@@ -41,8 +41,10 @@
 #include <mbd/MbdPmtHit.h>
 
 #include <TFile.h>
+#include <TProfile.h>
 #include <TH1.h>
 #include <TH1F.h>
+#include <TH3F.h>
 #include <TH2.h>
 #include <TH3.h>
 #include <TNtuple.h>
@@ -81,6 +83,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string& name
   , outfilename(filename)
 {
   _eventcounter = 0;
+  _vz = 999.0;
 }
 
 PositionDependentCorrection::~PositionDependentCorrection()
@@ -94,13 +97,62 @@ PositionDependentCorrection::~PositionDependentCorrection()
 
 int PositionDependentCorrection::Init(PHCompositeNode*)
 {
-  // Create a Fun4AllHistoManager to handle and keep track of all histograms created in this module.
+  // ------------------------------------------------------------------------------------
+  // Enhanced Debug/Checks for initialization
+  // ------------------------------------------------------------------------------------
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] PositionDependentCorrection::Init() called. "
+              << "Preparing to initialize histograms and managers." << std::endl;
+  }
+
+  // ------------------------------------------------------------------------------------
+  // Create a Fun4AllHistoManager to handle and keep track of all histograms created
+  // in this module. We check if it is allocated properly.
+  // ------------------------------------------------------------------------------------
   hm = new Fun4AllHistoManager(Name());
+  if (!hm)
+  {
+    if (Verbosity() > 0)
+    {
+      std::cerr << "[ERROR] Fun4AllHistoManager allocation failed (hm is null). "
+                << "Cannot proceed with initialization." << std::endl;
+    }
+    // Return an error code if needed
+    return -1;
+  }
 
-  // Open the output ROOT file, which will store the histograms and other results when the job completes.
+  // ------------------------------------------------------------------------------------
+  // Open the output ROOT file, which will store the histograms and other results
+  // when the job completes. We also ensure it's opened correctly.
+  // ------------------------------------------------------------------------------------
   outfile = new TFile(outfilename.c_str(), "RECREATE");
+  if (!outfile || outfile->IsZombie())
+  {
+    if (Verbosity() > 0)
+    {
+      std::cerr << "[ERROR] Could not open output file '" << outfilename
+                << "' for writing (outfile is null or zombie)." << std::endl;
+    }
+    // Return an error code if needed
+    return -1;
+  }
 
+  // ------------------------------------------------------------------------------------
+  // Initialize the TriggerAnalyzer pointer. Ensuring we have a valid pointer for
+  // any further use in the module.
+  // ------------------------------------------------------------------------------------
   trigAna = new TriggerAnalyzer();
+  if (!trigAna)
+  {
+    if (Verbosity() > 0)
+    {
+      std::cerr << "[ERROR] TriggerAnalyzer pointer is null. "
+                << "Cannot proceed with certain functionalities." << std::endl;
+    }
+    // We continue, but this may lead to limited functionality later.
+  }
+
   // ===========================
   //  CORRELATION PLOTS
   // ===========================
@@ -130,7 +182,6 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   //   (which can highlight dead/hot areas, or show position-dependent coverage).
   h_cemc_etaphi = new TH2F("h_cemc_etaphi", "", 96, 0, 96, 256, 0, 256);
 
-
   // ===========================
   //  1D DISTRIBUTIONS
   // ===========================
@@ -150,7 +201,6 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   //   1D histogram storing the energy of individual towers. Used to get the overall tower energy
   //   distribution, to see how often towers are firing at certain energy, and for QA.
   h_tower_e = new TH1F("h_tower_e","",1000,-1,5);
-
 
   // ===========================
   //  CLUSTER QA
@@ -185,7 +235,6 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   //   1D histogram counting the total number of clusters in each event.
   //   Good for monitoring occupancy and changes in cluster multiplicity with event conditions.
   h_nclusters = new TH1F("h_nclusters", "", 100, 0, 100);
-
 
   // ===========================
   //  TRUTH / MATCHING QA
@@ -269,7 +318,6 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   //   With 10,000 bins from 0 to 30, it gives a fine resolution of the truth E distribution.
   h_truthE = new TH1F("h_truthE","",10000,0,30);
 
-
   // ===========================
   //  POSITION-DEPENDENT STUFF
   // ===========================
@@ -304,14 +352,15 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   //   Potentially used to label or count how many clusters end up in each sub-cell bin across the 2×2 block space.
   h_block_bin = new TH1F("h_block_bin","",14,-0.5,1.5);
 
-    // For measuring raw phi resolution
-    h_phi_diff_raw = new TH1F("h_phi_diff_raw", "#Delta#phi raw", 200, -0.1, 0.1);
+  // For measuring raw phi resolution
+  h_phi_diff_raw = new TH1F("h_phi_diff_raw", "#Delta#phi raw", 200, -0.1, 0.1);
 
-    // For measuring corrected phi resolution
-    h_phi_diff_corrected = new TH1F("h_phi_diff_corr", "#Delta#phi corrected", 200, -0.1, 0.1);
+  // For measuring corrected phi resolution
+  h_phi_diff_corrected = new TH1F("h_phi_diff_corr", "#Delta#phi corrected", 200, -0.1, 0.1);
 
-    // Maybe a TProfile to see how #Delta#phi depends on local coordinate or energy
-    pr_phi_vs_blockcoord = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5, -0.2,0.2);
+  // Maybe a TProfile to see how #Delta#phi depends on local coordinate or energy
+  pr_phi_vs_blockcoord = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5, -0.2,0.2);
+
   // ===========================
   //  pT REWEIGHTING
   // ===========================
@@ -319,52 +368,124 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   // frw is an external ROOT file loaded containing pT reweighting histograms or factors
   // which can be applied to data or MC to match shapes. This is frequently used
   // in pi0 calibrations to unify spectrum shapes between data/MC or different samples.
-  frw = new TFile("/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/rw_pt.root");
+  //frw = new TFile("/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/rw_pt.root");
   // The next line (commented out) shows how we might retrieve a histogram per eta bin for reweighting:
   // for(int i=0; i<96; i++) h_pt_rw[i] = (TH1F*) frw->Get(Form("h_pt_eta%d", i));
-
 
   // rnd is a random number generator used, for example,
   // to smear cluster energies if we wish to do resolution studies or systematic variations.
   rnd = new TRandom3();
 
-  // Finally, return success. The function sets up everything needed before processing events.
+  // ------------------------------------------------------------------------------------
+  // Final check: if we reach here, we have presumably allocated all histograms successfully.
+  // Return success to indicate the initialization is complete.
+  // ------------------------------------------------------------------------------------
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] PositionDependentCorrection::Init() completed successfully. "
+              << "All histograms and objects have been allocated." << std::endl;
+  }
+
   return 0;
 }
 
 
+
 int PositionDependentCorrection::process_event(PHCompositeNode* topNode)
 {
+  // Print a debug statement before incrementing _eventcounter
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] PositionDependentCorrection::process_event() called. "
+              << "Current event counter (before increment) = " << _eventcounter << std::endl;
+  }
+
+  // Increment the event counter
   _eventcounter++;
 
+  // Print a debug statement after incrementing the counter
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Event counter has now been incremented to: "
+              << _eventcounter << std::endl;
+    std::cout << "[DEBUG] Proceeding to call process_towers() on topNode." << std::endl;
+  }
+
+  // Call the process_towers function
   process_towers(topNode);
 
+  // Print a debug statement after process_towers is called
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Completed process_towers(). Returning EVENT_OK." << std::endl;
+  }
+
+  // Return the Fun4All success code
   return Fun4AllReturnCodes::EVENT_OK;
 }
-
 
 float PositionDependentCorrection::retrieveVertexZ(PHCompositeNode* topNode)
 {
   float vtx_z = 0;
+
+  // Print debug statement about retrieveVertexZ logic
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] PositionDependentCorrection::retrieveVertexZ() called. "
+              << "Checking if getVtx is true..." << std::endl;
+  }
+
   if (getVtx)
   {
+    // Attempt to locate the GlobalVertexMap node
     GlobalVertexMap* vertexmap = findNode::getClass<GlobalVertexMap>(topNode, "GlobalVertexMap");
     if (!vertexmap)
     {
-      std::cout << "PositionDependentCorrection GlobalVertexMap node is missing" << std::endl;
+      // If it's missing, print a warning
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG] PositionDependentCorrection::retrieveVertexZ() - "
+                  << "GlobalVertexMap node is missing!" << std::endl;
+      }
     }
+
+    // If the vertexmap exists and is not empty, retrieve the first vertex
     if (vertexmap && !vertexmap->empty())
     {
       GlobalVertex* vtx = vertexmap->begin()->second;
       if (vtx)
       {
         vtx_z = vtx->get_z();
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG] Retrieved vertex Z position: "
+                    << vtx_z << std::endl;
+        }
+      }
+      else
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG] GlobalVertex pointer was null, cannot read z position." << std::endl;
+        }
       }
     }
+    else if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Either GlobalVertexMap is null or empty; no vertex to retrieve." << std::endl;
+    }
   }
+  else
+  {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] getVtx is false; not retrieving vertex from GlobalVertexMap." << std::endl;
+    }
+  }
+
+  // Return the found or defaulted z position
   return vtx_z;
 }
-
 // ----------------------------------------------------------------------------
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1438,26 +1559,136 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 
 int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 {
-  outfile->cd();
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] PositionDependentCorrection::End() - Entering End routine." << std::endl;
+  }
 
-  outfile->Write();
-  outfile->Close();
-  delete outfile;
-  hm->dumpHistos(outfilename, "UPDATE");
+  // Check if 'outfile' is valid before writing
+  if (outfile)
+  {
+    // Move into the file directory
+    outfile->cd();
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Changed to output file directory. Now writing histograms..." << std::endl;
+    }
+
+    // Write all objects to the file
+    outfile->Write();
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Successfully wrote histograms to the output file: "
+                << outfilename << std::endl;
+      std::cout << "[DEBUG] Closing output file..." << std::endl;
+    }
+
+    // Close the file
+    outfile->Close();
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Output file closed. Deleting the outfile pointer now." << std::endl;
+    }
+
+    // Delete the file pointer
+    delete outfile;
+    outfile = nullptr;
+  }
+  else
+  {
+    if (Verbosity() > 0)
+    {
+      std::cerr << "[ERROR] 'outfile' pointer is null. No histograms could be written!" << std::endl;
+    }
+  }
+
+  // Dump histograms via the HistoManager if valid
+  if (hm)
+  {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Dumping histograms to file '"
+                << outfilename << "' with mode 'UPDATE'." << std::endl;
+    }
+    hm->dumpHistos(outfilename, "UPDATE");
+
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Histograms successfully dumped to file: " << outfilename << std::endl;
+    }
+  }
+  else
+  {
+    if (Verbosity() > 0)
+    {
+      std::cerr << "[ERROR] HistoManager (hm) pointer is null. Cannot dump histograms!" << std::endl;
+    }
+  }
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] PositionDependentCorrection::End() - Routine completed successfully." << std::endl;
+  }
+
   return 0;
 }
 
-float PositionDependentCorrection::getWeight(int ieta, float pt){
-  if (ieta < 0 || ieta > 95) return 0;
+float PositionDependentCorrection::getWeight(int ieta, float pt)
+{
+  // Optional debug print
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] getWeight() called with ieta=" << ieta << ", pt=" << pt << std::endl;
+  }
+
+  // Maintain exact functionality
+  if (ieta < 0 || ieta > 95)
+  {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] ieta is out of valid range [0..95]. Returning 0." << std::endl;
+    }
+    return 0;
+  }
+
   float val = h_pt_rw[ieta]->GetBinContent(h_pt_rw[ieta]->FindBin(pt));
-  if (val==0) return 0;
-  return 1/val;
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Bin content for pt=" << pt
+              << " in ieta=" << ieta
+              << " is " << val << std::endl;
+  }
+
+  if (val == 0)
+  {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Bin content is 0, returning 0 as weight." << std::endl;
+    }
+    return 0;
+  }
+
+  float result = 1 / val;
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] getWeight(): returning weight = " << result << std::endl;
+  }
+  return result;
 }
 
 
 TF1* PositionDependentCorrection::fitHistogram(TH1* h)
 {
-  TF1* fitFunc = new TF1("fitFunc", "[0]/[2]/2.5*exp(-0.5*((x-[1])/[2])^2) + [3] + [4]*x + [5]*x^2 + [6]*x^3", h->GetXaxis()->GetXmin(), h->GetXaxis()->GetXmax());
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] fitHistogram() called. Setting up the fit function parameters now." << std::endl;
+  }
+
+  // Maintain exact functionality
+  TF1* fitFunc = new TF1("fitFunc",
+                         "[0]/[2]/2.5*exp(-0.5*((x-[1])/[2])^2) + [3] + [4]*x + [5]*x^2 + [6]*x^3",
+                         h->GetXaxis()->GetXmin(),
+                         h->GetXaxis()->GetXmax());
 
   fitFunc->SetParameter(0, 5);
   fitFunc->SetParameter(1, target_pi0_mass);
@@ -1467,44 +1698,88 @@ TF1* PositionDependentCorrection::fitHistogram(TH1* h)
   fitFunc->SetParameter(5, 0.0);
   fitFunc->SetParameter(6, 100);
 
-  fitFunc->SetParLimits(0, 0,10);
+  fitFunc->SetParLimits(0, 0, 10);
   fitFunc->SetParLimits(1, 0.113, 0.25);
   fitFunc->SetParLimits(2, 0.01, 0.04);
-  fitFunc->SetParLimits(3,-2 ,1 );
-  fitFunc->SetParLimits(4,0 ,40 );
-  fitFunc->SetParLimits(5, -150,50 );
-  fitFunc->SetParLimits(6, 0,200 );
+  fitFunc->SetParLimits(3, -2, 1);
+  fitFunc->SetParLimits(4, 0, 40);
+  fitFunc->SetParLimits(5, -150, 50);
+  fitFunc->SetParLimits(6, 0, 200);
 
   fitFunc->SetRange(0.05, 0.7);
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Performing fit on histogram '" << (h ? h->GetName() : "null")
+              << "' using option 'QN'." << std::endl;
+  }
 
   // Perform the fit
   h->Fit("fitFunc", "QN");
 
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] fitHistogram() completed the fit. Returning TF1 pointer." << std::endl;
+  }
   return fitFunc;
 }
 
 
-void PositionDependentCorrection::fitEtaSlices(const std::string& infile, const std::string& fitOutFile, const std::string& cdbFile)
+void PositionDependentCorrection::fitEtaSlices(const std::string& infile,
+                                              const std::string& fitOutFile,
+                                              const std::string& cdbFile)
 {
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] fitEtaSlices() called with infile='" << infile
+              << "', fitOutFile='" << fitOutFile
+              << "', cdbFile='" << cdbFile << "'." << std::endl;
+  }
+
+  // Maintain exact functionality
   TFile* fin = new TFile(infile.c_str());
-  std::cout << "getting hists" << std::endl;
-  TH1F* h_peak_eta = new TH1F("h_peak_eta", "", 96, 0, 96);
-  TH1F* h_sigma_eta = new TH1F("h_sigma_eta", "", 96, 0, 96);
-  TH1F* h_p3_eta = new TH1F("h_p3_eta", "", 96, 0, 96);
-  TH1F* h_p4_eta = new TH1F("h_p4_eta", "", 96, 0, 96);
-  TH1F* h_p5_eta = new TH1F("h_p5_eta", "", 96, 0, 96);
-  TH1F* h_p6_eta = new TH1F("h_p6_eta", "", 96, 0, 96);
-  TH1F* h_p0_eta = new TH1F("h_p0_eta", "", 96, 0, 96);
   if (!fin)
   {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] fitEtaSlices(): input TFile pointer is null! Exiting." << std::endl;
+    }
     std::cout << "PositionDependentCorrection::fitEtaSlices null fin" << std::endl;
     exit(1);
   }
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Successfully opened input file: " << infile << std::endl;
+    std::cout << "[DEBUG] Starting to retrieve histograms for fit..." << std::endl;
+  }
+
+  std::cout << "getting hists" << std::endl; // preserving original line
+
+  TH1F* h_peak_eta  = new TH1F("h_peak_eta",  "", 96, 0, 96);
+  TH1F* h_sigma_eta = new TH1F("h_sigma_eta", "", 96, 0, 96);
+  TH1F* h_p3_eta    = new TH1F("h_p3_eta",    "", 96, 0, 96);
+  TH1F* h_p4_eta    = new TH1F("h_p4_eta",    "", 96, 0, 96);
+  TH1F* h_p5_eta    = new TH1F("h_p5_eta",    "", 96, 0, 96);
+  TH1F* h_p6_eta    = new TH1F("h_p6_eta",    "", 96, 0, 96);
+  TH1F* h_p0_eta    = new TH1F("h_p0_eta",    "", 96, 0, 96);
+
   TH1F* h_M_eta[96];
   for (int i = 0; i < 96; i++)
   {
     h_M_eta[i] = (TH1F*) fin->Get(Form("h_mass_eta_lt_rw%d", i));
-    h_M_eta[i]->Scale(1./h_M_eta[i]->Integral(),"width");
+    if (h_M_eta[i])
+    {
+      h_M_eta[i]->Scale(1. / h_M_eta[i]->Integral(), "width");
+    }
+    else
+    {
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG] fitEtaSlices(): histogram 'h_mass_eta_lt_rw" << i
+                  << "' does not exist in file. This may cause issues but continuing." << std::endl;
+      }
+    }
   }
 
   TF1* fitFunOut[96];
@@ -1512,37 +1787,61 @@ void PositionDependentCorrection::fitEtaSlices(const std::string& infile, const 
   {
     if (!h_M_eta[i])
     {
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG] PositionDependentCorrection::fitEtaSlices null hist 'h_mass_eta_lt_rw"
+                  << i << "'. Continuing." << std::endl;
+      }
       std::cout << "PositionDependentCorrection::fitEtaSlices null hist" << std::endl;
+      continue;
     }
 
     fitFunOut[i] = fitHistogram(h_M_eta[i]);
-    fitFunOut[i]->SetName(Form("f_pi0_eta%d",i));
+    fitFunOut[i]->SetName(Form("f_pi0_eta%d", i));
+
     float mass_val_out = fitFunOut[i]->GetParameter(1);
     float mass_err_out = fitFunOut[i]->GetParError(1);
     h_peak_eta->SetBinContent(i + 1, mass_val_out);
-    if (isnan(h_M_eta[i]->GetEntries())){
-       h_peak_eta->SetBinError(i + 1, 0);
-       continue;
+
+    if (isnan(h_M_eta[i]->GetEntries()))
+    {
+      h_peak_eta->SetBinError(i + 1, 0);
+      continue;
     }
     h_peak_eta->SetBinError(i + 1, mass_err_out);
-    h_sigma_eta->SetBinContent(i+1,fitFunOut[i]->GetParameter(2));
-    h_sigma_eta->SetBinError(i+1,fitFunOut[i]->GetParError(2));
-    h_p3_eta->SetBinContent(i+1,fitFunOut[i]->GetParameter(3));
-    h_p3_eta->SetBinError(i+1,fitFunOut[i]->GetParError(3));
-    h_p4_eta->SetBinContent(i+1,fitFunOut[i]->GetParameter(4));
-    h_p4_eta->SetBinError(i+1,fitFunOut[i]->GetParError(4));
-    h_p5_eta->SetBinContent(i+1,fitFunOut[i]->GetParameter(5));
-    h_p5_eta->SetBinError(i+1,fitFunOut[i]->GetParError(5));
-    h_p6_eta->SetBinContent(i+1,fitFunOut[i]->GetParameter(6));
-    h_p6_eta->SetBinError(i+1,fitFunOut[i]->GetParError(6));
-    h_p0_eta->SetBinContent(i+1,fitFunOut[i]->GetParameter(0));
-    h_p0_eta->SetBinError(i+1,fitFunOut[i]->GetParError(0));
+
+    h_sigma_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(2));
+    h_sigma_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(2));
+
+    h_p3_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(3));
+    h_p3_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(3));
+
+    h_p4_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(4));
+    h_p4_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(4));
+
+    h_p5_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(5));
+    h_p5_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(5));
+
+    h_p6_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(6));
+    h_p6_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(6));
+
+    h_p0_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(0));
+    h_p0_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(0));
+  }
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Initial fit loops completed. Proceeding with CDBTTree usage..." << std::endl;
   }
 
   CDBTTree* cdbttree1 = new CDBTTree(cdbFile.c_str());
   CDBTTree* cdbttree2 = new CDBTTree(cdbFile.c_str());
-
   std::string m_fieldname = "Femc_datadriven_qm1_correction";
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Updating CDBTTree values with pi0 mass corrections." << std::endl;
+  }
 
   for (int i = 0; i < 96; i++)
   {
@@ -1560,16 +1859,27 @@ void PositionDependentCorrection::fitEtaSlices(const std::string& infile, const 
   delete cdbttree2;
   delete cdbttree1;
 
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Committed updated corrections to the CDBTTree." << std::endl;
+    std::cout << "[DEBUG] Creating output fit file: " << fitOutFile << std::endl;
+  }
+
   TFile* fit_out = new TFile(fitOutFile.c_str(), "recreate");
   fit_out->cd();
+
   for (auto& i : h_M_eta)
   {
-    i->Write();
-    delete i;
+    if (i)
+    {
+      i->Write();
+      delete i;
+    }
   }
+
   for (auto& i : fitFunOut)
   {
-    i->Write();
+    if (i) i->Write();
     delete i;
   }
 
@@ -1580,51 +1890,57 @@ void PositionDependentCorrection::fitEtaSlices(const std::string& infile, const 
   h_p0_eta->Write();
   h_sigma_eta->Write();
   h_peak_eta->Write();
-  fin->Close();
 
-  std::cout << "finish fitting suc" << std::endl;
+  fin->Close();
+  delete fin;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Fit results and histograms written to " << fitOutFile << std::endl;
+  }
+
+  std::cout << "finish fitting suc" << std::endl; // original line maintained
 
   return;
 }
 
-
-/////////////////////////////////////////////////////////////////////////////////////
-// getBlockCordCorr(...)
-// ----------------------
-// This method returns hyperbolically-corrected local coordinates (eta, phi)
-// inside a 2×2 tower block, to more accurately reflect the true shower position.
-//
-//  1) It first computes raw block coordinates with getBlockCord(...),
-//     which yields a pair in the range ~[0,1] for both eta and phi within the block.
-//  2) It shifts coordinates above 0.5 into [-0.5, +0.5], so the hyperbolic formula
-//     can be applied properly (the formula is defined to work around zero).
-//  3) It applies the "b" parameters (b_eta, b_phi), which encapsulate the shower width
-//     in each dimension, and uses a standard asinh-based correction (PHENIX approach).
-//  4) Then it shifts the corrected coordinates back into the ~[0,1] block space
-//     and returns them, so the rest of the code sees a corrected cluster position.
-/////////////////////////////////////////////////////////////////////////////////////
 
 std::pair<float,float> PositionDependentCorrection::getBlockCordCorr(
     std::vector<int> etas,
     std::vector<int> phis,
     std::vector<float> Es)
 {
-  // Obtain the uncorrected local block coordinate (0–1 range).
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] getBlockCordCorr() called. Computing raw local block coordinate." << std::endl;
+  }
+
+  // Maintain exact functionality
   std::pair<float,float> raw_cord = getBlockCord(etas, phis, Es);
 
-  // The center of gravity in local coordinates is forced into [-0.5, +0.5]
-  // by subtracting 1 if raw_cord was ≥ 0.5.
-  // This ensures the subsequent hyperbolic correction formula sees a domain
-  // centered around zero.
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Raw block coordinate: (" << raw_cord.first
+              << ", " << raw_cord.second << ")" << std::endl;
+  }
+
   float Xcg_eta = (raw_cord.first  < 0.5) ? raw_cord.first  : (raw_cord.first  - 1.0);
   float Xcg_phi = (raw_cord.second < 0.5) ? raw_cord.second : (raw_cord.second - 1.0);
 
-  // Shower width parameters in eta and phi directions, typically determined from fits.
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Adjusted local coordinates for asinh domain: Xcg_eta="
+              << Xcg_eta << ", Xcg_phi=" << Xcg_phi << std::endl;
+  }
+
   float b_eta = 0.155;
 
-  // Define the correction formula for asinh-based shower-profile correction:
-  //   t = b * asinh( 2 * x * sinh(1/(2b)) ).
-  // We'll reuse 'finv' by changing parameter [0] for b_eta, then b_phi.
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Using b_eta=" << b_eta << " and b_phi=" << b_phi
+              << " for correction." << std::endl;
+  }
+
   TF1 finv("finv", "[0]*TMath::ASinH(2*x*sinh(1/(2*[0])))", -0.5, 0.5);
 
   // Evaluate for eta direction
@@ -1635,15 +1951,25 @@ std::pair<float,float> PositionDependentCorrection::getBlockCordCorr(
   finv.SetParameter(0, b_phi);
   float t_phi = finv.Eval(Xcg_phi);
 
-  // Shift corrected coordinates back into the [0,1] range (or 0–1.0 block coordinates)
-  // by adding 1.0 if the original raw_cord was ≥ 0.5.
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Corrected local coordinates: t_eta="
+              << t_eta << ", t_phi=" << t_phi << std::endl;
+  }
+
   std::pair<float,float> res;
   res.first  = (raw_cord.first  < 0.5) ? t_eta : (t_eta + 1.0);
   res.second = (raw_cord.second < 0.5) ? t_phi : (t_phi + 1.0);
 
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Final block coordinate after shift: ("
+              << res.first << ", " << res.second << ")" << std::endl;
+    std::cout << "[DEBUG] getBlockCordCorr() returning corrected coordinates." << std::endl;
+  }
+
   return res;
 }
-
 
 /////////////////////////////////////////////////////////////////////////////////////
 // getBlockCord(...)
@@ -1661,10 +1987,23 @@ std::pair<float,float> PositionDependentCorrection::getBlockCord(
     std::vector<int> phis,
     std::vector<float> Es)
 {
+  // Maintain original functionality, adding verbosity prints:
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] getBlockCord() called. Computing average tower indices..." << std::endl;
+  }
+
   // Get the average tower index in eta and phi directions
   // weighted by tower energies (like an energy-weighted center of gravity).
   float avgEta = getAvgEta(etas, Es);
   float avgPhi = getAvgPhi(phis, Es);
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] Calculated avgEta=" << avgEta
+              << ", avgPhi=" << avgPhi << std::endl;
+    std::cout << "[DEBUG] Converting to integer bins, dividing by 2 for block indexing..." << std::endl;
+  }
 
   // Convert floating tower indices into integer bins, then find the block index
   // by dividing by 2. This concept lumps towers into 2×2 blocks in the geometry.
@@ -1678,13 +2017,34 @@ std::pair<float,float> PositionDependentCorrection::getBlockCord(
   float interBlockPhi = avgPhi - iblockphi * 2;
   float interBLockEta = avgEta - iblocketa * 2;
 
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] interBlockPhi=" << interBlockPhi
+              << ", interBLockEta=" << interBLockEta << std::endl;
+    std::cout << "[DEBUG] Checking for local eta coordinate above 1.5..." << std::endl;
+  }
+
   // If the local eta coordinate ended up above 1.5, shift it by -2.
   // This is typically to keep it in [0,2) range rather than [2, something bigger].
-  if (interBLockEta > 1.5) interBLockEta -= 2;
+  if (interBLockEta > 1.5)
+  {
+    interBLockEta -= 2;
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] interBLockEta was >1.5, shifted by 2 => "
+                << interBLockEta << std::endl;
+    }
+  }
 
   // Return the final "blockCord" pair, which is the coordinate inside that 2×2 block.
   // Typically, we interpret interBLockEta and interBlockPhi in the range [0,1].
   std::pair<float,float> blockCord = {interBLockEta, interBlockPhi};
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] getBlockCord() returning block coordinates: ("
+              << blockCord.first << ", " << blockCord.second << ")" << std::endl;
+  }
   return blockCord;
 }
 
@@ -1702,13 +2062,26 @@ float PositionDependentCorrection::getAvgEta(
     const std::vector<int> &toweretas,
     const std::vector<float> &towerenergies)
 {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] getAvgEta() called with toweretas.size()="
+                << toweretas.size() << std::endl;
+    }
+
     float etamult = 0;
     float etasum  = 0;
 
     // If only one tower is present, simply return its integer index
     // without weighting.
     if (toweretas.size() == 1)
+    {
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG] Only one tower in cluster => returning that tower's eta index: "
+                  << toweretas[0] << std::endl;
+      }
       return toweretas[0];
+    }
 
     // Otherwise, sum up eta_index × energy for each tower, and also sum energies.
     for (UInt_t j = 0; j < towerenergies.size(); j++)
@@ -1717,8 +2090,17 @@ float PositionDependentCorrection::getAvgEta(
         etamult += energymult;
         etasum  += towerenergies[j];
     }
+
     // The ratio gives the "average" tower-eta bin for this cluster.
-    return etamult / etasum;
+    float result = etamult / etasum;
+
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] getAvgEta() returning "
+                << result << " as the energy-weighted average eta-index."
+                << std::endl;
+    }
+    return result;
 }
 
 
@@ -1734,6 +2116,12 @@ float PositionDependentCorrection::getAvgPhi(
     const std::vector<int> &towerphis,
     const std::vector<float> &towerenergies)
 {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] getAvgPhi() called with towerphis.size()="
+                << towerphis.size() << std::endl;
+    }
+
     // The EMCal has 256 phi bins, so we define nphibin = 256 for shifting logic.
     int nphibin = 256;
     float phimult = 0;
@@ -1750,12 +2138,22 @@ float PositionDependentCorrection::getAvgPhi(
         if (phibin - towerphis[0] < -nphibin / 2.0)
         {
             phibin += nphibin;
+            if (Verbosity() > 0)
+            {
+              std::cout << "[DEBUG] phi wrap-around (low side): adjusted phibin => "
+                        << phibin << std::endl;
+            }
         }
         // Conversely, if the difference is > +128, we subtract 256 to wrap around
         // the other way.
         else if (phibin - towerphis[0] > +nphibin / 2.0)
         {
             phibin -= nphibin;
+            if (Verbosity() > 0)
+            {
+              std::cout << "[DEBUG] phi wrap-around (high side): adjusted phibin => "
+                        << phibin << std::endl;
+            }
         }
 
         // Double-check that after shifting, we are within ±128 bins of the first tower.
@@ -1774,6 +2172,11 @@ float PositionDependentCorrection::getAvgPhi(
     if (avgphi < 0)
     {
        avgphi += nphibin;
+       if (Verbosity() > 0)
+       {
+         std::cout << "[DEBUG] avgphi was negative; shifted to "
+                   << avgphi << " by adding nphibin=" << nphibin << std::endl;
+       }
     }
 
     // Also keep it modulo 256
@@ -1783,6 +2186,11 @@ float PositionDependentCorrection::getAvgPhi(
     if (avgphi >= 255.5)
     {
        avgphi -= nphibin;
+       if (Verbosity() > 0)
+       {
+         std::cout << "[DEBUG] avgphi >= 255.5; shifted to "
+                   << avgphi << " by subtracting nphibin=" << nphibin << std::endl;
+       }
     }
 
     // Additional offset: we then shift by +0.5 and apply modulo 2, then subtract 0.5.
@@ -1790,6 +2198,12 @@ float PositionDependentCorrection::getAvgPhi(
     // for local tower indexing or cluster block identification. The details of why 0.5 is used
     // can be geometry-specific, ensuring the center of a tower is at .5, for instance.
     avgphi = fmod(avgphi + 0.5, 2) - 0.5;
+
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] getAvgPhi() returning final adjusted phi="
+                << avgphi << std::endl;
+    }
 
     // Return the final adjusted phi coordinate in tower-bin space.
     return avgphi;
