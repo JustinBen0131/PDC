@@ -46,6 +46,7 @@ class PositionDependentCorrection : public SubsysReco
   int process_event(PHCompositeNode *);
   int End(PHCompositeNode *);
 
+  void setIsSimulation(bool sim) { isSimulation = sim; }
   // If you don't actually implement these, either remove them or define stubs:
   void setFitDoneForB(bool done, float bVal = 0.0) {
       isFitDoneForB = done;
@@ -268,6 +269,7 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_block_eta;
   TH1* h_clus_E_size;
   TH1* h_block_bin;
+  bool isSimulation = false;
 
   float getAvgEta(const std::vector<int> &toweretas,
                   const std::vector<float> &towerenergies);

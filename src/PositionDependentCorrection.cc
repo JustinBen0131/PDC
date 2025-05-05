@@ -1011,7 +1011,11 @@ void PositionDependentCorrection::finalClusterLoop(
     std::cout << "[Verbosity] finalClusterLoop: About to call trigAna->decodeTriggers() on topNode = "
               << topNode << std::endl;
   }
-  trigAna->decodeTriggers(topNode);
+    if (!isSimulation)  // or however you detect data vs sim
+    {
+       trigAna->decodeTriggers(topNode);
+    }
+
 
   if (Verbosity() > 0)
   {
