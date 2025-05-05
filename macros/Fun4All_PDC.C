@@ -26,8 +26,8 @@
 #include <phool/PHRandomSeed.h>
 #include <phool/PHCompositeNode.h>
 
-// Your custom input manager that ignores run number mismatch:
-#include "IgnoreRunNoNoSyncManager.h"  // <--- YOU NEED THIS HEADER
+// If you have a custom manager for ignoring run # mismatches
+#include "IgnoreRunNoNoSyncManager.h"
 
 #include <G4_CEmc_Spacal.C>
 #include <phool/recoConsts.h>
@@ -36,13 +36,13 @@
 #include <litecaloeval/LiteCaloEval.h>
 #include <g4calo/RawTowerBuilder.h>
 
-// Now we include our new advanced G4HitChecker subsystem:
+// Optionally, a G4HitChecker subsystem:
 #include "G4HitChecker.h"
 
-// If you have your custom code:
+// If you have custom code:
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src/PositionDependentCorrection.h"
 
-// #include <calotrigger/TriggerRunInfoReco.h> // omit if you don't need real trigger prescales
+// #include <calotrigger/TriggerRunInfoReco.h> // if you need real trigger prescales
 #include <ffaobjects/EventHeader.h>
 #include <calib_emc_pi0/pi0EtaByEta.h>
 
@@ -68,12 +68,35 @@ R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libPDC.so)
 
 #endif
 
-// -----------------------------------------------------------------------
-// Optional SubsysReco that overwrites run # in EventHeader
-// -----------------------------------------------------------------------
+//////////////////////////////////////////////////////////////////////////
+// SubsysReco that overwrites run # in EventHeader (optional)
+//////////////////////////////////////////////////////////////////////////
 #include <Event/Event.h>
 #include <phool/getClass.h>
 
+///////////////////////////////////////////////////////////////////
+// 1) A simple derived class that "adds" set_towerinfo_node_prefix(...)
+//    without changing the real RawClusterBuilderTemplate code.
+///////////////////////////////////////////////////////////////////
+class MyRawClusterBuilderTemplate : public RawClusterBuilderTemplate
+{
+public:
+  // Inherit RawClusterBuilderTemplate's constructor(s)
+  using RawClusterBuilderTemplate::RawClusterBuilderTemplate;
+
+  // Provide a dummy version of set_towerinfo_node_prefix(...)
+  void set_towerinfo_node_prefix(const std::string &prefix)
+  {
+    // Do nothing, or just log a message:
+    std::cout
+      << "[WARNING] 'set_towerinfo_node_prefix' not truly supported "
+      << "by this older version. Ignoring prefix='" << prefix << "'\n";
+  }
+};
+
+///////////////////////////////////////////////////////////////////
+// ForceRunNumberReco: Overwrites run # in EventHeader if desired
+///////////////////////////////////////////////////////////////////
 class ForceRunNumberReco : public SubsysReco
 {
 public:
@@ -85,7 +108,7 @@ public:
     EventHeader* evtheader = findNode::getClass<EventHeader>(topNode, "EventHeader");
     if(evtheader)
     {
-      // Overwrite the run number to e.g. 17
+      // Overwrite the run number to e.g. 17 (or any desired run)
       evtheader->set_RunNumber(m_newRunNo);
     }
     return 0; // EVENT_OK
@@ -94,29 +117,41 @@ private:
   int m_newRunNo;
 };
 
-// -----------------------------------------------------------------------
-
+///////////////////////////////////////////////////////////////////
+// A combined Fun4All macro that can do either old-style G4Hits->towers
+// and/or waveformsim pipeline for CEMC.
+//
+//  - 'recoFromHits_old': if true, do the standard cell reco -> tower -> calibrate
+//  - 'waveformRec': if true, do the waveform pipeline
+//
+// Node name collisions are avoided by carefully setting output prefixes.
+//
+// The position-dependent correction module is also included at the end.
+//
+// We now use MyRawClusterBuilderTemplate in place of RawClusterBuilderTemplate
+// to preserve calls to set_towerinfo_node_prefix() even though the base class
+// lacks that function in your environment.
+///////////////////////////////////////////////////////////////////
 void Fun4All_PDC(int nevents = 0,
                  const std::string &fname = "condor/listFiles/gamma_dst_calo_cluster.list",
                  const std::string &fnamehits = "condor/listFiles/gamma_g4hits.list")
 {
+  //---------------------------------------------------------------------
+  // 0) Setup the server and read the first input file to get run number
+  //---------------------------------------------------------------------
   std::cout << "[DEBUG] Entering Fun4All_PDC with nevents = " << nevents
             << ", fname = " << fname
             << ", fnamehits = " << fnamehits << std::endl;
 
-  // 1) Setup Fun4AllServer
   Fun4AllServer *se = Fun4AllServer::instance();
   if (!se)
   {
     std::cerr << "[ERROR] Fun4AllServer::instance() returned nullptr. Exiting." << std::endl;
     gSystem->Exit(1);
   }
-
-  // Increase verbosity for debugging
   int verbosity = 100;
   se->Verbosity(verbosity);
 
-  // 2) recoConsts
   recoConsts *rc = recoConsts::instance();
   if (!rc)
   {
@@ -124,7 +159,7 @@ void Fun4All_PDC(int nevents = 0,
     gSystem->Exit(1);
   }
 
-  // 3) Read first line from your DST file list
+  // read the first line from your DST list => extract run number
   std::ifstream file(fname);
   if (!file.is_open())
   {
@@ -139,14 +174,14 @@ void Fun4All_PDC(int nevents = 0,
     gSystem->Exit(1);
   }
   file.close();
+
   std::cout << "[DEBUG] First file in list is: " << first_file << std::endl;
 
-  // 4) Extract run number from the first file
   auto runseg = Fun4AllUtils::GetRunSegment(first_file);
   int runnumber = runseg.first;
   std::cout << "[INFO] run number = " << runnumber << std::endl;
 
-  // 5) Set up conditions DB flags
+  // set up conditions DB
   rc->set_StringFlag("CDB_GLOBALTAG", "MDC2");
   rc->set_uint64Flag("TIMESTAMP", runnumber);
   rc->set_IntFlag("RUNNUMBER", runnumber);
@@ -161,7 +196,9 @@ void Fun4All_PDC(int nevents = 0,
     std::cerr << "[EXCEPTION] CDBInterface usage: " << e.what() << std::endl;
   }
 
-  // 6) Register input manager for DST
+  //---------------------------------------------------------------------
+  // 1) Register a DST input manager for "DST_TOWERS"
+  //---------------------------------------------------------------------
   Fun4AllDstInputManager *in = new Fun4AllDstInputManager("DST_TOWERS");
   if(!in)
   {
@@ -171,7 +208,9 @@ void Fun4All_PDC(int nevents = 0,
   in->AddListFile(fname, 0);
   se->registerInputManager(in);
 
-  // 7) Check hits file for .root lines
+  //---------------------------------------------------------------------
+  // 2) Optionally register a second input manager for "DST_TOWERS2" if we have hits
+  //---------------------------------------------------------------------
   bool hasHits = false;
   {
     std::ifstream hitsCheck(fnamehits);
@@ -190,9 +229,9 @@ void Fun4All_PDC(int nevents = 0,
     }
   }
 
-  // 8) If we do have hits, create an IgnoreRunNoNoSyncManager so we skip mismatch errors
   if(hasHits)
   {
+    // We might skip mismatch errors:
     std::cout << "[DEBUG] Creating IgnoreRunNoNoSyncManager for DST_TOWERS2" << std::endl;
     IgnoreRunNoNoSyncManager *in2 = new IgnoreRunNoNoSyncManager("DST_TOWERS2");
     if(!in2)
@@ -200,12 +239,11 @@ void Fun4All_PDC(int nevents = 0,
       std::cerr << "[ERROR] Failed to allocate IgnoreRunNoNoSyncManager (DST_TOWERS2)." << std::endl;
       gSystem->Exit(1);
     }
-
-    // Optionally force the run number
+    // Optionally force run number
     ForceRunNumberReco *fixRun = new ForceRunNumberReco(runnumber);
     in2->registerSubsystem(fixRun);
 
-    in2->AddListFile(fnamehits, 0);
+    in2->AddListFile(fnamehits, 1);
     se->registerInputManager(in2);
   }
   else
@@ -214,30 +252,36 @@ void Fun4All_PDC(int nevents = 0,
               << " => skipping second input manager." << std::endl;
   }
 
-  // 9) Build output histogram file name
+  //---------------------------------------------------------------------
+  // 3) Build output histogram file name
+  //---------------------------------------------------------------------
   std::string filename = first_file.substr(first_file.find_last_of("/\\") + 1);
   std::string OutFile = Form("OUTHIST_iter_%s", filename.c_str());
   std::cout << "[DEBUG] Output histogram file will be: " << OutFile << std::endl;
 
-  // Decide whether to do "old style" from G4 hits or waveforms
-  bool recoFromHits_old = true;
-  bool waveformRec = false;
-  bool isSim = hasHits; // if we have G4 hits
+  //---------------------------------------------------------------------
+  // 4) Decide pipeline flags
+  //---------------------------------------------------------------------
+  bool recoFromHits_old = true;   // old style from G4 hits
+  bool waveformRec      = false;   // do waveformsim pipeline
+  bool isSim            = hasHits; // if we have G4 hits
 
-  // ----------------------------------------------------------------------
-  // >>> HERE IS WHERE WE ADD THE G4HitChecker SUBSYSTEM BEFORE ANY RECO <<<
-  // ----------------------------------------------------------------------
+  //---------------------------------------------------------------------
+  // 5) Optionally add G4HitChecker subsystem if desired
+  //---------------------------------------------------------------------
   {
-    // Suppose we allow 50 consecutive zero-hit events before exiting:
-    G4HitChecker *hitcheck = new G4HitChecker("CEMC", /* maxZeroAllowed= */ 50);
-    hitcheck->Verbosity(5); // can be adjusted from 0..10
+    // Suppose we allow 50 consecutive zero-hit events before exiting
+    G4HitChecker *hitcheck = new G4HitChecker("CEMC", /*maxZeroAllowed=*/50);
+    hitcheck->Verbosity(5);
     se->registerSubsystem(hitcheck);
   }
 
-  // If we do want old style G4Hits -> TOWER pipeline
+  //---------------------------------------------------------------------
+  // 6) "Old style" G4Hits -> tower pipeline
+  //---------------------------------------------------------------------
   if(recoFromHits_old && isSim)
   {
-    // a) CEMC cell reco
+    // (a) CEMC cell reco
     PHG4FullProjSpacalCellReco* cemc_cells = new PHG4FullProjSpacalCellReco("CEMCCYLCELLRECO");
     cemc_cells->Detector("CEMC");
     cemc_cells->Verbosity(verbosity);
@@ -258,15 +302,15 @@ void Fun4All_PDC(int nevents = 0,
     }
     se->registerSubsystem(cemc_cells);
 
-    // b) RawTowerBuilder
+    // (b) RawTowerBuilder
     RawTowerBuilder *TowerBuilder = new RawTowerBuilder("EmcRawTowerBuilder");
     TowerBuilder->Detector("CEMC");
     TowerBuilder->set_sim_tower_node_prefix("SIM");
     TowerBuilder->Verbosity(0);
     se->registerSubsystem(TowerBuilder);
 
-    // c) Digitizer
-    const double sampling_fraction = 2e-02;
+    // (c) Digitizer
+    const double sampling_fraction = 2.0e-02;
     RawTowerDigitizer::enu_digi_algorithm TowerDigi = RawTowerDigitizer::kNo_digitization;
     RawTowerDigitizer *TowerDigitizer = new RawTowerDigitizer("EmcRawTowerDigitizer");
     TowerDigitizer->Detector("CEMC");
@@ -274,7 +318,7 @@ void Fun4All_PDC(int nevents = 0,
     TowerDigitizer->set_digi_algorithm(TowerDigi);
     se->registerSubsystem(TowerDigitizer);
 
-    // d) TowerCalibration
+    // (d) TowerCalibration => writes TOWERINFO_CALIB_CEMC by default
     RawTowerCalibration *TowerCalibration = new RawTowerCalibration("EmcRawTowerCalibration");
     TowerCalibration->Detector("CEMC");
     if (TowerDigi == RawTowerDigitizer::kNo_digitization)
@@ -285,21 +329,23 @@ void Fun4All_PDC(int nevents = 0,
     TowerCalibration->set_pedstal_ADC(0);
     se->registerSubsystem(TowerCalibration);
 
-    // e) Another CaloTowerCalib for slopes etc.
-    std::string calib_fname = "/sphenix/u/username/path/mc_calib_NoDigi.root";
+    // (e) Another CaloTowerCalib => rename its output to avoid collisions
+    // We rename to produce TOWERINFO_CALIB2_CEMC
+    std::string calib_fname = "/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/mc_calib_NoDigi.root";
     CaloTowerCalib *calibEMC = new CaloTowerCalib("CEMCCALIB");
     calibEMC->set_detector_type(CaloTowerDefs::CEMC);
+    calibEMC->set_inputNodePrefix("TOWERINFO_CALIB_");
+    calibEMC->set_outputNodePrefix("TOWERINFO_CALIB2_");
     calibEMC->set_directURL(calib_fname.c_str());
-    calibEMC->set_inputNodePrefix("TOWERINFO_RAW_");
-    calibEMC->set_outputNodePrefix("TOWERINFO_CALIB_");
     se->registerSubsystem(calibEMC);
 
-    // f) RawClusterBuilderTemplate
-    RawClusterBuilderTemplate *ClusterBuilder = new RawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
+    // (f) RawCluster building from TOWERINFO_CALIB2_, but using our derived class
+    MyRawClusterBuilderTemplate *ClusterBuilder
+      = new MyRawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
+
     ClusterBuilder->Detector("CEMC");
     ClusterBuilder->set_threshold_energy(0.07);
     {
-      // Optionally load shape profile from e.g. $CALIBRATIONROOT/EmcProfile/CEMCprof_Thresh30MeV.root
       char* calroot = getenv("CALIBRATIONROOT");
       if(!calroot)
       {
@@ -316,38 +362,119 @@ void Fun4All_PDC(int nevents = 0,
       }
     }
     ClusterBuilder->set_UseTowerInfo(1);
+
+    // If you want to read from TOWERINFO_CALIB2_:
+    ClusterBuilder->set_towerinfo_node_prefix("TOWERINFO_CALIB2_");
+
     se->registerSubsystem(ClusterBuilder);
   }
 
-  // Possibly waveformsim pipeline
+  //---------------------------------------------------------------------
+  // 7) Waveform pipeline
+  //---------------------------------------------------------------------
   if(waveformRec)
   {
-    // Omitted
+    // Example "CaloWaveformSim" for CEMC
+    CaloWaveformSim* wfSim = new CaloWaveformSim("WaveSimCEMC");
+    wfSim->set_detector_type(CaloTowerDefs::CEMC);
+    wfSim->set_detector("CEMC");
+    wfSim->set_nsamples(12);
+    wfSim->set_pedestalsamples(12);
+    wfSim->set_timewidth(0.2);
+    wfSim->set_peakpos(6);
+
+    // If needed, you can specify a slope calibration name
+    // e.g. "cemc_pi0_twrSlope_v1_default"
+    wfSim->set_calibName("cemc_pi0_twrSlope_v1_default");
+
+    // If you need further modeling:
+    // wfSim->get_light_collection_model().load_data_file(...);
+
+    se->registerSubsystem(wfSim);
+
+    // Next a "CaloTowerBuilder" that uses the waveforms to produce tower info
+    CaloTowerBuilder *waveBuilder = new CaloTowerBuilder("CaloWaveBuilderCEMC");
+    waveBuilder->set_detector_type(CaloTowerDefs::CEMC);
+    waveBuilder->set_nsamples(12);
+    waveBuilder->set_dataflag(false);
+    waveBuilder->set_processing_type(CaloWaveformProcessing::TEMPLATE);
+    waveBuilder->set_builder_type(CaloTowerDefs::kWaveformTowerv2);
+    waveBuilder->set_softwarezerosuppression(true, 60); // example threshold
+    se->registerSubsystem(waveBuilder);
+
+    // We can also add "CaloTowerStatus" to mask certain bad towers if needed
+    CaloTowerStatus *statusEMC = new CaloTowerStatus("CEMCSTATUS");
+    statusEMC->set_detector_type(CaloTowerDefs::CEMC);
+    se->registerSubsystem(statusEMC);
+
+    // Calibrate the waveform-based towers => produce TOWERINFO_WF_CALIB_CEMC or so
+    CaloTowerCalib *wfCalib = new CaloTowerCalib("WaveCalibCEMC");
+    wfCalib->set_detector_type(CaloTowerDefs::CEMC);
+    wfCalib->set_inputNodePrefix("TOWERINFO_WF_"); // or "TOWERINFO_" if you set above
+    wfCalib->set_outputNodePrefix("TOWERINFO_WF_CALIB_");
+    // Possibly set a direct URL if you have a slope file
+    // wfCalib->set_directURL("/path/to/waveformSlope.root");
+    se->registerSubsystem(wfCalib);
+
+    // Optionally do a second calibration pass for waveforms
+    // or apply some MC re-calib:
+    CaloTowerCalib *wfCalib2 = new CaloTowerCalib("WaveCalibCEMC2");
+    wfCalib2->set_detector_type(CaloTowerDefs::CEMC);
+    // example get from conditions DB:
+    std::string MC_Calib = CDBInterface::instance()->getUrl("CEMC_MC_RECALIB");
+    wfCalib2->set_directURL(MC_Calib.c_str());
+    wfCalib2->set_inputNodePrefix("TOWERINFO_WF_CALIB_");
+    wfCalib2->set_outputNodePrefix("TOWERINFO_WF_CALIB2_");
+    // if you only want to do calibration, not re-building waveforms
+    wfCalib2->set_doCalibOnly(true);
+    se->registerSubsystem(wfCalib2);
+
+    // Then build clusters from waveforms
+    // but again, we use our derived MyRawClusterBuilderTemplate
+    MyRawClusterBuilderTemplate *ClusterBuilderWF
+      = new MyRawClusterBuilderTemplate("WaveRawClusterBuilder");
+
+    ClusterBuilderWF->Detector("CEMC");
+    ClusterBuilderWF->set_threshold_energy(0.07);
+    {
+      char* calroot = getenv("CALIBRATIONROOT");
+      if(!calroot)
+      {
+        std::cerr << "[WARNING] waveformsim: CALIBRATIONROOT not set. " << std::endl;
+      }
+      std::string emc_prof = std::string(calroot ? calroot : "")
+                           + "/EmcProfile/CEMCprof_Thresh30MeV.root";
+      ClusterBuilderWF->LoadProfile(emc_prof);
+    }
+    ClusterBuilderWF->set_UseTowerInfo(1);
+
+    // This will read from "TOWERINFO_WF_CALIB2_"
+    ClusterBuilderWF->set_towerinfo_node_prefix("TOWERINFO_WF_CALIB2_");
+
+    se->registerSubsystem(ClusterBuilderWF);
   }
 
-  // 10) If you had real triggers, you'd do:
-  // TriggerRunInfoReco *triggerruninforeco = new TriggerRunInfoReco();
-  // se->registerSubsystem(triggerruninforeco);
-
-  // 11) Register your PositionDependentCorrection module
+  //---------------------------------------------------------------------
+  // 8) Position‐Dependent Correction module
+  //---------------------------------------------------------------------
   PositionDependentCorrection *pdc = new PositionDependentCorrection("PositionDepCorr", OutFile);
+  pdc->setIsSimulation(isSim);
   se->registerSubsystem(pdc);
 
-  // 12) Optional debug print of the entire server structure
+  //---------------------------------------------------------------------
+  // 9) (Optional) Print entire server structure, then run
+  //---------------------------------------------------------------------
   se->Print("ALL");
   if (se->topNode()) se->topNode()->print();
 
-  // 13) Run
   std::cout << "[DEBUG] Running Fun4All with nevents = " << nevents << std::endl;
   se->run(nevents);
 
-  // 14) End
+  //---------------------------------------------------------------------
+  // 10) End job
+  //---------------------------------------------------------------------
   se->End();
-
-  // 15) Print timing
   se->PrintTimer();
-
-  // 16) Cleanup
   delete se;
 
   std::cout << "[INFO] Done! Exiting." << std::endl;
