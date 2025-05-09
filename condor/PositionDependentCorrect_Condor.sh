@@ -71,15 +71,23 @@ else
 fi
 
 # 5) Construct an output name
+# ------------------------------------
 firstRoot=$(head -n 1 inputdata.txt)
 fileBaseName=$(basename "$firstRoot")
 fileTag="${fileBaseName%.*}"
-outFile="${outDir}/PositionDependentCorrect_${fileTag}.root"
 
-echo "[INFO] Output file: $outFile"
+if [ "$dataOrSim" = "data" ]; then
+  outFile="${OUTDIR_DATA}/PositionDep_${fileTag}.root"
+else
+  outFile="${OUTDIR_SIM}/PositionDep_${fileTag}.root"
+fi
+mkdir -p "$(dirname "$outFile")"
+echo "[INFO] Output file will be: $outFile"
 echo "[INFO] Running macro with input data/hits..."
 
-root -b -l -q "${MACRO_PATH}(0,\"inputdata.txt\",\"inputdatahits.txt\")"
+root -b -l -q \
+  "${MACRO_PATH}(0, \"inputdata.txt\", \"inputdatahits.txt\", \"${outFile}\")"
+
 
 # 6) Move result. The macro might produce an OUTHIST*.root.
 #    If the macro directly writes to e.g. Fun4All_EMCal_sp something,

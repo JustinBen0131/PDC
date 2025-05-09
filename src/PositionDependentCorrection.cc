@@ -127,6 +127,7 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   // when the job completes. We also ensure it's opened correctly.
   // ------------------------------------------------------------------------------------
   outfile = new TFile(outfilename.c_str(), "RECREATE");
+  std::cout << "[INFO-OUTFILENAME] Writing histograms to: " << outfilename << std::endl;
   if (!outfile || outfile->IsZombie())
   {
     if (Verbosity() > 0)
@@ -1017,41 +1018,41 @@ void PositionDependentCorrection::finalClusterLoop(
     }
 
 
-  if (Verbosity() > 0)
-  {
-    std::cout << "[Verbosity] finalClusterLoop: Building list of fired triggers from triggerNameMap..." << std::endl;
-  }
+//  if (Verbosity() > 0)
+//  {
+//    std::cout << "[Verbosity] finalClusterLoop: Building list of fired triggers from triggerNameMap..." << std::endl;
+//  }
+//
+//  // Build a vector of short-name triggers that fired
+//  std::vector<std::string> activeTriggerNames;
+//  activeTriggerNames.reserve(triggerNameMap.size());
+//
+//  for (const auto &kv : triggerNameMap)
+//  {
+//    const std::string &dbTriggerName   = kv.first;   // e.g. "MBD N&S >= 1"
+//    const std::string &histFriendlyStr = kv.second;  // e.g. "MBD_NandS_geq_1"
+//
+//    if (trigAna->didTriggerFire(dbTriggerName))
+//    {
+//      activeTriggerNames.push_back(histFriendlyStr);
+//
+//      if (Verbosity() > 0)
+//      {
+//        std::cout << "[Verbosity]  -> Trigger fired: \"" << dbTriggerName
+//                  << "\" => short name \"" << histFriendlyStr << "\"\n";
+//      }
+//    }
+//  }
 
-  // Build a vector of short-name triggers that fired
-  std::vector<std::string> activeTriggerNames;
-  activeTriggerNames.reserve(triggerNameMap.size());
-
-  for (const auto &kv : triggerNameMap)
-  {
-    const std::string &dbTriggerName   = kv.first;   // e.g. "MBD N&S >= 1"
-    const std::string &histFriendlyStr = kv.second;  // e.g. "MBD_NandS_geq_1"
-
-    if (trigAna->didTriggerFire(dbTriggerName))
-    {
-      activeTriggerNames.push_back(histFriendlyStr);
-
-      if (Verbosity() > 0)
-      {
-        std::cout << "[Verbosity]  -> Trigger fired: \"" << dbTriggerName
-                  << "\" => short name \"" << histFriendlyStr << "\"\n";
-      }
-    }
-  }
-
-  // If none of our triggers fired, skip the hist-filling
-  if (activeTriggerNames.empty())
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[Verbosity] finalClusterLoop: No triggers from triggerNameMap are active. Skipping event." << std::endl;
-    }
-    return;
-  }
+//  // If none of our triggers fired, skip the hist-filling
+//  if (activeTriggerNames.empty())
+//  {
+//    if (Verbosity() > 0)
+//    {
+//      std::cout << "[Verbosity] finalClusterLoop: No triggers from triggerNameMap are active. Skipping event." << std::endl;
+//    }
+//    return;
+//  }
 
   // -----------------------------------------------------------------
   // 1) Basic cluster counting and QA

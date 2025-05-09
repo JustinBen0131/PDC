@@ -30,13 +30,11 @@ DST_LIST_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/dst_list"
 # e.g. "dst_calo_run2pp-00047289.list"
 
 # Simulation DST + G4Hits .list files
-# ---------------------------------------------------------------------
-# By default, we point to gamma_dst_calo_cluster.list & gamma_g4hits.list.
-# If you want others, set these environment variables externally or modify below.
-# ---------------------------------------------------------------------
-: "${SIM_LIST_DIR:="/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/condor/listFiles"}"
-: "${SIM_DST_LIST:="${SIM_LIST_DIR}/gamma_dst_calo_cluster.list"}"
-: "${SIM_HITS_LIST:="${SIM_LIST_DIR}/gamma_g4hits.list"}"
+# Where sim DST + G4Hits lists were generated (the PhotonJet pT=5 sample).
+: "${SIM_LIST_DIR:="/sphenix/u/patsfan753/scratch/PDCrun24pp/simListFiles/run21_type27_PhotonJet5"}"
+: "${SIM_DST_LIST:="${SIM_LIST_DIR}/DST_CALO_CLUSTER.list"}"
+: "${SIM_HITS_LIST:="${SIM_LIST_DIR}/G4Hits.list"}"
+
 
 # How many files per Condor chunk
 FILES_PER_CHUNK=10
@@ -176,7 +174,9 @@ local_run_data() {
   echo "[DEBUG] Using empty hits file => $emptyFile"
 
   echo "[INFO] Now calling root for data => will stop after $LOCAL_NEVENTS events"
-  root -b -q -l "${MACRO_PATH}(${LOCAL_NEVENTS}, \"${dataMerged}\", \"${emptyFile}\")"
+  outFile="$PWD/output_PositionDep_localDataTest.root"
+  root -b -q -l "${MACRO_PATH}(${LOCAL_NEVENTS}, \
+   \"${dataMerged}\", \"${emptyFile}\", \"${outFile}\")"
   local rc=$?
   if [ $rc -ne 0 ]; then
     echo "[ERROR] local_run_data ended with code=$rc"
@@ -262,7 +262,9 @@ local_sim_test_first_pair() {
   echo "$hitFile" > "$tmpHits"
 
   echo "[INFO] Will run up to $LOCAL_NEVENTS events"
-  root -b -q -l "${MACRO_PATH}(${LOCAL_NEVENTS}, \"${tmpDst}\", \"${tmpHits}\")"
+  outFile="$PWD/output_PositionDep_localSimTest.root"
+  root -b -q -l "${MACRO_PATH}(${LOCAL_NEVENTS}, \
+   \"${tmpDst}\", \"${tmpHits}\", \"${outFile}\")"
   local rc=$?
   if [ $rc -ne 0 ]; then
     echo "[ERROR] localSimTest ended with code=$rc"
