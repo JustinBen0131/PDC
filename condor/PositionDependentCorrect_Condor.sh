@@ -3,7 +3,7 @@
 # PositionDependentCorrect_Condor.sh
 #
 # This is the per‐job script Condor runs. It:
-#  1) Sets up the environment (SPhenix).
+#  1) Sets up the environment
 #  2) Reads arguments: runNumber, chunkFile, dataOrSim, clusterID, [optional chunkFile2 for sim].
 #  3) Copies chunkFile(s) into local node or uses them directly.
 #  4) Runs the Fun4All macro with appropriate input lists.
@@ -25,13 +25,18 @@ runNumber="$1"
 chunkFile1="$2"
 dataOrSim="$3"
 clusterID="$4"
-chunkFile2="$5"  # only used if dataOrSim=sim
+nEvents="$5"         # e.g. "0"
+chunkIndex="$6"      # condor's Process ID => chunk number
+chunkFile2="$7"      # G4Hits chunk file
 
-echo "[INFO]  runNumber  = $runNumber"
-echo "[INFO]  chunkFile1 = $chunkFile1"
-echo "[INFO]  dataOrSim  = $dataOrSim"
-echo "[INFO]  clusterID  = $clusterID"
-echo "[INFO]  chunkFile2 = $chunkFile2"
+
+echo "[INFO]  runNumber   = $runNumber"
+echo "[INFO]  chunkFile1  = $chunkFile1"
+echo "[INFO]  dataOrSim   = $dataOrSim"
+echo "[INFO]  clusterID   = $clusterID"
+echo "[INFO]  nEvents     = $nEvents"
+echo "[INFO]  chunkIndex  = $chunkIndex"
+echo "[INFO]  chunkFile2  = $chunkFile2"
 
 # 2) Define macro path (same as in the submit script)
 MACRO_PATH="/sphenix/u/patsfan753/scratch/PDCrun24pp/macros/Fun4ALL_PDC.C"
@@ -77,31 +82,12 @@ fileBaseName=$(basename "$firstRoot")
 fileTag="${fileBaseName%.*}"
 
 if [ "$dataOrSim" = "data" ]; then
-  outFile="${OUTDIR_DATA}/PositionDep_${fileTag}.root"
+  outFile="${OUTDIR_DATA}/PositionDep_data_chunk${chunkIndex}.root"
 else
-  outFile="${OUTDIR_SIM}/PositionDep_${fileTag}.root"
+  outFile="${OUTDIR_SIM}/PositionDep_sim_chunk${chunkIndex}.root"
 fi
 mkdir -p "$(dirname "$outFile")"
 echo "[INFO] Output file will be: $outFile"
 echo "[INFO] Running macro with input data/hits..."
 
-root -b -l -q \
-  "${MACRO_PATH}(0, \"inputdata.txt\", \"inputdatahits.txt\", \"${outFile}\")"
-
-
-# 6) Move result. The macro might produce an OUTHIST*.root.
-#    If the macro directly writes to e.g. Fun4All_EMCal_sp something,
-#    you can rename it here to outFile or do in the macro itself.
-
-# For example, if you know it produces: "OUTHIST_iter_..."
-# Move or rename to $outFile
-
-foundHist=$(ls OUTHIST_iter_*.root 2>/dev/null | head -n 1)
-if [ -f "$foundHist" ]; then
-  mv "$foundHist" "$outFile"
-  echo "[INFO] Moved histogram file => $outFile"
-else
-  echo "[WARNING] No OUTHIST_iter_*.root found. Possibly the macro named differently?"
-fi
-
-echo "[INFO] PositionDependentCorrect_Condor.sh finished!"
+root -b -l -q "${MACRO_PATH}+(${nEvents}, \"inputdata.txt\", \"inputdatahits.txt\", \"${outFile}\")"

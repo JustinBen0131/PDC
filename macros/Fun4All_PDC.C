@@ -71,8 +71,8 @@ void Fun4All_PDC(int nevents = 0,
     gSystem->Exit(1);
   }
 
-  int verbosity = 2; // or 100 for extremely verbose
-  se->Verbosity(verbosity);
+  int verbosity = 0; // or 100 for extremely verbose
+  se->Verbosity(0);
 
   // 1) Setup recoConsts, enable conditions DB
   recoConsts *rc = recoConsts::instance();
@@ -89,15 +89,19 @@ void Fun4All_PDC(int nevents = 0,
 
   // Allow the conditions DB
   // (some older code might do 'Enable::CDB = true;' or similar)
-  CDBInterface::instance()->Verbosity(1);
+  CDBInterface::instance()->Verbosity(0);
 
   ////////////////////////////////////////////////////////////
   // 2) Register TWO input managers:
   //    (a) 'in0' for the calo DST list
   //    (b) 'in1' for G4Hits
   ////////////////////////////////////////////////////////////
-  std::cout << "[DEBUG] Registering input managers for calo='"
-            << caloListFile << "'  and hits='" << g4HitsListFile << "'" << std::endl;
+    if (verbosity > 0)
+    {
+      std::cout << "[DEBUG] Registering input managers for calo='"
+                << caloListFile << "'  and hits='" << g4HitsListFile << "'" << std::endl;
+    }
+
 
   // (a) for the calo cluster DST
   Fun4AllInputManager* in0 = new Fun4AllDstInputManager("in0");
@@ -129,7 +133,7 @@ void Fun4All_PDC(int nevents = 0,
   ////////////////////////////////////////////////////////////
   std::cout << "[DEBUG] Setting up GlobalVertexReco for MBD-based vertex" << std::endl;
   GlobalVertexReco *gvertex = new GlobalVertexReco("GlobalVertexReco");
-  gvertex->Verbosity(verbosity);
+  gvertex->Verbosity(0);
   se->registerSubsystem(gvertex);
 
   ////////////////////////////////////////////////////////////
@@ -231,7 +235,7 @@ void Fun4All_PDC(int nevents = 0,
   ////////////////////////////////////////////////////////////
   // 8) Print the Fun4All server structure
   ////////////////////////////////////////////////////////////
-  se->Print("ALL");
+//  se->Print("ALL");
 
   std::cout << "[INFO] Running Fun4All with nevents = " << nevents << std::endl;
   se->run(nevents);
@@ -240,7 +244,7 @@ void Fun4All_PDC(int nevents = 0,
   // 9) End and cleanup
   ////////////////////////////////////////////////////////////
   se->End();
-  se->PrintTimer();
+//  se->PrintTimer();
   delete se;
 
   std::cout << "[INFO] Done. Exiting macro." << std::endl;
