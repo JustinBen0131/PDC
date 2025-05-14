@@ -1,6 +1,7 @@
 #include "PositionDependentCorrection.h"
 
 // G4Hits includes
+#include <fstream>
 #include <TLorentzVector.h>
 #include <g4main/PHG4Hit.h>
 #include <g4main/PHG4HitContainer.h>
@@ -8,6 +9,7 @@
 #include <g4main/PHG4VtxPoint.h>
 
 // G4Cells includes
+#include <array>
 #include <g4detectors/PHG4Cell.h>
 #include <g4detectors/PHG4CellContainer.h>
 
@@ -82,6 +84,17 @@ constexpr const char* ANSI_CYAN    = "\033[36m";
 R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 
 using namespace std;
+
+
+const double PositionDependentCorrection::bScan[N_B]  =
+  {0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.22, 0.28};
+
+const double PositionDependentCorrection::w0Scan[N_W] =
+  {3.0, 3.3, 3.6, 3.9, 4.2, 4.6, 5.1};
+
+const double PositionDependentCorrection::ptEdge[N_PT+1] =
+  {2.0, 3.0, 5.0, 8.0, 12.0};
+
 
 PositionDependentCorrection::PositionDependentCorrection(const std::string& name, const std::string& filename)
   : SubsysReco(name)
@@ -360,28 +373,133 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   h_block_bin = new TH1F("h_block_bin","",14,-0.5,1.5);
 
   // For measuring raw phi resolution
-  h_phi_diff_raw = new TH1F("h_phi_diff_raw", "#Delta#phi raw", 200, -0.1, 0.1);
+    // (A) Create the raw Δφ histograms for each pT bin
+  for (int i = 0; i < NPTBINS; i++)
+    {
+      float ptLo = ptEdge[i];
+      float ptHi = ptEdge[i+1];
+      h_phi_diff_raw_pt[i] = new TH1F(
+        Form("h_phi_diff_raw_%.0f_%.0f", ptLo, ptHi),  // histogram name
+        Form("#Delta#phi raw, %.0f < pT < %.0f", ptLo, ptHi),
+        200, -0.1, 0.1
+      );
+  }
+    
+    // (B) Create the corrected Δφ histograms for each pT bin
+    for (int i = 0; i < NPTBINS; i++)
+    {
+      // Use your already-declared static member array ptEdge[]:
+      float ptLo = ptEdge[i];
+      float ptHi = ptEdge[i+1];
 
-  // For measuring corrected phi resolution
-  h_phi_diff_corrected = new TH1F("h_phi_diff_corr", "#Delta#phi corrected", 200, -0.1, 0.1);
+      // Now you have a properly named ptHi, so you can use it
+      h_phi_diff_corrected_pt[i] = new TH1F(
+        Form("h_phi_diff_corr_%.1f_%.1f", ptLo, ptHi),
+        Form("#Delta#phi corrected, %.1f < pT < %.1f", ptLo, ptHi),
+        200, -0.1, 0.1
+      );
+    }
+
+    
 
   // Maybe a TProfile to see how #Delta#phi depends on local coordinate or energy
   pr_phi_vs_blockcoord = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5, -0.2,0.2);
+    
 
-  // ===========================
-  //  pT REWEIGHTING
-  // ===========================
-  //
-  // frw is an external ROOT file loaded containing pT reweighting histograms or factors
-  // which can be applied to data or MC to match shapes. This is frequently used
-  // in pi0 calibrations to unify spectrum shapes between data/MC or different samples.
-  //frw = new TFile("/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/rw_pt.root");
-  // The next line (commented out) shows how we might retrieve a histogram per eta bin for reweighting:
-  // for(int i=0; i<96; i++) h_pt_rw[i] = (TH1F*) frw->Get(Form("h_pt_eta%d", i));
+    // GOOD: use ptEdge[i] and ptEdge[i+1]
+    for (int i = 0; i < NPTBINS; i++)
+    {
+      // e.g. ptEdge[] = {2.0, 3.0, 5.0, 8.0, 12.0}
+      float ptLo = ptEdge[i];
+      float ptHi = ptEdge[i+1];
 
-  // rnd is a random number generator used, for example,
-  // to smear cluster energies if we wish to do resolution studies or systematic variations.
+      h_localPhi_corrected[i] = new TH1F(
+        Form("h_localPhi_corrected_%.1f_%.1f", ptLo, ptHi),
+        Form("Corrected local #phi, %.1f < pT < %.1f", ptLo, ptHi),
+        50, -0.5, 0.5
+      );
+    }
+
+
+    // Pseudocode: for each ipt in [0..N_PT), and each bScan[ib], register hAsh.
+    for (int ipt = 0; ipt < N_PT; ++ipt)
+    {
+      for (int ib = 0; ib < N_B; ++ib)
+      {
+        TString hname = Form("h_dx_ash_b%04.2f_pt%d", bScan[ib], ipt);
+        // supply bins, e.g. 120 from -6 to +6
+        TH1F* hAsh = new TH1F(hname, Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
+                              120, -6, 6);
+
+        hm->registerHisto(hAsh);
+      }
+
+      for (int iw = 0; iw < N_W; ++iw)
+      {
+        TString hname = Form("h_dx_log_w0%04.2f_pt%d", w0Scan[iw], ipt);
+        TH1F* hLog = new TH1F(hname, Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
+                              120, -6, 6);
+
+        hm->registerHisto(hLog);
+      }
+    }
+
+
+
   rnd = new TRandom3();
+    
+  // Try reading bValues.txt
+  {
+      const std::string bFilePath = "/sphenix/u/patsfan753/scratch/PDCrun24pp/bParameters/bValues.txt";
+      std::ifstream bfile(bFilePath.c_str());
+      if (!bfile.is_open())
+      {
+        // Not found => no correction
+        std::cout << "[INFO] bValues.txt NOT found at: " << bFilePath
+                  << " => will NOT apply phi correction." << std::endl;
+        isFitDoneForB = false;
+      }
+      else
+      {
+        std::cout << "[INFO] Found " << bFilePath << "; reading b-values for correction." << std::endl;
+        
+        // We expect 3 lines.  Typically each line: "pTlow  pThigh  bValue"
+        // plus maybe a header line. Let's skip lines that start with '#'.
+        // We'll store them into m_bVals[0..2] in the same order as your pT bins.
+        int iFound = 0;
+        std::string line;
+        while (std::getline(bfile, line))
+        {
+          if (line.empty() || line[0] == '#') continue; // skip comments
+          std::istringstream iss(line);
+          float ptLo, ptHi, bVal;
+          if (!(iss >> ptLo >> ptHi >> bVal)) continue; // parse fail => skip
+          
+          if (iFound < 3)
+          {
+            m_bVals[iFound] = bVal;
+            iFound++;
+          }
+        }
+        bfile.close();
+        
+        if (iFound == 3)
+        {
+          isFitDoneForB = true;
+          std::cout << "[INFO] Successfully parsed 3 lines => b-values: "
+                    << m_bVals[0] << ", "
+                    << m_bVals[1] << ", "
+                    << m_bVals[2] << std::endl;
+        }
+        else
+        {
+          // Not enough lines => no correction
+          isFitDoneForB = false;
+          std::cout << "[WARNING] Found file but did NOT get 3 b-values. => no correction." << std::endl;
+        }
+      }
+  }
+    
 
   // ------------------------------------------------------------------------------------
   // Final check: if we reach here, we have presumably allocated all histograms successfully.
@@ -971,6 +1089,82 @@ float PositionDependentCorrection::convertBlockToGlobalPhi(int block_phi_bin, fl
   return globalPhi;
 }
 
+
+////////////////////////////////////////////////////////////////////////
+// doAshShift(...)
+//    Minimal "ash" formula that parallels doPhiBlockCorr but is simpler.
+//    Takes a local-block φ in [0,1], applies b*asinh, returns ∈ [0,1].
+////////////////////////////////////////////////////////////////////////
+float PositionDependentCorrection::doAshShift(float localPhi, float bVal)
+{
+  // Step 1: put localPhi in [-0.5, +0.5]
+  float Xcg = (localPhi < 0.5f) ? localPhi : (localPhi - 1.0f);
+
+  // Step 2: asinh transform
+  //   Xash = b * asinh( 2 * Xcg * sinh(1/(2b)) )
+  float val = bVal * asinh( 2.f * Xcg * sinh(1.f/(2.f*bVal)) );
+
+  // Step 3: shift back to [0,1]
+  if(localPhi >= 0.5f) val += 1.0f;
+  return val;
+}
+
+
+////////////////////////////////////////////////////////////////////////
+// doLogWeightCoord(...)
+//    Computes local ϕ in [0,1] via the "log‐weight" formula:
+//      w_i = max(0, w0 + ln(E_i / sumE)),
+//    and an energy-weighted center in tower phi indices (with wrap fix).
+////////////////////////////////////////////////////////////////////////
+float PositionDependentCorrection::doLogWeightCoord(const std::vector<int>& towerphis,
+                                                    const std::vector<float>& towerenergies,
+                                                    float w0)
+{
+  if(towerphis.empty() || towerenergies.empty()) return 0.0f;
+
+  // 1) sum total tower energy
+  double sumE=0;
+  for(size_t i=0; i<towerenergies.size(); ++i) sumE += towerenergies[i];
+  if(sumE < 1e-9) return 0.0f; // no energy => localPhi=0
+
+  // 2) compute weights w_i, handle phi wrap
+  int nphibin = 256;    // for sPHENIX EMC
+  double sumW=0, sumWPhi=0;
+  int refPhi = towerphis[0];
+
+  for(size_t i=0; i<towerenergies.size(); i++)
+  {
+    double frac = towerenergies[i] / sumE;
+    double w    = w0 + log(frac);
+    if(w < 0) w=0; // clamp to zero
+
+    // wrap fix
+    int phibin = towerphis[i];
+    if(phibin - refPhi < -nphibin/2)  phibin += nphibin;
+    else if(phibin - refPhi >  nphibin/2)  phibin -= nphibin;
+
+    sumW    += w;
+    sumWPhi += w * phibin;
+  }
+  if(sumW < 1e-9) return 0.0f;
+
+  // 3) average phi bin => local phi
+  double avgphi = sumWPhi / sumW;
+  // keep in [0..256)
+  while(avgphi < 0)        avgphi += nphibin;
+  while(avgphi >= nphibin) avgphi -= nphibin;
+
+  // map tower index to [0,2) => then to [-0.5..+1.5], etc.
+  double localPhi = fmod(avgphi + 0.5, 2.0) - 0.5;
+  // clamp to [0..1)
+  if(localPhi < 0.0)  localPhi += 1.0;
+  if(localPhi >=1.0)  localPhi -= 1.0;
+
+  return float(localPhi);
+}
+
+
+
 void PositionDependentCorrection::finalClusterLoop(
     PHCompositeNode* /*topNode*/,
     RawClusterContainer* clusterContainer,
@@ -1217,42 +1411,189 @@ void PositionDependentCorrection::finalClusterLoop(
           h_delPhi_e_phi->Fill(delPhi, tr_phot.E(), lt_phi);
 
           h_truthE->Fill(tr_phot.E());
-
-          // -------------------------------------
-          // (A) Fill raw phi difference histogram
-          // -------------------------------------
+            
+          // 1) find which pT slice this photon falls into
+          float thisPt = photon1.Pt();
+          int iPtSlice = -1;
+          for (int i=0; i<N_PT; ++i)
           {
-            // Put delPhi in the range -pi..+pi
-            delPhi = TVector2::Phi_mpi_pi(delPhi);
-            if (h_phi_diff_raw) h_phi_diff_raw->Fill(delPhi);
+            if(thisPt >= ptEdge[i] && thisPt < ptEdge[i+1])
+              {
+                iPtSlice = i;
+                break;
+              }
+          }
+          if(iPtSlice<0) { /* outside [2..12] => skip scanning */ continue; }
 
-            // Optionally fill TProfile vs. local block phi coordinate
-            if (pr_phi_vs_blockcoord)
-            {
-              pr_phi_vs_blockcoord->Fill(blockCord.second, delPhi);
+          // 2) compute the "true" x position
+          float phiTrue = TVector2::Phi_mpi_pi(tr_phot.Phi());
+          float xTrue   = 112.f * phiTrue;  // e.g. radius=112cm =>  x = R * phi
+
+          // 3) get local phi from getBlockCord(second)
+          float localPhi    = blockCord.second;      // your code already computed this
+          int   blockPhiBin = block_phi_bin;         // e.g. from earlier
+
+          // 4) for each Ash b
+          for(int ib=0; ib<N_B; ++ib)
+          {
+              float bTrial  = bScan[ib];
+
+              // use doAshShift
+              float localAsh = doAshShift(localPhi, bTrial);
+
+              // global phi
+              float phiReco  = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localAsh) );
+              float xReco    = 112.f * phiReco;
+
+              TString hname = Form("h_dx_ash_b%04.2f_pt%d", bTrial, iPtSlice);
+              TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
+              if(hAsh) hAsh->Fill( xReco - xTrue );
             }
 
-            // If isFitDoneForB => do the correction
-            if (isFitDoneForB)
+            // 5) for each log-weight w0
+            for(int iw=0; iw<N_W; ++iw)
             {
-              if (block_eta_bin >= 0 && block_eta_bin < NBinsBlock &&
-                  block_phi_bin >= 0 && block_phi_bin < NBinsBlock)
+              float w0Trial   = w0Scan[iw];
+
+              // compute local phi by weighting the actual towers
+              float localLog  = doLogWeightCoord(tower_phis, tower_energies, w0Trial);
+
+              float phiRecoLog = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localLog) );
+              float xRecoLog   = 112.f * phiRecoLog;
+
+              TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Trial, iPtSlice);
+              TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
+              if(hLog) hLog->Fill( xRecoLog - xTrue );
+            }
+
+
+            // -------------------------------------------------------
+            // (A) Determine the pT bin index
+            // -------------------------------------------------------
+
+            // cluster pT (e.g. `clus_pt`)
+            thisPt = clus_pt;  // or photon1.Pt()
+
+            // Map pT to iPtBin in [0..2], or -1 if out of range
+            int iPtBin = -1;
+            for (int i = 0; i < NPTBINS; i++)
+            {
+              if (thisPt >= ptEdge[i] && thisPt < ptEdge[i+1])
               {
-                // 1) get the corrected local phi
-                float correctedBlockPhi = doPhiBlockCorr(blockCord.second, b_phi);
-
-                // 2) convert to global phi in radians
-                float correctedPhi = convertBlockToGlobalPhi(block_phi_bin, correctedBlockPhi);
-
-                // 3) compute the new ∆φ
-                float delPhiCorr = TVector2::Phi_mpi_pi(correctedPhi - tr_phot.Phi());
-
-                // 4) fill corrected distribution
-                if (h_phi_diff_corrected) h_phi_diff_corrected->Fill(delPhiCorr);
+                iPtBin = i;
+                break;
               }
             }
-          }
+            // If outside [2,8], we do not fill any of the 3 histograms
+            if (iPtBin < 0)
+            {
+                continue;
+            }
 
+
+            // -------------------------------------------------------
+            // (B) Fill the raw Δφ histogram
+            // -------------------------------------------------------
+            {
+              // Put delPhi in the range (-π .. +π)
+              delPhi = TVector2::Phi_mpi_pi(delPhi);
+
+              // Optional debug print:
+              if (Verbosity() > 0)
+              {
+                std::cout << "[DEBUG] finalClusterLoop -> raw phi diff fill:\n"
+                          << "   * cluster E=" << photon1.E()
+                          << "   * truth E="   << tr_phot.E()
+                          << "   * delR="      << photon1.DeltaR(tr_phot)
+                          << "   * delPhi="    << delPhi
+                          << std::endl;
+              }
+
+              // Fill the per-bin histogram if iPtBin >= 0
+              if (iPtBin >= 0)
+              {
+                if (h_phi_diff_raw_pt[iPtBin])
+                {
+                  h_phi_diff_raw_pt[iPtBin]->Fill(delPhi);
+
+                  if (Verbosity() > 0)
+                  {
+                    int currentEntries = (int) h_phi_diff_raw_pt[iPtBin]->GetEntries();
+                    std::cout << "[DEBUG] h_phi_diff_raw_pt[" << iPtBin
+                              << "]->Fill(" << delPhi << ") => new #entries="
+                              << currentEntries << std::endl;
+                  }
+                }
+                else
+                {
+                  // Just in case
+                  if (Verbosity() > 0)
+                  {
+                    std::cout << "[WARNING] h_phi_diff_raw_pt[" << iPtBin
+                              << "] is null => no fill!" << std::endl;
+                  }
+                }
+              }
+
+              // (Optional) fill TProfile vs. local block phi coordinate
+              if (pr_phi_vs_blockcoord)
+              {
+                pr_phi_vs_blockcoord->Fill(blockCord.second, delPhi);
+              }
+            }
+
+            // -------------------------------------------------------
+            // (C) Apply the b correction if isFitDoneForB == true
+            // -------------------------------------------------------
+            if (isFitDoneForB && iPtBin >= 0)
+            {
+              // Retrieve the b-value from m_bVals array for the determined pT bin
+              float bPhiUsed = m_bVals[iPtBin];
+
+              // Only proceed if it’s non-trivial
+              if (bPhiUsed > 1e-9)
+              {
+                // Step 1: Correct the *local block phi coordinate*
+                float correctedBlockPhi = doPhiBlockCorr(blockCord.second, bPhiUsed);
+                  
+                h_localPhi_corrected[iPtBin]->Fill(correctedBlockPhi);
+
+                // Step 2: Convert that corrected local coordinate to a global phi
+                float correctedPhi = convertBlockToGlobalPhi(block_phi_bin, correctedBlockPhi);
+
+                // Step 3: Recompute Δφ in (-π..+π)
+                float delPhiCorr = TVector2::Phi_mpi_pi(correctedPhi - tr_phot.Phi());
+
+                // Fill corrected histogram
+                if (h_phi_diff_corrected_pt[iPtBin])
+                {
+                  h_phi_diff_corrected_pt[iPtBin]->Fill(delPhiCorr);
+
+                  if (Verbosity() > 0)
+                  {
+                    std::cout << "[DEBUG] h_phi_diff_corrected_pt[" << iPtBin
+                              << "]->Fill(" << delPhiCorr << ") => #entries="
+                              << h_phi_diff_corrected_pt[iPtBin]->GetEntries() << std::endl;
+                  }
+                }
+                else
+                {
+                  if (Verbosity() > 0)
+                  {
+                    std::cout << "[WARNING] h_phi_diff_corrected_pt[" << iPtBin
+                              << "] is null => no fill!" << std::endl;
+                  }
+                }
+              }
+              else
+              {
+                // b=0 => no correction
+                if (Verbosity() > 0)
+                {
+                  std::cout << "[DEBUG] bPhiUsed=0 => skipping local phi correction." << std::endl;
+                }
+              }
+            }
           // position‐dependent resolution
           if (block_eta_bin >= 0 && block_eta_bin < NBinsBlock &&
               block_phi_bin >= 0 && block_phi_bin < NBinsBlock)
@@ -1652,28 +1993,28 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
     }
   }
 
-  // Dump histograms via the HistoManager if valid
-  if (hm)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] Dumping histograms to file '"
-                << outfilename << "' with mode 'UPDATE'." << std::endl;
-    }
-    hm->dumpHistos(outfilename, "UPDATE");
-
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] Histograms successfully dumped to file: " << outfilename << std::endl;
-    }
-  }
-  else
-  {
-    if (Verbosity() > 0)
-    {
-      std::cerr << "[ERROR] HistoManager (hm) pointer is null. Cannot dump histograms!" << std::endl;
-    }
-  }
+//  // Dump histograms via the HistoManager if valid
+//  if (hm)
+//  {
+//    if (Verbosity() > 0)
+//    {
+//      std::cout << "[DEBUG] Dumping histograms to file '"
+//                << outfilename << "' with mode 'UPDATE'." << std::endl;
+//    }
+//    hm->dumpHistos(outfilename, "UPDATE");
+//
+//    if (Verbosity() > 0)
+//    {
+//      std::cout << "[DEBUG] Histograms successfully dumped to file: " << outfilename << std::endl;
+//    }
+//  }
+//  else
+//  {
+//    if (Verbosity() > 0)
+//    {
+//      std::cerr << "[ERROR] HistoManager (hm) pointer is null. Cannot dump histograms!" << std::endl;
+//    }
+//  }
 
   if (Verbosity() > 0)
   {

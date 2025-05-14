@@ -16,7 +16,7 @@
 #############################
 
 # Path to your Fun4All macro:
-MACRO_PATH="/sphenix/u/patsfan753/scratch/PDCrun24pp/macros/Fun4ALL_PDC.C"
+MACRO_PATH="/sphenix/u/patsfan753/scratch/PDCrun24pp/macros/Fun4All_PDC.C"
 
 # Where to send Condor output/logs
 LOG_DIR="/sphenix/user/${USER}/PositionDependentCorrect"

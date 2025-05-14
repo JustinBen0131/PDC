@@ -1,6 +1,7 @@
 #ifndef PositionDependentCorrection_H__
 #define PositionDependentCorrection_H__
 
+#include <array>
 #include <fun4all/SubsysReco.h>  // we do need this
 #include <string>                // for std::string
 #include <vector>                // for std::vector
@@ -106,6 +107,11 @@ class PositionDependentCorrection : public SubsysReco
     
   float convertBlockToGlobalPhi(int block_phi_bin, float localPhi);
 
+  float doAshShift(float localPhi, float bVal);
+  float doLogWeightCoord(const std::vector<int>& towerphis,
+                           const std::vector<float>& towerenergies,
+                           float w0);
+
   void finalClusterLoop(PHCompositeNode* topNode,
                         RawClusterContainer* clusterContainer,
                         float vtx_z,
@@ -130,14 +136,24 @@ class PositionDependentCorrection : public SubsysReco
   Fun4AllHistoManager *hm = nullptr;
   TFile *outfile = nullptr;
     
-  bool isFitDoneForB = false; // default: no correction
+  float b_phi = 0.0f;
+  bool isFitDoneForB = false;   // whether we've read in b-values
+  std::array<float,3> m_bVals;  // for storing b-values for the 3 pT bins
 
-  float b_phi = 0.0;          // The correction factor from your fit
+  static const int    N_B = 8;
+  static const int    N_W = 7;
+  static const int    N_PT = 4;
+
+  static const double bScan[N_B];
+  static const double w0Scan[N_W];
+  static const double ptEdge[N_PT+1];
     
   TriggerAnalyzer* trigAna{nullptr};
     
-  TH1F* h_phi_diff_raw = nullptr;
-  TH1F* h_phi_diff_corrected = nullptr;
+  static constexpr int NPTBINS = 3;  // We have three pT bins
+  TH1F* h_localPhi_corrected[NPTBINS];
+  TH1F* h_phi_diff_raw_pt[NPTBINS];         // raw Δφ for each bin
+  TH1F* h_phi_diff_corrected_pt[NPTBINS];   // corrected Δφ for each bin
   TProfile* pr_phi_vs_blockcoord = nullptr;
 
   TH2* h_emcal_mbd_correlation = nullptr;

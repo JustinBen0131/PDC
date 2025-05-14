@@ -71,7 +71,7 @@ void Fun4All_PDC(int nevents = 0,
     gSystem->Exit(1);
   }
 
-  int verbosity = 0; // or 100 for extremely verbose
+  int verbosity = 2; // or 100 for extremely verbose
   se->Verbosity(0);
 
   // 1) Setup recoConsts, enable conditions DB
@@ -224,7 +224,7 @@ void Fun4All_PDC(int nevents = 0,
   PositionDependentCorrection *pdc
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
   pdc->setIsSimulation(isSimulation);
-  pdc->Verbosity(verbosity);
+  pdc->Verbosity(0);
   se->registerSubsystem(pdc);
 
   ////////////////////////////////////////////////////////////

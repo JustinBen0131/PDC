@@ -2,46 +2,58 @@
 ###############################################################################
 # PositionDependentCorrect_Condor.sh
 #
-# This is the per‐job script Condor runs. It:
-#  1) Sets up the environment
-#  2) Reads arguments: runNumber, chunkFile, dataOrSim, clusterID, [optional chunkFile2 for sim].
-#  3) Copies chunkFile(s) into local node or uses them directly.
-#  4) Runs the Fun4All macro with appropriate input lists.
-#  5) Places output in the designated directory.
+# Reduced-verbosity version focusing on why the macro might not be read properly.
+# Rewritten to directly call macros/Fun4All_PDC.C without a MACRO_PATH variable.
 ###############################################################################
 
-# 1) Setup environment
+echo "====================================================================="
 echo "[INFO] PositionDependentCorrect_Condor.sh: Starting..."
+echo "[INFO] Host: $(hostname -f), Working dir: $(pwd)"
+echo "====================================================================="
+
+#############################
+# 1) Setup environment
+#############################
 export USER="$(id -u -n)"
-export LOGNAME=${USER}
-export HOME=/sphenix/u/${LOGNAME}
-# Example local installation
+export LOGNAME="${USER}"
+export HOME="/sphenix/u/${LOGNAME}"
+
 MYINSTALL="/sphenix/user/${USER}/install"
 source /opt/sphenix/core/bin/sphenix_setup.sh -n
 source /opt/sphenix/core/bin/setup_local.sh "$MYINSTALL"
 
-# Parse arguments
+#############################
+# 2) Parse arguments
+#############################
 runNumber="$1"
 chunkFile1="$2"
 dataOrSim="$3"
 clusterID="$4"
-nEvents="$5"         # e.g. "0"
-chunkIndex="$6"      # condor's Process ID => chunk number
-chunkFile2="$7"      # G4Hits chunk file
+nEvents="$5"      # e.g. "0"
+chunkIndex="$6"   # condor Process
+chunkFile2="$7"   # G4Hits file (sim only)
 
+echo "---------------------------------------------------------------------"
+echo "[INFO] runNumber   = $runNumber"
+echo "[INFO] chunkFile1  = $chunkFile1"
+echo "[INFO] dataOrSim   = $dataOrSim"
+echo "[INFO] clusterID   = $clusterID"
+echo "[INFO] nEvents     = $nEvents"
+echo "[INFO] chunkIndex  = $chunkIndex"
+echo "[INFO] chunkFile2  = $chunkFile2"
+echo "---------------------------------------------------------------------"
 
-echo "[INFO]  runNumber   = $runNumber"
-echo "[INFO]  chunkFile1  = $chunkFile1"
-echo "[INFO]  dataOrSim   = $dataOrSim"
-echo "[INFO]  clusterID   = $clusterID"
-echo "[INFO]  nEvents     = $nEvents"
-echo "[INFO]  chunkIndex  = $chunkIndex"
-echo "[INFO]  chunkFile2  = $chunkFile2"
+#############################
+# 3) Check that macros/Fun4All_PDC.C exists
+#############################
+if [ ! -f "macros/Fun4All_PDC.C" ]; then
+  echo "[ERROR] Cannot find macros/Fun4All_PDC.C in $(pwd) or the script’s directory."
+  exit 1
+fi
 
-# 2) Define macro path (same as in the submit script)
-MACRO_PATH="/sphenix/u/patsfan753/scratch/PDCrun24pp/macros/Fun4ALL_PDC.C"
-
-# 3) Decide output directory
+#############################
+# 4) Decide output directory
+#############################
 OUTDIR_DATA="/sphenix/tg/tg01/bulk/jbennett/PDC/output"
 OUTDIR_SIM="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut"
 
@@ -53,17 +65,18 @@ else
   echo "[WARNING] dataOrSim not recognized => defaulting to data output."
   outDir="$OUTDIR_DATA"
 fi
-
 mkdir -p "$outDir"
 
-# 4) Move chunkFile(s) local
+#############################
+# 5) Copy chunk files locally
+#############################
+echo "[DEBUG] Checking chunkFile1 => $chunkFile1"
 if [ ! -f "$chunkFile1" ]; then
   echo "[ERROR] chunkFile1 missing: $chunkFile1"
   exit 1
 fi
 cp "$chunkFile1" inputdata.txt
 
-# For sim, we also have chunkFile2
 if [ "$dataOrSim" == "sim" ]; then
   if [ ! -f "$chunkFile2" ]; then
     echo "[ERROR] chunkFile2 missing for sim: $chunkFile2"
@@ -71,23 +84,47 @@ if [ "$dataOrSim" == "sim" ]; then
   fi
   cp "$chunkFile2" inputdatahits.txt
 else
-  # data => no second file
   echo "" > inputdatahits.txt
 fi
 
-# 5) Construct an output name
-# ------------------------------------
-firstRoot=$(head -n 1 inputdata.txt)
-fileBaseName=$(basename "$firstRoot")
+echo "[DEBUG] inputdata.txt (first few lines):"
+head -n 5 inputdata.txt
+echo "[DEBUG] inputdatahits.txt (first few lines):"
+head -n 5 inputdatahits.txt
+
+#############################
+# 6) Construct output filename
+#############################
+firstRoot="$(head -n 1 inputdata.txt)"
+fileBaseName="$(basename "$firstRoot")"
 fileTag="${fileBaseName%.*}"
 
 if [ "$dataOrSim" = "data" ]; then
-  outFile="${OUTDIR_DATA}/PositionDep_data_chunk${chunkIndex}.root"
+  outFile="${outDir}/PositionDep_data_chunk${chunkIndex}.root"
 else
-  outFile="${OUTDIR_SIM}/PositionDep_sim_chunk${chunkIndex}.root"
+  outFile="${outDir}/PositionDep_sim_chunk${chunkIndex}.root"
 fi
 mkdir -p "$(dirname "$outFile")"
-echo "[INFO] Output file will be: $outFile"
-echo "[INFO] Running macro with input data/hits..."
+echo "[INFO] Final output file: $outFile"
 
-root -b -l -q "${MACRO_PATH}+(${nEvents}, \"inputdata.txt\", \"inputdatahits.txt\", \"${outFile}\")"
+#############################
+# 7) Run the macro directly
+#############################
+echo "[INFO] Invoking ROOT macro with command:"
+echo "root -b -l -q \"macros/Fun4All_PDC.C(${nEvents}, \\\"inputdata.txt\\\", \\\"inputdatahits.txt\\\", \\\"${outFile}\\\")\""
+
+root -b -l -q "macros/Fun4All_PDC.C(${nEvents}, \"inputdata.txt\", \"inputdatahits.txt\", \"${outFile}\")"
+rc=$?
+
+echo "---------------------------------------------------------------------"
+echo "[INFO] ROOT return code: $rc"
+if [ $rc -ne 0 ]; then
+  echo "[ERROR] ROOT macro failed with return code $rc"
+  exit $rc
+fi
+
+echo "[INFO] Done. Checking output directory: $(dirname "$outFile")"
+ls -lh "$(dirname "$outFile")"
+
+echo "[INFO] PositionDependentCorrect_Condor.sh finished OK."
+exit 0
