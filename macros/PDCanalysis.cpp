@@ -19,6 +19,173 @@
 #include <iomanip>
 #include <fstream>
 
+void plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
+{
+  // -------------------------------------------------------------------------
+  // 1) Configuration
+  // -------------------------------------------------------------------------
+  constexpr int    N_PT   = 4;
+  const     double ptEdge[N_PT+1] = {2.0, 3.0, 5.0, 8.0, 12.0};
+
+  // Ash (b) scan
+  const double bMin  = 0.05, bMax = 0.30, bStep = 0.01;
+  std::vector<double> bScan;
+  for(double b=bMin; b<=bMax+1e-9; b+=bStep) bScan.push_back(b);
+  const int N_B = bScan.size();
+
+  // Log (w0) scan
+  const double w0Min = 2.8,  w0Max = 5.5, w0Step = 0.10;
+  std::vector<double> w0Scan;
+  for(double w=w0Min; w<=w0Max+1e-9; w+=w0Step) w0Scan.push_back(w);
+  const int N_W = w0Scan.size();
+
+  // Output location
+  const TString baseDir    = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput";
+  const TString histOutDir = baseDir + "/ASH_LOG_PLOTS";
+  gSystem->mkdir(baseDir,    /*parents=*/true);
+  gSystem->mkdir(histOutDir, /*parents=*/true);
+
+  // -------------------------------------------------------------------------
+  // 2) Input file
+  // -------------------------------------------------------------------------
+  std::cout << "[INFO] Opening '" << infile << "'...\n";
+  std::unique_ptr<TFile> f(TFile::Open(infile,"READ"));
+  if(!f || f->IsZombie()){
+    std::cerr << "[ERROR] Cannot open file.\n"; return;
+  }
+
+  // -------------------------------------------------------------------------
+  // 3) ROOT style
+  // -------------------------------------------------------------------------
+  gStyle->SetOptStat(0);
+  gStyle->SetTitleFontSize(0.045);
+
+  int  colors [4] = {kBlack, kRed, kBlue, kMagenta+2};
+  int  markers[4] = {20,      21,   22,    23       };
+
+  // ======================================================================
+  // 4)  ASH  : σx  vs  b
+  // ======================================================================
+  TCanvas cAsh("cAsh","Ash RMS vs b",800,600);
+  cAsh.SetLeftMargin(0.12);  cAsh.SetBottomMargin(0.12);  cAsh.SetGrid();
+
+  double gMinAsh =  DBL_MAX, gMaxAsh = -DBL_MAX;
+  std::vector<TGraph*> gAshVec;
+  std::vector<double>  bestB (N_PT,0.), bestRMS_A(N_PT,DBL_MAX);
+
+  for(int ipt=0; ipt<N_PT; ++ipt)
+  {
+    auto g = new TGraph; g->SetName(Form("gAsh_pt%d",ipt));
+    for(size_t ib=0; ib<bScan.size(); ++ib)
+    {
+      double bVal = bScan[ib];
+      TString hN  = Form("h_dx_ash_b%04.2f_pt%d",bVal,ipt);
+      if(TH1* h = dynamic_cast<TH1*>(f->Get(hN)))
+      {
+        double r = h->GetRMS();
+        g->SetPoint(g->GetN(), bVal, r);
+
+        if(r>0){
+          gMinAsh = std::min(gMinAsh,r);
+          gMaxAsh = std::max(gMaxAsh,r);
+          if(r<bestRMS_A[ipt]){ bestRMS_A[ipt]=r; bestB[ipt]=bVal; }
+        }
+
+        // quick PNG snapshot
+        TCanvas ctmp; h->Draw("E"); ctmp.SaveAs(histOutDir+"/"+hN+".png");
+      }
+    }
+    g->SetMarkerStyle(markers[ipt]);
+    g->SetMarkerColor(colors [ipt]);
+    g->SetLineColor  (colors [ipt]);
+    g->SetMarkerSize(1.3);
+    gAshVec.push_back(g);
+  }
+
+  // guard: empty?
+  if(gMinAsh==DBL_MAX){ gMinAsh=0; gMaxAsh=1; }
+
+  // draw onto the *correct* pad
+  cAsh.cd();
+  gAshVec[0]->Draw("ALP");
+  gAshVec[0]->GetYaxis()->SetRangeUser(gMinAsh-0.1*fabs(gMinAsh),
+                                       gMaxAsh+0.1*fabs(gMaxAsh));
+  for(size_t i=1;i<gAshVec.size();++i) gAshVec[i]->Draw("LP SAME");
+
+  TLegend legA(0.15,0.70,0.45,0.85); legA.SetBorderSize(0); legA.SetFillStyle(0);
+  for(int ipt=0; ipt<N_PT; ++ipt){
+    legA.AddEntry(gAshVec[ipt],
+      Form("%.1f<p_{T}<%.1f GeV  (best b=%.2f)",ptEdge[ipt],ptEdge[ipt+1],bestB[ipt]),
+      "lp");
+  }
+  legA.Draw();
+  TLatex().DrawLatexNDC(0.2,0.92,"Ash");
+
+  cAsh.SaveAs(baseDir+"/Ash_RMS_vs_b.png");
+  std::cout << "[INFO] Saved Ash_RMS_vs_b.png\n";
+
+  // ======================================================================
+  // 5)  LOG  : σx  vs  w0
+  // ======================================================================
+  TCanvas cLog("cLog","Log RMS vs w0",800,600);
+  cLog.SetLeftMargin(0.12);  cLog.SetBottomMargin(0.12);  cLog.SetGrid();
+
+  double gMinLog = DBL_MAX, gMaxLog = -DBL_MAX;
+  std::vector<TGraph*> gLogVec;
+  std::vector<double>  bestW (N_PT,0.), bestRMS_L(N_PT,DBL_MAX);
+
+  for(int ipt=0; ipt<N_PT; ++ipt)
+  {
+    auto g = new TGraph; g->SetName(Form("gLog_pt%d",ipt));
+    for(size_t iw=0; iw<w0Scan.size(); ++iw)
+    {
+      double wVal = w0Scan[iw];
+      TString hN  = Form("h_dx_log_w0%04.2f_pt%d",wVal,ipt);
+      if(TH1* h = dynamic_cast<TH1*>(f->Get(hN)))
+      {
+        double r = h->GetRMS();
+        g->SetPoint(g->GetN(), wVal, r);
+
+        if(r>0){
+          gMinLog = std::min(gMinLog,r);
+          gMaxLog = std::max(gMaxLog,r);
+          if(r<bestRMS_L[ipt]){ bestRMS_L[ipt]=r; bestW[ipt]=wVal; }
+        }
+
+        TCanvas ctmp; h->Draw("E"); ctmp.SaveAs(histOutDir+"/"+hN+".png");
+      }
+    }
+    g->SetMarkerStyle(markers[ipt]);
+    g->SetMarkerColor(colors [ipt]);
+    g->SetLineColor  (colors [ipt]);
+    g->SetMarkerSize(1.3);
+    gLogVec.push_back(g);
+  }
+
+  if(gMinLog==DBL_MAX){ gMinLog=0; gMaxLog=1; }
+
+  // *** critical: make sure we're on the main canvas, not a stale ctmp ***
+  cLog.cd();
+  gLogVec[0]->Draw("ALP");
+  gLogVec[0]->GetYaxis()->SetRangeUser(gMinLog-0.1*fabs(gMinLog),
+                                       gMaxLog+0.1*fabs(gMaxLog));
+  for(size_t i=1;i<gLogVec.size();++i) gLogVec[i]->Draw("LP SAME");
+
+  TLegend legB(0.15,0.65,0.45,0.85); legB.SetBorderSize(0); legB.SetFillStyle(0);
+  for(int ipt=0; ipt<N_PT; ++ipt){
+    legB.AddEntry(gLogVec[ipt],
+      Form("%.1f<p_{T}<%.1f GeV  (best w_{0}=%.2f)",ptEdge[ipt],ptEdge[ipt+1],bestW[ipt]),
+      "lp");
+  }
+  legB.Draw();
+  TLatex().DrawLatexNDC(0.2,0.92,"Log");
+
+  cLog.SaveAs(baseDir+"/Log_RMS_vs_w0.png");
+  std::cout << "[INFO] Saved Log_RMS_vs_w0.png\n";
+
+  std::cout << "[DONE] plotAshLogRMS_sideBySide finished.\n";
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Asinh-based function for local phi fits:
 //
@@ -644,6 +811,8 @@ void PDCanalysis()
     // cleanup
     delete htmp;
   }
+  plotAshLogRMS_sideBySide(filename);
+
     
   ///////////////////////////////////////////////////////////////////////
   // 6) Done

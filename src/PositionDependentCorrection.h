@@ -16,6 +16,7 @@ class Fun4AllHistoManager;
 class PHCompositeNode;
 class RawTowerGeomContainer;   // <-- ADDED
 class RawClusterContainer;     // <-- ADDED
+class BEmcRecCEMC;
 
 class TFile;
 class TNtuple;
@@ -75,6 +76,12 @@ class PositionDependentCorrection : public SubsysReco
   void fitEtaSlices(const std::string& infile,
                     const std::string& fitOutFile,
                     const std::string& cdbFile);
+    
+  void setBEmcRec(BEmcRecCEMC* bemcptr)
+  {
+      m_bemcRec = bemcptr;
+  }
+
 
  protected:
   // --------------------------------------------------------------------
@@ -92,7 +99,7 @@ class PositionDependentCorrection : public SubsysReco
                      float &vtx_z,
                      std::vector<TLorentzVector> &truth_photons,
                      std::vector<TLorentzVector> &truth_meson_photons);
-
+  BEmcRecCEMC* m_bemcRec = nullptr;
   //  <-- We forward-declared RawTowerGeomContainer & RawClusterContainer above
   RawTowerGeomContainer* checkTowerGeometry(PHCompositeNode* topNode);
   RawClusterContainer* retrieveClusterContainer(PHCompositeNode* topNode);
@@ -140,13 +147,10 @@ class PositionDependentCorrection : public SubsysReco
   bool isFitDoneForB = false;   // whether we've read in b-values
   std::array<float,3> m_bVals;  // for storing b-values for the 3 pT bins
 
-  static const int    N_B = 8;
-  static const int    N_W = 7;
   static const int    N_PT = 4;
-
-  static const double bScan[N_B];
-  static const double w0Scan[N_W];
   static const double ptEdge[N_PT+1];
+  std::vector<double> m_bScan;
+  std::vector<double> m_w0Scan;
     
   TriggerAnalyzer* trigAna{nullptr};
     

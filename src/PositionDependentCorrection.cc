@@ -74,6 +74,7 @@
 #include <map>
 
 #include <g4main/PHG4TruthInfoContainer.h>
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
 
 constexpr const char* ANSI_BOLD  = "\033[1m";
 constexpr const char* ANSI_RESET = "\033[0m";
@@ -85,16 +86,10 @@ R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 
 using namespace std;
 
-
-const double PositionDependentCorrection::bScan[N_B]  =
-  {0.08, 0.10, 0.12, 0.14, 0.16, 0.18, 0.22, 0.28};
-
-const double PositionDependentCorrection::w0Scan[N_W] =
-  {3.0, 3.3, 3.6, 3.9, 4.2, 4.6, 5.1};
-
-const double PositionDependentCorrection::ptEdge[N_PT+1] =
-  {2.0, 3.0, 5.0, 8.0, 12.0};
-
+const double PositionDependentCorrection::ptEdge[PositionDependentCorrection::N_PT+1] =
+{
+  2.0, 3.0, 5.0, 8.0, 12.0
+};
 
 PositionDependentCorrection::PositionDependentCorrection(const std::string& name, const std::string& filename)
   : SubsysReco(name)
@@ -419,31 +414,65 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
         50, -0.5, 0.5
       );
     }
+ 
 
+    const double bMin   = 0.05;  // cm
+    const double bMax   = 0.30;  // cm
+    const double bStep  = 0.01;  // cm
 
-    // Pseudocode: for each ipt in [0..N_PT), and each bScan[ib], register hAsh.
+    const double w0Min  = 2.8;   // dimensionless
+    const double w0Max  = 5.5;
+    const double w0Step = 0.10;  // step size
+
+    // (1) clear any existing contents
+    m_bScan.clear();
+    m_w0Scan.clear();
+
+    // (2) fill them
+    for (double b = bMin; b <= bMax + 1e-6; b += bStep)
+      m_bScan.push_back(b);
+
+    for (double w = w0Min; w <= w0Max + 1e-6; w += w0Step)
+      m_w0Scan.push_back(w);
+
+    // we can still do:
+    const int N_B = m_bScan.size();
+    const int N_W = m_w0Scan.size();
+    
+
+    // ===============================
+    // Example: Register h_dx_ash and h_dx_log histograms
+    // for each b and w₀, for each pT bin
+    // ===============================
     for (int ipt = 0; ipt < N_PT; ++ipt)
     {
+      // -- Ash approach --
       for (int ib = 0; ib < N_B; ++ib)
       {
-        TString hname = Form("h_dx_ash_b%04.2f_pt%d", bScan[ib], ipt);
-        // supply bins, e.g. 120 from -6 to +6
-        TH1F* hAsh = new TH1F(hname, Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
+        double bVal = m_bScan[ib];
+        TString hname = Form("h_dx_ash_b%04.2f_pt%d", bVal, ipt);
+
+        // e.g. 120 bins from -6 to +6
+        TH1F* hAsh = new TH1F(hname,
+                              Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
                               120, -6, 6);
 
         hm->registerHisto(hAsh);
       }
 
+      // -- Log‐weight approach --
       for (int iw = 0; iw < N_W; ++iw)
       {
-        TString hname = Form("h_dx_log_w0%04.2f_pt%d", w0Scan[iw], ipt);
-        TH1F* hLog = new TH1F(hname, Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
+        double w0Val = m_w0Scan[iw];
+        TString hname = Form("h_dx_log_w0%04.2f_pt%d", w0Val, ipt);
+
+        TH1F* hLog = new TH1F(hname,
+                              Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
                               120, -6, 6);
 
         hm->registerHisto(hLog);
       }
     }
-
 
 
   rnd = new TRandom3();
@@ -1412,60 +1441,128 @@ void PositionDependentCorrection::finalClusterLoop(
 
           h_truthE->Fill(tr_phot.E());
             
-          // 1) find which pT slice this photon falls into
+          // ----------------------------------------------------
+          //  1) Determine which pT slice this photon falls into
+          // ----------------------------------------------------
           float thisPt = photon1.Pt();
           int iPtSlice = -1;
-          for (int i=0; i<N_PT; ++i)
+          for (int i = 0; i < N_PT; ++i)
           {
-            if(thisPt >= ptEdge[i] && thisPt < ptEdge[i+1])
+              if (thisPt >= ptEdge[i] && thisPt < ptEdge[i + 1])
               {
                 iPtSlice = i;
                 break;
               }
           }
-          if(iPtSlice<0) { /* outside [2..12] => skip scanning */ continue; }
-
-          // 2) compute the "true" x position
-          float phiTrue = TVector2::Phi_mpi_pi(tr_phot.Phi());
-          float xTrue   = 112.f * phiTrue;  // e.g. radius=112cm =>  x = R * phi
-
-          // 3) get local phi from getBlockCord(second)
-          float localPhi    = blockCord.second;      // your code already computed this
-          int   blockPhiBin = block_phi_bin;         // e.g. from earlier
-
-          // 4) for each Ash b
-          for(int ib=0; ib<N_B; ++ib)
+          if (iPtSlice < 0)
           {
-              float bTrial  = bScan[ib];
+              // outside [2..12] => skip
+              continue;
+          }
 
-              // use doAshShift
-              float localAsh = doAshShift(localPhi, bTrial);
+          // ----------------------------------------------------
+          //  2) Compute the "true" x position for truth photon
+          // ----------------------------------------------------
+          float phiTrue = TVector2::Phi_mpi_pi(tr_phot.Phi());
+          float xTrue   = 112.f * phiTrue;  // (still using 112 cm for "true" radius)
 
-              // global phi
-              float phiReco  = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localAsh) );
-              float xReco    = 112.f * phiReco;
+          // ----------------------------------------------------
+          //  3) Get local block phi from getBlockCord(second)
+          // ----------------------------------------------------
+          float localPhi    = blockCord.second;   // from your code
+          int   blockPhiBin = block_phi_bin;      // e.g. from earlier
 
+          // ----------------------------------------------------
+          //  4A) Loop over "Ash" b-values
+          // ----------------------------------------------------
+          for (int ib = 0; ib < static_cast<int>(m_bScan.size()); ++ib)
+          {
+              double bTrial = m_bScan[ib];
+
+              // a) apply your "doAshShift" to local phi
+              float localAsh  = doAshShift(localPhi, bTrial);
+
+              // b) convert to a *front-face* global phi
+              float phiRecoFF = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localAsh) );
+
+              // c) front-face x,y at r=112 cm (z=0 for front face)
+              float xA = 112.f * std::cos(phiRecoFF);
+              float yA = 112.f * std::sin(phiRecoFF);
+              float zA = 0.f; // approximate front face
+
+              // d) correct for shower depth => get (xC, yC, zC)
+              float xC = 0.f;
+              float yC = 0.f;
+              float zC = 0.f;
+
+              if (m_bemcRec)
+              {
+                // Use the pointer-based BEmcRecCEMC
+                m_bemcRec->CorrectShowerDepth(photon1.E(), xA, yA, zA, xC, yC, zC);
+              }
+              else
+              {
+                // If m_bemcRec is null, optionally skip or do no correction
+                // For clarity, we just do no correction here:
+                xC = xA;
+                yC = yA;
+                zC = zA;
+              }
+
+              // e) compute final radius & phi from corrected (xC,yC)
+              float rCorr  = std::sqrt(xC*xC + yC*yC);
+              float phiCorr= std::atan2(yC, xC);
+
+              // f) define xReco from (rCorr * phiCorr)
+              float xReco = rCorr * phiCorr;
+
+              // fill histogram
               TString hname = Form("h_dx_ash_b%04.2f_pt%d", bTrial, iPtSlice);
               TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
-              if(hAsh) hAsh->Fill( xReco - xTrue );
-            }
+              if (hAsh) hAsh->Fill(xReco - xTrue);
+          }
 
-            // 5) for each log-weight w0
-            for(int iw=0; iw<N_W; ++iw)
-            {
-              float w0Trial   = w0Scan[iw];
+          // ----------------------------------------------------
+          //  4B) Loop over "log-weight" w0
+          // ----------------------------------------------------
+          for (int iw = 0; iw < static_cast<int>(m_w0Scan.size()); ++iw)
+          {
+              double w0Trial = m_w0Scan[iw];
 
-              // compute local phi by weighting the actual towers
+              // a) compute local phi by weighting the actual towers
               float localLog  = doLogWeightCoord(tower_phis, tower_energies, w0Trial);
 
-              float phiRecoLog = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localLog) );
-              float xRecoLog   = 112.f * phiRecoLog;
+              // b) get front-face global phi from localLog
+              float phiRecoFF = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localLog) );
 
+              // c) same shower-depth correction
+              float xA = 112.f * std::cos(phiRecoFF);
+              float yA = 112.f * std::sin(phiRecoFF);
+              float zA = 0.f;
+              float xC = 0.f;
+              float yC = 0.f;
+              float zC = 0.f;
+
+              if (m_bemcRec)
+              {
+                m_bemcRec->CorrectShowerDepth(photon1.E(), xA, yA, zA, xC, yC, zC);
+              }
+              else
+              {
+                xC = xA;
+                yC = yA;
+                zC = zA;
+              }
+
+              float rCorr   = std::sqrt(xC*xC + yC*yC);
+              float phiCorr = std::atan2(yC, xC);
+              float xRecoLog= rCorr * phiCorr;
+
+              // fill histogram
               TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Trial, iPtSlice);
               TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
-              if(hLog) hLog->Fill( xRecoLog - xTrue );
-            }
-
+              if (hLog) hLog->Fill(xRecoLog - xTrue);
+          }
 
             // -------------------------------------------------------
             // (A) Determine the pT bin index
@@ -1834,7 +1931,7 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   }
 
   // If vertex out of range => skip
-  if (std::fabs(vtx_z) > _vz)
+  if (std::fabs(vtx_z) > 30.0)
   {
     if (Verbosity() > 0)
     {

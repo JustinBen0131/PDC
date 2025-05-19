@@ -41,6 +41,7 @@
 // Possibly your custom code
 ////////////////////////////////////////////////////////////
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src/PositionDependentCorrection.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
 
 R__LOAD_LIBRARY(libcdbobjects)
 R__LOAD_LIBRARY(libfun4all.so)
@@ -54,6 +55,7 @@ R__LOAD_LIBRARY(libCaloWaveformSim.so)
 R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 R__LOAD_LIBRARY(libcalibCaloEmc_pi0.so)
 R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libPDC.so)
+R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_reco.so)
 
 ////////////////////////////////////////////////////////////
 // The main Fun4All macro
@@ -84,8 +86,8 @@ void Fun4All_PDC(int nevents = 0,
   // We want the "MDC2" global tag
   rc->set_StringFlag("CDB_GLOBALTAG", "MDC2");
   // We'll guess that the "TIMESTAMP" or run # is 21 (or parse from the file)
-  rc->set_uint64Flag("TIMESTAMP", 21);
-  rc->set_IntFlag("RUNNUMBER", 21);
+  rc->set_uint64Flag("TIMESTAMP", 24);
+  rc->set_IntFlag("RUNNUMBER", 24);
 
   // Allow the conditions DB
   // (some older code might do 'Enable::CDB = true;' or similar)
@@ -170,12 +172,12 @@ void Fun4All_PDC(int nevents = 0,
     calib1->set_calib_const_GeV_ADC(1.0/0.02); // example
     se->registerSubsystem(calib1);
 
-    // Another tower-level calibration => TOWERINFO_CALIB2_CEMC
-    CaloTowerCalib *calib2 = new CaloTowerCalib("CaloTowerCalibCEMC");
-    calib2->set_detector_type(CaloTowerDefs::CEMC);
-    calib2->set_inputNodePrefix("TOWERINFO_CALIB_");
-    calib2->set_directURL("/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/mc_calib_NoDigi.root");
-    se->registerSubsystem(calib2);
+//    // Another tower-level calibration => TOWERINFO_CALIB2_CEMC
+//    CaloTowerCalib *calib2 = new CaloTowerCalib("CaloTowerCalibCEMC");
+//    calib2->set_detector_type(CaloTowerDefs::CEMC);
+//    calib2->set_inputNodePrefix("TOWERINFO_CALIB_");
+//    calib2->set_directURL("/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/mc_calib_NoDigi.root");
+//    se->registerSubsystem(calib2);
 
 //    // Finally, cluster building from TOWERINFO_CALIB2_
 //    RawClusterBuilderTemplate *clusBuilder
@@ -207,6 +209,11 @@ void Fun4All_PDC(int nevents = 0,
   // 5) handle additional calibration
   ////////////////////////////////////////////////////////////
   Process_Calo_Calib();
+    
+    
+    
+  BEmcRecCEMC *bemcPtr = new BEmcRecCEMC();
+  bemcPtr->SetCylindricalGeometry();
 
   ////////////////////////////////////////////////////////////
   // 6) Our PositionDependentCorrection code
@@ -223,6 +230,7 @@ void Fun4All_PDC(int nevents = 0,
                     : outFileName;
   PositionDependentCorrection *pdc
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
+  pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
   pdc->Verbosity(0);
   se->registerSubsystem(pdc);

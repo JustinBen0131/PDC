@@ -32,7 +32,7 @@ DST_LIST_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/dst_list"
 
 # Simulation DST + G4Hits .list files
 # Where sim DST + G4Hits lists were generated (the PhotonJet pT=5 sample).
-: "${SIM_LIST_DIR:="/sphenix/u/patsfan753/scratch/PDCrun24pp/simListFiles/run21_type27_PhotonJet5"}"
+: "${SIM_LIST_DIR:="/sphenix/u/patsfan753/scratch/PDCrun24pp/simListFiles/run24_type14_gamma_pt_200_40000"}"
 : "${SIM_DST_LIST:="${SIM_LIST_DIR}/DST_CALO_CLUSTER.list"}"
 : "${SIM_HITS_LIST:="${SIM_LIST_DIR}/G4Hits.list"}"
 
