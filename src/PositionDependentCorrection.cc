@@ -91,10 +91,15 @@ const double PositionDependentCorrection::ptEdge[PositionDependentCorrection::N_
   2.0, 3.0, 5.0, 8.0, 12.0
 };
 
-PositionDependentCorrection::PositionDependentCorrection(const std::string& name, const std::string& filename)
+PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
+                                                         const std::string &filename)
   : SubsysReco(name)
   , detector("HCALIN")
   , outfilename(filename)
+  , g4hitntuple(nullptr)
+  , g4cellntuple(nullptr)
+  , towerntuple(nullptr)
+  , clusterntuple(nullptr)
 {
   _eventcounter = 0;
   _vz = 999.0;
@@ -103,10 +108,11 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string& name
 PositionDependentCorrection::~PositionDependentCorrection()
 {
   delete hm;
-  delete g4hitntuple;
-  delete g4cellntuple;
-  delete towerntuple;
-  delete clusterntuple;
+
+  if (g4hitntuple)   delete g4hitntuple;
+  if (g4cellntuple)  delete g4cellntuple;
+  if (towerntuple)   delete towerntuple;
+  if (clusterntuple) delete clusterntuple;
 }
 
 int PositionDependentCorrection::Init(PHCompositeNode*)
@@ -1441,117 +1447,184 @@ void PositionDependentCorrection::finalClusterLoop(
 
           h_truthE->Fill(tr_phot.E());
             
-          // ----------------------------------------------------
-          //  1) Determine which pT slice this photon falls into
-          // ----------------------------------------------------
-          float thisPt = photon1.Pt();
-          int iPtSlice = -1;
-          for (int i = 0; i < N_PT; ++i)
-          {
+            // ----------------------------------------------------
+            //  1) Determine which pT slice this photon falls into
+            // ----------------------------------------------------
+            float thisPt = photon1.Pt();
+            int iPtSlice = -1;
+            for (int i = 0; i < N_PT; ++i)
+            {
               if (thisPt >= ptEdge[i] && thisPt < ptEdge[i + 1])
               {
                 iPtSlice = i;
                 break;
               }
-          }
-          if (iPtSlice < 0)
-          {
-              // outside [2..12] => skip
+            }
+
+            // If out of range [2..12], skip it
+            if (iPtSlice < 0)
+            {
+              if (Verbosity() > 0)
+              {
+                std::cout << "[DEBUG] Photon pT=" << thisPt << " is outside [2..12], skipping.\n";
+              }
               continue;
-          }
+            }
 
-          // ----------------------------------------------------
-          //  2) Compute the "true" x position for truth photon
-          // ----------------------------------------------------
-          float phiTrue = TVector2::Phi_mpi_pi(tr_phot.Phi());
-          float xTrue   = 112.f * phiTrue;  // (still using 112 cm for "true" radius)
+            // ----------------------------------------------------
+            //  2) Compute the "true" x position for truth photon
+            // ----------------------------------------------------
+            float phiTrue = TVector2::Phi_mpi_pi(tr_phot.Phi());
+            float xTrue   = 112.f * phiTrue;  // still using 112 cm for "true" radius
 
-          // ----------------------------------------------------
-          //  3) Get local block phi from getBlockCord(second)
-          // ----------------------------------------------------
-          float localPhi    = blockCord.second;   // from your code
-          int   blockPhiBin = block_phi_bin;      // e.g. from earlier
+            if (Verbosity() > 1)
+            {
+              std::cout << "[DEBUG] true phi=" << phiTrue
+                        << ", xTrue=" << xTrue
+                        << "  (radius=112cm)\n";
+            }
 
-          // ----------------------------------------------------
-          //  4A) Loop over "Ash" b-values
-          // ----------------------------------------------------
-          for (int ib = 0; ib < static_cast<int>(m_bScan.size()); ++ib)
-          {
+            // ----------------------------------------------------
+            //  3) Get local block phi from getBlockCord(second)
+            // ----------------------------------------------------
+            float localPhi    = blockCord.second;   // from your code
+            int   blockPhiBin = block_phi_bin;      // e.g. from earlier
+
+            if (Verbosity() > 1)
+            {
+              std::cout << "[DEBUG] localPhi=" << localPhi
+                        << ", blockPhiBin=" << blockPhiBin
+                        << " (from block coordinates)\n";
+            }
+
+            // ----------------------------------------------------
+            //  4A) Loop over "Ash" b-values
+            // ----------------------------------------------------
+            for (int ib = 0; ib < static_cast<int>(m_bScan.size()); ++ib)
+            {
               double bTrial = m_bScan[ib];
 
-              // a) apply your "doAshShift" to local phi
+              // (a) apply your "doAshShift" to local phi
               float localAsh  = doAshShift(localPhi, bTrial);
 
-              // b) convert to a *front-face* global phi
-              float phiRecoFF = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localAsh) );
+              if (Verbosity() > 1)
+              {
+                std::cout << "[DEBUG]   (Ash) bTrial=" << bTrial
+                          << ", localAsh before correction=" << localPhi
+                          << ", after doAshShift=" << localAsh << "\n";
+              }
 
-              // c) front-face x,y at r=112 cm (z=0 for front face)
+              // (b) convert to a front-face global phi
+              float phiRecoFF = TVector2::Phi_mpi_pi(convertBlockToGlobalPhi(blockPhiBin, localAsh));
+
+              // (c) front-face x,y at r=112 cm (z=0 for front face)
               float xA = 112.f * std::cos(phiRecoFF);
               float yA = 112.f * std::sin(phiRecoFF);
-              float zA = 0.f; // approximate front face
+              float zA = 0.f;
 
-              // d) correct for shower depth => get (xC, yC, zC)
+              // (d) correct for shower depth => (xC, yC, zC)
               float xC = 0.f;
               float yC = 0.f;
               float zC = 0.f;
 
               if (m_bemcRec)
               {
-                // Use the pointer-based BEmcRecCEMC
                 m_bemcRec->CorrectShowerDepth(photon1.E(), xA, yA, zA, xC, yC, zC);
+
+                if (Verbosity() > 1)
+                {
+                  std::cout << "[DEBUG]   (Ash) after BEmcRecCEMC->CorrectShowerDepth:"
+                            << " xC=" << xC << ", yC=" << yC << ", zC=" << zC << "\n";
+                }
               }
               else
               {
-                // If m_bemcRec is null, optionally skip or do no correction
-                // For clarity, we just do no correction here:
+                // No correction if pointer is null
                 xC = xA;
                 yC = yA;
                 zC = zA;
+
+                if (Verbosity() > 1)
+                {
+                  std::cout << "[DEBUG]   (Ash) m_bemcRec is null => skipping shower-depth correction.\n";
+                }
               }
 
-              // e) compute final radius & phi from corrected (xC,yC)
-              float rCorr  = std::sqrt(xC*xC + yC*yC);
-              float phiCorr= std::atan2(yC, xC);
+              // (e) compute final radius & phi from corrected (xC,yC)
+              float rCorr   = std::sqrt(xC*xC + yC*yC);
+              float phiCorr = std::atan2(yC, xC);
 
-              // f) define xReco from (rCorr * phiCorr)
+              // (f) define xReco from (rCorr * phiCorr)
               float xReco = rCorr * phiCorr;
 
               // fill histogram
               TString hname = Form("h_dx_ash_b%04.2f_pt%d", bTrial, iPtSlice);
-              TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
-              if (hAsh) hAsh->Fill(xReco - xTrue);
-          }
+              TH1F* hAsh    = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
+              if (hAsh)
+              {
+                hAsh->Fill(xReco - xTrue);
 
-          // ----------------------------------------------------
-          //  4B) Loop over "log-weight" w0
-          // ----------------------------------------------------
-          for (int iw = 0; iw < static_cast<int>(m_w0Scan.size()); ++iw)
-          {
+                if (Verbosity() > 1)
+                {
+                  std::cout << "[DEBUG]   (Ash) Filled histogram '"
+                            << hname << "' with dx=" << (xReco - xTrue)
+                            << ". #entries=" << hAsh->GetEntries() << "\n";
+                }
+              }
+              else if (Verbosity() > 0)
+              {
+                std::cerr << "[WARNING]   (Ash) histogram '" << hname << "' not found, skipping fill.\n";
+              }
+            }
+
+            // ----------------------------------------------------
+            //  4B) Loop over "log-weight" w0
+            // ----------------------------------------------------
+            for (int iw = 0; iw < static_cast<int>(m_w0Scan.size()); ++iw)
+            {
               double w0Trial = m_w0Scan[iw];
 
-              // a) compute local phi by weighting the actual towers
-              float localLog  = doLogWeightCoord(tower_phis, tower_energies, w0Trial);
+              // (a) compute local phi by weighting the actual towers
+              float localLog = doLogWeightCoord(tower_phis, tower_energies, w0Trial);
 
-              // b) get front-face global phi from localLog
-              float phiRecoFF = TVector2::Phi_mpi_pi( convertBlockToGlobalPhi(blockPhiBin, localLog) );
+              if (Verbosity() > 1)
+              {
+                std::cout << "[DEBUG]   (LogW) w0Trial=" << w0Trial
+                          << ", localLog coordinate = " << localLog << "\n";
+              }
 
-              // c) same shower-depth correction
+              // (b) get front-face global phi from localLog
+              float phiRecoFF = TVector2::Phi_mpi_pi(convertBlockToGlobalPhi(blockPhiBin, localLog));
+
+              // (c) again, front-face x,y at r=112 cm (z=0)
               float xA = 112.f * std::cos(phiRecoFF);
               float yA = 112.f * std::sin(phiRecoFF);
               float zA = 0.f;
+
               float xC = 0.f;
               float yC = 0.f;
               float zC = 0.f;
 
+              // same shower-depth correction
               if (m_bemcRec)
               {
                 m_bemcRec->CorrectShowerDepth(photon1.E(), xA, yA, zA, xC, yC, zC);
+
+                if (Verbosity() > 1)
+                {
+                  std::cout << "[DEBUG]   (LogW) after BEmcRecCEMC->CorrectShowerDepth:"
+                            << " xC=" << xC << ", yC=" << yC << ", zC=" << zC << "\n";
+                }
               }
               else
               {
                 xC = xA;
                 yC = yA;
                 zC = zA;
+                if (Verbosity() > 1)
+                {
+                  std::cout << "[DEBUG]   (LogW) m_bemcRec is null => skipping shower-depth correction.\n";
+                }
               }
 
               float rCorr   = std::sqrt(xC*xC + yC*yC);
@@ -1560,9 +1633,25 @@ void PositionDependentCorrection::finalClusterLoop(
 
               // fill histogram
               TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Trial, iPtSlice);
-              TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
-              if (hLog) hLog->Fill(xRecoLog - xTrue);
-          }
+              TH1F* hLog     = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
+              if (hLog)
+              {
+                hLog->Fill(xRecoLog - xTrue);
+
+                if (Verbosity() > 1)
+                {
+                  std::cout << "[DEBUG]   (LogW) Filled histogram '"
+                            << hname2 << "' with dx=" << (xRecoLog - xTrue)
+                            << ". #entries=" << hLog->GetEntries() << "\n";
+                }
+              }
+              else if (Verbosity() > 0)
+              {
+                std::cerr << "[WARNING]   (LogW) histogram '" << hname2
+                          << "' not found, skipping fill.\n";
+              }
+            }
+
 
             // -------------------------------------------------------
             // (A) Determine the pT bin index
