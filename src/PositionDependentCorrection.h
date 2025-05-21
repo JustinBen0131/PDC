@@ -7,7 +7,7 @@
 #include <vector>                // for std::vector
 #include <map>                   // for std::map
 #include <calotrigger/TriggerAnalyzer.h>
-
+#include <calobase/RawCluster.h>
 
 // --------------------------------------------------------------------
 // 1) Forward declarations for classes we only use as pointers/references
@@ -30,6 +30,7 @@ class TProfile2D;
 class TProfile;
 class TLorentzVector;
 class TRandom3;
+class RawCluster;
 
 class PositionDependentCorrection : public SubsysReco
 {
@@ -135,9 +136,10 @@ class PositionDependentCorrection : public SubsysReco
                         float weight);
 
     void fillAshLogDx(
+        RawCluster* cluster,
         const TLorentzVector& recoPhoton,
         const TLorentzVector& truthPhoton,
-        const std::pair<float,float>& blockCord,
+        const std::pair<float, float>& blockCord,
         int blockPhiBin,
         const std::vector<int>& tower_phis,
         const std::vector<float>& tower_energies

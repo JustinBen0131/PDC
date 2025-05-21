@@ -336,7 +336,7 @@ universe                = vanilla
 executable              = PositionDependentCorrect_Condor.sh
 # Args: <runNum> <listFileData> <"data"|"sim"> <clusterID> <nEvents> [<listFileHits>]
 arguments               = ${runNum} \$(filename) data \$(Cluster) 0
-log                     = /tmp/patsfan753_condor_logs/job.\$(Cluster).\$(Process).log
+log                     = /sphenix/user/patsfan753/PDCrun24pp/log/job.\$(Cluster).\$(Process).log
 output                  = /sphenix/user/patsfan753/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
 error                   = /sphenix/user/patsfan753/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
 request_memory          = 1000MB
@@ -408,7 +408,7 @@ universe                = vanilla
 executable              = PositionDependentCorrect_Condor.sh
 # Args: <runNum=9999> <listFileData> <"sim"> <clusterID> <nEvents=0> [<listFileHits>]
 arguments               = 9999 \$(filenameA) sim \$(Cluster) 0 \$(Process) \$(filenameB)
-log                     = /tmp/patsfan753_condor_logs/job.\$(Cluster).\$(Process).log
+log                     = /sphenix/user/patsfan753/PDCrun24pp/log/job.\$(Cluster).\$(Process).log
 output                  = /sphenix/user/patsfan753/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
 error                   = /sphenix/user/patsfan753/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
 request_memory          = 1000MB

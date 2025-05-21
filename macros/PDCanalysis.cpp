@@ -200,21 +200,26 @@ void plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
 double asinhModel(double *x, double *par)
 {
   double Norm = par[0];  // overall scale
-  double b    = par[1];  // the "b" parameter we want to extract
-
-  // If b is extremely small or zero, avoid division by zero
-  if (b <= 1e-9) return 1e-12;
+  double b    = par[1];  // the "b" parameter
+  if (b <= 1e-9) return 1e-12; // avoid division by zero if b is small
 
   double Xcg = x[0];
-  double arg = 1.0 + 4.0 * Xcg * Xcg * TMath::SinH(1.0/(2.0*b)) * TMath::SinH(1.0/(2.0*b));
+  double arg = 1.0 + 4.0*Xcg*Xcg*TMath::SinH(1.0/(2.0*b))*TMath::SinH(1.0/(2.0*b));
   double denom = TMath::Sqrt(arg);
 
   double numer = 2.0 * b;
-  double result = Norm * ( numer / denom );
+  double result = Norm * (numer/denom);
   return result;
 }
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // doLocalPhiEtaFits(...)
+//
+//  1) Projects local-φ or local-η from h3 in slices of pT
+//  2) Overlays all 4 bins on one canvas => LocalPhiFits.png or LocalEtaFits.png
+//  3) If coordinate == phi, also do single‐bin overlays raw vs corrected
+//  4) **Now** also produce a 2×2 table of the final per‐bin fits
 ////////////////////////////////////////////////////////////////////////////////
 void doLocalPhiEtaFits(TH3F* h3,
                        const double pT_bins_low[4],
@@ -226,7 +231,7 @@ void doLocalPhiEtaFits(TH3F* h3,
   gSystem->mkdir(outDirPhi, /*recursive=*/true);
 
   /////////////////////////////////////////////////////////////////////////////
-  // Equation strings for phi vs eta
+  // Equation strings for φ vs η
   /////////////////////////////////////////////////////////////////////////////
   TString eqPhiString =
     "Y(X) = Norm #times #frac{2b_{#phi}}{#sqrt{1 + 4X^{2} sinh^{2}(1/(2b_{#phi}))}}";
@@ -240,15 +245,12 @@ void doLocalPhiEtaFits(TH3F* h3,
   eqLatex.SetTextSize(0.028);
   eqLatex.SetTextAlign(13);
 
-  // We have 4 pT slices now
-  const int NPT = 4;
-
-  // Colors/markers for the 4 pT slices
-  int  colors [NPT] = {kBlack, kRed,    kBlue,      kMagenta+2};
-  int  markers[NPT] = {20,     21,      22,         23        };
+  const int NPT = 4; // 4 pT slices
+  int  colors [NPT] = {kBlack, kRed, kBlue, kMagenta+2};
+  int  markers[NPT] = {20,     21,   22,   23       };
 
   // -------------------------------------------------------------------------
-  // Helper lambda for the quadruple overlay, plus single‐bin overlays for φ
+  // Helper lambda for the quadruple overlay
   // -------------------------------------------------------------------------
   auto fitCoordAndMakePlot =
     [&](const char* coordName,    // "phi" or "eta"
@@ -256,9 +258,8 @@ void doLocalPhiEtaFits(TH3F* h3,
         const TString& outPNGname,
         const TString& xTitle)
   {
-    // Distinguish φ vs η
     bool isPhi = (strcmp(coordName, "phi") == 0);
-    TString eqString = (isPhi ? eqPhiString : eqEtaString);
+    TString eqString = isPhi ? eqPhiString : eqEtaString;
 
     // If writing to bResults, label which coordinate we’re fitting
     if (bResults.is_open())
@@ -276,35 +277,36 @@ void doLocalPhiEtaFits(TH3F* h3,
     }
 
     // 1) Create a canvas for the quadruple overlay
-    TCanvas cCoord(Form("cCoord_%s",coordName),
-                   Form("Local %s distributions",coordName),
-                   900,700);
+    TCanvas cCoord(Form("cCoord_%s", coordName),
+                   Form("Local %s distributions", coordName),
+                   900, 700);
     cCoord.SetLeftMargin(0.12);
     cCoord.SetRightMargin(0.05);
     cCoord.SetBottomMargin(0.12);
     cCoord.cd();
 
-    TLegend leg(0.18,0.68,0.4,0.88);
+    TLegend leg(0.18, 0.68, 0.4, 0.88);
     leg.SetBorderSize(0);
     leg.SetFillStyle(0);
     leg.SetTextSize(0.028);
 
-    // We'll store up to 4 uncorrected histograms
     std::vector<TH1D*> hLocalVec(NPT, nullptr);
 
-    // 2) Loop over the 4 pT slices
+    // 2) Loop over the 4 pT slices => single overlay
+    std::vector<double> bestBvals(NPT, 0.0); // store b-values if we want them
+
     for(int i=0; i<NPT; i++)
     {
-      // Determine Z range in h3 => picking out that pT slice
+      // Determine Z range for that pT slice
       int zLo = h3->GetZaxis()->FindFixBin(pT_bins_low[i] + 1e-9);
       int zHi = h3->GetZaxis()->FindFixBin(pT_bins_high[i] - 1e-9);
       if(zLo < 1) zLo=1;
       if(zHi> h3->GetNbinsZ()) zHi= h3->GetNbinsZ();
 
+      // Set the range & do the 1D projection
       h3->GetXaxis()->SetRange(1, h3->GetNbinsX());
       h3->GetZaxis()->SetRange(zLo, zHi);
 
-      // Project to 1D
       TH1D* hLocal = (TH1D*) h3->Project3D(projectOpt);
       if(!hLocal)
       {
@@ -314,14 +316,13 @@ void doLocalPhiEtaFits(TH3F* h3,
       }
       hLocalVec[i] = hLocal;
 
-      // Name & title
       hLocal->SetName(Form("hLocal%s_%.1fto%.1f",
                            coordName, pT_bins_low[i], pT_bins_high[i]));
       hLocal->SetTitle(Form(";%s; scaled counts", xTitle.Data()));
 
       // Normalize
       double integral = hLocal->Integral();
-      if(integral > 1e-9) hLocal->Scale(1./integral);
+      if(integral > 1e-9) hLocal->Scale(1. / integral);
 
       // Style
       hLocal->SetMarkerStyle(markers[i]);
@@ -329,8 +330,8 @@ void doLocalPhiEtaFits(TH3F* h3,
       hLocal->SetLineColor  (colors[i]);
       hLocal->SetMarkerSize(1.2);
 
-      // Draw on the quadruple overlay
-      if(i == 0)
+      // Draw: one big overlay with all bins
+      if (i == 0)
       {
         hLocal->Draw("E");
         hLocal->GetYaxis()->SetRangeUser(0, 0.4);
@@ -345,13 +346,12 @@ void doLocalPhiEtaFits(TH3F* h3,
       // ---------------------------------------------------------------------
       // Multi‐start fit approach
       // ---------------------------------------------------------------------
-      TF1* fAsinh = new TF1(Form("fAsinh_%s_%d",coordName,i),
+      TF1* fAsinh = new TF1(Form("fAsinh_%s_%d", coordName, i),
                             asinhModel, -0.5, 0.5, 2);
       fAsinh->SetParNames("Norm", "bVal");
-
       // Parameter limits
-      fAsinh->SetParLimits(0, 1e-6, 1e6);   // Norm
-      fAsinh->SetParLimits(1, 1e-5,  1.0);  // bVal ~ [1e-5..1.0]
+      fAsinh->SetParLimits(0, 1e-6, 1e6);
+      fAsinh->SetParLimits(1, 1e-5, 1.0);
 
       // Some initial guesses
       std::vector<std::pair<double,double>> initialGuesses = {
@@ -381,7 +381,6 @@ void doLocalPhiEtaFits(TH3F* h3,
           if(thisChi2 < bestChi2)
           {
             bestChi2 = thisChi2;
-            // keep a copy of best
             if(bestFunc) delete bestFunc;
             bestFunc = (TF1*) fAsinh->Clone(
               Form("bestFunc_%s_%d", coordName, i)
@@ -398,8 +397,7 @@ void doLocalPhiEtaFits(TH3F* h3,
         bestFunc->Draw("SAME");
 
         bVal = bestFunc->GetParameter(1);
-        // store so it doesn't vanish
-        hLocal->GetListOfFunctions()->Add(bestFunc);
+        hLocal->GetListOfFunctions()->Add(bestFunc); // store it so it doesn't vanish
       }
       else
       {
@@ -407,22 +405,17 @@ void doLocalPhiEtaFits(TH3F* h3,
                   << coordName << ", pT bin i=" << i
                   << " => bVal=0.\n";
       }
+      bestBvals[i] = bVal;
 
       // Legend entry
       TString legEntry = Form("p_{T}=[%.1f,%.1f] GeV : b=%.3g",
                               pT_bins_low[i], pT_bins_high[i], bVal);
       leg.AddEntry(hLocal, legEntry, "lp");
 
-      // --------------------------------------------------
-      // Only write b-value if:
-      //  - isPhi == true
-      //  - we have a bestFunc
-      //  - pT_bins_high[i] > pT_bins_low[i] (non-empty bin)
-      //  - bVal is non-tiny
-      // --------------------------------------------------
-      if(isPhi && bResults.is_open() && bestFunc
-         && (pT_bins_high[i] > pT_bins_low[i])
-         && (bVal > 1e-9))
+      // Possibly record b-values
+      if (isPhi && bResults.is_open() && bestFunc
+          && (pT_bins_high[i] > pT_bins_low[i])
+          && (bVal > 1e-9))
       {
         bResults << pT_bins_low[i]  << "  "
                  << pT_bins_high[i] << "   "
@@ -430,136 +423,148 @@ void doLocalPhiEtaFits(TH3F* h3,
       }
     } // end loop over i
 
-    // Draw eq label and legend
+    // Add eq label and legend on the big overlay
     leg.Draw();
     eqLatex.DrawLatex(0.57, 0.82, eqString);
 
-    // Save final quadruple overlay
+    // Save that overlay
     TString mainOut = outDirPhi + "/" + outPNGname;
     cCoord.SaveAs(mainOut);
     std::cout << "[INFO] Wrote quadruple-overlay " << coordName
               << " => " << mainOut << std::endl;
 
+      // -----------------------------------------------------------------------
+      // If it's local φ, also produce the single‐bin overlay of raw vs. corrected
+      // -----------------------------------------------------------------------
       if (isPhi)
       {
-        // We know we have 4 pT slices: i = 0..3
-        for (int i = 0; i < NPT; i++)
+        // For each of the 4 pT bins
+        for(int i=0; i<NPT; i++)
         {
-          TH1D* hUnc = hLocalVec[i];
-          if (!hUnc) continue;
+          double ptLo = pT_bins_low[i];
+          double ptHi = pT_bins_high[i];
 
-          // The name of the "corrected" histogram we want to find
-          TString corrName = Form("h_localPhi_corrected_%.1f_%.1f",
-                                  pT_bins_low[i], pT_bins_high[i]);
-          
-          // Grab that corrected histogram from memory
-          TH1F* hCorr = dynamic_cast<TH1F*>(gROOT->FindObject(corrName));
-          if (!hCorr)
+          //----------------------------------------------------------------------
+          // 1) Retrieve the RAW Δφ histogram
+          //----------------------------------------------------------------------
+          TString rawName = Form("h_phi_diff_raw_%.0f_%.0f", ptLo, ptHi);
+          TH1F* hRaw = dynamic_cast<TH1F*>(gROOT->FindObject(rawName));
+          if(!hRaw)
           {
-            std::cerr << "[WARNING] No corrected hist '"
-                      << corrName << "' => skipping single-bin overlay for pT bin i="
-                      << i << std::endl;
+            std::cerr << "[WARNING] No raw Δφ hist '" << rawName
+                      << "' => skip overlay for pT bin i=" << i << std::endl;
             continue;
           }
 
-          // Build a canvas name & title
-          TString cName  = Form("cLocalPhiCompare_%.1fto%.1f",
-                                pT_bins_low[i], pT_bins_high[i]);
-          TString cTitle = Form("Local-#phi overlay [%.1f < p_{T} < %.1f]",
-                                pT_bins_low[i], pT_bins_high[i]);
+          //----------------------------------------------------------------------
+          // 2) Retrieve the CORRECTED Δφ histogram
+          //----------------------------------------------------------------------
+          TString corrName = Form("h_phi_diff_corr_%.1f_%.1f", ptLo, ptHi);
+          TH1F* hCorr = dynamic_cast<TH1F*>(gROOT->FindObject(corrName));
+          if(!hCorr)
+          {
+            std::cerr << "[WARNING] No corrected Δφ hist '" << corrName
+                      << "' => skip overlay for pT bin i=" << i << std::endl;
+            continue;
+          }
+
+          //----------------------------------------------------------------------
+          // 3) Make a canvas & style each histogram
+          //----------------------------------------------------------------------
+          TString cName  = Form("cDeltaPhiCompare_%.1fto%.1f", ptLo, ptHi);
+          TString cTitle = Form("Δ#phi overlay [%.1f < p_{T} < %.1f]", ptLo, ptHi);
+
           TCanvas cSingle(cName, cTitle, 800, 600);
           cSingle.SetLeftMargin(0.12);
           cSingle.SetRightMargin(0.05);
           cSingle.SetBottomMargin(0.12);
           cSingle.cd();
 
-          // Clone uncorrected histogram for re‐normalization
-          TH1D* hUncClone = (TH1D*) hUnc->Clone(
-              Form("%s_clone", hUnc->GetName())
-          );
+          // Normalize each to area=1
+          double rInt = hRaw->Integral();
+          double cInt = hCorr->Integral();
+          if(rInt  > 1e-9) hRaw ->Scale(1./rInt);
+          if(cInt  > 1e-9) hCorr->Scale(1./cInt);
 
-          // Rescale each so integral=1
-          double uncInt  = hUncClone->Integral();
-          double corrInt = hCorr->Integral();
-          if (uncInt  > 1e-9) hUncClone->Scale(1. / uncInt);
-          if (corrInt > 1e-9) hCorr->Scale(1. / corrInt);
+          // Style: raw in black
+          hRaw->SetLineColor(kBlack);
+          hRaw->SetMarkerColor(kBlack);
+          hRaw->SetMarkerStyle(20);
+          hRaw->SetMarkerSize(1);
+          hRaw->SetTitle(cTitle);
+          hRaw->GetXaxis()->SetTitle("#Delta#phi (reco - truth) [radians]");
+          hRaw->GetYaxis()->SetTitle("counts (normalized)");
+          hRaw->GetYaxis()->SetTitleOffset(1.2);
 
-          // Style the uncorrected
-          hUncClone->SetLineColor(kBlack);
-          hUncClone->SetMarkerColor(kBlack);
-          hUncClone->SetMarkerStyle(20);
-          hUncClone->SetMarkerSize(1);
-          hUncClone->SetTitle(cTitle);
-          hUncClone->GetXaxis()->SetTitle("local #phi_{CG} in block");
-          hUncClone->GetYaxis()->SetTitle("counts (normalized)");
-          hUncClone->GetYaxis()->SetTitleOffset(1.2);
-
-          // Style the corrected
+          // corrected in red
           hCorr->SetLineColor(kRed);
           hCorr->SetMarkerColor(kRed);
           hCorr->SetMarkerStyle(21);
           hCorr->SetMarkerSize(1);
 
-          // Draw them both
-          hUncClone->Draw("E");
-          double maxUnc  = hUncClone->GetMaximum();
+          //----------------------------------------------------------------------
+          // 4) Draw them
+          //----------------------------------------------------------------------
+          hRaw->Draw("E");
+          double maxRaw  = hRaw->GetMaximum();
           double maxCorr = hCorr->GetMaximum();
-          double newMax  = TMath::Max(maxUnc, maxCorr) * 1.25;
-          hUncClone->GetYaxis()->SetRangeUser(0, newMax);
+          double newMax  = TMath::Max(maxRaw, maxCorr)*1.25;
+          hRaw->GetYaxis()->SetRangeUser(0, newMax);
 
           hCorr->Draw("SAME E");
 
-          // Add a legend
+          //----------------------------------------------------------------------
+          // 5) Add a legend
+          //----------------------------------------------------------------------
           TLegend legSingle(0.55, 0.70, 0.85, 0.85);
           legSingle.SetBorderSize(0);
           legSingle.SetFillStyle(0);
           legSingle.SetTextSize(0.035);
 
-          legSingle.AddEntry(hUncClone,
-                             Form("Raw local #phi (%.1f < p_{T} < %.1f)",
-                                  pT_bins_low[i], pT_bins_high[i]),
-                             "lp");
+          legSingle.AddEntry(hRaw,
+              Form("Raw #Delta#phi (%.1f< p_{T}<%.1f)", ptLo, ptHi),
+              "lp");
           legSingle.AddEntry(hCorr,
-                             Form("Corrected local #phi (%.1f < p_{T} < %.1f)",
-                                  pT_bins_low[i], pT_bins_high[i]),
-                             "lp");
+              Form("Corrected #Delta#phi (%.1f< p_{T}<%.1f)", ptLo, ptHi),
+              "lp");
           legSingle.Draw();
 
-          // Save
-          TString singleOut = Form("%s/LocalPhiCompare_%.1fto%.1f.png",
-                                   outDirPhi.Data(),
-                                   pT_bins_low[i], pT_bins_high[i]);
+          //----------------------------------------------------------------------
+          // 6) Save
+          //----------------------------------------------------------------------
+          TString singleOut = Form("%s/DeltaPhiCompare_%.1fto%.1f.png",
+                                   outDirPhi.Data(), ptLo, ptHi);
           cSingle.SaveAs(singleOut);
 
-          std::cout << "[INFO] Single-bin local-#phi overlay pT=["
-                    << pT_bins_low[i] << "," << pT_bins_high[i]
+          std::cout << "[INFO] Single-bin Δφ overlay pT=["
+                    << ptLo << "," << ptHi
                     << "] => " << singleOut << std::endl;
         } // end loop over i
-      } // end if(isPhi)
+      }
+
   }; // end fitCoordAndMakePlot
 
   // -----------------------------------------------------------------------
-  // 4) Call for φ => “LocalPhiFits.png”
+  // (1) call for φ => “LocalPhiFits.png”
   // -----------------------------------------------------------------------
   fitCoordAndMakePlot(
-    "phi",  // coordName
-    "y",    // local φ is y-axis in TH3
+    "phi",
+    "y",
     "LocalPhiFits.png",
     "local #phi_{CG} in block"
   );
 
   // -----------------------------------------------------------------------
-  // 5) Call for η => “LocalEtaFits.png”
+  // (2) call for η => “LocalEtaFits.png”
   // -----------------------------------------------------------------------
   fitCoordAndMakePlot(
     "eta",
-    "x",    // local η is x-axis in TH3
+    "x",
     "LocalEtaFits.png",
     "local #eta_{CG} in block"
   );
-
-  // No changes needed for your additional 2×2 overlay block if you have one
-  // (omitted here for brevity). Everything else is the same.
+  
+  // Everything else remains the same
 }
 
 

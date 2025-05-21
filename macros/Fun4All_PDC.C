@@ -389,7 +389,7 @@ void Fun4All_PDC(int nevents = 0,
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
  // pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
-  pdc->Verbosity(2);
+  pdc->Verbosity(0);
   se->registerSubsystem(pdc);
 
   ////////////////////////////////////////////////////////////

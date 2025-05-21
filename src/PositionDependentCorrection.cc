@@ -1228,181 +1228,224 @@ float PositionDependentCorrection::doLogWeightCoord(const std::vector<int>& towe
 
 
 // ----------------------------------------------------------------------
-//  fillAshLogDx
-//    * Extracted from the "Ash / log-weight" X-position scanning block
-//    * Maintains the same pT-slice logic [2..12] and histogram filling
+// fillAshLogDx
+//   * Uses the cluster’s lead tower => (lt_eta, lt_phi)
+//   * Encodes them -> leadKey => retrieve tower geometry
+//   * rFront = sqrt(xc² + yc²) - ½ thickness  => actual front face
+//   * Projects truth photon to that rFront => apply CorrectShowerDepth => xTrue
+//   * For each bVal or w0Val => local φ => global => depth => xReco => fill xReco - xTrue
 // ----------------------------------------------------------------------
 void PositionDependentCorrection::fillAshLogDx(
+    RawCluster* cluster,               // pass in the cluster we are analyzing
     const TLorentzVector& recoPhoton,
     const TLorentzVector& truthPhoton,
-    const std::pair<float,float>& blockCord,
+    const std::pair<float,float>& blockCord, // local block coords in [0,1]
     int blockPhiBin,
     const std::vector<int>& tower_phis,
     const std::vector<float>& tower_energies
 )
 {
-  // ----------------------------------------------------
-  //  1) Determine which pT slice this photon falls into
-  // ----------------------------------------------------
-  float thisPt = recoPhoton.Pt();
+  //------------------------------------------------------------------
+  // 0) Identify which pT slice the reco photon is in [2..12]
+  //------------------------------------------------------------------
+  float ptReco = recoPhoton.Pt();
   int iPtSlice = -1;
   for (int i = 0; i < N_PT; ++i)
   {
-    if (thisPt >= ptEdge[i] && thisPt < ptEdge[i + 1])
+    if (ptReco >= ptEdge[i] && ptReco < ptEdge[i+1])
     {
       iPtSlice = i;
       break;
     }
   }
-
-  // If out of range [2..12], skip it
   if (iPtSlice < 0)
   {
     if (Verbosity() > 0)
     {
-      std::cout << "[DEBUG] Photon pT=" << thisPt
-                << " is outside [2..12], skipping.\n";
+      std::cout << "[DEBUG] fillAshLogDx => Reco pT=" << ptReco
+                << " is outside [2..12], skip.\n";
     }
     return;
   }
 
-  // ----------------------------------------------------
-  //  2) Compute the "true" x position for truth photon
-  // ----------------------------------------------------
-  float phiTrue = TVector2::Phi_mpi_pi(truthPhoton.Phi());
-  float xTrue   = 112.f * phiTrue;  // radius=112 cm
-
-  if (Verbosity() > 1)
+  //------------------------------------------------------------------
+  // 1) Retrieve the cluster’s lead tower geometry => per‐cluster radius
+  //------------------------------------------------------------------
+  if (!cluster)
   {
-    std::cout << "[DEBUG] true phi=" << phiTrue
-              << ", xTrue=" << xTrue
-              << "  (radius=112cm)\n";
+    if (Verbosity() > 0)
+    {
+      std::cout << "[WARN] fillAshLogDx => 'cluster' is null => skipping.\n";
+    }
+    return;
+  }
+  if (!m_bemcRec)
+  {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[WARN] fillAshLogDx => m_bemcRec==NULL => no shower corrections.\n";
+    }
+    return;
   }
 
-  // ----------------------------------------------------
-  //  3) Get local block phi from 'blockCord.second'
-  // ----------------------------------------------------
-  float localPhi = blockCord.second;
+  // (a) get the lead tower’s (eta,phi) from the cluster
+  auto [lt_eta, lt_phi] = cluster->get_lead_tower();
 
-  if (Verbosity() > 1)
+  // (b) build the tower key
+  unsigned int leadKey = TowerInfoDefs::encode_emcal( lt_eta, lt_phi );
+
+  RawTowerGeom* leadTowerGeom = m_geometry->get_tower_geometry( leadKey );
+  if (!leadTowerGeom)
   {
-    std::cout << "[DEBUG] localPhi=" << localPhi
-              << ", blockPhiBin=" << blockPhiBin << "\n";
+    if (Verbosity() > 0)
+    {
+      std::cout << "[ERROR] fillAshLogDx => leadTowerGeom is NULL => skip.\n";
+    }
+    return;
   }
 
-  // ----------------------------------------------------
-  //  4A) Loop over "Ash" b-values
-  // ----------------------------------------------------
-  for (size_t ib = 0; ib < m_bScan.size(); ++ib)
+  // best practice: front face radius = center minus half-thickness
+  //  double xCenter   = leadTowerGeom->get_center_x();
+  //  double yCenter   = leadTowerGeom->get_center_y();
+  double rFront    = leadTowerGeom->get_center_radius();
+
+  if (Verbosity() > 0)
   {
-    double bTrial = m_bScan[ib];
+    std::cout << "[DEBUG] fillAshLogDx => cluster pT=" << ptReco
+              << ", iPtSlice=" << iPtSlice
+              << ", lead tower= (" << lt_eta << "," << lt_phi << ")"
+              << ", rFront=" << rFront
+              << std::endl;
+  }
 
-    // (a) apply "doAshShift" to local phi
-    float localAsh = doAshShift(localPhi, bTrial);
-
-    if (Verbosity() > 1)
-    {
-      std::cout << "[DEBUG]   (Ash) bTrial=" << bTrial
-                << ", localAsh(before)=" << localPhi
-                << ", after doAshShift=" << localAsh << "\n";
-    }
-
-    // (b) convert to a front-face global phi
-    float phiRecoFF = TVector2::Phi_mpi_pi(
-        convertBlockToGlobalPhi(blockPhiBin, localAsh)
-    );
-
-    // (c) front-face x,y at r=112 cm
-    float xA = 112.f * std::cos(phiRecoFF);
-    float yA = 112.f * std::sin(phiRecoFF);
-    float zA = 0.f;
-
-    // (d) correct for shower depth => (xC, yC, zC)
-    float xC=0.f, yC=0.f, zC=0.f;
-    if (m_bemcRec)
-    {
-      m_bemcRec->CorrectShowerDepth(recoPhoton.E(), xA, yA, zA, xC, yC, zC);
-    }
-    else
-    {
-      // No correction if pointer is null
-      xC = xA;  yC = yA;  zC = zA;
-    }
-
-    // (e) compute final radius & phi
-    float rCorr   = std::sqrt(xC*xC + yC*yC);
-    float phiCorr = std::atan2(yC, xC);
-
-    // (f) define xReco
-    float xReco = rCorr * phiCorr;
-
-    // fill histogram
-    TString hname = Form("h_dx_ash_b%04.2f_pt%d", bTrial, iPtSlice);
-    TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
-    if (hAsh)
-    {
-      hAsh->Fill(xReco - xTrue);
-    }
-    else if (Verbosity() > 0)
-    {
-      std::cerr << "[WARNING] (Ash) Hist '" << hname << "' not found.\n";
-    }
-  } // end loop over b-values
-
-  // ----------------------------------------------------
-  //  4B) Loop over "log-weight" w0
-  // ----------------------------------------------------
-  for (size_t iw = 0; iw < m_w0Scan.size(); ++iw)
+  //------------------------------------------------------------------
+  // 2) Project the TRUTH photon to that same radius => apply CorrectShowerDepth
+  //------------------------------------------------------------------
+  float pxTruth = truthPhoton.Px();
+  float pyTruth = truthPhoton.Py();
+  float pzTruth = truthPhoton.Pz();
+  double ptTruth = std::sqrt(pxTruth*pxTruth + pyTruth*pyTruth);
+  if (ptTruth < 1e-9)
   {
-    double w0Trial = m_w0Scan[iw];
-
-    // (a) compute local phi by weighting the actual towers
-    float localLog = doLogWeightCoord(tower_phis, tower_energies, w0Trial);
-
-    if (Verbosity() > 1)
+    if (Verbosity() > 0)
     {
-      std::cout << "[DEBUG]   (LogW) w0Trial=" << w0Trial
-                << ", localLog=" << localLog << "\n";
+      std::cout << "[DEBUG] fillAshLogDx => truth photon pT~0 => skipping.\n";
     }
+    return;
+  }
 
-    // (b) get front-face global phi
-    float phiRecoFF = TVector2::Phi_mpi_pi(
-        convertBlockToGlobalPhi(blockPhiBin, localLog)
-    );
+  //  scale factor to get us to rFront in the XY plane
+  double tTruth = rFront / ptTruth;
+  double xAtrue = pxTruth * tTruth;
+  double yAtrue = pyTruth * tTruth;
+  double zAtrue = pzTruth * tTruth;  // if you have a nonzero vertexZ, add that offset
 
-    // (c) front-face x,y at r=112 cm
-    float xA = 112.f * std::cos(phiRecoFF);
-    float yA = 112.f * std::sin(phiRecoFF);
-    float zA = 0.f;
+  // Depth-correct “front-face” => final (xT,yT,zT)
+  float xT=0.f, yT=0.f, zT=0.f;
+  m_bemcRec->CorrectShowerDepth( truthPhoton.E(),
+                                 xAtrue, yAtrue, zAtrue,
+                                 xT,     yT,     zT );
+
+  double rTrue   = std::sqrt( xT*xT + yT*yT );
+  double phiTrue = std::atan2( yT, xT );
+  double xTrue   = rTrue * phiTrue;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] fillAshLogDx => truth E=" << truthPhoton.E()
+              << " front-face coords= (" << xAtrue << "," << yAtrue << "," << zAtrue << ")"
+              << " => after depth= (" << xT << "," << yT << "," << zT << ")"
+              << " => xTrue=" << xTrue
+              << std::endl;
+  }
+
+  //------------------------------------------------------------------
+  // 3) For each “Ash” bVal => local block φ => global => depth => xReco => fill
+  //------------------------------------------------------------------
+  for (double bVal : m_bScan)
+  {
+    // (a) shift local φ using asinh
+    float localAsh = doAshShift(blockCord.second, bVal);
+
+    // (b) localAsh + blockPhiBin => global φ at rFront
+    float coarsePhiInd = blockPhiBin*2 + localAsh*2.f;  // block=2 wide
+    float globalPhi    = coarsePhiInd * (2.f*M_PI / 256.f);
+
+    float xA = rFront * std::cos(globalPhi);
+    float yA = rFront * std::sin(globalPhi);
+
+    // Depth-correct for the reco energy
+    float xC=0.f, yC=0.f, zC=0.f;
+    m_bemcRec->CorrectShowerDepth( recoPhoton.E(),
+                                   xA, yA, /*zA=*/0.f,
+                                   xC, yC, zC );
+
+    double rReco   = std::sqrt( xC*xC + yC*yC );
+    double phiReco = std::atan2( yC, xC );
+    double xReco   = rReco * phiReco;
+
+    // fill => “h_dx_ash_b##.##_ptN”
+    TString hname = Form("h_dx_ash_b%04.2f_pt%d", bVal, iPtSlice);
+    if (TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data())))
+    {
+      hAsh->Fill( xReco - xTrue );
+      if (Verbosity() > 1)
+      {
+        std::cout << "[DBX] bVal=" << bVal
+                  << ", localAsh=" << localAsh
+                  << ", xReco=" << xReco
+                  << " => dx=" << (xReco - xTrue)
+                  << std::endl;
+      }
+    }
+  }
+
+  //------------------------------------------------------------------
+  // 4) For each “log‐weight” w0 => localLog => global => depth => xReco => fill
+  //------------------------------------------------------------------
+  for (double w0Val : m_w0Scan)
+  {
+    float localLog = doLogWeightCoord( tower_phis, tower_energies, w0Val );
+
+    float coarsePhiInd = blockPhiBin*2 + localLog*2.f;
+    float globalPhi    = coarsePhiInd * (2.f*M_PI / 256.f);
+
+    float xA = rFront * std::cos(globalPhi);
+    float yA = rFront * std::sin(globalPhi);
 
     float xC=0.f, yC=0.f, zC=0.f;
-    if (m_bemcRec)
-    {
-      m_bemcRec->CorrectShowerDepth(recoPhoton.E(), xA, yA, zA, xC, yC, zC);
-    }
-    else
-    {
-      xC = xA;  yC = yA;  zC = zA;
-    }
+    m_bemcRec->CorrectShowerDepth( recoPhoton.E(),
+                                   xA, yA, /*zA=*/0.f,
+                                   xC, yC, zC );
 
-    float rCorr   = std::sqrt(xC*xC + yC*yC);
-    float phiCorr = std::atan2(yC, xC);
-    float xRecoLog= rCorr * phiCorr;
+    double rReco   = std::sqrt( xC*xC + yC*yC );
+    double phiReco = std::atan2( yC, xC );
+    double xReco   = rReco * phiReco;
 
-    // fill histogram
-    TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Trial, iPtSlice);
-    TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
-    if (hLog)
+    // fill => “h_dx_log_w0##.##_ptN”
+    TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Val, iPtSlice);
+    if (TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data())))
     {
-      hLog->Fill(xRecoLog - xTrue);
+      hLog->Fill( xReco - xTrue );
+      if (Verbosity() > 1)
+      {
+        std::cout << "[DBX] w0Val=" << w0Val
+                  << ", localLog=" << localLog
+                  << ", xReco=" << xReco
+                  << " => dx=" << (xReco - xTrue)
+                  << std::endl;
+      }
     }
-    else if (Verbosity() > 0)
-    {
-      std::cerr << "[WARNING] (LogW) Hist '" << hname2 << "' not found.\n";
-    }
-  } // end loop over w0
-} // end fillAshLogDx
+  }
 
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] fillAshLogDx => done pT slice=" << iPtSlice
+              << ", cluster pT=" << ptReco
+              << ", lead tower= (" << lt_eta << "," << lt_phi << ")"
+              << ", filled bVal & w0Val hist.\n";
+  }
+}
 
 // ----------------------------------------------------------------------
 //  fillDPhiRawAndCorrected
@@ -1755,8 +1798,15 @@ void PositionDependentCorrection::finalClusterLoop(
             
 
             // snippet inside finalClusterLoop, after matching a photon:
-          fillAshLogDx(photon1, tr_phot, blockCord, block_phi_bin,
-                         tower_phis, tower_energies);
+            fillAshLogDx(
+                recoCluster,          // <--- first argument is RawCluster*
+                photon1,              // recoPhoton
+                tr_phot,              // truthPhoton
+                blockCord,
+                block_phi_bin,
+                tower_phis,
+                tower_energies
+            );
 
           fillDPhiRawAndCorrected(photon1, tr_phot, blockCord, block_phi_bin, delPhi);
 
