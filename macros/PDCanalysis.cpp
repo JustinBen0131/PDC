@@ -19,39 +19,78 @@
 #include <iomanip>
 #include <fstream>
 
+////////////////////////////////////////////////////////////////////////
+// 0) Add this helper function *above* your main plot function.
+//
+double getCoreSigma(TH1* h)
+{
+  // Return zero if stats are insufficient:
+  if(!h || h->GetEntries() < 50) return 0;
+
+  // Crude initial estimates:
+  const double peak = h->GetBinCenter( h->GetMaximumBin() );
+  const double rms  = h->GetRMS();
+
+  // Fit window => ±2.5×RMS around the mode
+  const double fitMin = peak - 2.5*rms;
+  const double fitMax = peak + 2.5*rms;
+
+  // Gauss with amplitude, mean, sigma
+  TF1 g("g","gaus", fitMin, fitMax);
+  g.SetParameters( h->GetMaximum(), peak, rms );
+
+  // Quiet fit (no printout, no drawing)
+  int status = h->Fit(&g,"Q0N");
+  if(status != 0) return 0; // fit failed
+
+  // Return the fitted Gaussian σ
+  return g.GetParameter(2);
+}
+
+////////////////////////////////////////////////////////////////////////
+// 1) The main macro that uses getCoreSigma(...) and saves fit plots
+////////////////////////////////////////////////////////////////////////
 void plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
 {
   // -------------------------------------------------------------------------
   // 1) Configuration
   // -------------------------------------------------------------------------
-  constexpr int    N_PT   = 4;
-  const     double ptEdge[N_PT+1] = {2.0, 3.0, 5.0, 8.0, 12.0};
+  constexpr int N_PT = 11;
+  const double ptEdge[N_PT+1] = {
+    2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0
+  };
 
-  // Ash (b) scan
-  const double bMin  = 0.05, bMax = 0.30, bStep = 0.01;
+  // Ash scan in dimensionless b, from 0.15..0.45 in steps of 0.01
+  const double bMin  = 0.15;
+  const double bMax  = 0.45;
+  const double bStep = 0.01;
   std::vector<double> bScan;
-  for(double b=bMin; b<=bMax+1e-9; b+=bStep) bScan.push_back(b);
-  const int N_B = bScan.size();
+  for(double b = bMin; b <= bMax + 1e-9; b += bStep) bScan.push_back(b);
+  const int N_B = (int)bScan.size();
 
   // Log (w0) scan
-  const double w0Min = 2.8,  w0Max = 5.5, w0Step = 0.10;
+  const double w0Min  = 2.8;
+  const double w0Max  = 5.5;
+  const double w0Step = 0.10;
   std::vector<double> w0Scan;
-  for(double w=w0Min; w<=w0Max+1e-9; w+=w0Step) w0Scan.push_back(w);
-  const int N_W = w0Scan.size();
+  for(double w = w0Min; w <= w0Max + 1e-9; w += w0Step) w0Scan.push_back(w);
+  const int N_W = (int)w0Scan.size();
 
-  // Output location
+  // Where to write outputs
   const TString baseDir    = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput";
   const TString histOutDir = baseDir + "/ASH_LOG_PLOTS";
-  gSystem->mkdir(baseDir,    /*parents=*/true);
-  gSystem->mkdir(histOutDir, /*parents=*/true);
+  gSystem->mkdir(baseDir,   true);
+  gSystem->mkdir(histOutDir,true);
 
   // -------------------------------------------------------------------------
-  // 2) Input file
+  // 2) Input ROOT file
   // -------------------------------------------------------------------------
   std::cout << "[INFO] Opening '" << infile << "'...\n";
-  std::unique_ptr<TFile> f(TFile::Open(infile,"READ"));
-  if(!f || f->IsZombie()){
-    std::cerr << "[ERROR] Cannot open file.\n"; return;
+  std::unique_ptr<TFile> f(TFile::Open(infile, "READ"));
+  if(!f || f->IsZombie())
+  {
+    std::cerr << "[ERROR] Cannot open file.\n";
+    return;
   }
 
   // -------------------------------------------------------------------------
@@ -60,135 +99,213 @@ void plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
   gStyle->SetOptStat(0);
   gStyle->SetTitleFontSize(0.045);
 
-  int  colors [4] = {kBlack, kRed, kBlue, kMagenta+2};
-  int  markers[4] = {20,      21,   22,    23       };
+  // A color array for up to 11 bins
+  const int N_COLOR = 11;
+  int colors[N_COLOR] = {
+    kBlack, kRed, kBlue, kMagenta+2, kOrange,
+    kGreen+2, kCyan+2, kGray+1, kViolet+1,
+    kAzure+2, kSpring+9
+  };
+  int markers[N_COLOR] = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30};
 
   // ======================================================================
-  // 4)  ASH  : σx  vs  b
+  // 4)  ASH  :  Gaussian‐core σ_x  vs  b
   // ======================================================================
   TCanvas cAsh("cAsh","Ash RMS vs b",800,600);
-  cAsh.SetLeftMargin(0.12);  cAsh.SetBottomMargin(0.12);  cAsh.SetGrid();
+  cAsh.SetLeftMargin(0.12);
+  cAsh.SetBottomMargin(0.12);
+  cAsh.SetGrid();
 
   double gMinAsh =  DBL_MAX, gMaxAsh = -DBL_MAX;
   std::vector<TGraph*> gAshVec;
-  std::vector<double>  bestB (N_PT,0.), bestRMS_A(N_PT,DBL_MAX);
+  std::vector<double>  bestB(N_PT,0.0);
+  std::vector<double>  bestRMS_A(N_PT, DBL_MAX);
 
-  for(int ipt=0; ipt<N_PT; ++ipt)
+  // Outer loop over the 11 pT bins
+  for(int ipt=0; ipt < N_PT; ++ipt)
   {
-    auto g = new TGraph; g->SetName(Form("gAsh_pt%d",ipt));
-    for(size_t ib=0; ib<bScan.size(); ++ib)
+    TGraph* g = new TGraph;
+    g->SetName(Form("gAsh_pt%d", ipt));
+
+    // b-scan loop
+    for(int ib=0; ib < N_B; ++ib)
     {
       double bVal = bScan[ib];
-      TString hN  = Form("h_dx_ash_b%04.2f_pt%d",bVal,ipt);
-      if(TH1* h = dynamic_cast<TH1*>(f->Get(hN)))
-      {
-        double r = h->GetRMS();
-        g->SetPoint(g->GetN(), bVal, r);
+      TString hname = Form("h_dx_ash_b%04.2f_pt%d", bVal, ipt);
 
-        if(r>0){
-          gMinAsh = std::min(gMinAsh,r);
-          gMaxAsh = std::max(gMaxAsh,r);
-          if(r<bestRMS_A[ipt]){ bestRMS_A[ipt]=r; bestB[ipt]=bVal; }
+      // Retrieve the histogram
+      if(TH1* h = dynamic_cast<TH1*>( f->Get(hname) ))
+      {
+        // Fit the Gaussian core
+        double coreWidth = getCoreSigma(h);
+        // Keep track of min & max in that TGraph
+        if(coreWidth > 0)
+        {
+          gMinAsh = std::min(gMinAsh, coreWidth);
+          gMaxAsh = std::max(gMaxAsh, coreWidth);
+
+          // Check if this is the best so far
+          if(coreWidth < bestRMS_A[ipt])
+          {
+            bestRMS_A[ipt] = coreWidth;
+            bestB[ipt]     = bVal;
+          }
         }
 
-        // quick PNG snapshot
-        TCanvas ctmp; h->Draw("E"); ctmp.SaveAs(histOutDir+"/"+hN+".png");
+        // Add this point
+        g->SetPoint(g->GetN(), bVal, coreWidth);
+
+        // Save quick PNG with fit overlay
+        {
+          TCanvas ctmp;
+          h->Draw("E");
+          if(h->GetFunction("g")) // The TF1 from getCoreSigma
+          {
+            h->GetFunction("g")->SetLineColor(kRed);
+            h->GetFunction("g")->Draw("LSAME");
+          }
+          ctmp.SaveAs(histOutDir + "/" + hname + ".png");
+        }
       }
-    }
-    g->SetMarkerStyle(markers[ipt]);
-    g->SetMarkerColor(colors [ipt]);
-    g->SetLineColor  (colors [ipt]);
+    } // end b-scan
+
+    // Style the TGraph
+    g->SetMarkerStyle(markers[ipt % N_COLOR]);
+    g->SetMarkerColor(colors [ipt % N_COLOR]);
+    g->SetLineColor  (colors [ipt % N_COLOR]);
     g->SetMarkerSize(1.3);
     gAshVec.push_back(g);
   }
 
-  // guard: empty?
-  if(gMinAsh==DBL_MAX){ gMinAsh=0; gMaxAsh=1; }
+  if(gMinAsh == DBL_MAX) { gMinAsh=0; gMaxAsh=1; }
 
-  // draw onto the *correct* pad
+  // Draw the first TGraph => define the axis
   cAsh.cd();
   gAshVec[0]->Draw("ALP");
   gAshVec[0]->GetXaxis()->SetTitle("b");
-  gAshVec[0]->GetYaxis()->SetTitle("#sigma_{x}");
-  gAshVec[0]->GetYaxis()->SetRangeUser(gMinAsh-0.1*fabs(gMinAsh),
-                                       gMaxAsh+0.1*fabs(gMaxAsh));
-  for(size_t i=1;i<gAshVec.size();++i) gAshVec[i]->Draw("LP SAME");
+  gAshVec[0]->GetYaxis()->SetTitle("#sigma_{x} (Gaussian core)");
+  gAshVec[0]->GetYaxis()->SetRangeUser(gMinAsh - 0.1*fabs(gMinAsh),
+                                       gMaxAsh + 0.1*fabs(gMaxAsh));
 
-  TLegend legA(0.15,0.70,0.45,0.85); legA.SetBorderSize(0); legA.SetFillStyle(0);
-  for(int ipt=0; ipt<N_PT; ++ipt){
+  // Overdraw the rest
+  for(size_t i=1; i<gAshVec.size(); ++i)
+  {
+    gAshVec[i]->Draw("LP SAME");
+  }
+
+  // Make a legend
+  TLegend legA(0.15,0.70,0.45,0.85);
+  legA.SetBorderSize(0);
+  legA.SetFillStyle(0);
+  for(int ipt=0; ipt < N_PT; ++ipt)
+  {
     legA.AddEntry(gAshVec[ipt],
-      Form("%.1f<p_{T}<%.1f GeV  (best b=%.2f)",ptEdge[ipt],ptEdge[ipt+1],bestB[ipt]),
-      "lp");
+                  Form("%.1f<p_{T}<%.1f GeV  (best b=%.2f)",
+                       ptEdge[ipt], ptEdge[ipt+1], bestB[ipt]),
+                  "lp");
   }
   legA.Draw();
-  TLatex().DrawLatexNDC(0.2,0.92,"Ash");
 
-  cAsh.SaveAs(baseDir+"/Ash_RMS_vs_b.png");
+  TLatex().DrawLatexNDC(0.2,0.92,"Ash");
+  cAsh.SaveAs(baseDir + "/Ash_RMS_vs_b.png");
   std::cout << "[INFO] Saved Ash_RMS_vs_b.png\n";
 
   // ======================================================================
-  // 5)  LOG  : σx  vs  w0
+  // 5)  LOG :  Gaussian‐core σ_x  vs  w0
   // ======================================================================
   TCanvas cLog("cLog","Log RMS vs w0",800,600);
-  cLog.SetLeftMargin(0.12);  cLog.SetBottomMargin(0.12);  cLog.SetGrid();
+  cLog.SetLeftMargin(0.12);
+  cLog.SetBottomMargin(0.12);
+  cLog.SetGrid();
 
   double gMinLog = DBL_MAX, gMaxLog = -DBL_MAX;
   std::vector<TGraph*> gLogVec;
-  std::vector<double>  bestW (N_PT,0.), bestRMS_L(N_PT,DBL_MAX);
+  std::vector<double>  bestW(N_PT, 0.);
+  std::vector<double>  bestRMS_L(N_PT, DBL_MAX);
 
-  for(int ipt=0; ipt<N_PT; ++ipt)
+  for(int ipt=0; ipt < N_PT; ++ipt)
   {
-    auto g = new TGraph; g->SetName(Form("gLog_pt%d",ipt));
-    for(size_t iw=0; iw<w0Scan.size(); ++iw)
+    TGraph* g = new TGraph;
+    g->SetName(Form("gLog_pt%d", ipt));
+
+    // w0-scan loop
+    for(int iw=0; iw < N_W; ++iw)
     {
       double wVal = w0Scan[iw];
-      TString hN  = Form("h_dx_log_w0%04.2f_pt%d",wVal,ipt);
-      if(TH1* h = dynamic_cast<TH1*>(f->Get(hN)))
+      TString hname = Form("h_dx_log_w0%04.2f_pt%d", wVal, ipt);
+
+      if(TH1* h = dynamic_cast<TH1*>( f->Get(hname) ))
       {
-        double r = h->GetRMS();
-        g->SetPoint(g->GetN(), wVal, r);
+        double coreWidth = getCoreSigma(h);
+        if(coreWidth > 0)
+        {
+          gMinLog = std::min(gMinLog, coreWidth);
+          gMaxLog = std::max(gMaxLog, coreWidth);
 
-        if(r>0){
-          gMinLog = std::min(gMinLog,r);
-          gMaxLog = std::max(gMaxLog,r);
-          if(r<bestRMS_L[ipt]){ bestRMS_L[ipt]=r; bestW[ipt]=wVal; }
+          // best so far?
+          if(coreWidth < bestRMS_L[ipt])
+          {
+            bestRMS_L[ipt] = coreWidth;
+            bestW[ipt]     = wVal;
+          }
         }
+        g->SetPoint(g->GetN(), wVal, coreWidth);
 
-        TCanvas ctmp; h->Draw("E"); ctmp.SaveAs(histOutDir+"/"+hN+".png");
+        // Save snapshot
+        {
+          TCanvas ctmp;
+          h->Draw("E");
+          if(h->GetFunction("g"))
+          {
+            h->GetFunction("g")->SetLineColor(kRed);
+            h->GetFunction("g")->Draw("LSAME");
+          }
+          ctmp.SaveAs(histOutDir + "/" + hname + ".png");
+        }
       }
-    }
-    g->SetMarkerStyle(markers[ipt]);
-    g->SetMarkerColor(colors [ipt]);
-    g->SetLineColor  (colors [ipt]);
+    } // end w0-scan
+
+    // Style
+    g->SetMarkerStyle(markers[ipt % N_COLOR]);
+    g->SetMarkerColor(colors [ipt % N_COLOR]);
+    g->SetLineColor  (colors [ipt % N_COLOR]);
     g->SetMarkerSize(1.3);
     gLogVec.push_back(g);
   }
 
-  if(gMinLog==DBL_MAX){ gMinLog=0; gMaxLog=1; }
+  // If no valid hist => define a trivial range
+  if(gMinLog == DBL_MAX) { gMinLog=0; gMaxLog=1; }
 
-  // *** critical: make sure we're on the main canvas, not a stale ctmp ***
   cLog.cd();
   gLogVec[0]->Draw("ALP");
   gLogVec[0]->GetXaxis()->SetTitle("w_{0}");
-  gLogVec[0]->GetYaxis()->SetTitle("#sigma_{x}");
-  gLogVec[0]->GetYaxis()->SetRangeUser(gMinLog-0.1*fabs(gMinLog),
-                                       gMaxLog+0.1*fabs(gMaxLog));
-  for(size_t i=1;i<gLogVec.size();++i) gLogVec[i]->Draw("LP SAME");
+  gLogVec[0]->GetYaxis()->SetTitle("#sigma_{x} (Gaussian core)");
+  gLogVec[0]->GetYaxis()->SetRangeUser(gMinLog - 0.1*fabs(gMinLog),
+                                       gMaxLog + 0.1*fabs(gMaxLog));
+  for(size_t i=1; i<gLogVec.size(); ++i)
+  {
+    gLogVec[i]->Draw("LP SAME");
+  }
 
-  TLegend legB(0.15,0.65,0.45,0.85); legB.SetBorderSize(0); legB.SetFillStyle(0);
-  for(int ipt=0; ipt<N_PT; ++ipt){
+  TLegend legB(0.15,0.65,0.45,0.85);
+  legB.SetBorderSize(0);
+  legB.SetFillStyle(0);
+  for(int ipt=0; ipt < N_PT; ++ipt)
+  {
     legB.AddEntry(gLogVec[ipt],
-      Form("%.1f<p_{T}<%.1f GeV  (best w_{0}=%.2f)",ptEdge[ipt],ptEdge[ipt+1],bestW[ipt]),
-      "lp");
+                  Form("%.1f<p_{T}<%.1f GeV  (best w_{0}=%.2f)",
+                       ptEdge[ipt], ptEdge[ipt+1], bestW[ipt]),
+                  "lp");
   }
   legB.Draw();
-  TLatex().DrawLatexNDC(0.2,0.92,"Log");
 
-  cLog.SaveAs(baseDir+"/Log_RMS_vs_w0.png");
+  TLatex().DrawLatexNDC(0.2,0.92,"Log");
+  cLog.SaveAs(baseDir + "/Log_RMS_vs_w0.png");
   std::cout << "[INFO] Saved Log_RMS_vs_w0.png\n";
 
   std::cout << "[DONE] plotAshLogRMS_sideBySide finished.\n";
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Asinh-based function for local phi fits:
@@ -245,10 +362,16 @@ void doLocalPhiEtaFits(TH3F* h3,
   eqLatex.SetTextSize(0.028);
   eqLatex.SetTextAlign(13);
 
-  const int NPT = 4; // 4 pT slices
-  int  colors [NPT] = {kBlack, kRed, kBlue, kMagenta+2};
-  int  markers[NPT] = {20,     21,   22,   23       };
+  const int NPT = 11;          // ← was 6
 
+
+  int  colors [NPT] = { kBlack, kRed+1, kBlue+1, kGreen+2, kOrange+7,
+                          kMagenta+2, kCyan+1, kViolet+3, kSpring+5, kGray+2, kAzure+2 };
+
+    // use the SAME marker everywhere: filled circle (ROOT style 20)
+  int  markers[NPT];
+  std::fill_n(markers, NPT, 20);
+    
   // -------------------------------------------------------------------------
   // Helper lambda for the quadruple overlay
   // -------------------------------------------------------------------------
@@ -684,10 +807,10 @@ void PDCanalysis()
     // 3b) Also produce 2D plots for each pT slice [2,4], [4,6], [6,8]
     ///////////////////////////////////////////////////////////////////
     {
-      double pT_bins_low[4]  = {2.0, 3.0, 5.0, 8.0};
-      double pT_bins_high[4] = {3.0, 5.0, 8.0, 12.0};
+      double pT_bins_low[6]  = {2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0};
+      double pT_bins_high[6] = {3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0};
 
-      for(int i=0; i<4; i++)
+      for(int i=0; i<11; i++)
       {
         // Determine Z-range in the 3D histogram (pT axis)
         int zLo = h3->GetZaxis()->FindFixBin(pT_bins_low[i] + 1e-9);
@@ -730,8 +853,8 @@ void PDCanalysis()
   ///////////////////////////////////////////////////////////////////////
   // 4) Local φ slices in pT bins => do 1D projections, fits
   ///////////////////////////////////////////////////////////////////////
-    double pT_bins_low[4]  = {2.0, 3.0, 5.0, 8.0};
-    double pT_bins_high[4] = {3.0, 5.0, 8.0, 12.0};
+  double pT_bins_low[6]  = {2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0};
+  double pT_bins_high[6] = {3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0};
 
   // We'll record b-values to a text file
   std::ofstream bResults(Form("%s/bValues.txt", baseDir.Data()));

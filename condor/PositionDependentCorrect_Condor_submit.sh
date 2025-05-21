@@ -348,14 +348,15 @@ EOL
   done
 }
 
-##
-# submit_sim_condor => Submits condor jobs for sim (ALL events).
-##
+## ----------------------------------------------------------------------
+## submit_sim_condor => Submits condor jobs for sim (ALL events).
+## ----------------------------------------------------------------------
 submit_sim_condor() {
   echo "######################################################################"
   echo "[INFO] Submitting Condor jobs => simulation"
   mkdir -p "$LOG_DIR"/{stdout,error} "$CONDOR_LISTFILES_DIR"
 
+  # quick existence check
   if [ ! -f "$SIM_DST_LIST" ]; then
     echo "[ERROR] SIM_DST_LIST not found => $SIM_DST_LIST"
     return
@@ -370,6 +371,8 @@ submit_sim_condor() {
   mapfile -t simHitsAll < "$SIM_HITS_LIST"
   local totalDst=${#simDstAll[@]}
   local totalHits=${#simHitsAll[@]}
+
+  # we only have as many valid pairs as the lesser of DST/Hits lines
   local maxN=$(( totalDst < totalHits ? totalDst : totalHits ))
 
   echo "[INFO] Found $totalDst DST lines, $totalHits G4Hit lines => up to $maxN pairs"
@@ -384,40 +387,70 @@ submit_sim_condor() {
   > "$chunkListOfLists"
 
   # chunk them in sets of $FILES_PER_CHUNK
+  # but do a quick check for each file's existence/size
   while [ $i -lt $maxN ]; do
-    chunkIndex=$(( chunkIndex + 1 ))
 
+    chunkIndex=$(( chunkIndex + 1 ))
     local chunkDst="${CONDOR_LISTFILES_DIR}/sim_dst_chunk${chunkIndex}.list"
     local chunkHits="${CONDOR_LISTFILES_DIR}/sim_hits_chunk${chunkIndex}.list"
     > "$chunkDst"
     > "$chunkHits"
 
-    for (( cc=0; cc<FILES_PER_CHUNK && i<maxN; cc++ )); do
-      echo "${simDstAll[$i]}"   >> "$chunkDst"
-      echo "${simHitsAll[$i]}" >> "$chunkHits"
+    # NOTE: multiply FILES_PER_CHUNK by 2 so each chunk has double the lines
+    local cc=0
+    while [ $cc -lt $(( FILES_PER_CHUNK * 2 )) ] && [ $i -lt $maxN ]; do
+
+      local dstFile="${simDstAll[$i]}"
+      local hitFile="${simHitsAll[$i]}"
+
+      # Quick checks for missing or empty
+      if [ ! -s "$dstFile" ] || [ ! -s "$hitFile" ]; then
+        echo "[WARN] Skipping index=$i => missing or empty file: dst=[$dstFile], hits=[$hitFile]"
+        i=$(( i + 1 ))
+        continue
+      fi
+
+      # Otherwise, they look OK => add them to chunk
+      echo "$dstFile"  >> "$chunkDst"
+      echo "$hitFile" >> "$chunkHits"
+
       i=$(( i + 1 ))
+      cc=$(( cc + 1 ))
     done
 
-    echo "$chunkDst $chunkHits" >> "$chunkListOfLists"
-    echo "[DEBUG] Created chunk pair => $chunkDst + $chunkHits"
+    # Only add chunk to list if it’s not empty
+    local linesDst
+    linesDst=$(wc -l < "$chunkDst")
+    if [ "$linesDst" -gt 0 ]; then
+      echo "$chunkDst $chunkHits" >> "$chunkListOfLists"
+      echo "[DEBUG] Created chunk #$chunkIndex => $chunkDst + $chunkHits  with $linesDst pairs"
+    else
+      echo "[INFO] Chunk #$chunkIndex is empty => not adding."
+    fi
+
   done
 
-  # each job => all events => nevents=0
+  # Build the .sub file with a bigger memory request
   cat > PositionDependentCorrect_sim.sub <<EOL
 universe                = vanilla
 executable              = PositionDependentCorrect_Condor.sh
 # Args: <runNum=9999> <listFileData> <"sim"> <clusterID> <nEvents=0> [<listFileHits>]
 arguments               = 9999 \$(filenameA) sim \$(Cluster) 0 \$(Process) \$(filenameB)
+
 log                     = /sphenix/user/patsfan753/PDCrun24pp/log/job.\$(Cluster).\$(Process).log
 output                  = /sphenix/user/patsfan753/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
 error                   = /sphenix/user/patsfan753/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
-request_memory          = 1000MB
+
+
+request_memory          = 2000MB
+
 queue filenameA filenameB from ${chunkListOfLists}
 EOL
 
   echo "[INFO] condor_submit => PositionDependentCorrect_sim.sub"
   condor_submit PositionDependentCorrect_sim.sub
 }
+
 
 submit_test_sim_condor() {
   echo "######################################################################"

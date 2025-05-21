@@ -2,10 +2,12 @@
 
 # -- Now processing local phi fits --
 # pTlow  pThigh  b_phi
-2  3   0.168104
-3  5   0.16671
-5  8   0.16507
-8  12   0.162767
+2  3   0.161734
+3  5   0.16558
+5  8   0.167286
+8  12   0.159242
+12  20   0.157182
+20  30   0.157182
 
 # -- Now processing local eta fits --
 # pTlow  pThigh  b_eta
