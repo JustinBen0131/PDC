@@ -483,8 +483,8 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
 
   rnd = new TRandom3();
     
-  // Try reading bValues.txt
-  {
+    // Try reading bValues.txt
+    {
       const std::string bFilePath = "/sphenix/u/patsfan753/scratch/PDCrun24pp/bParameters/bValues.txt";
       std::ifstream bfile(bFilePath.c_str());
       if (!bfile.is_open())
@@ -497,43 +497,71 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
       else
       {
         std::cout << "[INFO] Found " << bFilePath << "; reading b-values for correction." << std::endl;
-        
-        // We expect 3 lines.  Typically each line: "pTlow  pThigh  bValue"
-        // plus maybe a header line. Let's skip lines that start with '#'.
-        // We'll store them into m_bVals[0..2] in the same order as your pT bins.
-        int iFound = 0;
+
+        // The 4 pT ranges you expect
+        const float expectedLo[4] = {2.0, 3.0, 5.0, 8.0};
+        const float expectedHi[4] = {3.0, 5.0, 8.0, 12.0};
+
+        // Keep track of which bins we have found
+        bool gotBin[4] = {false, false, false, false};
+
+        // Prepare to read lines
         std::string line;
         while (std::getline(bfile, line))
         {
-          if (line.empty() || line[0] == '#') continue; // skip comments
+          if (line.empty() || line[0] == '#') continue; // skip empty or comment lines
+
           std::istringstream iss(line);
           float ptLo, ptHi, bVal;
-          if (!(iss >> ptLo >> ptHi >> bVal)) continue; // parse fail => skip
-          
-          if (iFound < 3)
+          if (!(iss >> ptLo >> ptHi >> bVal))
           {
-            m_bVals[iFound] = bVal;
-            iFound++;
+            // parse fail => skip
+            continue;
           }
-        }
+
+          // Attempt to match each expected bin
+          for (int i = 0; i < 4; i++)
+          {
+            // If exact equality is safe, do (ptLo == expectedLo[i]) etc.
+            // Or if worried about floating precision, do something like:
+            auto closeEnough = [](float a, float b) {
+              return std::fabs(a - b) < 1e-5;
+            };
+
+            // Check if this line’s pT range matches the i-th bin
+            if ( closeEnough(ptLo, expectedLo[i]) &&
+                 closeEnough(ptHi, expectedHi[i]) )
+            {
+              m_bVals[i] = bVal;    // store bVal
+              gotBin[i]   = true;   // mark found
+              break; // Stop checking the other bins
+            }
+          }
+        } // end while reading lines
+
         bfile.close();
-        
-        if (iFound == 3)
+
+        // Now see if we got *all* 4 bins
+        bool allFound = (gotBin[0] && gotBin[1] && gotBin[2] && gotBin[3]);
+        if (allFound)
         {
           isFitDoneForB = true;
-          std::cout << "[INFO] Successfully parsed 3 lines => b-values: "
-                    << m_bVals[0] << ", "
-                    << m_bVals[1] << ", "
-                    << m_bVals[2] << std::endl;
+          std::cout << "[INFO] Successfully parsed b-values for all 4 bins:\n"
+                    << "       [2,3] : " << m_bVals[0] << "\n"
+                    << "       [3,5] : " << m_bVals[1] << "\n"
+                    << "       [5,8] : " << m_bVals[2] << "\n"
+                    << "       [8,12]: " << m_bVals[3] << "\n";
         }
         else
         {
-          // Not enough lines => no correction
+          // Not enough lines matched => no correction
           isFitDoneForB = false;
-          std::cout << "[WARNING] Found file but did NOT get 3 b-values. => no correction." << std::endl;
+          std::cout << "[WARNING] bValues.txt found but did NOT have the 4 needed lines.\n"
+                    << "          => no phi correction.\n";
         }
       }
-  }
+    } // end reading bValues.txt
+
     
 
   // ------------------------------------------------------------------------------------
@@ -1199,6 +1227,284 @@ float PositionDependentCorrection::doLogWeightCoord(const std::vector<int>& towe
 }
 
 
+// ----------------------------------------------------------------------
+//  fillAshLogDx
+//    * Extracted from the "Ash / log-weight" X-position scanning block
+//    * Maintains the same pT-slice logic [2..12] and histogram filling
+// ----------------------------------------------------------------------
+void PositionDependentCorrection::fillAshLogDx(
+    const TLorentzVector& recoPhoton,
+    const TLorentzVector& truthPhoton,
+    const std::pair<float,float>& blockCord,
+    int blockPhiBin,
+    const std::vector<int>& tower_phis,
+    const std::vector<float>& tower_energies
+)
+{
+  // ----------------------------------------------------
+  //  1) Determine which pT slice this photon falls into
+  // ----------------------------------------------------
+  float thisPt = recoPhoton.Pt();
+  int iPtSlice = -1;
+  for (int i = 0; i < N_PT; ++i)
+  {
+    if (thisPt >= ptEdge[i] && thisPt < ptEdge[i + 1])
+    {
+      iPtSlice = i;
+      break;
+    }
+  }
+
+  // If out of range [2..12], skip it
+  if (iPtSlice < 0)
+  {
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] Photon pT=" << thisPt
+                << " is outside [2..12], skipping.\n";
+    }
+    return;
+  }
+
+  // ----------------------------------------------------
+  //  2) Compute the "true" x position for truth photon
+  // ----------------------------------------------------
+  float phiTrue = TVector2::Phi_mpi_pi(truthPhoton.Phi());
+  float xTrue   = 112.f * phiTrue;  // radius=112 cm
+
+  if (Verbosity() > 1)
+  {
+    std::cout << "[DEBUG] true phi=" << phiTrue
+              << ", xTrue=" << xTrue
+              << "  (radius=112cm)\n";
+  }
+
+  // ----------------------------------------------------
+  //  3) Get local block phi from 'blockCord.second'
+  // ----------------------------------------------------
+  float localPhi = blockCord.second;
+
+  if (Verbosity() > 1)
+  {
+    std::cout << "[DEBUG] localPhi=" << localPhi
+              << ", blockPhiBin=" << blockPhiBin << "\n";
+  }
+
+  // ----------------------------------------------------
+  //  4A) Loop over "Ash" b-values
+  // ----------------------------------------------------
+  for (size_t ib = 0; ib < m_bScan.size(); ++ib)
+  {
+    double bTrial = m_bScan[ib];
+
+    // (a) apply "doAshShift" to local phi
+    float localAsh = doAshShift(localPhi, bTrial);
+
+    if (Verbosity() > 1)
+    {
+      std::cout << "[DEBUG]   (Ash) bTrial=" << bTrial
+                << ", localAsh(before)=" << localPhi
+                << ", after doAshShift=" << localAsh << "\n";
+    }
+
+    // (b) convert to a front-face global phi
+    float phiRecoFF = TVector2::Phi_mpi_pi(
+        convertBlockToGlobalPhi(blockPhiBin, localAsh)
+    );
+
+    // (c) front-face x,y at r=112 cm
+    float xA = 112.f * std::cos(phiRecoFF);
+    float yA = 112.f * std::sin(phiRecoFF);
+    float zA = 0.f;
+
+    // (d) correct for shower depth => (xC, yC, zC)
+    float xC=0.f, yC=0.f, zC=0.f;
+    if (m_bemcRec)
+    {
+      m_bemcRec->CorrectShowerDepth(recoPhoton.E(), xA, yA, zA, xC, yC, zC);
+    }
+    else
+    {
+      // No correction if pointer is null
+      xC = xA;  yC = yA;  zC = zA;
+    }
+
+    // (e) compute final radius & phi
+    float rCorr   = std::sqrt(xC*xC + yC*yC);
+    float phiCorr = std::atan2(yC, xC);
+
+    // (f) define xReco
+    float xReco = rCorr * phiCorr;
+
+    // fill histogram
+    TString hname = Form("h_dx_ash_b%04.2f_pt%d", bTrial, iPtSlice);
+    TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
+    if (hAsh)
+    {
+      hAsh->Fill(xReco - xTrue);
+    }
+    else if (Verbosity() > 0)
+    {
+      std::cerr << "[WARNING] (Ash) Hist '" << hname << "' not found.\n";
+    }
+  } // end loop over b-values
+
+  // ----------------------------------------------------
+  //  4B) Loop over "log-weight" w0
+  // ----------------------------------------------------
+  for (size_t iw = 0; iw < m_w0Scan.size(); ++iw)
+  {
+    double w0Trial = m_w0Scan[iw];
+
+    // (a) compute local phi by weighting the actual towers
+    float localLog = doLogWeightCoord(tower_phis, tower_energies, w0Trial);
+
+    if (Verbosity() > 1)
+    {
+      std::cout << "[DEBUG]   (LogW) w0Trial=" << w0Trial
+                << ", localLog=" << localLog << "\n";
+    }
+
+    // (b) get front-face global phi
+    float phiRecoFF = TVector2::Phi_mpi_pi(
+        convertBlockToGlobalPhi(blockPhiBin, localLog)
+    );
+
+    // (c) front-face x,y at r=112 cm
+    float xA = 112.f * std::cos(phiRecoFF);
+    float yA = 112.f * std::sin(phiRecoFF);
+    float zA = 0.f;
+
+    float xC=0.f, yC=0.f, zC=0.f;
+    if (m_bemcRec)
+    {
+      m_bemcRec->CorrectShowerDepth(recoPhoton.E(), xA, yA, zA, xC, yC, zC);
+    }
+    else
+    {
+      xC = xA;  yC = yA;  zC = zA;
+    }
+
+    float rCorr   = std::sqrt(xC*xC + yC*yC);
+    float phiCorr = std::atan2(yC, xC);
+    float xRecoLog= rCorr * phiCorr;
+
+    // fill histogram
+    TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Trial, iPtSlice);
+    TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
+    if (hLog)
+    {
+      hLog->Fill(xRecoLog - xTrue);
+    }
+    else if (Verbosity() > 0)
+    {
+      std::cerr << "[WARNING] (LogW) Hist '" << hname2 << "' not found.\n";
+    }
+  } // end loop over w0
+} // end fillAshLogDx
+
+
+// ----------------------------------------------------------------------
+//  fillDPhiRawAndCorrected
+//    * Extracted from the "raw Δφ" fill and "corrected Δφ" fill
+//    * Maintains pT-binning [2..8] for iPtBin
+// ----------------------------------------------------------------------
+void PositionDependentCorrection::fillDPhiRawAndCorrected(
+    const TLorentzVector& recoPhoton,
+    const TLorentzVector& truthPhoton,
+    const std::pair<float,float>& blockCord,
+    int blockPhiBin,
+    float delPhi
+)
+{
+  // 1) Determine which of the 4 pT bins we’re in
+  float thisPt = recoPhoton.Pt();  // or clus_pt
+
+  int iPtBin = -1;
+  for (int i = 0; i < NPTBINS; ++i)  // NPTBINS == 4
+  {
+    if (thisPt >= ptEdge[i] && thisPt < ptEdge[i+1])
+    {
+      iPtBin = i;
+      break;
+    }
+  }
+  // If the cluster’s pT is not in [2..12], skip
+  if (iPtBin < 0)
+  {
+    return;
+  }
+
+  // 2) Compute the uncorrected ∆φ in the range (-π..+π)
+  delPhi = TVector2::Phi_mpi_pi(delPhi);
+
+  // Optional debug
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] fillDPhiRawAndCorrected:\n"
+              << "   * cluster E=" << recoPhoton.E()
+              << "   * truth E="   << truthPhoton.E()
+              << "   * ∆R="        << recoPhoton.DeltaR(truthPhoton)
+              << "   * ∆φ(raw)="   << delPhi
+              << std::endl;
+  }
+
+  // 3) Fill uncorrected histogram
+  if (h_phi_diff_raw_pt[iPtBin])
+  {
+    h_phi_diff_raw_pt[iPtBin]->Fill(delPhi);
+  }
+  else if (Verbosity() > 0)
+  {
+    std::cout << "[WARNING] h_phi_diff_raw_pt[" << iPtBin
+              << "] is null => no fill!" << std::endl;
+  }
+
+  // 4) (Optional) fill TProfile vs. local block φ coordinate
+  if (pr_phi_vs_blockcoord)
+  {
+    pr_phi_vs_blockcoord->Fill(blockCord.second, delPhi);
+  }
+
+  // 5) If we have read in b-values, apply the correction
+  if (isFitDoneForB)
+  {
+    float bPhiUsed = m_bVals[iPtBin];  // pick the b-value for this pT bin
+    if (bPhiUsed > 1e-9)
+    {
+      // (a) Correct the local block φ coordinate
+      float correctedBlockPhi = doPhiBlockCorr(blockCord.second, bPhiUsed);
+
+      // Keep track of how that local φ changes (optional QA)
+      if (h_localPhi_corrected[iPtBin])
+      {
+        h_localPhi_corrected[iPtBin]->Fill(correctedBlockPhi);
+      }
+
+      // (b) Convert that corrected local coordinate to global φ
+      float correctedPhi = convertBlockToGlobalPhi(blockPhiBin, correctedBlockPhi);
+
+      // (c) Recompute ∆φ in (-π..+π)
+      float delPhiCorr = TVector2::Phi_mpi_pi(correctedPhi - truthPhoton.Phi());
+
+      // (d) Fill corrected histogram
+      if (h_phi_diff_corrected_pt[iPtBin])
+      {
+        h_phi_diff_corrected_pt[iPtBin]->Fill(delPhiCorr);
+      }
+      else if (Verbosity() > 0)
+      {
+        std::cout << "[WARNING] h_phi_diff_corrected_pt[" << iPtBin
+                  << "] is null => no fill!" << std::endl;
+      }
+    }
+    else if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] bPhiUsed=0 => skipping local φ correction.\n";
+    }
+  } // end if isFitDoneForB
+}
+
 
 void PositionDependentCorrection::finalClusterLoop(
     PHCompositeNode* /*topNode*/,
@@ -1447,339 +1753,14 @@ void PositionDependentCorrection::finalClusterLoop(
 
           h_truthE->Fill(tr_phot.E());
             
-            // ----------------------------------------------------
-            //  1) Determine which pT slice this photon falls into
-            // ----------------------------------------------------
-            float thisPt = photon1.Pt();
-            int iPtSlice = -1;
-            for (int i = 0; i < N_PT; ++i)
-            {
-              if (thisPt >= ptEdge[i] && thisPt < ptEdge[i + 1])
-              {
-                iPtSlice = i;
-                break;
-              }
-            }
 
-            // If out of range [2..12], skip it
-            if (iPtSlice < 0)
-            {
-              if (Verbosity() > 0)
-              {
-                std::cout << "[DEBUG] Photon pT=" << thisPt << " is outside [2..12], skipping.\n";
-              }
-              continue;
-            }
+            // snippet inside finalClusterLoop, after matching a photon:
+          fillAshLogDx(photon1, tr_phot, blockCord, block_phi_bin,
+                         tower_phis, tower_energies);
 
-            // ----------------------------------------------------
-            //  2) Compute the "true" x position for truth photon
-            // ----------------------------------------------------
-            float phiTrue = TVector2::Phi_mpi_pi(tr_phot.Phi());
-            float xTrue   = 112.f * phiTrue;  // still using 112 cm for "true" radius
+          fillDPhiRawAndCorrected(photon1, tr_phot, blockCord, block_phi_bin, delPhi);
 
-            if (Verbosity() > 1)
-            {
-              std::cout << "[DEBUG] true phi=" << phiTrue
-                        << ", xTrue=" << xTrue
-                        << "  (radius=112cm)\n";
-            }
-
-            // ----------------------------------------------------
-            //  3) Get local block phi from getBlockCord(second)
-            // ----------------------------------------------------
-            float localPhi    = blockCord.second;   // from your code
-            int   blockPhiBin = block_phi_bin;      // e.g. from earlier
-
-            if (Verbosity() > 1)
-            {
-              std::cout << "[DEBUG] localPhi=" << localPhi
-                        << ", blockPhiBin=" << blockPhiBin
-                        << " (from block coordinates)\n";
-            }
-
-            // ----------------------------------------------------
-            //  4A) Loop over "Ash" b-values
-            // ----------------------------------------------------
-            for (int ib = 0; ib < static_cast<int>(m_bScan.size()); ++ib)
-            {
-              double bTrial = m_bScan[ib];
-
-              // (a) apply your "doAshShift" to local phi
-              float localAsh  = doAshShift(localPhi, bTrial);
-
-              if (Verbosity() > 1)
-              {
-                std::cout << "[DEBUG]   (Ash) bTrial=" << bTrial
-                          << ", localAsh before correction=" << localPhi
-                          << ", after doAshShift=" << localAsh << "\n";
-              }
-
-              // (b) convert to a front-face global phi
-              float phiRecoFF = TVector2::Phi_mpi_pi(convertBlockToGlobalPhi(blockPhiBin, localAsh));
-
-              // (c) front-face x,y at r=112 cm (z=0 for front face)
-              float xA = 112.f * std::cos(phiRecoFF);
-              float yA = 112.f * std::sin(phiRecoFF);
-              float zA = 0.f;
-
-              // (d) correct for shower depth => (xC, yC, zC)
-              float xC = 0.f;
-              float yC = 0.f;
-              float zC = 0.f;
-
-              if (m_bemcRec)
-              {
-                m_bemcRec->CorrectShowerDepth(photon1.E(), xA, yA, zA, xC, yC, zC);
-
-                if (Verbosity() > 1)
-                {
-                  std::cout << "[DEBUG]   (Ash) after BEmcRecCEMC->CorrectShowerDepth:"
-                            << " xC=" << xC << ", yC=" << yC << ", zC=" << zC << "\n";
-                }
-              }
-              else
-              {
-                // No correction if pointer is null
-                xC = xA;
-                yC = yA;
-                zC = zA;
-
-                if (Verbosity() > 1)
-                {
-                  std::cout << "[DEBUG]   (Ash) m_bemcRec is null => skipping shower-depth correction.\n";
-                }
-              }
-
-              // (e) compute final radius & phi from corrected (xC,yC)
-              float rCorr   = std::sqrt(xC*xC + yC*yC);
-              float phiCorr = std::atan2(yC, xC);
-
-              // (f) define xReco from (rCorr * phiCorr)
-              float xReco = rCorr * phiCorr;
-
-              // fill histogram
-              TString hname = Form("h_dx_ash_b%04.2f_pt%d", bTrial, iPtSlice);
-              TH1F* hAsh    = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
-              if (hAsh)
-              {
-                hAsh->Fill(xReco - xTrue);
-
-                if (Verbosity() > 1)
-                {
-                  std::cout << "[DEBUG]   (Ash) Filled histogram '"
-                            << hname << "' with dx=" << (xReco - xTrue)
-                            << ". #entries=" << hAsh->GetEntries() << "\n";
-                }
-              }
-              else if (Verbosity() > 0)
-              {
-                std::cerr << "[WARNING]   (Ash) histogram '" << hname << "' not found, skipping fill.\n";
-              }
-            }
-
-            // ----------------------------------------------------
-            //  4B) Loop over "log-weight" w0
-            // ----------------------------------------------------
-            for (int iw = 0; iw < static_cast<int>(m_w0Scan.size()); ++iw)
-            {
-              double w0Trial = m_w0Scan[iw];
-
-              // (a) compute local phi by weighting the actual towers
-              float localLog = doLogWeightCoord(tower_phis, tower_energies, w0Trial);
-
-              if (Verbosity() > 1)
-              {
-                std::cout << "[DEBUG]   (LogW) w0Trial=" << w0Trial
-                          << ", localLog coordinate = " << localLog << "\n";
-              }
-
-              // (b) get front-face global phi from localLog
-              float phiRecoFF = TVector2::Phi_mpi_pi(convertBlockToGlobalPhi(blockPhiBin, localLog));
-
-              // (c) again, front-face x,y at r=112 cm (z=0)
-              float xA = 112.f * std::cos(phiRecoFF);
-              float yA = 112.f * std::sin(phiRecoFF);
-              float zA = 0.f;
-
-              float xC = 0.f;
-              float yC = 0.f;
-              float zC = 0.f;
-
-              // same shower-depth correction
-              if (m_bemcRec)
-              {
-                m_bemcRec->CorrectShowerDepth(photon1.E(), xA, yA, zA, xC, yC, zC);
-
-                if (Verbosity() > 1)
-                {
-                  std::cout << "[DEBUG]   (LogW) after BEmcRecCEMC->CorrectShowerDepth:"
-                            << " xC=" << xC << ", yC=" << yC << ", zC=" << zC << "\n";
-                }
-              }
-              else
-              {
-                xC = xA;
-                yC = yA;
-                zC = zA;
-                if (Verbosity() > 1)
-                {
-                  std::cout << "[DEBUG]   (LogW) m_bemcRec is null => skipping shower-depth correction.\n";
-                }
-              }
-
-              float rCorr   = std::sqrt(xC*xC + yC*yC);
-              float phiCorr = std::atan2(yC, xC);
-              float xRecoLog= rCorr * phiCorr;
-
-              // fill histogram
-              TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Trial, iPtSlice);
-              TH1F* hLog     = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
-              if (hLog)
-              {
-                hLog->Fill(xRecoLog - xTrue);
-
-                if (Verbosity() > 1)
-                {
-                  std::cout << "[DEBUG]   (LogW) Filled histogram '"
-                            << hname2 << "' with dx=" << (xRecoLog - xTrue)
-                            << ". #entries=" << hLog->GetEntries() << "\n";
-                }
-              }
-              else if (Verbosity() > 0)
-              {
-                std::cerr << "[WARNING]   (LogW) histogram '" << hname2
-                          << "' not found, skipping fill.\n";
-              }
-            }
-
-
-            // -------------------------------------------------------
-            // (A) Determine the pT bin index
-            // -------------------------------------------------------
-
-            // cluster pT (e.g. `clus_pt`)
-            thisPt = clus_pt;  // or photon1.Pt()
-
-            // Map pT to iPtBin in [0..2], or -1 if out of range
-            int iPtBin = -1;
-            for (int i = 0; i < NPTBINS; i++)
-            {
-              if (thisPt >= ptEdge[i] && thisPt < ptEdge[i+1])
-              {
-                iPtBin = i;
-                break;
-              }
-            }
-            // If outside [2,8], we do not fill any of the 3 histograms
-            if (iPtBin < 0)
-            {
-                continue;
-            }
-
-
-            // -------------------------------------------------------
-            // (B) Fill the raw Δφ histogram
-            // -------------------------------------------------------
-            {
-              // Put delPhi in the range (-π .. +π)
-              delPhi = TVector2::Phi_mpi_pi(delPhi);
-
-              // Optional debug print:
-              if (Verbosity() > 0)
-              {
-                std::cout << "[DEBUG] finalClusterLoop -> raw phi diff fill:\n"
-                          << "   * cluster E=" << photon1.E()
-                          << "   * truth E="   << tr_phot.E()
-                          << "   * delR="      << photon1.DeltaR(tr_phot)
-                          << "   * delPhi="    << delPhi
-                          << std::endl;
-              }
-
-              // Fill the per-bin histogram if iPtBin >= 0
-              if (iPtBin >= 0)
-              {
-                if (h_phi_diff_raw_pt[iPtBin])
-                {
-                  h_phi_diff_raw_pt[iPtBin]->Fill(delPhi);
-
-                  if (Verbosity() > 0)
-                  {
-                    int currentEntries = (int) h_phi_diff_raw_pt[iPtBin]->GetEntries();
-                    std::cout << "[DEBUG] h_phi_diff_raw_pt[" << iPtBin
-                              << "]->Fill(" << delPhi << ") => new #entries="
-                              << currentEntries << std::endl;
-                  }
-                }
-                else
-                {
-                  // Just in case
-                  if (Verbosity() > 0)
-                  {
-                    std::cout << "[WARNING] h_phi_diff_raw_pt[" << iPtBin
-                              << "] is null => no fill!" << std::endl;
-                  }
-                }
-              }
-
-              // (Optional) fill TProfile vs. local block phi coordinate
-              if (pr_phi_vs_blockcoord)
-              {
-                pr_phi_vs_blockcoord->Fill(blockCord.second, delPhi);
-              }
-            }
-
-            // -------------------------------------------------------
-            // (C) Apply the b correction if isFitDoneForB == true
-            // -------------------------------------------------------
-            if (isFitDoneForB && iPtBin >= 0)
-            {
-              // Retrieve the b-value from m_bVals array for the determined pT bin
-              float bPhiUsed = m_bVals[iPtBin];
-
-              // Only proceed if it’s non-trivial
-              if (bPhiUsed > 1e-9)
-              {
-                // Step 1: Correct the *local block phi coordinate*
-                float correctedBlockPhi = doPhiBlockCorr(blockCord.second, bPhiUsed);
-                  
-                h_localPhi_corrected[iPtBin]->Fill(correctedBlockPhi);
-
-                // Step 2: Convert that corrected local coordinate to a global phi
-                float correctedPhi = convertBlockToGlobalPhi(block_phi_bin, correctedBlockPhi);
-
-                // Step 3: Recompute Δφ in (-π..+π)
-                float delPhiCorr = TVector2::Phi_mpi_pi(correctedPhi - tr_phot.Phi());
-
-                // Fill corrected histogram
-                if (h_phi_diff_corrected_pt[iPtBin])
-                {
-                  h_phi_diff_corrected_pt[iPtBin]->Fill(delPhiCorr);
-
-                  if (Verbosity() > 0)
-                  {
-                    std::cout << "[DEBUG] h_phi_diff_corrected_pt[" << iPtBin
-                              << "]->Fill(" << delPhiCorr << ") => #entries="
-                              << h_phi_diff_corrected_pt[iPtBin]->GetEntries() << std::endl;
-                  }
-                }
-                else
-                {
-                  if (Verbosity() > 0)
-                  {
-                    std::cout << "[WARNING] h_phi_diff_corrected_pt[" << iPtBin
-                              << "] is null => no fill!" << std::endl;
-                  }
-                }
-              }
-              else
-              {
-                // b=0 => no correction
-                if (Verbosity() > 0)
-                {
-                  std::cout << "[DEBUG] bPhiUsed=0 => skipping local phi correction." << std::endl;
-                }
-              }
-            }
+            
           // position‐dependent resolution
           if (block_eta_bin >= 0 && block_eta_bin < NBinsBlock &&
               block_phi_bin >= 0 && block_phi_bin < NBinsBlock)
@@ -2020,7 +2001,7 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   }
 
   // If vertex out of range => skip
-  if (std::fabs(vtx_z) > 30.0)
+  if (std::fabs(vtx_z) > 60.0)
   {
     if (Verbosity() > 0)
     {

@@ -134,6 +134,25 @@ class PositionDependentCorrection : public SubsysReco
                         float pi0ptcut,
                         float weight);
 
+    void fillAshLogDx(
+        const TLorentzVector& recoPhoton,
+        const TLorentzVector& truthPhoton,
+        const std::pair<float,float>& blockCord,
+        int blockPhiBin,
+        const std::vector<int>& tower_phis,
+        const std::vector<float>& tower_energies
+    );
+
+    // --------------------------------------------------------------
+    // Extracted from finalClusterLoop for raw/corrected Δφ mechanism
+    // --------------------------------------------------------------
+  void fillDPhiRawAndCorrected(
+        const TLorentzVector& recoPhoton,
+        const TLorentzVector& truthPhoton,
+        const std::pair<float,float>& blockCord,
+        int blockPhiBin,
+        float delPhi
+  );
   // --------------------------------------------------------------------
   // 3) Data members
   // --------------------------------------------------------------------
@@ -145,7 +164,7 @@ class PositionDependentCorrection : public SubsysReco
     
   float b_phi = 0.0f;
   bool isFitDoneForB = false;   // whether we've read in b-values
-  std::array<float,3> m_bVals;  // for storing b-values for the 3 pT bins
+  std::array<float,4> m_bVals;  // for storing b-values for the 3 pT bins
 
   static const int    N_PT = 4;
   static const double ptEdge[N_PT+1];
@@ -154,7 +173,7 @@ class PositionDependentCorrection : public SubsysReco
     
   TriggerAnalyzer* trigAna{nullptr};
     
-  static constexpr int NPTBINS = 3;  // We have three pT bins
+  static constexpr int NPTBINS = 4;  // We have three pT bins
   TH1F* h_localPhi_corrected[NPTBINS];
   TH1F* h_phi_diff_raw_pt[NPTBINS];         // raw Δφ for each bin
   TH1F* h_phi_diff_corrected_pt[NPTBINS];   // corrected Δφ for each bin

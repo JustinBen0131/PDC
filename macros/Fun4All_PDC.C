@@ -86,7 +86,7 @@ void Fun4All_PDC(int nevents = 0,
   }
 
   int verbosity = 2; // or 100 for extremely verbose
-  se->Verbosity(1);
+  se->Verbosity(0);
 
   // 1) Setup recoConsts, enable conditions DB
   recoConsts *rc = recoConsts::instance();
@@ -389,7 +389,7 @@ void Fun4All_PDC(int nevents = 0,
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
  // pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
-  pdc->Verbosity(5);
+  pdc->Verbosity(2);
   se->registerSubsystem(pdc);
 
   ////////////////////////////////////////////////////////////
