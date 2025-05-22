@@ -7,7 +7,7 @@
 #include <g4main/PHG4HitContainer.h>
 #include <g4main/PHG4Particle.h>
 #include <g4main/PHG4VtxPoint.h>
-
+#include <TKey.h>
 // G4Cells includes
 #include <array>
 #include <g4detectors/PHG4Cell.h>
@@ -88,7 +88,7 @@ using namespace std;
 
 const double PositionDependentCorrection::ptEdge[PositionDependentCorrection::N_PT+1] =
 {
-  2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0
+    0.5, 1.0, 2.0, 4.0, 8.0
 };
 
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
@@ -102,7 +102,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
   , clusterntuple(nullptr)
 {
   _eventcounter = 0;
-  _vz = 999.0;
+  _vz = 60.0;
 }
 
 PositionDependentCorrection::~PositionDependentCorrection()
@@ -422,62 +422,80 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
     }
  
 
-    const double bMin = 0.15;
-    const double bMax = 0.45;
-    const double bStep= 0.01;
-
-    const double w0Min  = 2.8;   // dimensionless
-    const double w0Max  = 5.5;
-    const double w0Step = 0.10;  // step size
-
-    // (1) clear any existing contents
-    m_bScan.clear();
-    m_w0Scan.clear();
-
-    // (2) fill them
-    for (double b = bMin; b <= bMax + 1e-6; b += bStep)
-      m_bScan.push_back(b);
-
-    for (double w = w0Min; w <= w0Max + 1e-6; w += w0Step)
-      m_w0Scan.push_back(w);
-
-    // we can still do:
-    const int N_B = m_bScan.size();
-    const int N_W = m_w0Scan.size();
-    
-
-    // ===============================
-    // Example: Register h_dx_ash and h_dx_log histograms
-    // for each b and w₀, for each pT bin
-    // ===============================
-    for (int ipt = 0; ipt < N_PT; ++ipt)
     {
-      // -- Ash approach --
-      for (int ib = 0; ib < N_B; ++ib)
-      {
-        double bVal = m_bScan[ib];
-        TString hname = Form("h_dx_ash_b%04.2f_pt%d", bVal, ipt);
+        // Example: revised parameter scans with a wider range:
+        const double bMin   = 0.10;
+        const double bMax   = 1.00;
+        const double bStep  = 0.05;
 
-        // e.g. 120 bins from -6 to +6
-        TH1F* hAsh = new TH1F(hname,
-                              Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
-                              120, -6, 6);
+        const double w0Min  = 2.00;
+        const double w0Max  = 6.00;
+        const double w0Step = 0.10;
 
-        hm->registerHisto(hAsh);
-      }
+        // Clear old vectors
+        m_bScan.clear();
+        m_w0Scan.clear();
 
-      // -- Log‐weight approach --
-      for (int iw = 0; iw < N_W; ++iw)
-      {
-        double w0Val = m_w0Scan[iw];
-        TString hname = Form("h_dx_log_w0%04.2f_pt%d", w0Val, ipt);
+        // 1) Fill b‐scan values
+        {
+          int nb = static_cast<int>( std::round( (bMax - bMin)/bStep ) );
+          for (int ib = 0; ib <= nb; ++ib)
+          {
+            double val = bMin + ib*bStep;
+            // Snap to 3 decimals
+            val = std::floor(val*1000. + 0.5)/1000.;
+            m_bScan.push_back(val);
+          }
+        }
 
-        TH1F* hLog = new TH1F(hname,
-                              Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
-                              120, -6, 6);
+        // 2) Fill w0‐scan values
+        {
+          int nw = static_cast<int>( std::round( (w0Max - w0Min)/w0Step ) );
+          for (int iw = 0; iw <= nw; ++iw)
+          {
+            double val = w0Min + iw*w0Step;
+            // Snap to 2 decimals
+            val = std::floor(val*100. + 0.5)/100.;
+            m_w0Scan.push_back(val);
+          }
+        }
 
-        hm->registerHisto(hLog);
-      }
+        const int N_B = m_bScan.size();
+        const int N_W = m_w0Scan.size();
+
+        // Make sure we only declare histograms once
+        if (!alreadyDeclaredHistograms)
+        {
+          for (int ipt = 0; ipt < N_PT; ++ipt)
+          {
+            // ---------- Ash approach ----------
+            for (int ib = 0; ib < N_B; ++ib)
+            {
+              double bVal = m_bScan[ib];
+
+              // name example: "h_dx_ash_b0.300_pt0"
+              TString hname = Form("h_dx_ash_b%.3f_pt%d", bVal, ipt);
+              TH1F* hAsh = new TH1F(hname,
+                                    Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
+                                    80, -4, 4 );
+              hm->registerHisto(hAsh);
+            }
+
+            // ---------- Log‐weight approach ----------
+            for (int iw = 0; iw < N_W; ++iw)
+            {
+              double w0Val = m_w0Scan[iw];
+
+              // name example: "h_dx_log_w05.70_pt2"
+              TString hname = Form("h_dx_log_w0%.2f_pt%d", w0Val, ipt);
+              TH1F* hLog = new TH1F(hname,
+                                    Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
+                                    80, -4, 4 );
+              hm->registerHisto(hLog);
+            }
+          }
+          alreadyDeclaredHistograms = true;
+        }
     }
 
 
@@ -1160,15 +1178,17 @@ float PositionDependentCorrection::convertBlockToGlobalPhi(int block_phi_bin, fl
 ////////////////////////////////////////////////////////////////////////
 float PositionDependentCorrection::doAshShift(float localPhi, float bVal)
 {
-  // Step 1: put localPhi in [-0.5, +0.5]
+  // 1) Shift localPhi (0..1) -> Xcg in (-0.5..+0.5)
   float Xcg = (localPhi < 0.5f) ? localPhi : (localPhi - 1.0f);
 
-  // Step 2: asinh transform
-  //   Xash = b * asinh( 2 * Xcg * sinh(1/(2b)) )
+  // 2) asinh transform (with no forced clamp to ±0.5):
+  //    Xash = bVal * asinh( 2 * Xcg * sinh(1/(2*bVal)) )
   float val = bVal * asinh( 2.f * Xcg * sinh(1.f/(2.f*bVal)) );
 
-  // Step 3: shift back to [0,1]
-  if(localPhi >= 0.5f) val += 1.0f;
+  // 3) Shift back to [0,1] if needed
+  if (localPhi >= 0.5f) val += 1.0f;
+
+  // Return the final coordinate
   return val;
 }
 
@@ -1414,7 +1434,7 @@ void PositionDependentCorrection::fillAshLogDx(
       double xReco   = rReco * phiReco;
 
       // Fill “h_dx_ash_bXX_ptYY” if it exists
-      TString hname = Form("h_dx_ash_b%04.2f_pt%d", bVal, iPtSlice);
+      TString hname = Form("h_dx_ash_b%.3f_pt%d", bVal, iPtSlice);
       TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
       if (!hAsh)
       {
@@ -1472,7 +1492,7 @@ void PositionDependentCorrection::fillAshLogDx(
       double phiReco = std::atan2(yC, xC);
       double xReco   = rReco * phiReco;
 
-      TString hname2 = Form("h_dx_log_w0%04.2f_pt%d", w0Val, iPtSlice);
+      TString hname2 = Form("h_dx_log_w0%.2f_pt%d", w0Val, iPtSlice);
       TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
       if (!hLog)
       {
@@ -2117,7 +2137,7 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   }
 
   // If vertex out of range => skip
-  if (std::fabs(vtx_z) > 60.0)
+  if (std::fabs(vtx_z) > _vz)
   {
     if (Verbosity() > 0)
     {
@@ -2256,6 +2276,54 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
                 << outfilename << std::endl;
       std::cout << "[DEBUG] Closing output file..." << std::endl;
     }
+      
+      if (Verbosity() > 0)
+      {
+        std::cout << "\n[INFO] Listing all histograms in the output file:\n";
+        std::cout << std::left
+                  << std::setw(30) << "Histogram Name"
+                  << std::setw(10) << "Class"
+                  << std::setw(12) << "#Entries"
+                  << std::endl;
+        std::cout << "--------------------------------------------------------------\n";
+
+        // Change directory to outfile if not already
+        outfile->cd();
+
+        // Grab the list of all objects in this directory
+        TList* listKeys = gDirectory->GetListOfKeys();
+        if (listKeys)
+        {
+          // Iterate over each key
+          TIter nextKey(listKeys);
+          TKey* key = nullptr;
+          while ((key = (TKey*)nextKey()))
+          {
+            // Get the class name and the object name
+            const char* className = key->GetClassName();
+            const char* objName   = key->GetName();
+
+            // Read the object from file
+            TObject* obj = key->ReadObj();
+            if (!obj) continue;
+
+            // If it’s a histogram (TH1‐derived), print out entries
+            TH1* h1 = dynamic_cast<TH1*>(obj);
+            if (h1)
+            {
+              // Print name, class, and entries
+              std::cout << std::left
+                        << std::setw(30) << objName
+                        << std::setw(10) << className
+                        << std::setw(12) << (Long64_t)h1->GetEntries()
+                        << std::endl;
+            }
+            // optional else: if you want to handle TH2, TH3, etc. separately
+          }
+        }
+        std::cout << "[INFO] Finished listing histograms.\n" << std::endl;
+      }
+
 
     // Close the file
     outfile->Close();

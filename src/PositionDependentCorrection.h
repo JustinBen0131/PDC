@@ -82,6 +82,7 @@ class PositionDependentCorrection : public SubsysReco
   {
       m_bemcRec = bemcptr;
   }
+  bool alreadyDeclaredHistograms = false;
 
 
  protected:
@@ -165,17 +166,17 @@ class PositionDependentCorrection : public SubsysReco
   TFile *outfile = nullptr;
     
   float b_phi = 0.0f;
-  bool isFitDoneForB = false;   // whether we've read in b-values
-  std::array<float,4> m_bVals;  // for storing b-values for the 3 pT bins
+  bool isFitDoneForB = true;   // whether we've read in b-values
+  std::array<float,4> m_bVals;  // for storing b-values for the 4 pT bins
 
-  static const int    N_PT = 11;
+  static const int    N_PT = 4;
   static const double ptEdge[N_PT+1];
   std::vector<double> m_bScan;
   std::vector<double> m_w0Scan;
     
   TriggerAnalyzer* trigAna{nullptr};
     
-  static constexpr int NPTBINS = 11;
+  static constexpr int NPTBINS = 4;
   TH1F* h_localPhi_corrected[NPTBINS];
   TH1F* h_phi_diff_raw_pt[NPTBINS];         // raw Δφ for each bin
   TH1F* h_phi_diff_corrected_pt[NPTBINS];   // corrected Δφ for each bin
