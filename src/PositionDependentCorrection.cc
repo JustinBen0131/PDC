@@ -88,7 +88,7 @@ using namespace std;
 
 const double PositionDependentCorrection::ptEdge[PositionDependentCorrection::N_PT+1] =
 {
-    0.5, 1.0, 2.0, 4.0, 8.0
+    0.5, 0.75, 1.25, 2, 3
 };
 
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
@@ -362,12 +362,34 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
     }
   }
 
-  // h3_cluster_block_cord_pt:
-  //   A 3D histogram that stores (x: local eta-block coordinate, y: local phi-block coordinate, z: cluster energy).
-  //   This is used to map out how often clusters occur at each sub-tower position (0–1 in each dimension),
-  //   which is the key to understanding the shower position distribution inside towers.
-  h3_cluster_block_cord_pt = new TH3F("h2_cluster_block_cord_pt","",14,-0.5,1.5,14,-0.5,1.5,5,0,10);
+    // 1) Prepare arrays of edges for X and Y
+    //    We want 14 uniform bins in [−0.5..+1.5], so we build an array of length 15
+    static Double_t xedges[15], yedges[15];
+    for (int i = 0; i <= 14; i++)
+    {
+      xedges[i] = -0.5 + i * (2.0 / 14.0); // from -0.5 up to +1.5
+      yedges[i] = -0.5 + i * (2.0 / 14.0);
+    }
 
+    // 2) We already have pTedges for the Z axis
+    static const Double_t pTedges[5] = {0.5, 0.75, 1.25, 2.0, 3.0};
+
+    // 3) Create h3_cluster_block_cord_pt using the fully variable-bin constructor
+    h3_cluster_block_cord_pt = new TH3F(
+      "h2_cluster_block_cord_pt", "",
+      14, xedges,   // X dimension
+      14, yedges,   // Y dimension
+       4, pTedges   // Z dimension
+    );
+
+    // 4) Create h3_cluster_block_cord_corr_pt in the same way
+    h3_cluster_block_cord_corr_pt = new TH3F(
+      "h3_cluster_block_cord_corr_pt",
+      "Corrected local block coords vs. pT",
+      14, xedges,
+      14, yedges,
+       4, pTedges
+    );
   // h_block_bin:
   //   1D histogram that may be used to look at the block coordinate axis in discrete steps (0–1, or subdivided further).
   //   Potentially used to label or count how many clusters end up in each sub-cell bin across the 2×2 block space.
@@ -423,10 +445,10 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
  
 
     {
-        // Example: revised parameter scans with a wider range:
-        const double bMin   = 0.10;
-        const double bMax   = 1.00;
-        const double bStep  = 0.05;
+        // scan 0.05-0.60 in *cell units*, 0.01 step
+        const double bMin  = 0.05;   // 0.05 cell  ≈ 0.13 cm
+        const double bMax  = 0.60;   // 0.60 cell  ≈ 1.5 cm
+        const double bStep = 0.01;   // 0.01 cell  ≈ 0.025 cm
 
         const double w0Min  = 2.00;
         const double w0Max  = 6.00;
@@ -1417,7 +1439,7 @@ void PositionDependentCorrection::fillAshLogDx(
       float localAsh = doAshShift(blockCord.second, bVal);
 
       // Convert that local-φ to a global tower φ index => multiply by 2 => total
-      float coarsePhiInd = blockPhiBin*2 + localAsh*2.f;
+      float coarsePhiInd = blockPhiBin*2 + localAsh;
       float globalPhi    = coarsePhiInd * (2.f*M_PI / 256.f);
 
       float xA = rFront * std::cos(globalPhi);
@@ -1533,11 +1555,6 @@ void PositionDependentCorrection::fillAshLogDx(
 }
 
 
-// ----------------------------------------------------------------------
-//  fillDPhiRawAndCorrected
-//    * Extracted from the "raw Δφ" fill and "corrected Δφ" fill
-//    * Maintains pT-binning [2..8] for iPtBin
-// ----------------------------------------------------------------------
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
     const TLorentzVector& recoPhoton,
     const TLorentzVector& truthPhoton,
@@ -1546,8 +1563,8 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
     float delPhi
 )
 {
-  // 1) Determine which of the 4 pT bins we’re in
-  float thisPt = recoPhoton.Pt();  // or clus_pt
+  // 1) Determine which of the 4 pT bins we are in
+  float thisPt = recoPhoton.Pt();  // could also use clus_pt
 
   int iPtBin = -1;
   for (int i = 0; i < NPTBINS; ++i)  // NPTBINS == 4
@@ -1559,12 +1576,9 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
     }
   }
   // If the cluster’s pT is not in [2..12], skip
-  if (iPtBin < 0)
-  {
-    return;
-  }
+  if (iPtBin < 0) return;
 
-  // 2) Compute the uncorrected ∆φ in the range (-π..+π)
+  // 2) Compute the uncorrected Δφ in range (-π..+π)
   delPhi = TVector2::Phi_mpi_pi(delPhi);
 
   // Optional debug
@@ -1585,8 +1599,7 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
   }
   else if (Verbosity() > 0)
   {
-    std::cout << "[WARNING] h_phi_diff_raw_pt[" << iPtBin
-              << "] is null => no fill!" << std::endl;
+    std::cout << "[WARNING] h_phi_diff_raw_pt[" << iPtBin << "] is null => no fill!" << std::endl;
   }
 
   // 4) (Optional) fill TProfile vs. local block φ coordinate
@@ -1601,7 +1614,9 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
     float bPhiUsed = m_bVals[iPtBin];  // pick the b-value for this pT bin
     if (bPhiUsed > 1e-9)
     {
+      //----------------------------------------------------------------
       // (a) Correct the local block φ coordinate
+      //----------------------------------------------------------------
       float correctedBlockPhi = doPhiBlockCorr(blockCord.second, bPhiUsed);
 
       // Keep track of how that local φ changes (optional QA)
@@ -1610,13 +1625,19 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
         h_localPhi_corrected[iPtBin]->Fill(correctedBlockPhi);
       }
 
+      //----------------------------------------------------------------
       // (b) Convert that corrected local coordinate to global φ
+      //----------------------------------------------------------------
       float correctedPhi = convertBlockToGlobalPhi(blockPhiBin, correctedBlockPhi);
 
+      //----------------------------------------------------------------
       // (c) Recompute ∆φ in (-π..+π)
+      //----------------------------------------------------------------
       float delPhiCorr = TVector2::Phi_mpi_pi(correctedPhi - truthPhoton.Phi());
 
-      // (d) Fill corrected histogram
+      //----------------------------------------------------------------
+      // (d) Fill corrected Δφ histogram
+      //----------------------------------------------------------------
       if (h_phi_diff_corrected_pt[iPtBin])
       {
         h_phi_diff_corrected_pt[iPtBin]->Fill(delPhiCorr);
@@ -1626,14 +1647,33 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
         std::cout << "[WARNING] h_phi_diff_corrected_pt[" << iPtBin
                   << "] is null => no fill!" << std::endl;
       }
+
+      //----------------------------------------------------------------
+      // (e) (NEW) Fill a *parallel* 3D histogram with the corrected φ
+      //----------------------------------------------------------------
+      // We'll store:
+      //    X = blockCord.first (unchanged local-eta)
+      //    Y = correctedBlockPhi
+      //    Z = thisPt (or recoPhoton.Pt())
+      //----------------------------------------------------------------
+      if (h3_cluster_block_cord_corr_pt)
+      {
+        h3_cluster_block_cord_corr_pt->Fill(blockCord.first, correctedBlockPhi, thisPt);
+      }
+      else if (Verbosity() > 0)
+      {
+        std::cout << "[WARNING] h3_cluster_block_cord_corr_pt is null => no fill for corrected local φ!" << std::endl;
+      }
     }
     else if (Verbosity() > 0)
     {
       std::cout << "[DEBUG] bPhiUsed=0 => skipping local φ correction.\n";
     }
-  } // end if isFitDoneForB
-}
+  }
+  // else not isFitDoneForB => do nothing special
 
+  // Done!
+}
 
 void PositionDependentCorrection::finalClusterLoop(
     PHCompositeNode* /*topNode*/,
@@ -1822,7 +1862,7 @@ void PositionDependentCorrection::finalClusterLoop(
       int block_phi_bin = h_block_bin->FindBin(blockCord.second) - 1;
 
       // Fill 3D histogram: local coord (x,y) vs. cluster energy (z)
-      h3_cluster_block_cord_pt->Fill(blockCord.first, blockCord.second, clusE);
+      h3_cluster_block_cord_pt->Fill(blockCord.first, blockCord.second, clus_pt);
 
       // Fill cluster‐size correlation
       h_clusE_nTow->Fill(clusE, nTow);

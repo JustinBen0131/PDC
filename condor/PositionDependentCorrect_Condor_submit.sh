@@ -348,201 +348,182 @@ EOL
   done
 }
 
-## ----------------------------------------------------------------------
-## submit_sim_condor => Submits condor jobs for sim (ALL events).
-## ----------------------------------------------------------------------
+
+###############################################################################
+# submit_sim_condor => Submits condor jobs for simulation (ALL events).
+#
+#   If second argument is:
+#       firstRound   => do full cleaning, then submit first 30k pairs
+#       secondRound  => partial cleaning (only logs, stdout, error),
+#                       then skip first 30k pairs and submit next 30k
+#   If the second arg is anything else => default to 'firstRound' logic
+###############################################################################
 submit_sim_condor() {
-  echo "######################################################################"
-  echo "[INFO] Submitting Condor jobs => simulation"
+
+  set -Eeuo pipefail
+  trap 'echo "[FATAL] An unexpected error occurred near line $LINENO. Exiting." >&2' ERR
+
+  # Helper to clean logs/stdout/error only
+  clean_logs_stdout_error() {
+    echo "[DEBUG] Cleaning up old logs, stdout, and error files..."
+    rm -vf "/sphenix/user/$USER/PDCrun24pp/log/job."*.log    2>/dev/null || true
+    rm -vf "/sphenix/user/$USER/PDCrun24pp/stdout/job."*.out 2>/dev/null || true
+    rm -vf "/sphenix/user/$USER/PDCrun24pp/error/job."*.err  2>/dev/null || true
+  }
+
+  local roundArg="${1:-}"
+  local chunkSize=30000   # We'll submit 30k lines/pairs at a time
+  local offset=0          # 0 => first chunk, 30000 => second chunk, etc.
+
+  case "$roundArg" in
+
+    secondRound)
+      # partial cleaning => logs/stdout/error only
+      offset=30000
+      echo "######################################################################"
+      echo "[INFO] Submitting Condor jobs => simulation (SECOND 30k chunk)."
+      echo "[INFO] We will read from DST list: '$SIM_DST_LIST' but skip first 30000 lines."
+      echo "[INFO] And from G4Hits list:       '$SIM_HITS_LIST'"
+      echo "[INFO] We will produce a submission file for lines [30000..60000)."
+      echo
+      echo "[STEP 0] **Partial** cleaning => logs/stdout/error only."
+      clean_logs_stdout_error
+      ;;
+
+    testSubmit)
+      # minimal or none
+      offset=0
+      chunkSize=5
+      echo "######################################################################"
+      echo "[INFO] Submitting Condor jobs => simulation TEST (5 lines)."
+      echo "[INFO] We will read from DST list: '$SIM_DST_LIST'"
+      echo "[INFO] And from G4Hits list:       '$SIM_HITS_LIST'"
+      echo "[INFO] We will produce a submission file for lines [0..5)."
+      echo
+      echo "[STEP 0] Minimal cleaning => or none."
+      # Uncomment if you want to also remove logs/etc in test mode:
+      # clean_logs_stdout_error
+      ;;
+
+    *)
+      # Default => firstRound => full cleaning
+      echo "######################################################################"
+      echo "[INFO] Submitting Condor jobs => simulation (FIRST 30k chunk)."
+      echo "[INFO] We will read from DST list: '$SIM_DST_LIST'"
+      echo "[INFO] And from G4Hits list:       '$SIM_HITS_LIST'"
+      echo "[INFO] We will produce a submission file for lines [0..30000)."
+      echo
+      echo "[STEP 0] Full cleaning => leftover chunk lists, root outputs, logs, etc."
+      rm -vf "${CONDOR_LISTFILES_DIR}/sim_dst_chunk"*.list 2>/dev/null || true
+      rm -vf "${CONDOR_LISTFILES_DIR}/sim_hits_chunk"*.list 2>/dev/null || true
+      rm -vf "${CONDOR_LISTFILES_DIR}/sim_chunks.txt"        2>/dev/null || true
+      rm -vf "${OUTDIR_SIM}/PositionDep_sim_chunk"*.root     2>/dev/null || true
+      clean_logs_stdout_error
+      ;;
+  esac
+
+  ###########################################################################
+  # 1) Make sure directories exist
+  ###########################################################################
+  echo "[STEP 1] Ensuring required directories exist..."
   mkdir -p "$LOG_DIR"/{stdout,error} "$CONDOR_LISTFILES_DIR"
 
-  # quick existence check
+  ###########################################################################
+  # 2) Check for SIM_DST_LIST / SIM_HITS_LIST
+  ###########################################################################
+  echo "[STEP 2] Checking if the specified input lists exist..."
   if [ ! -f "$SIM_DST_LIST" ]; then
-    echo "[ERROR] SIM_DST_LIST not found => $SIM_DST_LIST"
-    return
+    echo "[ERROR] DST list not found => '$SIM_DST_LIST'"
+    return 1
   fi
   if [ ! -f "$SIM_HITS_LIST" ]; then
-    echo "[ERROR] SIM_HITS_LIST not found => $SIM_HITS_LIST"
-    return
+    echo "[ERROR] G4Hits list not found => '$SIM_HITS_LIST'"
+    return 1
   fi
 
-  # read lines
+  ###########################################################################
+  # 3) Read both lists, figure out how many lines we can process
+  ###########################################################################
+  echo "[STEP 3] Reading DST/HITS filenames from the input lists..."
   mapfile -t simDstAll < "$SIM_DST_LIST"
   mapfile -t simHitsAll < "$SIM_HITS_LIST"
-  local totalDst=${#simDstAll[@]}
-  local totalHits=${#simHitsAll[@]}
 
-  # we only have as many valid pairs as the lesser of DST/Hits lines
-  local maxN=$(( totalDst < totalHits ? totalDst : totalHits ))
-
-  echo "[INFO] Found $totalDst DST lines, $totalHits G4Hit lines => up to $maxN pairs"
-  if [ "$maxN" -eq 0 ]; then
-    echo "[WARNING] zero pairs => no sim submission"
-    return
-  fi
-
-  local chunkIndex=0
-  local i=0
-  local chunkListOfLists="${CONDOR_LISTFILES_DIR}/sim_chunks.txt"
-  > "$chunkListOfLists"
-
-  # chunk them in sets of $FILES_PER_CHUNK
-  # but do a quick check for each file's existence/size
-  while [ $i -lt $maxN ]; do
-
-    chunkIndex=$(( chunkIndex + 1 ))
-    local chunkDst="${CONDOR_LISTFILES_DIR}/sim_dst_chunk${chunkIndex}.list"
-    local chunkHits="${CONDOR_LISTFILES_DIR}/sim_hits_chunk${chunkIndex}.list"
-    > "$chunkDst"
-    > "$chunkHits"
-
-    # NOTE: multiply FILES_PER_CHUNK by 2 so each chunk has double the lines
-    local cc=0
-    while [ $cc -lt $(( FILES_PER_CHUNK * 2 )) ] && [ $i -lt $maxN ]; do
-
-      local dstFile="${simDstAll[$i]}"
-      local hitFile="${simHitsAll[$i]}"
-
-      # Quick checks for missing or empty
-      if [ ! -s "$dstFile" ] || [ ! -s "$hitFile" ]; then
-        echo "[WARN] Skipping index=$i => missing or empty file: dst=[$dstFile], hits=[$hitFile]"
-        i=$(( i + 1 ))
-        continue
-      fi
-
-      # Otherwise, they look OK => add them to chunk
-      echo "$dstFile"  >> "$chunkDst"
-      echo "$hitFile" >> "$chunkHits"
-
-      i=$(( i + 1 ))
-      cc=$(( cc + 1 ))
-    done
-
-    # Only add chunk to list if it’s not empty
-    local linesDst
-    linesDst=$(wc -l < "$chunkDst")
-    if [ "$linesDst" -gt 0 ]; then
-      echo "$chunkDst $chunkHits" >> "$chunkListOfLists"
-      echo "[DEBUG] Created chunk #$chunkIndex => $chunkDst + $chunkHits  with $linesDst pairs"
-    else
-      echo "[INFO] Chunk #$chunkIndex is empty => not adding."
-    fi
-
-  done
-
-  # Build the .sub file with a bigger memory request
-  cat > PositionDependentCorrect_sim.sub <<EOL
-universe                = vanilla
-executable              = PositionDependentCorrect_Condor.sh
-# Args: <runNum=9999> <listFileData> <"sim"> <clusterID> <nEvents=0> [<listFileHits>]
-arguments               = 9999 \$(filenameA) sim \$(Cluster) 0 \$(Process) \$(filenameB)
-
-log                     = /sphenix/user/patsfan753/PDCrun24pp/log/job.\$(Cluster).\$(Process).log
-output                  = /sphenix/user/patsfan753/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
-error                   = /sphenix/user/patsfan753/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
-
-
-request_memory          = 2000MB
-
-queue filenameA filenameB from ${chunkListOfLists}
-EOL
-
-  echo "[INFO] condor_submit => PositionDependentCorrect_sim.sub"
-  condor_submit PositionDependentCorrect_sim.sub
-}
-
-
-submit_test_sim_condor() {
-  echo "######################################################################"
-  echo "[INFO] Submitting TEST Condor jobs => simulation (only the first 12 lines with chunking)"
-
-  mkdir -p "$LOG_DIR"/{stdout,error} "$CONDOR_LISTFILES_DIR"
-
-  if [ ! -f "$SIM_DST_LIST" ]; then
-    echo "[ERROR] SIM_DST_LIST not found => $SIM_DST_LIST"
-    return
-  fi
-  if [ ! -f "$SIM_HITS_LIST" ]; then
-    echo "[ERROR] SIM_HITS_LIST not found => $SIM_HITS_LIST"
-    return
-  fi
-
-  # read lines
-  mapfile -t simDstAll < "$SIM_DST_LIST"
-  mapfile -t simHitsAll < "$SIM_HITS_LIST"
   local totalDst=${#simDstAll[@]}
   local totalHits=${#simHitsAll[@]}
   local maxN=$(( totalDst < totalHits ? totalDst : totalHits ))
 
-  echo "[INFO] Found $totalDst DST lines, $totalHits G4Hit lines => up to $maxN pairs in principle."
+  echo "     Found $totalDst DST lines, $totalHits G4Hit lines."
+  echo "     => Potentially can form up to $maxN DST/HITS pairs total."
 
-  if [ "$maxN" -eq 0 ]; then
-    echo "[WARNING] zero pairs => no sim submission"
-    return
+  # If offset exceeds total lines, there's nothing to do
+  if [ "$offset" -ge "$maxN" ]; then
+    echo "[WARNING] offset=$offset is >= total=$maxN => no lines remain => no submission."
+    return 0
   fi
 
-  # limit ourselves to first 12 lines total
-  local limit=12
-  if [ "$maxN" -lt 12 ]; then
-    limit=$maxN  # if fewer than 12 lines total, just do that many
+  # We'll process lines from [offset..(offset+chunkSize)), but not exceeding maxN
+  local endIndex=$(( offset + chunkSize ))
+  if [ "$endIndex" -gt "$maxN" ]; then
+    endIndex=$maxN
   fi
 
-  local chunkListOfLists="${CONDOR_LISTFILES_DIR}/sim_test_chunks.txt"
-  > "$chunkListOfLists"
+  local linesToProcess=$(( endIndex - offset ))
+  echo "[INFO] Submitting lines from $offset to $((endIndex-1)) => total $linesToProcess lines/pairs."
 
-  local i=0
-  local chunkIndex=0
-  # We'll reuse the global FILES_PER_CHUNK=10 if you want:
-  while [ $i -lt $limit ]; do
-    chunkIndex=$(( chunkIndex + 1 ))
+  if [ "$linesToProcess" -le 0 ]; then
+    echo "[ERROR] No lines remain in that range => no submission."
+    return 1
+  fi
 
-    local chunkDst="${CONDOR_LISTFILES_DIR}/sim_test_dst_chunk${chunkIndex}.list"
-    local chunkHits="${CONDOR_LISTFILES_DIR}/sim_test_hits_chunk${chunkIndex}.list"
-    > "$chunkDst"
-    > "$chunkHits"
-
-    # fill up to 10 lines or until we reach $limit
-    local cc=0
-    while [ $cc -lt $FILES_PER_CHUNK ] && [ $i -lt $limit ]; do
-      echo "${simDstAll[$i]}"   >> "$chunkDst"
-      echo "${simHitsAll[$i]}" >> "$chunkHits"
-      i=$(( i + 1 ))
-      cc=$(( cc + 1 ))
-    done
-
-    echo "$chunkDst $chunkHits" >> "$chunkListOfLists"
-    echo "[DEBUG] For test, created chunk #$chunkIndex => $chunkDst + $chunkHits"
-  done
-
-  # each job => process all events => nevents=0
-  cat > PositionDependentCorrect_sim_test.sub <<EOL
+  ###########################################################################
+  # 4) Build the .sub file with each pair in a queue item
+  ###########################################################################
+  echo "[STEP 4] Creating 'PositionDependentCorrect_sim.sub' for lines [$offset..$((endIndex-1))]"
+  local submitFile="PositionDependentCorrect_sim.sub"
+  cat > "$submitFile" <<EOL
 universe                = vanilla
 executable              = PositionDependentCorrect_Condor.sh
-# Args: <runNum=9999> <listFileData> <"sim"> <clusterID> <nEvents=0> <chunkIndex> [<listFileHits>]
-# We pass 9999 for runNumber, \$(filenameA) for DST chunk, "sim" for dataOrSim,
-# \$(Cluster) for clusterID, "0" for nEvents, \$(Process) for chunkIndex, \$(filenameB) for hits chunk
-arguments               = 9999 \$(filenameA) sim \$(Cluster) 0 \$(Process) \$(filenameB)
+# Args format: <runNum=9999> <listFileData> <"sim"> <clusterID> <nEvents=0> <processID> [<listFileHits>]
+log                     = /sphenix/user/$USER/PDCrun24pp/log/job.\$(Cluster).\$(Process).log
+output                  = /sphenix/user/$USER/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
+error                   = /sphenix/user/$USER/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
 
-log                     = /tmp/patsfan753_condor_logs/job.\$(Cluster).\$(Process).log
-output                  = /sphenix/user/patsfan753/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
-error                   = /sphenix/user/patsfan753/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
-request_memory          = 1000MB
+request_memory          = 1500MB
 
-queue filenameA filenameB from ${chunkListOfLists}
 EOL
 
-  echo "[INFO] condor_submit => PositionDependentCorrect_sim_test.sub"
-  condor_submit PositionDependentCorrect_sim_test.sub
+  # For each line i in [offset..endIndex), queue 1 job
+  local i
+  for (( i=offset; i<endIndex; i++ )); do
+    local dstFile="${simDstAll[$i]}"
+    local hitFile="${simHitsAll[$i]}"
+    echo "arguments               = 9999 $dstFile sim \$(Cluster) 0 $i $hitFile" >> "$submitFile"
+    echo "queue" >> "$submitFile"
+    echo >> "$submitFile"
+  done
+
+  ###########################################################################
+  # 5) condor_submit
+  ###########################################################################
+  echo "[STEP 5] Submitting $linesToProcess lines => $submitFile ..."
+  condor_submit "$submitFile"
+  local rc=$?
+  if [ $rc -ne 0 ]; then
+    echo "[ERROR] condor_submit failed with exit code=$rc."
+    return 1
+  else
+    echo "[INFO] condor_submit succeeded. Your $linesToProcess simulation job(s) are queued."
+  fi
+
+  echo "[INFO] Done. Exiting submit_sim_condor() successfully (roundArg='$roundArg')."
 }
 
 #############################
 # 4) MAIN LOGIC
 #############################
-
 case "$MODE" in
 
   local)
-    # local => must specify 'both' or 'noSim'
     if [ "$WHAT" == "both" ]; then
       echo "===================================================================="
       echo "[INFO] local => data + sim, each up to $LOCAL_NEVENTS events"
@@ -581,16 +562,17 @@ case "$MODE" in
     ;;
 
   simOnly)
+    # The second argument might be "firstRound" or "secondRound"
     echo "===================================================================="
-    echo "[INFO] Condor => sim only (ALL events)."
+    echo "[INFO] Condor => sim only. round='$WHAT'"
     echo "===================================================================="
-    submit_sim_condor
+    submit_sim_condor "$WHAT"
     exit 0
     ;;
 
   submitTestSimCondor)
     echo "===================================================================="
-    echo "[INFO] Condor => TEST sim only (FIRST 4 lines)."
+    echo "[INFO] Condor => TEST sim only (partial)."
     echo "===================================================================="
     submit_test_sim_condor
     exit 0

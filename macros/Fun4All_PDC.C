@@ -126,7 +126,7 @@ void Fun4All_PDC(int nevents = 0,
     gSystem->Exit(1);
   }
   // The second argument '1' means topNode level or segment, depending on your usage
-  in0->AddListFile(caloListFile, 1);
+  in0->AddFile(caloListFile);
   se->registerInputManager(in0);
 
   // (b) for G4Hits
@@ -136,7 +136,7 @@ void Fun4All_PDC(int nevents = 0,
     std::cerr << "[ERROR] Could not create Fun4AllDstInputManager for in1" << std::endl;
     gSystem->Exit(1);
   }
-  in1->AddListFile(g4HitsListFile, 1);
+  in1->AddFile(g4HitsListFile);
   se->registerInputManager(in1);
 
   ////////////////////////////////////////////////////////////

@@ -29,10 +29,9 @@ runNumber="$1"
 chunkFile1="$2"
 dataOrSim="$3"
 clusterID="$4"
-nEvents="$5"      # e.g. "0"
-chunkIndex="$6"   # condor Process
-chunkFile2="$7"   # G4Hits file (sim only)
-
+nEvents="$5"
+chunkIndex="$6"   # offset + loop index
+chunkFile2="$7"
 echo "---------------------------------------------------------------------"
 echo "[INFO] runNumber   = $runNumber"
 echo "[INFO] chunkFile1  = $chunkFile1"
@@ -67,36 +66,35 @@ else
 fi
 mkdir -p "$outDir"
 
-#############################
-# 5) Copy chunk files locally
-#############################
-echo "[DEBUG] Checking chunkFile1 => $chunkFile1"
-if [ ! -f "$chunkFile1" ]; then
-  echo "[ERROR] chunkFile1 missing: $chunkFile1"
-  exit 1
-fi
-cp "$chunkFile1" inputdata.txt
+##############################
+## 5) Copy chunk files locally
+##############################
+#echo "[DEBUG] Checking chunkFile1 => $chunkFile1"
+#if [ ! -f "$chunkFile1" ]; then
+#  echo "[ERROR] chunkFile1 missing: $chunkFile1"
+#  exit 1
+#fi
+#cp "$chunkFile1" inputdata.txt
 
-if [ "$dataOrSim" == "sim" ]; then
-  if [ ! -f "$chunkFile2" ]; then
-    echo "[ERROR] chunkFile2 missing for sim: $chunkFile2"
-    exit 1
-  fi
-  cp "$chunkFile2" inputdatahits.txt
-else
-  echo "" > inputdatahits.txt
-fi
+#if [ "$dataOrSim" == "sim" ]; then
+#  if [ ! -f "$chunkFile2" ]; then
+#    echo "[ERROR] chunkFile2 missing for sim: $chunkFile2"
+#    exit 1
+#  fi
+#  cp "$chunkFile2" inputdatahits.txt
+#else
+#  echo "" > inputdatahits.txt
+#fi
 
-echo "[DEBUG] inputdata.txt (first few lines):"
-head -n 5 inputdata.txt
-echo "[DEBUG] inputdatahits.txt (first few lines):"
-head -n 5 inputdatahits.txt
+#echo "[DEBUG] inputdata.txt (first few lines):"
+#head -n 5 inputdata.txt
+#echo "[DEBUG] inputdatahits.txt (first few lines):"
+#head -n 5 inputdatahits.txt
 
 #############################
 # 6) Construct output filename
 #############################
-firstRoot="$(head -n 1 inputdata.txt)"
-fileBaseName="$(basename "$firstRoot")"
+fileBaseName="$(basename "$chunkFile1")"
 fileTag="${fileBaseName%.*}"
 
 if [ "$dataOrSim" = "data" ]; then
@@ -111,9 +109,9 @@ echo "[INFO] Final output file: $outFile"
 # 7) Run the macro directly
 #############################
 echo "[INFO] Invoking ROOT macro with command:"
-echo "root -b -l -q \"macros/Fun4All_PDC.C(${nEvents}, \\\"inputdata.txt\\\", \\\"inputdatahits.txt\\\", \\\"${outFile}\\\")\""
+echo "root -b -l -q \"macros/Fun4All_PDC.C(${nEvents}, \\\"${chunkFile1}\\\", \\\"${chunkFile2}\\\", \\\"${outFile}\\\")\""
 
-root -b -l -q "macros/Fun4All_PDC.C(${nEvents}, \"inputdata.txt\", \"inputdatahits.txt\", \"${outFile}\")"
+root -b -l -q "macros/Fun4All_PDC.C(${nEvents}, \"${chunkFile1}\", \"${chunkFile2}\", \"${outFile}\")"
 rc=$?
 
 echo "---------------------------------------------------------------------"
@@ -123,8 +121,6 @@ if [ $rc -ne 0 ]; then
   exit $rc
 fi
 
-echo "[INFO] Done. Checking output directory: $(dirname "$outFile")"
-ls -lh "$(dirname "$outFile")"
 
 echo "[INFO] PositionDependentCorrect_Condor.sh finished OK."
 exit 0

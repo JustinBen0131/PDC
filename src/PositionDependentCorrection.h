@@ -220,6 +220,7 @@ class PositionDependentCorrection : public SubsysReco
   TH1* hmbdtime_cut;
   TH1* hemcaltime_cut;
   TH1* hihcaltime_cut;
+  TH3* h3_cluster_block_cord_corr_pt;
   TH1* hohcaltime_cut;
   TH1* h_tower_e;
 
