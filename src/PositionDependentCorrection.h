@@ -50,11 +50,7 @@ class PositionDependentCorrection : public SubsysReco
   int End(PHCompositeNode *);
 
   void setIsSimulation(bool sim) { isSimulation = sim; }
-  // If you don't actually implement these, either remove them or define stubs:
-  void setFitDoneForB(bool done, float bVal = 0.0) {
-      isFitDoneForB = done;
-      b_phi = bVal; // if done == true, store the best-fit b_phi from your external study
-    }
+    
   int process_g4hits(PHCompositeNode *);
   int process_g4cells(PHCompositeNode *);
   int process_towers(PHCompositeNode *);
@@ -113,8 +109,10 @@ class PositionDependentCorrection : public SubsysReco
                     int &nClusContainer);
     
   float doPhiBlockCorr(float localPhi, float bphi);
+  float doEtaBlockCorr(float localEta, float bEta);
     
   float convertBlockToGlobalPhi(int block_phi_bin, float localPhi);
+  float convertBlockToGlobalEta(int block_eta_bin, float localEta);
 
   float doAshShift(float localPhi, float bVal);
   float doLogWeightCoord(const std::vector<int>& towerphis,
@@ -156,6 +154,14 @@ class PositionDependentCorrection : public SubsysReco
         int blockPhiBin,
         float delPhi
   );
+  void fillDEtaRawAndCorrected(
+        const TLorentzVector& recoPhoton,
+        const TLorentzVector& truthPhoton,
+        const std::pair<float,float>& blockCord, // local block coords in [0,1]
+        int blockEtaBin,
+        float delEta
+  );
+
   // --------------------------------------------------------------------
   // 3) Data members
   // --------------------------------------------------------------------
@@ -164,22 +170,45 @@ class PositionDependentCorrection : public SubsysReco
   int Getpeaktime(TH1 *h);
   Fun4AllHistoManager *hm = nullptr;
   TFile *outfile = nullptr;
-    
-  float b_phi = 0.0f;
-  bool isFitDoneForB = true;   // whether we've read in b-values
-  std::array<float,4> m_bVals;  // for storing b-values for the 4 pT bins
+  bool  isFitDoneForPhi = false;
+  bool  isFitDoneForEta = false;
+    //--------------------------------------------------------------------
+    //  Energy–slice constants  (barrel EMCAL photons)
+    //--------------------------------------------------------------------
+    static constexpr int    N_Ebins = 8;          // 9 edges → 8 slices
 
-  static const int    N_PT = 4;
-  static const double ptEdge[N_PT+1];
+    // master edges [GeV]
+    static constexpr double eEdge[N_Ebins + 1] =
+        { 2, 4, 6, 8, 10, 12, 15, 20, 30 };
+
+    // derive {E_low} and {E_high} once, at compile-time, via a lambda
+    static constexpr std::array<float, N_Ebins> expectedLo =
+    []{
+        std::array<float, N_Ebins> lo{};
+        for (int i = 0; i < N_Ebins; ++i) lo[i] = static_cast<float>(eEdge[i]);
+        return lo;
+    }();
+
+    static constexpr std::array<float, N_Ebins> expectedHi =
+    []{
+        std::array<float, N_Ebins> hi{};
+        for (int i = 0; i < N_Ebins; ++i) hi[i] = static_cast<float>(eEdge[i+1]);
+        return hi;
+    }();
+
+    // everything that used to be length-4 must now be length-8
+    float m_bValsPhi[N_Ebins]{};
+    float m_bValsEta[N_Ebins]{};
+    
   std::vector<double> m_bScan;
   std::vector<double> m_w0Scan;
-    
   TriggerAnalyzer* trigAna{nullptr};
-    
-  static constexpr int NPTBINS = 4;
-  TH1F* h_localPhi_corrected[NPTBINS];
-  TH1F* h_phi_diff_raw_pt[NPTBINS];         // raw Δφ for each bin
-  TH1F* h_phi_diff_corrected_pt[NPTBINS];   // corrected Δφ for each bin
+  TH1F* h_localPhi_corrected[N_Ebins];
+  TH1F* h_localEta_corrected[N_Ebins];
+  TH1F* h_phi_diff_raw_E[N_Ebins];         // raw Δφ for each bin
+  TH1F* h_phi_diff_corrected_E[N_Ebins];   // corrected Δφ for each bin
+  TH1F* h_eta_diff_raw_E[N_Ebins];
+  TH1F* h_eta_diff_corrected_E[N_Ebins];
   TProfile* pr_phi_vs_blockcoord = nullptr;
 
   TH2* h_emcal_mbd_correlation = nullptr;
@@ -220,7 +249,7 @@ class PositionDependentCorrection : public SubsysReco
   TH1* hmbdtime_cut;
   TH1* hemcaltime_cut;
   TH1* hihcaltime_cut;
-  TH3* h3_cluster_block_cord_corr_pt;
+  TH3* h3_cluster_block_cord_E_corrected;
   TH1* hohcaltime_cut;
   TH1* h_tower_e;
 
@@ -266,10 +295,10 @@ class PositionDependentCorrection : public SubsysReco
 
   int _eventcounter;
   int _range = 1;
-  float _vz = 30.0;
-  bool m_vtxCut = false;
+  bool m_vtxCut = true;
   bool dynMaskClus = false;
-  bool getVtx = false;
+  float _vz = 0;
+  bool getVtx = true;
   bool debug = false;
 
   TH1* h_pt1;
@@ -307,7 +336,7 @@ class PositionDependentCorrection : public SubsysReco
   static const int NBinsBlock = 14;
   TH2* h_mass_block_pt[NBinsBlock][NBinsBlock];
   TH2* h_res_block_E[NBinsBlock][NBinsBlock];
-  TH3* h3_cluster_block_cord_pt;
+  TH3* h3_cluster_block_cord_E;
   TH1* h_block_phi;
   TH1* h_block_eta;
   TH1* h_clus_E_size;
@@ -320,7 +349,6 @@ class PositionDependentCorrection : public SubsysReco
                   const std::vector<float> &towerenergies);
 
   std::pair<float,float> getBlockCord(std::vector<int>, std::vector<int>, std::vector<float>);
-  std::pair<float,float> getBlockCordCorr(std::vector<int>,std::vector<int>,std::vector<float>);
 
   std::map<std::string, std::string> triggerNameMap = {
     {"MBD N&S >= 1", "MBD_NandS_geq_1"}

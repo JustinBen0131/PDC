@@ -18,337 +18,420 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <TFitResult.h>
+#include <TLatex.h>
+#include <vector>
+#include <utility>
+#include <cmath>
+#include <memory>
+#include <cfloat>  // for DBL_MAX
 
-constexpr double pTedges[] = {0.5, 0.75, 1.25, 2, 3};
-// Let the compiler figure out how many bins that is:
-constexpr int N_PT = (sizeof(pTedges)/sizeof(pTedges[0])) - 1;
+////////////////////////////////////////////////////////////////////////////////
+// 1) New energy‐bin array => 8 intervals
+////////////////////////////////////////////////////////////////////////////////
+constexpr double E_edges[] = {2, 4, 6, 8, 10, 12, 15, 20, 30};
+constexpr int    N_E       = (sizeof(E_edges)/sizeof(E_edges[0])) - 1;
+// => N_E=8
 
-void plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
+////////////////////////////////////////////////////////////////////////////////
+// (A) "core Gaussian fit" method
+////////////////////////////////////////////////////////////////////////////////
+double coreGaussianSigma(TH1* h, const TString& pngSavePath)
 {
-  // --------------------------------------------------------------------------------
-  // 1) Parameter setup
-  // --------------------------------------------------------------------------------
-  // pT bins come from pTedges[] above.
+  if(!h || h->GetEntries() < 20) return 0.;
 
-  // Ash (b) scan
-  const double bMin   = 0.50;
-  const double bMax   = 2.00;
-  const double bStep  = 0.05;
+  // quartiles [25%,50%,75%]
+  double q[3], probs[3] = {0.25, 0.50, 0.75};
+  h->GetQuantiles(3, q, probs);
 
+  double xMin = q[0];
+  double xMax = q[2];
+  if(xMin >= xMax) return 0.;
+
+  TF1 fitG("fitG","gaus", xMin, xMax);
+  fitG.SetParameters(h->GetMaximum(), q[1], 0.3*(xMax-xMin));
+
+  int fitStatus = h->Fit(&fitG, "QN0R");
+  double sigma  = (fitStatus==0) ? fitG.GetParameter(2) : h->GetRMS();
+
+  // If we want the visual diagnostic:
+  if(!pngSavePath.IsNull())
+  {
+    TCanvas ctmp("ctmp","ctmp",600,500);
+    h->Draw("E");
+
+    fitG.SetLineColor(kRed);
+    fitG.SetLineWidth(2);
+    fitG.Draw("SAME");
+
+    TLatex lat;
+    lat.SetNDC(true);
+    lat.SetTextSize(0.04);
+
+    double fitMean = fitG.GetParameter(1);
+    lat.SetTextColor(kRed);
+    lat.DrawLatex(0.58, 0.82, Form("#mu=%.3f", fitMean));
+    lat.DrawLatex(0.58, 0.74, Form("#sigma=%.3f", sigma));
+
+    ctmp.SaveAs(pngSavePath);
+    ctmp.Close();
+  }
+
+  return sigma;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// (B) "raw RMS" method
+////////////////////////////////////////////////////////////////////////////////
+double rawRMS(TH1* h, const TString& /*unusedPNG*/)
+{
+  // We won't produce a diagnostic figure for raw RMS, or you can if you want.
+  // Just return h->GetRMS().
+  if(!h || h->GetEntries()<2) return 0.;
+  return h->GetRMS();
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// Helper structure to store the results of scanning (Ash or Log)
+////////////////////////////////////////////////////////////////////////////////
+struct ScanResults
+{
+  // For each E‐bin, we store a TGraph of (parameter vs sigma)
+  std::vector<TGraph*> tgVec;
+
+  // In each E‐bin, we track best parameter + best sigma
+  std::vector<double> bestParam;  // best b (cm) or best w0
+  std::vector<double> bestSigma;
+
+  // global min/max for the Y-axis across all E-bins
+  double minY=DBL_MAX, maxY=-DBL_MAX;
+
+  // counters
+  int totalHist=0, missingHist=0, zeroEntry=0, usedHist=0;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// doAshScan(...): scans b in [0.05..0.60], reads histograms, calls sigmaFunc
+////////////////////////////////////////////////////////////////////////////////
+ScanResults doAshScan(
+    TFile* f,
+    int N_E,
+    const double* E_edges,
+    const std::vector<double>& bScan,
+    double cellSize,
+    const std::function<double(TH1*,const TString&)>& sigmaFunc,
+    const TString& suffix,
+    const TString& histOutDir
+)
+{
+  ScanResults results;
+  results.tgVec.resize(N_E);
+
+  for(int iE=0; iE<N_E; iE++)
+  {
+    auto g = new TGraph;
+    g->SetName( Form("gAsh_%s_E%d", suffix.Data(), iE) );
+
+    for(double bValRaw : bScan)
+    {
+      // replicate 4-dec rounding
+      double bValCell = std::round(bValRaw*10000.)/10000.;
+
+      results.totalHist++;
+
+      // histogram name => "h_dx_ash_b%.4f_E{iE}"
+      TString hName = Form("h_dx_ash_b%.4f_E%d", bValCell, iE);
+      TH1* h = dynamic_cast<TH1*>( f->Get(hName) );
+      if(!h)
+      {
+        results.missingHist++;
+        continue;
+      }
+
+      double ent = h->GetEntries();
+      if(ent <= 0) {
+        results.zeroEntry++;
+      } else {
+        results.usedHist++;
+      }
+
+      // create a little name for the optional PNG
+      // e.g. "h_dx_ash_b0.2000_E2_fit.png"
+      TString diagName = Form("%s/%s_%s.png", histOutDir.Data(), hName.Data(), suffix.Data());
+      double sVal = sigmaFunc(h, diagName);
+
+      double bCm = bValCell * cellSize;
+
+      g->SetPoint(g->GetN(), bCm, sVal);
+      if(sVal>0)
+      {
+        results.minY = std::min(results.minY, sVal);
+        results.maxY = std::max(results.maxY, sVal);
+
+        if(iE >= (int)results.bestSigma.size()) {
+          results.bestSigma.resize(N_E, DBL_MAX);
+          results.bestParam.resize(N_E, 0.);
+        }
+        if(sVal < results.bestSigma[iE]) {
+          results.bestSigma[iE]  = sVal;
+          results.bestParam[iE]  = bCm;
+        }
+      }
+    } // end for bVal
+
+    g->SetMarkerStyle(20 + (iE % 10));
+    g->SetMarkerColor(1 + (iE % 10));
+    g->SetLineColor  (1 + (iE % 10));
+    g->SetMarkerSize(1.2);
+
+    results.tgVec[iE] = g;
+  } // end for iE
+
+  if(results.minY == DBL_MAX) { results.minY=0.; results.maxY=1.; }
+
+  return results;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// doLogScan(...): scans w0 in [2..6], reads histos, calls sigmaFunc
+////////////////////////////////////////////////////////////////////////////////
+ScanResults doLogScan(
+    TFile* f,
+    int N_E,
+    const double* E_edges,
+    const std::vector<double>& w0Scan,
+    const std::function<double(TH1*,const TString&)>& sigmaFunc,
+    const TString& suffix,
+    const TString& histOutDir
+)
+{
+  ScanResults results;
+  results.tgVec.resize(N_E);
+
+  for(int iE=0; iE<N_E; iE++)
+  {
+    auto g = new TGraph;
+    g->SetName( Form("gLog_%s_E%d", suffix.Data(), iE) );
+
+    for(double w0Raw : w0Scan)
+    {
+      double wVal = std::round(w0Raw*100.)/100.;
+
+      results.totalHist++;
+
+      // name => "h_dx_log_w0%.2f_E{iE}"
+      TString hName = Form("h_dx_log_w0%.2f_E%d", wVal, iE);
+      TH1* h = dynamic_cast<TH1*>( f->Get(hName) );
+      if(!h)
+      {
+        results.missingHist++;
+        continue;
+      }
+
+      double ent = h->GetEntries();
+      if(ent<=0) {
+        results.zeroEntry++;
+      } else {
+        results.usedHist++;
+      }
+
+      TString diagName = Form("%s/%s_%s.png", histOutDir.Data(), hName.Data(), suffix.Data());
+      double sVal = sigmaFunc(h, diagName);
+
+      g->SetPoint(g->GetN(), wVal, sVal);
+      if(sVal>0)
+      {
+        results.minY = std::min(results.minY, sVal);
+        results.maxY = std::max(results.maxY, sVal);
+
+        if(iE >= (int)results.bestSigma.size()) {
+          results.bestSigma.resize(N_E, DBL_MAX);
+          results.bestParam.resize(N_E, 0.);
+        }
+        if(sVal < results.bestSigma[iE]) {
+          results.bestSigma[iE] = sVal;
+          results.bestParam[iE] = wVal;
+        }
+      }
+    } // end w0Raw
+
+    g->SetMarkerStyle(21 + (iE % 10));
+    g->SetMarkerColor(2 + (iE % 10));
+    g->SetLineColor  (2 + (iE % 10));
+    g->SetMarkerSize(1.2);
+
+    results.tgVec[iE] = g;
+  } // end iE
+
+  if(results.minY==DBL_MAX){ results.minY=0.; results.maxY=1.; }
+  return results;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// drawAshLogSideBySide(...):
+//   Takes 2 ScanResults: one for Ash, one for Log, plus “method name” (e.g. "fit" or "rms")
+//   => draws them on a single 1×2 canvas (left=Ash, right=Log) and saves a PNG
+////////////////////////////////////////////////////////////////////////////////
+void drawAshLogSideBySide(
+    const ScanResults& ashRes,
+    const ScanResults& logRes,
+    const char* methodName,  // e.g. "FIT" or "RMS"
+    const double* E_edges,
+    int N_E,
+    const TString& baseDir
+)
+{
+  // 1) Make the 1×2 canvas
+  TString canName = Form("cSideBySide_%s", methodName);
+  TCanvas cSide(canName, canName, 1600, 600);
+  cSide.Divide(2,1);
+
+  // 2) Left pad => Ash
+  cSide.cd(1);
+  gPad->SetLeftMargin(0.12);
+  gPad->SetBottomMargin(0.12);
+  gPad->SetGrid();
+
+  // if we have at least 1 E bin
+  if(!ashRes.tgVec.empty())
+  {
+    ashRes.tgVec[0]->Draw("ALP");
+    ashRes.tgVec[0]->GetXaxis()->SetTitle("b (cm)");
+    ashRes.tgVec[0]->GetYaxis()->SetTitle("#sigma_{x} (cm)");
+    ashRes.tgVec[0]->GetYaxis()->SetRangeUser(ashRes.minY - 0.1*fabs(ashRes.minY),
+                                              ashRes.maxY + 0.1*fabs(ashRes.maxY));
+
+    for(size_t i=1; i<ashRes.tgVec.size(); i++){
+      ashRes.tgVec[i]->Draw("LP SAME");
+    }
+  }
+
+  TLegend legA(0.15,0.65,0.48,0.88);
+  legA.SetBorderSize(0);
+  legA.SetFillStyle(0);
+  for(int iE=0;iE<N_E;iE++){
+    double bBest = (iE<(int)ashRes.bestParam.size()) ? ashRes.bestParam[iE] : 0.;
+    double sBest = (iE<(int)ashRes.bestSigma.size()) ? ashRes.bestSigma[iE] : 0.;
+    legA.AddEntry(
+      (iE<(int)ashRes.tgVec.size()? ashRes.tgVec[iE] : nullptr),
+      Form("%.1f< E<%.1f (b=%.3f, #sigma=%.3f)", E_edges[iE], E_edges[iE+1], bBest, sBest),
+      "lp"
+    );
+  }
+  legA.Draw();
+
+  // top label => e.g. "Ash [FIT]" or "Ash [RMS]"
+  TLatex latA; latA.SetNDC(true);
+  latA.DrawLatex(0.2, 0.92, Form("Ash [%s]", methodName));
+
+  // 3) Right pad => Log
+  cSide.cd(2);
+  gPad->SetLeftMargin(0.12);
+  gPad->SetBottomMargin(0.12);
+  gPad->SetGrid();
+
+  if(!logRes.tgVec.empty())
+  {
+    logRes.tgVec[0]->Draw("ALP");
+    logRes.tgVec[0]->GetXaxis()->SetTitle("w_{0}");
+    logRes.tgVec[0]->GetYaxis()->SetTitle("#sigma_{x} (cm)");
+    logRes.tgVec[0]->GetYaxis()->SetRangeUser(logRes.minY - 0.1*fabs(logRes.minY),
+                                              logRes.maxY + 0.1*fabs(logRes.maxY));
+    for(size_t i=1;i<logRes.tgVec.size(); i++){
+      logRes.tgVec[i]->Draw("LP SAME");
+    }
+  }
+
+  TLegend legB(0.15,0.65,0.48,0.88);
+  legB.SetBorderSize(0);
+  legB.SetFillStyle(0);
+  for(int iE=0;iE<N_E;iE++){
+    double wBest = (iE<(int)logRes.bestParam.size()) ? logRes.bestParam[iE] : 0.;
+    double sBest = (iE<(int)logRes.bestSigma.size()) ? logRes.bestSigma[iE] : 0.;
+    legB.AddEntry(
+      (iE<(int)logRes.tgVec.size()? logRes.tgVec[iE] : nullptr),
+      Form("%.1f< E<%.1f (w0=%.2f, #sigma=%.3f)", E_edges[iE], E_edges[iE+1], wBest, sBest),
+      "lp"
+    );
+  }
+  legB.Draw();
+
+  TLatex latB; latB.SetNDC(true);
+  latB.DrawLatex(0.2, 0.92, Form("Log [%s]", methodName));
+
+  // 4) Save the 1×2 canvas
+  TString outName = Form("%s/SideBySide_%s.png", baseDir.Data(), methodName);
+  cSide.SaveAs(outName);
+  std::cout << "[INFO] Wrote combined (Ash & Log) canvas => " << outName << std::endl;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// The main function that does 2 methods => “fit” & “rms”
+//   Each produces 1 row × 2 columns => left=Ash, right=Log
+////////////////////////////////////////////////////////////////////////////////
+void plotAshLogRMS_sideBySide(const char* infile="PositionDep_sim_ALL.root")
+{
+  // b-scan
+  const double bMin=0.05, bMax=0.60, bStep=0.01;
   std::vector<double> bScan;
-  for(double b = bMin; b <= bMax + 1e-9; b += bStep) bScan.push_back(b);
-  const int N_B = bScan.size();
+  for(double b=bMin; b<=bMax+1e-9; b+=bStep) bScan.push_back(b);
 
-  // Log (w0) scan
-  const double w0Min  = 2.00;
-  const double w0Max  = 6.00;
-  const double w0Step = 0.10;
-
+  // log-scan
+  const double w0Min=2.0, w0Max=6.0, w0Step=0.1;
   std::vector<double> w0Scan;
-  for(double w = w0Min; w <= w0Max + 1e-9; w += w0Step) w0Scan.push_back(w);
-  const int N_W = w0Scan.size();
+  for(double w=w0Min; w<=w0Max+1e-9; w+=w0Step) w0Scan.push_back(w);
 
-  // Output location
-  const TString baseDir    = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput";
-  const TString histOutDir = baseDir + "/ASH_LOG_PLOTS";
+  // output
+  TString baseDir    = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput";
+  TString histOutDir = baseDir + "/ASH_LOG_PLOTS";
+  gSystem->mkdir(baseDir,true);
+  gSystem->mkdir(histOutDir,true);
 
-  gSystem->mkdir(baseDir,    /*parents=*/true);
-  gSystem->mkdir(histOutDir, /*parents=*/true);
-
-  // --------------------------------------------------------------------------------
-  // 2) Input file
-  // --------------------------------------------------------------------------------
-  std::cout << "[INFO] Opening file '" << infile << "'..." << std::endl;
+  // 2) Open file
   std::unique_ptr<TFile> f(TFile::Open(infile,"READ"));
   if(!f || f->IsZombie()){
-    std::cerr << "[ERROR] Cannot open file or file is Zombie.\n";
+    std::cerr << "[ERROR] Could not open file => abort.\n";
     return;
   }
-  std::cout << "[INFO] Successfully opened '" << infile << "'." << std::endl;
+  std::cout << "[INFO] Successfully opened '" << infile << "'\n";
 
-  // --------------------------------------------------------------------------------
-  // 3) ROOT style
-  // --------------------------------------------------------------------------------
   gStyle->SetOptStat(0);
   gStyle->SetTitleFontSize(0.045);
 
-  // Setup color + marker for each pT bin
-  std::vector<int> colors;
-  std::vector<int> markers;
-  {
-    // Example color set (at least 11 distinct choices)
-    const int baseColorList[] = {
-      kBlack, kRed, kBlue, kMagenta+2, kOrange,
-      kGreen+2, kCyan+2, kGray+1, kViolet+1, kAzure+2, kSpring+9
-    };
-    // Marker styles
-    const int baseMarkerList[] = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30};
+  constexpr double cellSize=5.55; // cm
 
-    for (int i = 0; i < N_PT; ++i) {
-      colors.push_back( baseColorList[i % 11] );
-      markers.push_back(baseMarkerList[i % 11]);
-    }
-  }
+  // We'll define two "sigma" functions:
+  //   (A) coreGaussianSigma
+  //   (B) rawRMS  (we can create a small lambda that just calls rawRMS)
+  auto rawRMSlambda = [&](TH1* h, const TString&) {
+    if(!h || h->GetEntries()<2) return 0.;
+    return h->GetRMS();
+  };
 
-  // --------------------------------------------------------------------------------
-  // 4) Ash (b) scan:  σx vs b
-  // --------------------------------------------------------------------------------
-  std::cout << "\n[INFO] ASH scan: We'll loop over " << N_B << " b-values "
-            << "(" << bMin << " to " << bMax << " step " << bStep << ") "
-            << " for " << N_PT << " pT bins."
-            << "\n       => Expect " << (N_B * N_PT) << " histograms.\n";
+  // 3) (FIT) doAshScan & doLogScan => produce (AshFit, LogFit)
+  std::cout<<"\n=== Doing FIT-based scanning (coreGaussianSigma) ===\n";
+  auto ashFit = doAshScan(f.get(), N_E, E_edges, bScan, cellSize, coreGaussianSigma, "fit", histOutDir);
+  auto logFit = doLogScan(f.get(), N_E, E_edges, w0Scan, coreGaussianSigma, "fit", histOutDir);
 
-  TCanvas cAsh("cAsh","Ash RMS vs b",800,600);
-  cAsh.SetLeftMargin(0.12);
-  cAsh.SetBottomMargin(0.12);
-  cAsh.SetGrid();
+  // Then draw them side-by-side in a single 1×2 canvas
+  drawAshLogSideBySide(ashFit, logFit, "FIT", E_edges, N_E, baseDir);
 
-  double gMinAsh =  DBL_MAX;
-  double gMaxAsh = -DBL_MAX;
+  // 4) (RMS) doAshScan & doLogScan => produce (AshRMS, LogRMS)
+  std::cout<<"\n=== Doing RMS-based scanning (h->GetRMS) ===\n";
+  auto ashRMS = doAshScan(f.get(), N_E, E_edges, bScan, cellSize, rawRMSlambda, "rms", histOutDir);
+  auto logRMS = doLogScan(f.get(), N_E, E_edges, w0Scan, rawRMSlambda, "rms", histOutDir);
 
-  std::vector<TGraph*> gAshVec;
-  gAshVec.reserve(N_PT);
+  // Then draw them side-by-side in a single 1×2 canvas
+  drawAshLogSideBySide(ashRMS, logRMS, "RMS", E_edges, N_E, baseDir);
 
-  // For each pT bin, track best (lowest) RMS
-  std::vector<double> bestB(N_PT, 0.);
-  std::vector<double> bestRMS_A(N_PT, DBL_MAX);
-
-  // Counters for how many histograms are missing/found
-  int totalHistAsh    = 0;
-  int missingHistAsh  = 0;
-  int zeroEntryAsh    = 0;  // found hist but 0 entries
-  int usedHistAsh     = 0;  // found and non-empty
-
-  for(int ipt = 0; ipt < N_PT; ++ipt)
-  {
-    auto g = new TGraph;
-    g->SetName(Form("gAsh_pt%d", ipt));
-
-    std::cout << "\n  [ASH-scan: pT bin " << ipt << "] Searching for histograms...\n";
-
-    for(size_t ib=0; ib < bScan.size(); ++ib)
-    {
-      double bVal = bScan[ib];
-      ++totalHistAsh; // We expect one histogram for each (ipt, bVal)
-
-      TString hN  = Form("h_dx_ash_b%.3f_pt%d", bVal, ipt);
-      TH1* h = dynamic_cast<TH1*>(f->Get(hN));
-
-      if(!h) {
-        std::cerr << "   [WARN] Missing histogram: " << hN << std::endl;
-        ++missingHistAsh;
-        continue;
-      }
-      // Found the histogram
-      double entries = h->GetEntries();
-      double integral= h->Integral();
-      double rms     = h->GetRMS();
-
-      if(entries == 0) {
-        std::cout << "   [WARN] Found " << hN << " but it has 0 entries.\n";
-        ++zeroEntryAsh;
-      } else {
-        ++usedHistAsh;
-        std::cout << "   [INFO] Found " << hN << " => entries=" << entries
-                  << ", integral=" << integral << ", RMS=" << rms << std::endl;
-      }
-
-      // Store point even if zero entries => might be 0 RMS
-      g->SetPoint(g->GetN(), bVal, rms);
-
-      if(rms > 0){
-        gMinAsh = std::min(gMinAsh, rms);
-        gMaxAsh = std::max(gMaxAsh, rms);
-        if(rms < bestRMS_A[ipt]) {
-          bestRMS_A[ipt] = rms;
-          bestB[ipt]     = bVal;
-        }
-      }
-
-      // Quick PNG snapshot
-      // (Optional: disable if you don't need each histogram in a separate PNG)
-      TCanvas ctmp;
-      h->Draw("E");
-      ctmp.SaveAs(histOutDir + "/" + hN + ".png");
-    }
-
-    g->SetMarkerStyle(markers[ipt]);
-    g->SetMarkerColor(colors [ipt]);
-    g->SetLineColor  (colors [ipt]);
-    g->SetMarkerSize(1.3);
-    gAshVec.push_back(g);
-  }
-
-  // If we never updated gMinAsh, it means no hist found at all
-  if(gMinAsh == DBL_MAX) { gMinAsh=0; gMaxAsh=1; }
-
-  cAsh.cd();
-  if(!gAshVec.empty()) {
-    gAshVec[0]->Draw("ALP");
-    gAshVec[0]->GetXaxis()->SetTitle("b");
-    gAshVec[0]->GetYaxis()->SetTitle("#sigma_{x}");
-    gAshVec[0]->GetYaxis()->SetRangeUser(gMinAsh-0.1*fabs(gMinAsh),
-                                         gMaxAsh+0.1*fabs(gMaxAsh));
-    for(size_t i=1; i < gAshVec.size(); ++i) gAshVec[i]->Draw("LP SAME");
-  }
-
-  TLegend legA(0.15,0.70,0.45,0.85);
-  legA.SetBorderSize(0);
-  legA.SetFillStyle(0);
-  for(int ipt=0; ipt<N_PT; ++ipt) {
-    legA.AddEntry(gAshVec[ipt],
-      Form("%.1f < p_{T} < %.1f GeV  (best b=%.2f, RMS=%.4f)",
-           pTedges[ipt], pTedges[ipt+1], bestB[ipt], bestRMS_A[ipt]),
-      "lp");
-  }
-  legA.Draw();
-  TLatex().DrawLatexNDC(0.2,0.92,"Ash");
-
-  cAsh.SaveAs(baseDir+"/Ash_RMS_vs_b.png");
-  std::cout << "\n[INFO] Saved " << (baseDir + "/Ash_RMS_vs_b.png") << std::endl;
-
-  // Print summary for Ash
-  std::cout << "\n[ASH SUMMARY]-----------------------------------------\n"
-            << "  # pT bins             = " << N_PT << "\n"
-            << "  # b-values scanned    = " << N_B << "\n"
-            << "  => total histograms   = " << totalHistAsh << "\n"
-            << "  => missing histograms = " << missingHistAsh << "\n"
-            << "  => zero-entry hists   = " << zeroEntryAsh << "\n"
-            << "  => used (non-empty)   = " << usedHistAsh << "\n";
-  for(int ipt=0; ipt<N_PT; ++ipt){
-    std::cout << "   pT bin " << ipt << " => best b=" << bestB[ipt]
-              << ", best RMS=" << bestRMS_A[ipt] << "\n";
-  }
-  std::cout << "------------------------------------------------------\n";
-
-  // --------------------------------------------------------------------------------
-  // 5) Log (w0) scan:  σx vs w0
-  // --------------------------------------------------------------------------------
-  std::cout << "\n[INFO] LOG scan: We'll loop over " << N_W << " w0-values "
-            << "(" << w0Min << " to " << w0Max << " step " << w0Step << ") "
-            << " for " << N_PT << " pT bins."
-            << "\n       => Expect " << (N_W * N_PT) << " histograms.\n";
-
-  TCanvas cLog("cLog","Log RMS vs w0",800,600);
-  cLog.SetLeftMargin(0.12);
-  cLog.SetBottomMargin(0.12);
-  cLog.SetGrid();
-
-  double gMinLog =  DBL_MAX;
-  double gMaxLog = -DBL_MAX;
-
-  std::vector<TGraph*> gLogVec;
-  gLogVec.reserve(N_PT);
-
-  // For each pT bin, track best (lowest) RMS for the log scan
-  std::vector<double> bestW(N_PT, 0.);
-  std::vector<double> bestRMS_L(N_PT, DBL_MAX);
-
-  // Counters for log hist usage
-  int totalHistLog    = 0;
-  int missingHistLog  = 0;
-  int zeroEntryLog    = 0;
-  int usedHistLog     = 0;
-
-  for(int ipt=0; ipt<N_PT; ++ipt)
-  {
-    auto g = new TGraph;
-    g->SetName(Form("gLog_pt%d", ipt));
-
-    std::cout << "\n  [LOG-scan: pT bin " << ipt << "] Searching for histograms...\n";
-
-    for(size_t iw=0; iw < w0Scan.size(); ++iw)
-    {
-      double wVal = w0Scan[iw];
-      ++totalHistLog;
-
-      TString hN  = Form("h_dx_log_w0%.2f_pt%d", wVal, ipt);
-      TH1* h = dynamic_cast<TH1*>(f->Get(hN));
-      if(!h) {
-        std::cerr << "   [WARN] Missing histogram: " << hN << std::endl;
-        ++missingHistLog;
-        continue;
-      }
-
-      double entries = h->GetEntries();
-      double integral= h->Integral();
-      double rms     = h->GetRMS();
-
-      if(entries == 0) {
-        std::cout << "   [WARN] Found " << hN << " but 0 entries.\n";
-        ++zeroEntryLog;
-      } else {
-        ++usedHistLog;
-        std::cout << "   [INFO] Found " << hN << " => entries=" << entries
-                  << ", integral=" << integral << ", RMS=" << rms << std::endl;
-      }
-
-      g->SetPoint(g->GetN(), wVal, rms);
-
-      if(rms > 0){
-        gMinLog = std::min(gMinLog, rms);
-        gMaxLog = std::max(gMaxLog, rms);
-        if(rms < bestRMS_L[ipt]) {
-          bestRMS_L[ipt] = rms;
-          bestW[ipt]     = wVal;
-        }
-      }
-
-      TCanvas ctmp;
-      h->Draw("E");
-      ctmp.SaveAs(histOutDir + "/" + hN + ".png");
-    }
-
-    g->SetMarkerStyle(markers[ipt]);
-    g->SetMarkerColor(colors[ipt]);
-    g->SetLineColor  (colors[ipt]);
-    g->SetMarkerSize(1.3);
-    gLogVec.push_back(g);
-  }
-
-  if(gMinLog == DBL_MAX) { gMinLog=0; gMaxLog=1; }
-
-  cLog.cd();
-  if(!gLogVec.empty()) {
-    gLogVec[0]->Draw("ALP");
-    gLogVec[0]->GetXaxis()->SetTitle("w_{0}");
-    gLogVec[0]->GetYaxis()->SetTitle("#sigma_{x}");
-    gLogVec[0]->GetYaxis()->SetRangeUser(gMinLog-0.1*fabs(gMinLog),
-                                         gMaxLog+0.1*fabs(gMaxLog));
-    for(size_t i=1; i < gLogVec.size(); ++i) gLogVec[i]->Draw("LP SAME");
-  }
-
-  TLegend legB(0.15,0.65,0.45,0.85);
-  legB.SetBorderSize(0);
-  legB.SetFillStyle(0);
-  for(int ipt=0; ipt<N_PT; ++ipt) {
-    legB.AddEntry(gLogVec[ipt],
-      Form("%.1f < p_{T} < %.1f GeV (best w_{0}=%.2f, RMS=%.4f)",
-           pTedges[ipt], pTedges[ipt+1], bestW[ipt], bestRMS_L[ipt]),
-      "lp");
-  }
-  legB.Draw();
-  TLatex().DrawLatexNDC(0.2,0.92,"Log");
-
-  cLog.SaveAs(baseDir+"/Log_RMS_vs_w0.png");
-  std::cout << "\n[INFO] Saved " << (baseDir + "/Log_RMS_vs_w0.png") << std::endl;
-
-  // Print summary for Log
-  std::cout << "\n[LOG SUMMARY]------------------------------------------\n"
-            << "  # pT bins             = " << N_PT << "\n"
-            << "  # w0-values scanned   = " << N_W << "\n"
-            << "  => total histograms   = " << totalHistLog << "\n"
-            << "  => missing histograms = " << missingHistLog << "\n"
-            << "  => zero-entry hists   = " << zeroEntryLog << "\n"
-            << "  => used (non-empty)   = " << usedHistLog << "\n";
-  for(int ipt=0; ipt<N_PT; ++ipt){
-    std::cout << "   pT bin " << ipt << " => best w0=" << bestW[ipt]
-              << ", best RMS=" << bestRMS_L[ipt] << "\n";
-  }
-  std::cout << "--------------------------------------------------------\n";
-
-  std::cout << "\n[DONE] plotAshLogRMS_sideBySide finished.\n" << std::endl;
+  std::cout<<"\n[DONE] plotAshLogRMS_sideBySide completed.\n";
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Asinh-based function for local phi fits:
@@ -374,21 +457,20 @@ double asinhModel(double *x, double *par)
 ////////////////////////////////////////////////////////////////////////////////
 // doLocalPhiEtaFits(...)
 //
-//  1) Projects local-φ or local-η from h3 in slices of pT
-//  2) Overlays all 4 bins on one canvas => LocalPhiFits.png or LocalEtaFits.png
+//  1) Projects local-φ or local-η from h3 in slices of pT (here E-slices).
+//  2) Overlays all E-bins on one canvas => LocalPhiFits.png or LocalEtaFits.png
 //  3) If coord=phi, also does single‐bin overlays of raw vs corrected Δφ
-//  4) **Now** also produces a 2×2 table of each per‐bin local‐φ distribution
-//     with its best-fit, including pT range and b-parameter in the title.
+//  4) Finally, we produce a canvas with each bin's local‐φ distribution & fit.
+//
+// **Changed**: now it's a 4×2 canvas for 8 bins (instead of 2×2).
 ////////////////////////////////////////////////////////////////////////////////
 void doLocalPhiEtaFits(TH3F* h3,
-                       const double pT_bins_low[4],
-                       const double pT_bins_high[4],
+                       const double pT_bins_low[/*N_E*/],
+                       const double pT_bins_high[/*N_E*/],
                        std::ofstream& bResults,
                        const TString& outDirPhi)
 {
-  // We have exactly 4 pT bins:
-  const int N_PT = 4;
-
+  // We have N_E=8 bins
   // Ensure output directory exists
   gSystem->mkdir(outDirPhi, /*recursive=*/true);
 
@@ -407,9 +489,10 @@ void doLocalPhiEtaFits(TH3F* h3,
   eqLatex.SetTextSize(0.028);
   eqLatex.SetTextAlign(13);
 
-  // Style arrays for the 4 bins
-  int colors[N_PT]   = { kBlack, kRed+1, kBlue+1, kGreen+2 };
-  int markers[N_PT]  = {20, 20, 20, 20}; // all circles
+  // Style arrays for the bins
+  int colors[N_E]   = { kBlack, kRed+1, kBlue+1, kGreen+2,
+                        kMagenta+1, kOrange+2, kAzure+2, kSpring+9 };
+  int markers[N_E]  = {20, 20, 20, 20, 21, 21, 21, 21};
 
   // -------------------------------------------------------------------------
   // Helper lambda for the quadruple overlay
@@ -429,16 +512,16 @@ void doLocalPhiEtaFits(TH3F* h3,
       if (isPhi)
       {
         bResults << "\n# -- Now processing local phi fits --\n"
-                 << "# pTlow  pThigh  b_phi\n";
+                 << "# E_low  E_high  b_phi\n";
       }
       else
       {
         bResults << "\n# -- Now processing local eta fits --\n"
-                 << "# pTlow  pThigh  b_eta\n";
+                 << "# E_low  E_high  b_eta\n";
       }
     }
 
-    // 1) Create a canvas for the “quadruple overlay” of the 4 pT bins
+    // 1) Create a canvas for the “overlay” of all N_E=8 bins
     TCanvas cCoord(Form("cCoord_%s", coordName),
                    Form("Local %s distributions", coordName),
                    900, 700);
@@ -447,19 +530,19 @@ void doLocalPhiEtaFits(TH3F* h3,
     cCoord.SetBottomMargin(0.12);
     cCoord.cd();
 
-    TLegend leg(0.18, 0.68, 0.4, 0.88);
+    TLegend leg(0.18, 0.68, 0.55, 0.88);
     leg.SetBorderSize(0);
     leg.SetFillStyle(0);
     leg.SetTextSize(0.028);
 
     // We'll store the 1D projections and best-fit b-values
-    std::vector<TH1D*> hLocalVec(N_PT, nullptr);
-    std::vector<double> bestBvals(N_PT, 0.0);
+    std::vector<TH1D*> hLocalVec(N_E, nullptr);
+    std::vector<double> bestBvals(N_E, 0.0);
 
-    // 2) Loop over the 4 pT slices => single overlay
-    for(int i=0; i<N_PT; i++)
+    // 2) Loop over the 8 E-slices => single overlay
+    for(int i=0; i<N_E; i++)
     {
-      // Determine Z range for that pT slice
+      // Determine Z range for that E slice
       int zLo = h3->GetZaxis()->FindFixBin(pT_bins_low[i] + 1e-9);
       int zHi = h3->GetZaxis()->FindFixBin(pT_bins_high[i] - 1e-9);
       if(zLo < 1) zLo=1;
@@ -473,7 +556,7 @@ void doLocalPhiEtaFits(TH3F* h3,
       if(!hLocal)
       {
         std::cerr << "[WARNING] Could not project " << coordName
-                  << " for pT bin i=" << i << std::endl;
+                  << " for E bin i=" << i << std::endl;
         continue;
       }
       hLocalVec[i] = hLocal;
@@ -565,13 +648,13 @@ void doLocalPhiEtaFits(TH3F* h3,
       else
       {
         std::cerr << "[WARNING] No valid multi‐start fit for "
-                  << coordName << ", pT bin i=" << i
+                  << coordName << ", E bin i=" << i
                   << " => bVal=0.\n";
       }
       bestBvals[i] = bVal;
 
       // Legend entry
-      TString legEntry = Form("p_{T}=[%.1f,%.1f] GeV : b=%.3g",
+      TString legEntry = Form("E=[%.1f,%.1f] GeV : b=%.3g",
                               pT_bins_low[i], pT_bins_high[i], bVal);
       leg.AddEntry(hLocal, legEntry, "lp");
 
@@ -590,148 +673,203 @@ void doLocalPhiEtaFits(TH3F* h3,
     leg.Draw();
     eqLatex.DrawLatex(0.57, 0.82, eqString);
 
-    // Save that “quadruple overlay”
+    // Save that “overlay”
     TString mainOut = outDirPhi + "/" + outPNGname;
     cCoord.SaveAs(mainOut);
-    std::cout << "[INFO] Wrote quadruple-overlay " << coordName
+    std::cout << "[INFO] Wrote overlay " << coordName
               << " => " << mainOut << std::endl;
 
     // -----------------------------------------------------------------------
     // If it's local φ, also produce:
     //   (a) single‐bin overlay of raw vs. corrected Δφ
-    //   (b) a 2×2 table of each bin’s local‐φ distribution & asinh fit
+    //   (b) a **4×2** layout for 8 bin local‐φ distributions + asinh fits
     // -----------------------------------------------------------------------
     if (isPhi)
     {
-      //----------------------------------------------------------------------
-      // (a) Single‐bin overlay: raw vs corrected, if those histograms exist
-      //----------------------------------------------------------------------
-      for(int i=0; i<N_PT; i++)
-      {
-        double ptLo = pT_bins_low[i];
-        double ptHi = pT_bins_high[i];
-
-        // 1) Retrieve the RAW Δφ histogram
-        TString rawName = Form("h_phi_diff_raw_%.0f_%.0f", ptLo, ptHi);
-        TH1F* hRaw = dynamic_cast<TH1F*>(gROOT->FindObject(rawName));
-        if(!hRaw)
+        //----------------------------------------------------------------------
+        // (a) Single‐bin overlay: raw vs corrected, if those histograms exist
+        //----------------------------------------------------------------------
+        for(int i=0; i<N_E; i++)
         {
-          std::cerr << "[WARNING] No raw Δφ hist '" << rawName
-                    << "' => skip overlay for pT bin i=" << i << std::endl;
-          continue;
-        }
+            double ptLo = pT_bins_low[i];
+            double ptHi = pT_bins_high[i];
+            
+            // 1) Retrieve the RAW Δφ histogram
+            TString rawName = Form("h_phi_diff_raw_%.0f_%.0f", ptLo, ptHi);
+            TH1F* hRaw = dynamic_cast<TH1F*>(gROOT->FindObject(rawName));
+            if(!hRaw)
+            {
+                std::cerr << "[WARNING] No raw Δphi hist '" << rawName
+                          << "' => skip overlay for E bin i=" << i << std::endl;
+                continue;
+            }
+            
+            // 2) Retrieve the CORRECTED Δφ histogram
+            TString corrName = Form("h_phi_diff_corr_%.1f_%.1f", ptLo, ptHi);
+            TH1F* hCorr = dynamic_cast<TH1F*>(gROOT->FindObject(corrName));
+            if(!hCorr)
+            {
+                std::cerr << "[WARNING] No corrected Δphi hist '" << corrName
+                          << "' => skip overlay for E bin i=" << i << std::endl;
+                continue;
+            }
+            
+            // 3) Make a canvas & style each histogram
+            TString cName  = Form("cDeltaPhiCompare_%.1fto%.1f", ptLo, ptHi);
+            TString cTitle = Form("#Delta#phi overlay [%.1f < E < %.1f]",
+                                  ptLo, ptHi);
+            
+            TCanvas cSingle(cName, cTitle, 800, 600);
+            cSingle.SetLeftMargin(0.12);
+            cSingle.SetRightMargin(0.05);
+            cSingle.SetBottomMargin(0.12);
+            cSingle.cd();
+            
+            // Normalize each to area=1
+            double rInt = hRaw->Integral();
+            double cInt = hCorr->Integral();
+            if(rInt  > 1e-9) hRaw ->Scale(1./rInt);
+            if(cInt  > 1e-9) hCorr->Scale(1./cInt);
+            
+            // Style: raw in black
+            hRaw->SetLineColor(kBlack);
+            hRaw->SetMarkerColor(kBlack);
+            hRaw->SetMarkerStyle(20);
+            hRaw->SetMarkerSize(1);
+            hRaw->SetTitle(cTitle);
+            hRaw->GetXaxis()->SetTitle("#Delta#phi (reco - truth) [radians]");
+            hRaw->GetYaxis()->SetTitle("counts (normalized)");
+            hRaw->GetYaxis()->SetTitleOffset(1.2);
+            
+            // corrected in red
+            hCorr->SetLineColor(kRed);
+            hCorr->SetMarkerColor(kRed);
+            hCorr->SetMarkerStyle(21);
+            hCorr->SetMarkerSize(1);
+            
+            // 4) Draw them
+            hRaw->Draw("E");
+            double maxRaw  = hRaw->GetMaximum();
+            double maxCorr = hCorr->GetMaximum();
+            double newMax  = TMath::Max(maxRaw, maxCorr)*1.25;
+            hRaw->GetYaxis()->SetRangeUser(0, newMax);
+            
+            hCorr->Draw("SAME E");
+            
+            // 5) Add a legend
+            TLegend legSingle(0.55, 0.70, 0.85, 0.85);
+            legSingle.SetBorderSize(0);
+            legSingle.SetFillStyle(0);
+            legSingle.SetTextSize(0.035);
+            
+            legSingle.AddEntry(hRaw,
+                               Form("Raw #Delta#phi (%.1f< E<%.1f)", ptLo, ptHi),
+                               "lp");
+            legSingle.AddEntry(hCorr,
+                               Form("Corrected #Delta#phi (%.1f< E<%.1f)", ptLo, ptHi),
+                               "lp");
+            legSingle.Draw();
+            
+            // 6) Save
+            TString singleOut = Form("%s/DeltaPhiCompare_%.1fto%.1f.png",
+                                     outDirPhi.Data(), ptLo, ptHi);
+            cSingle.SaveAs(singleOut);
+            
+            std::cout << "[INFO] Single-bin Δphi overlay E=["
+            << ptLo << "," << ptHi
+            << "] => " << singleOut << std::endl;
+        } // end loop over i
+        
+        //----------------------------------------------------------------------
+        // (b) A **4×2** canvas showing each bin's local‐φ distribution & best-fit,
+        //     possibly overlaying the corrected local‐φ projection
+        //----------------------------------------------------------------------
+        TCanvas c2by2("cLocalPhi4by2", "Local φ fits per E bin", 1600, 1000);
+        c2by2.Divide(4, 2);  // 4 columns, 2 rows = 8 pads
 
-        // 2) Retrieve the CORRECTED Δφ histogram
-        TString corrName = Form("h_phi_diff_corr_%.1f_%.1f", ptLo, ptHi);
-        TH1F* hCorr = dynamic_cast<TH1F*>(gROOT->FindObject(corrName));
-        if(!hCorr)
+        // Attempt to retrieve the corrected TH3
+        TH3F* h3corr = dynamic_cast<TH3F*>(gROOT->FindObject("h2_cluster_block_cord_E_corrected"));
+        if(!h3corr)
         {
-          std::cerr << "[WARNING] No corrected Δφ hist '" << corrName
-                    << "' => skip overlay for pT bin i=" << i << std::endl;
-          continue;
+            std::cout << "[WARNING] 'h2_cluster_block_cord_E_corrected' not found; no overlay.\n";
         }
+        
+        for (int i=0; i<N_E; i++)
+        {
+            c2by2.cd(i+1);
+            // from the big overlay
+            TH1D* histLocal = hLocalVec[i];
+            if (!histLocal) continue;  // skip if empty
+            
+            // Put E range + b param in the title
+            double bVal = 0.0;
+            TF1* bf = dynamic_cast<TF1*>(
+                       histLocal->GetListOfFunctions()->FindObject(
+                         Form("bestFunc_phi_%d", i)
+                       )
+                     );
+            if(bf) bVal = bf->GetParameter(1);
 
-        // 3) Make a canvas & style each histogram
-        TString cName  = Form("cDeltaPhiCompare_%.1fto%.1f", ptLo, ptHi);
-        TString cTitle = Form("#Delta#phi overlay [%.1f < p_{T} < %.1f]",
-                              ptLo, ptHi);
-
-        TCanvas cSingle(cName, cTitle, 800, 600);
-        cSingle.SetLeftMargin(0.12);
-        cSingle.SetRightMargin(0.05);
-        cSingle.SetBottomMargin(0.12);
-        cSingle.cd();
-
-        // Normalize each to area=1
-        double rInt = hRaw->Integral();
-        double cInt = hCorr->Integral();
-        if(rInt  > 1e-9) hRaw ->Scale(1./rInt);
-        if(cInt  > 1e-9) hCorr->Scale(1./cInt);
-
-        // Style: raw in black
-        hRaw->SetLineColor(kBlack);
-        hRaw->SetMarkerColor(kBlack);
-        hRaw->SetMarkerStyle(20);
-        hRaw->SetMarkerSize(1);
-        hRaw->SetTitle(cTitle);
-        hRaw->GetXaxis()->SetTitle("#Delta#phi (reco - truth) [radians]");
-        hRaw->GetYaxis()->SetTitle("counts (normalized)");
-        hRaw->GetYaxis()->SetTitleOffset(1.2);
-
-        // corrected in red
-        hCorr->SetLineColor(kRed);
-        hCorr->SetMarkerColor(kRed);
-        hCorr->SetMarkerStyle(21);
-        hCorr->SetMarkerSize(1);
-
-        // 4) Draw them
-        hRaw->Draw("E");
-        double maxRaw  = hRaw->GetMaximum();
-        double maxCorr = hCorr->GetMaximum();
-        double newMax  = TMath::Max(maxRaw, maxCorr)*1.25;
-        hRaw->GetYaxis()->SetRangeUser(0, newMax);
-
-        hCorr->Draw("SAME E");
-
-        // 5) Add a legend
-        TLegend legSingle(0.55, 0.70, 0.85, 0.85);
-        legSingle.SetBorderSize(0);
-        legSingle.SetFillStyle(0);
-        legSingle.SetTextSize(0.035);
-
-        legSingle.AddEntry(hRaw,
-            Form("Raw #Delta#phi (%.1f< p_{T}<%.1f)", ptLo, ptHi),
-            "lp");
-        legSingle.AddEntry(hCorr,
-            Form("Corrected #Delta#phi (%.1f< p_{T}<%.1f)", ptLo, ptHi),
-            "lp");
-        legSingle.Draw();
-
-        // 6) Save
-        TString singleOut = Form("%s/DeltaPhiCompare_%.1fto%.1f.png",
-                                 outDirPhi.Data(), ptLo, ptHi);
-        cSingle.SaveAs(singleOut);
-
-        std::cout << "[INFO] Single-bin Δphi overlay pT=["
-                  << ptLo << "," << ptHi
-                  << "] => " << singleOut << std::endl;
-      } // end loop over i
-
-      //----------------------------------------------------------------------
-      // (b) A 2×2 canvas showing each bin's local‐φ distribution & best-fit
-      //----------------------------------------------------------------------
-      TCanvas c2by2("cLocalPhi2by2", "Local φ fits per pT bin", 1000, 800);
-      c2by2.Divide(2, 2);
-
-      for (int i=0; i<N_PT; i++)
-      {
-        c2by2.cd(i+1);
-        TH1D* histLocal = hLocalVec[i];
-        if (!histLocal) continue;  // skip if empty
-
-        // Put pT range + b param in the title
-        double bVal = bestBvals[i];
-        TString binTitle = Form("Local #phi: p_{T}=[%.1f,%.1f], b=%.3g",
-                                pT_bins_low[i], pT_bins_high[i], bVal);
-        histLocal->SetTitle(binTitle);
-        histLocal->GetXaxis()->SetTitle(xTitle);
-        histLocal->GetYaxis()->SetTitle("counts (normalized)");
-        histLocal->Draw("E");
-
-        // Overlay the best fit if it exists
-        TF1* bestF = dynamic_cast<TF1*>(
-          histLocal->GetListOfFunctions()->FindObject(
-            Form("bestFunc_%s_%d", coordName, i)
-          )
-        );
-        if(bestF) bestF->Draw("SAME");
-      }
-
-      // Save the 2×2 layout
-      TString out2by2 = outDirPhi + "/LocalPhiFits_2by2.png";
-      c2by2.SaveAs(out2by2);
-      std::cout << "[INFO] Wrote 2×2 local φ bin-by-bin fits => "
-                << out2by2 << std::endl;
+            TString binTitle = Form("Local #phi: E=[%.1f,%.1f], b=%.3g",
+                                    pT_bins_low[i], pT_bins_high[i], bVal);
+            histLocal->SetTitle(binTitle);
+            histLocal->GetXaxis()->SetTitle("local #phi_{CG}");
+            histLocal->GetYaxis()->SetTitle("counts (normalized)");
+            histLocal->Draw("E");
+            
+            // Overlay the best function
+            if(bf) bf->Draw("SAME");
+            
+            //-------------------------------------------------------------
+            // Overlap the corrected local-φ from h3corr, if present
+            //-------------------------------------------------------------
+            if (h3corr)
+            {
+                // Define the pT bin range
+                int zLoCorr = h3corr->GetZaxis()->FindFixBin(pT_bins_low[i] + 1e-9);
+                int zHiCorr = h3corr->GetZaxis()->FindFixBin(pT_bins_high[i] - 1e-9);
+                if(zLoCorr < 1) zLoCorr=1;
+                if(zHiCorr> h3corr->GetNbinsZ()) zHiCorr= h3corr->GetNbinsZ();
+                
+                // Project in the φ dimension => "y"
+                h3corr->GetXaxis()->SetRange(1, h3corr->GetNbinsX());
+                h3corr->GetZaxis()->SetRange(zLoCorr, zHiCorr);
+                
+                TH1D* hCorrLocal = (TH1D*) h3corr->Project3D("y");
+                if (hCorrLocal)
+                {
+                    double integC = hCorrLocal->Integral();
+                    if (integC > 1e-9) hCorrLocal->Scale(1./integC);
+                    
+                    hCorrLocal->SetLineColor(kMagenta+1);
+                    hCorrLocal->SetMarkerColor(kMagenta+1);
+                    hCorrLocal->SetMarkerStyle(25);
+                    hCorrLocal->SetMarkerSize(1.0);
+                    hCorrLocal->SetTitle("");
+                    
+                    hCorrLocal->Draw("SAME E");
+                    
+                    // Possibly add a small local legend
+                    TLegend legCorr(0.50, 0.65, 0.88, 0.82);
+                    legCorr.SetBorderSize(0);
+                    legCorr.SetFillStyle(0);
+                    legCorr.SetTextSize(0.035);
+                    legCorr.AddEntry(histLocal, "Uncorrected", "lp");
+                    legCorr.AddEntry(hCorrLocal, "Corrected", "lp");
+                    legCorr.Draw("SAME");
+                }
+                else
+                {
+                    std::cout << "[WARNING] Could not project corrected local-φ for bin " << i << std::endl;
+                }
+            } // end if(h3corr)
+        }
+        
+        // Save the 4×2 layout
+        TString out2by2 = outDirPhi + "/LocalPhiFits_4by2.png";
+        c2by2.SaveAs(out2by2);
+        std::cout << "[INFO] Wrote 4×2 local φ bin-by-bin fits => "
+        << out2by2 << std::endl;
     }
 
   }; // end fitCoordAndMakePlot
@@ -759,153 +897,14 @@ void doLocalPhiEtaFits(TH3F* h3,
 
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// overlayUncorrCorrLocalPhi_noFits(...)
-////////////////////////////////////////////////////////////////////////////////
-//
-// Overlays the uncorrected vs corrected local-φ distributions from two TH3F
-// histograms, each shaped like (local-η binning, local-φ binning, pT binning).
-//
-// For each of the 4 pT bins, we:
-//   1) Project the uncorrected histogram in pT range [pT_lo, pT_hi] onto "y"
-//      (the local‐φ axis), producing TH1D hUnc.
-//   2) Project the corrected histogram in the same pT range, producing TH1D hCorr.
-//   3) Normalize each, overlay them on the same pad.
-//   4) Add a legend labeling “Uncorrected” vs “Corrected” + pT range in the title.
-//
-// We then produce a single TCanvas with a 2×2 layout (one pad per pT bin) and
-// save it to the specified “outPNG” file.
-//
-// NOTE: This version does *no fits*, so no b-parameters are computed or displayed.
-//
-////////////////////////////////////////////////////////////////////////////////
-void overlayUncorrCorrLocalPhi_noFits(
-    TH3F* h3_uncorr,
-    TH3F* h3_corr,
-    const double pT_low[4],
-    const double pT_high[4],
-    const TString& outPNG
-)
-{
-  // Basic checks
-  if(!h3_uncorr || !h3_corr)
-  {
-    std::cerr << "[ERROR] overlayUncorrCorrLocalPhi_noFits: null histogram pointer.\n";
-    return;
-  }
-
-  // We'll produce a 2×2 TCanvas for four pT bins
-  TCanvas c2by2("cLocalPhiUncorrCorr","Local #phi Overlay: Uncorr vs Corr",1200,1000);
-  c2by2.Divide(2,2);
-
-  // We assume exactly 4 pT bins
-  const int N_BINS = 4;
-
-  // For each pT bin => fill one pad
-  for(int i=0; i<N_BINS; i++)
-  {
-    c2by2.cd(i+1);
-
-    // pT range
-    double pTlo = pT_low[i];
-    double pThi = pT_high[i];
-
-    //----------------------------------------------------------------------
-    // (A) Project UNCORRECTED in that pT range
-    //----------------------------------------------------------------------
-    // 1) set the Z axis range for pT in [pTlo, pThi]
-    int zLo = h3_uncorr->GetZaxis()->FindFixBin(pTlo + 1e-9);
-    int zHi = h3_uncorr->GetZaxis()->FindFixBin(pThi - 1e-9);
-    if(zLo < 1) zLo = 1;
-    if(zHi > h3_uncorr->GetNbinsZ()) zHi = h3_uncorr->GetNbinsZ();
-    h3_uncorr->GetZaxis()->SetRange(zLo, zHi);
-
-    // 2) Project onto "y" => local φ
-    TH1D* hUnc = (TH1D*) h3_uncorr->Project3D("y");
-    if(!hUnc)
-    {
-      std::cerr << "[WARN] No uncorrected projection for pT bin " << i
-                << " => skip.\n";
-      continue;
-    }
-
-    // Normalize
-    double intUnc = hUnc->Integral();
-    if(intUnc > 1e-9) hUnc->Scale(1./intUnc);
-
-    // Style
-    hUnc->SetName( Form("hUnc_phi_ptBin%d", i) );
-    hUnc->SetLineColor(kBlue+1);
-    hUnc->SetMarkerColor(kBlue+1);
-    hUnc->SetMarkerStyle(20);
-    hUnc->SetMarkerSize(1);
-    hUnc->SetTitle( Form("Local #phi: p_{T}=[%.1f,%.1f]", pTlo, pThi) );
-    hUnc->GetXaxis()->SetTitle("local #phi");
-    hUnc->GetYaxis()->SetTitle("counts (normalized)");
-
-    // Draw first
-    hUnc->Draw("E");
-    double maxUnc = hUnc->GetMaximum();
-    hUnc->GetYaxis()->SetRangeUser(0, 1.2 * maxUnc);
-
-    //----------------------------------------------------------------------
-    // (B) Project CORRECTED in the same pT range
-    //----------------------------------------------------------------------
-    zLo = h3_corr->GetZaxis()->FindFixBin(pTlo + 1e-9);
-    zHi = h3_corr->GetZaxis()->FindFixBin(pThi - 1e-9);
-    if(zLo < 1) zLo=1;
-    if(zHi > h3_corr->GetNbinsZ()) zHi= h3_corr->GetNbinsZ();
-    h3_corr->GetZaxis()->SetRange(zLo, zHi);
-
-    TH1D* hCorr = (TH1D*) h3_corr->Project3D("y");
-    if(!hCorr)
-    {
-      std::cerr << "[WARN] No corrected projection for pT bin " << i
-                << " => skipping.\n";
-      continue;
-    }
-
-    // Normalize
-    double intCorr = hCorr->Integral();
-    if(intCorr > 1e-9) hCorr->Scale(1./intCorr);
-
-    // Style
-    hCorr->SetName( Form("hCorr_phi_ptBin%d", i) );
-    hCorr->SetLineColor(kRed);
-    hCorr->SetMarkerColor(kRed);
-    hCorr->SetMarkerStyle(21);
-    hCorr->SetMarkerSize(1);
-
-    // Overdraw
-    hCorr->Draw("SAME E");
-
-    //----------------------------------------------------------------------
-    // (C) Legend
-    //----------------------------------------------------------------------
-    TLegend leg(0.50, 0.65, 0.88, 0.85);
-    leg.SetBorderSize(0);
-    leg.SetFillStyle(0);
-    leg.AddEntry(hUnc, "Uncorrected", "lp");
-    leg.AddEntry(hCorr,"Corrected",   "lp");
-    leg.Draw();
-  }
-
-  //----------------------------------------------------------------------
-  // Save the 2×2 layout
-  //----------------------------------------------------------------------
-  c2by2.SaveAs(outPNG);
-  std::cout << "[INFO] overlayUncorrCorrLocalPhi_noFits => wrote 2×2 overlay to "
-            << outPNG << std::endl;
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // PDCanalysis()
 //
 //  1) Lists all histograms (like the original code).
-//  2) Makes a 2D block-eta vs block-phi plot from h2_cluster_block_cord_pt
-//  3) Makes local-phi distributions for pT slices [2,4], [4,6], [6,8],
-//     fits them, and records b-values.
+//  2) Makes a 2D block-eta vs block-phi plot from h2_cluster_block_cord_E
+//  3) Makes local-phi distributions for E slices [2,4], [4,6], [6,8], [8,10],
+//     [10,12], [12,15], [15,20], [20,30], fits them, and records b-values.
 //  4) Finally, saves *every* histogram as a PNG in:
 //       /Users/.../SimOutput/allHistOutput
 ////////////////////////////////////////////////////////////////////////////////
@@ -965,13 +964,13 @@ void PDCanalysis()
   std::cout << "[INFO] Finished listing histograms.\n" << std::endl;
 
   ///////////////////////////////////////////////////////////////////////
-  // 2) Grab the 3D histogram for block coords vs pT
+  // 2) Grab the 3D histogram for block coords vs E
   ///////////////////////////////////////////////////////////////////////
-  TH3F* h3 = (TH3F*) f->Get("h2_cluster_block_cord_pt");
+  TH3F* h3 = (TH3F*) f->Get("h2_cluster_block_cord_E");
     
   if(!h3)
   {
-    std::cerr << "[ERROR] 'h2_cluster_block_cord_pt' not found => can't do block-eta vs. block-phi.\n";
+    std::cerr << "[ERROR] 'h2_cluster_block_cord_E' not found => can't do block-eta vs. block-phi.\n";
     f->Close(); delete f;
     return;
   }
@@ -989,10 +988,10 @@ void PDCanalysis()
   gSystem->mkdir(outDirAll, true);
 
   ///////////////////////////////////////////////////////////////////////
-  // 3) Create 2D plot from h3 by integrating over entire pT
+  // 3) Create 2D plot from h3 by integrating over entire E
   ///////////////////////////////////////////////////////////////////////
     {
-      // First, restore the Z-axis range to include all pT
+      // First, restore the Z-axis range to include all E
       h3->GetZaxis()->SetRange(1, h3->GetNbinsZ());
       TH2F* h2_block2D = (TH2F*) h3->Project3D("xy");
       h2_block2D->SetName("h2_blockCoord2D");
@@ -1007,19 +1006,19 @@ void PDCanalysis()
       h2_block2D->Draw("COLZ");
 
       c2d.SaveAs(outDir2D + "/BlockEtaPhi_2D.png");
-      std::cout << "[INFO] Wrote 2D block-eta vs block-phi (all pT) => "
+      std::cout << "[INFO] Wrote 2D block-eta vs block-phi (all E) => "
                 << (outDir2D + "/BlockEtaPhi_2D.png") << std::endl;
     }
 
     ///////////////////////////////////////////////////////////////////
-    // 3b) Also produce 2D plots for each pT slice [2,4], [4,6], [6,8]
+    // 3b) Also produce 2D plots for each E slice
     ///////////////////////////////////////////////////////////////////
     {
-      for(int i=0; i<N_PT; i++)
+      for(int i=0; i<N_E; i++)
       {
-        // Determine Z-range in the 3D histogram (pT axis)
-        int zLo = h3->GetZaxis()->FindFixBin( pTedges[i] + 1e-9 );
-        int zHi = h3->GetZaxis()->FindFixBin( pTedges[i+1] - 1e-9 );
+        // Determine Z-range in the 3D histogram (E axis)
+        int zLo = h3->GetZaxis()->FindFixBin( E_edges[i] + 1e-9 );
+        int zHi = h3->GetZaxis()->FindFixBin( E_edges[i+1] - 1e-9 );
         if(zLo < 1) zLo = 1;
         if(zHi > h3->GetNbinsZ()) zHi = h3->GetNbinsZ();
 
@@ -1028,13 +1027,13 @@ void PDCanalysis()
         TH2F* h2_slice = (TH2F*) h3->Project3D("xy");
 
         // Name & title
-        h2_slice->SetName( Form("h2_blockCoord2D_pt%.0fto%.0f", pTedges[i], pTedges[i+1]) );
-        h2_slice->SetTitle( Form("Block #eta vs Block #phi (%.1f < p_{T} < %.1f);block #eta;block #phi",
-                                   pTedges[i], pTedges[i+1]) );
+        h2_slice->SetName( Form("h2_blockCoord2D_E%.0fto%.0f", E_edges[i], E_edges[i+1]) );
+        h2_slice->SetTitle( Form("Block #eta vs Block #phi (%.1f < E < %.1f);block #eta;block #phi",
+                                   E_edges[i], E_edges[i+1]) );
 
         // Draw
-        TCanvas c2dSlice( Form("c2d_pt%.0fto%.0f", pTedges[i], pTedges[i+1]),
-                            "Block Eta-Phi (pT slice)", 900, 700);
+        TCanvas c2dSlice( Form("c2d_E%.0fto%.0f", E_edges[i], E_edges[i+1]),
+                          "Block Eta-Phi (E slice)", 900, 700);
         c2dSlice.SetLeftMargin(0.12);
         c2dSlice.SetRightMargin(0.15);
         c2dSlice.SetBottomMargin(0.12);
@@ -1043,18 +1042,18 @@ void PDCanalysis()
         h2_slice->Draw("COLZ");
 
         // Save a PNG for each slice
-        TString outName = Form("/BlockEtaPhi_2D_pt%.0fto%.0f.png",
-                                 pTedges[i], pTedges[i+1]);
+        TString outName = Form("/BlockEtaPhi_2D_E%.0fto%.0f.png",
+                               E_edges[i], E_edges[i+1]);
         c2dSlice.SaveAs(outDir2D + outName);
 
         std::cout << "[INFO] Wrote 2D block-eta vs block-phi => "
                   << (outDir2D + outName)
-                  << " for pT=[" << pTedges[i] << ", " << pTedges[i+1] << "]" << std::endl;
+                  << " for E=[" << E_edges[i] << ", " << E_edges[i+1] << "]" << std::endl;
       }
     }
 
   ///////////////////////////////////////////////////////////////////////
-  // 4) Local φ slices in pT bins => do 1D projections, fits
+  // 4) Local φ slices in E bins => do 1D projections, fits
   ///////////////////////////////////////////////////////////////////////
 
   // We'll record b-values to a text file
@@ -1062,13 +1061,13 @@ void PDCanalysis()
   if(!bResults.is_open()) {
     std::cerr << "[WARNING] Could not open bValues.txt for writing.\n";
   } else {
-    bResults << "# pTlow  pThigh   bValue\n";
+    bResults << "# E_low  E_high   bValue\n";
   }
 
-  double pT_bins_low[4], pT_bins_high[4];
-  for(int j=0; j<4; j++){
-      pT_bins_low[j]  = pTedges[j];
-      pT_bins_high[j] = pTedges[j+1];
+  double pT_bins_low[N_E], pT_bins_high[N_E];
+  for(int j=0; j<N_E; j++){
+      pT_bins_low[j]  = E_edges[j];
+      pT_bins_high[j] = E_edges[j+1];
   }
   doLocalPhiEtaFits(h3, pT_bins_low, pT_bins_high, bResults, outDirPhi);
     
@@ -1082,10 +1081,6 @@ void PDCanalysis()
 
   ///////////////////////////////////////////////////////////////////////
   // 5) Save *every* histogram in the file as a PNG in /allHistOutput/
-  //
-  //    We'll do a second iteration over keys, create a TCanvas,
-  //    draw the histogram, and SaveAs(...). We'll do some minimal
-  //    logic to handle TH1 vs TH2 vs TH3 vs TProfile.
   ///////////////////////////////////////////////////////////////////////
   std::cout << "\n[INFO] Now saving *every* histogram as a PNG => " << outDirAll << std::endl;
 
@@ -1115,17 +1110,11 @@ void PDCanalysis()
     ctemp.SetBottomMargin(0.12);
 
     // Decide how to draw
-    //   TH2 => "COLZ"
-    //   TH3 => "BOX" or skip
-    //   TProfile => normal "E1"
-    //   TH1 => normal "E"
-    //   We'll keep it simple
     if( htmp->InheritsFrom("TH2") ) {
       htmp->Draw("COLZ");
     }
     else if(htmp->InheritsFrom("TH3")) {
       // 3D is tricky to visualize. We'll do "BOX".
-      // Or skip if you prefer. We'll just do BOX.
       htmp->Draw("BOX");
     }
     else if(htmp->InheritsFrom("TProfile")) {
@@ -1137,47 +1126,12 @@ void PDCanalysis()
     }
 
     ctemp.SaveAs(outPNG);
-    // cleanup
     delete htmp;
   }
+
+  // Finally call the side‐by‐side RMS vs b/w0
   plotAshLogRMS_sideBySide(filename);
 
-    ////////////////////////////////////////////
-    // (X) Overlays: uncorrected vs. corrected
-    ////////////////////////////////////////////
-    // 1) Retrieve both histograms from the file.
-    //    Suppose the uncorrected is "h2_cluster_block_cord_pt"
-    //    and the corrected is "h3_cluster_block_cord_corr_pt".
-    //    Make sure these names match the ones in your code!
-    TH3F* h3_uncorr = dynamic_cast<TH3F*>( f->Get("h2_cluster_block_cord_pt") );
-    TH3F* h3_corr   = dynamic_cast<TH3F*>( f->Get("h3_cluster_block_cord_corr_pt") );
-    if(!h3_uncorr || !h3_corr)
-    {
-      std::cerr << "[WARNING] Could not retrieve uncorrected or corrected TH3F. Skipping overlay." << std::endl;
-    }
-    else
-    {
-      // 2) Define four pT bins. For example:
-      double pT_low[4]  = {2.0,  4.0,  6.0,  8.0};
-      double pT_high[4] = {4.0,  6.0,  8.0, 12.0};
-
-      // 3) Decide the output PNG name
-      TString overlayPNG = baseDir + "/LocalPhi_Overlay_UncorrVsCorr_noFits.png";
-
-      // 4) Call the function (make sure you've #included or have it in scope)
-      overlayUncorrCorrLocalPhi_noFits(
-        h3_uncorr,    // uncorrected TH3F
-        h3_corr,      // corrected TH3F
-        pT_low,       // array of 4 low edges
-        pT_high,      // array of 4 high edges
-        overlayPNG    // output PNG
-      );
-
-      std::cout << "[INFO] Done overlaying uncorrected vs corrected local-phi distributions.\n"
-                << "       See: " << overlayPNG << std::endl;
-    }
-
-    
   ///////////////////////////////////////////////////////////////////////
   // 6) Done
   ///////////////////////////////////////////////////////////////////////

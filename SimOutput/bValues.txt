@@ -1,0 +1,11 @@
+# pTlow  pThigh   bValue
+
+# -- Now processing local phi fits --
+# pTlow  pThigh  b_phi
+2  4   0.171463
+4  6   0.169837
+6  8   0.169682
+8  10   0.168371
+
+# -- Now processing local eta fits --
+# pTlow  pThigh  b_eta

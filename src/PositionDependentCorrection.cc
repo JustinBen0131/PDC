@@ -12,7 +12,7 @@
 #include <array>
 #include <g4detectors/PHG4Cell.h>
 #include <g4detectors/PHG4CellContainer.h>
-
+#include <regex>
 // Tower includes
 #include <calobase/RawCluster.h>
 #include <calobase/RawClusterContainer.h>
@@ -86,11 +86,6 @@ R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 
 using namespace std;
 
-const double PositionDependentCorrection::ptEdge[PositionDependentCorrection::N_PT+1] =
-{
-    0.5, 0.75, 1.25, 2, 3
-};
-
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
                                                          const std::string &filename)
   : SubsysReco(name)
@@ -102,7 +97,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
   , clusterntuple(nullptr)
 {
   _eventcounter = 0;
-  _vz = 60.0;
+  _vz = 60.0;;
 }
 
 PositionDependentCorrection::~PositionDependentCorrection()
@@ -362,33 +357,22 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
     }
   }
 
-    // 1) Prepare arrays of edges for X and Y
-    //    We want 14 uniform bins in [−0.5..+1.5], so we build an array of length 15
-    static Double_t xedges[15], yedges[15];
-    for (int i = 0; i <= 14; i++)
-    {
-      xedges[i] = -0.5 + i * (2.0 / 14.0); // from -0.5 up to +1.5
-      yedges[i] = -0.5 + i * (2.0 / 14.0);
-    }
 
-    // 2) We already have pTedges for the Z axis
-    static const Double_t pTedges[5] = {0.5, 0.75, 1.25, 2.0, 3.0};
 
-    // 3) Create h3_cluster_block_cord_pt using the fully variable-bin constructor
-    h3_cluster_block_cord_pt = new TH3F(
-      "h2_cluster_block_cord_pt", "",
-      14, xedges,   // X dimension
-      14, yedges,   // Y dimension
-       4, pTedges   // Z dimension
+    h3_cluster_block_cord_E = new TH3F(
+        "h2_cluster_block_cord_E",
+        "Uncorrected local block coords vs. pT",
+        14, -0.5, 1.5,   // X
+        14, -0.5, 1.5,   // Y
+         5,  0.0, 10.0   // Z
     );
 
-    // 4) Create h3_cluster_block_cord_corr_pt in the same way
-    h3_cluster_block_cord_corr_pt = new TH3F(
-      "h3_cluster_block_cord_corr_pt",
-      "Corrected local block coords vs. pT",
-      14, xedges,
-      14, yedges,
-       4, pTedges
+    h3_cluster_block_cord_E_corrected = new TH3F(
+        "h2_cluster_block_cord_E_corrected",
+        "Corrected local block coords vs. pT",
+        14, -0.5, 1.5,   // X
+        14, -0.5, 1.5,   // Y
+         5,  0.0, 10.0   // Z
     );
   // h_block_bin:
   //   1D histogram that may be used to look at the block coordinate axis in discrete steps (0–1, or subdivided further).
@@ -397,29 +381,41 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
 
   // For measuring raw phi resolution
     // (A) Create the raw Δφ histograms for each pT bin
-  for (int i = 0; i < NPTBINS; i++)
+  for (int i = 0; i < N_Ebins; i++)
     {
-      float ptLo = ptEdge[i];
-      float ptHi = ptEdge[i+1];
-      h_phi_diff_raw_pt[i] = new TH1F(
-        Form("h_phi_diff_raw_%.0f_%.0f", ptLo, ptHi),  // histogram name
-        Form("#Delta#phi raw, %.0f < pT < %.0f", ptLo, ptHi),
+      float eLo = eEdge[i];
+      float eHi = eEdge[i+1];
+      h_phi_diff_raw_E[i] = new TH1F(
+        Form("h_phi_diff_raw_%.0f_%.0f", eLo, eHi),  // histogram name
+        Form("#Delta#phi raw, %.0f < pT < %.0f", eLo, eHi),
         200, -0.1, 0.1
+      );
+        
+      h_eta_diff_raw_E[i] = new TH1F(
+          Form("h_eta_diff_raw_%.1f_%.1f", eLo, eHi),
+          Form("#Delta#eta raw, %.1f < E < %.1f", eLo, eHi),
+          200, -0.1, 0.1
       );
   }
     
     // (B) Create the corrected Δφ histograms for each pT bin
-    for (int i = 0; i < NPTBINS; i++)
+    for (int i = 0; i < N_Ebins; i++)
     {
-      // Use your already-declared static member array ptEdge[]:
-      float ptLo = ptEdge[i];
-      float ptHi = ptEdge[i+1];
+      // Use your already-declared static member array eEdge[]:
+      float eLo = eEdge[i];
+      float eHi = eEdge[i+1];
 
-      // Now you have a properly named ptHi, so you can use it
-      h_phi_diff_corrected_pt[i] = new TH1F(
-        Form("h_phi_diff_corr_%.1f_%.1f", ptLo, ptHi),
-        Form("#Delta#phi corrected, %.1f < pT < %.1f", ptLo, ptHi),
+      // Now you have a properly named eHi, so you can use it
+      h_phi_diff_corrected_E[i] = new TH1F(
+        Form("h_phi_diff_corr_%.1f_%.1f", eLo, eHi),
+        Form("#Delta#phi corrected, %.1f < pT < %.1f", eLo, eHi),
         200, -0.1, 0.1
+      );
+        
+      h_eta_diff_corrected_E[i] = new TH1F(
+          Form("h_eta_diff_corr_%.1f_%.1f", eLo, eHi),
+          Form("#Delta#eta corrected, %.1f < E < %.1f", eLo, eHi),
+          200, -0.1, 0.1
       );
     }
 
@@ -429,178 +425,196 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   pr_phi_vs_blockcoord = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5, -0.2,0.2);
     
 
-    // GOOD: use ptEdge[i] and ptEdge[i+1]
-    for (int i = 0; i < NPTBINS; i++)
+    // GOOD: use eEdge[i] and eEdge[i+1]
+    for (int i = 0; i < N_Ebins; i++)
     {
-      // e.g. ptEdge[] = {2.0, 3.0, 5.0, 8.0, 12.0}
-      float ptLo = ptEdge[i];
-      float ptHi = ptEdge[i+1];
+      // e.g. eEdge[] = {2.0, 3.0, 5.0, 8.0, 12.0}
+      float eLo = eEdge[i];
+      float eHi = eEdge[i+1];
 
       h_localPhi_corrected[i] = new TH1F(
-        Form("h_localPhi_corrected_%.1f_%.1f", ptLo, ptHi),
-        Form("Corrected local #phi, %.1f < pT < %.1f", ptLo, ptHi),
+        Form("h_localPhi_corrected_%.1f_%.1f", eLo, eHi),
+        Form("Corrected local #phi, %.1f < E < %.1f", eLo, eHi),
         50, -0.5, 0.5
       );
+        
+     h_localEta_corrected[i] = new TH1F(
+          Form("h_localEta_corrected_%.1f_%.1f", eLo, eHi),
+          Form("Corrected local #eta, %.1f < E < %.1f", eLo, eHi),
+          50, -0.5, 0.5
+        );
     }
  
-
+    // ----------------------------------------------------------------------
+    //  Ash-b   and   Log-w0  trial grids  (energy-binned version, PHENIX-like)
+    // ----------------------------------------------------------------------
     {
-        // scan 0.05-0.60 in *cell units*, 0.01 step
-        const double bMin  = 0.05;   // 0.05 cell  ≈ 0.13 cm
-        const double bMax  = 0.60;   // 0.60 cell  ≈ 1.5 cm
-        const double bStep = 0.01;   // 0.01 cell  ≈ 0.025 cm
+      // Cell size at the EMCal front face (sPHENIX barrel)
+      constexpr double cellSize = 5.55;        // [cm]
 
-        const double w0Min  = 2.00;
-        const double w0Max  = 6.00;
-        const double w0Step = 0.10;
+      // ────────────────────────────────────────────────────────────────────
+      // 1) Ash scan – b parameter in *cm*  (0.00 – 1.60 cm, 0.05-cm grid)
+      // ────────────────────────────────────────────────────────────────────
+      m_bScan.clear();
+      for (double b_cm = 0.00; b_cm <= 1.60 + 1e-9; b_cm += 0.05)
+      {
+        const double b_cell = b_cm / cellSize;                 // convert → cell units
+        m_bScan.push_back( std::round(b_cell*10000.)/10000. ); // keep 4-dec precision
+      }
 
-        // Clear old vectors
-        m_bScan.clear();
-        m_w0Scan.clear();
+      // ────────────────────────────────────────────────────────────────────
+      // 2) Log-weight scan – w0 parameter (1.5 – 7.0 in 0.10 increments)
+      // ────────────────────────────────────────────────────────────────────
+      m_w0Scan.clear();
+      for (double w0 = 1.5; w0 <= 7.0 + 1e-9; w0 += 0.10)
+        m_w0Scan.push_back( std::round(w0*100.)/100. );        // 2-dec precision
 
-        // 1) Fill b‐scan values
+      // ────────────────────────────────────────────────────────────────────
+      // 3) Declare the (E-slice dependent) histograms ONCE
+      // ────────────────────────────────────────────────────────────────────
+      if (!alreadyDeclaredHistograms)
+      {
+        for (int iE = 0; iE < N_Ebins; ++iE)          // ← energy-bin loop
         {
-          int nb = static_cast<int>( std::round( (bMax - bMin)/bStep ) );
-          for (int ib = 0; ib <= nb; ++ib)
+          // 3a)  Ash  (b scan)
+          for (double bVal : m_bScan)
           {
-            double val = bMin + ib*bStep;
-            // Snap to 3 decimals
-            val = std::floor(val*1000. + 0.5)/1000.;
-            m_bScan.push_back(val);
+            const TString hName =
+              Form("h_dx_ash_b%.4f_E%d", bVal, iE);   // **** four decimals ****
+            auto h = new TH1F(hName,
+                              ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                              80, -4, 4);
+            hm->registerHisto(h);
+          }
+
+          // 3b)  Log  (w0 scan)
+          for (double w0 : m_w0Scan)
+          {
+            const TString hName =
+              Form("h_dx_log_w0%.2f_E%d", w0, iE);
+            auto h = new TH1F(hName,
+                              ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                              80, -4, 4);
+            hm->registerHisto(h);
           }
         }
-
-        // 2) Fill w0‐scan values
-        {
-          int nw = static_cast<int>( std::round( (w0Max - w0Min)/w0Step ) );
-          for (int iw = 0; iw <= nw; ++iw)
-          {
-            double val = w0Min + iw*w0Step;
-            // Snap to 2 decimals
-            val = std::floor(val*100. + 0.5)/100.;
-            m_w0Scan.push_back(val);
-          }
-        }
-
-        const int N_B = m_bScan.size();
-        const int N_W = m_w0Scan.size();
-
-        // Make sure we only declare histograms once
-        if (!alreadyDeclaredHistograms)
-        {
-          for (int ipt = 0; ipt < N_PT; ++ipt)
-          {
-            // ---------- Ash approach ----------
-            for (int ib = 0; ib < N_B; ++ib)
-            {
-              double bVal = m_bScan[ib];
-
-              // name example: "h_dx_ash_b0.300_pt0"
-              TString hname = Form("h_dx_ash_b%.3f_pt%d", bVal, ipt);
-              TH1F* hAsh = new TH1F(hname,
-                                    Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
-                                    80, -4, 4 );
-              hm->registerHisto(hAsh);
-            }
-
-            // ---------- Log‐weight approach ----------
-            for (int iw = 0; iw < N_W; ++iw)
-            {
-              double w0Val = m_w0Scan[iw];
-
-              // name example: "h_dx_log_w05.70_pt2"
-              TString hname = Form("h_dx_log_w0%.2f_pt%d", w0Val, ipt);
-              TH1F* hLog = new TH1F(hname,
-                                    Form("%s; x_{reco}-x_{true}; counts", hname.Data()),
-                                    80, -4, 4 );
-              hm->registerHisto(hLog);
-            }
-          }
-          alreadyDeclaredHistograms = true;
-        }
+        alreadyDeclaredHistograms = true;
+      }
     }
 
 
   rnd = new TRandom3();
-    
-    // Try reading bValues.txt
+    //--------------------------------------------------------------------
+    //  b-value reader   (general-N_Ebins version)
+    //--------------------------------------------------------------------
     {
-      const std::string bFilePath = "/sphenix/u/patsfan753/scratch/PDCrun24pp/bParameters/bValues.txt";
-      std::ifstream bfile(bFilePath.c_str());
-      if (!bfile.is_open())
+      /*--------------------------------------------------------------*/
+      /* 0)  First check whether the user even asked for the fit.      */
+      /*--------------------------------------------------------------*/
+      if (!isFitDoneForPhi && !isFitDoneForEta)
       {
-        // Not found => no correction
-        std::cout << "[INFO] bValues.txt NOT found at: " << bFilePath
-                  << " => will NOT apply phi correction." << std::endl;
-        isFitDoneForB = false;
+        std::cout << "[INFO]   isFitDoneForPhi && isFitDoneForEta are both false ⇒ "
+                     "skip reading bValues.txt\n";
+        /* keep the two flags false and return */
       }
       else
       {
-        std::cout << "[INFO] Found " << bFilePath << "; reading b-values for correction." << std::endl;
+        const std::string bFilePath =
+            "/sphenix/u/patsfan753/scratch/PDCrun24pp/bParameters/bValues.txt";
 
-        // The 4 pT ranges you expect
-        const float expectedLo[4] = {2.0, 3.0, 5.0, 8.0};
-        const float expectedHi[4] = {3.0, 5.0, 8.0, 12.0};
-
-        // Keep track of which bins we have found
-        bool gotBin[4] = {false, false, false, false};
-
-        // Prepare to read lines
-        std::string line;
-        while (std::getline(bfile, line))
+        std::ifstream bfile(bFilePath);
+        if (!bfile.is_open())
         {
-          if (line.empty() || line[0] == '#') continue; // skip empty or comment lines
-
-          std::istringstream iss(line);
-          float ptLo, ptHi, bVal;
-          if (!(iss >> ptLo >> ptHi >> bVal))
-          {
-            // parse fail => skip
-            continue;
-          }
-
-          // Attempt to match each expected bin
-          for (int i = 0; i < 4; i++)
-          {
-            // If exact equality is safe, do (ptLo == expectedLo[i]) etc.
-            // Or if worried about floating precision, do something like:
-            auto closeEnough = [](float a, float b) {
-              return std::fabs(a - b) < 1e-5;
-            };
-
-            // Check if this line’s pT range matches the i-th bin
-            if ( closeEnough(ptLo, expectedLo[i]) &&
-                 closeEnough(ptHi, expectedHi[i]) )
-            {
-              m_bVals[i] = bVal;    // store bVal
-              gotBin[i]   = true;   // mark found
-              break; // Stop checking the other bins
-            }
-          }
-        } // end while reading lines
-
-        bfile.close();
-
-        // Now see if we got *all* 4 bins
-        bool allFound = (gotBin[0] && gotBin[1] && gotBin[2] && gotBin[3]);
-        if (allFound)
-        {
-          isFitDoneForB = true;
-          std::cout << "[INFO] Successfully parsed b-values for all 4 bins:\n"
-                    << "       [2,3] : " << m_bVals[0] << "\n"
-                    << "       [3,5] : " << m_bVals[1] << "\n"
-                    << "       [5,8] : " << m_bVals[2] << "\n"
-                    << "       [8,12]: " << m_bVals[3] << "\n";
+          std::cout << "[WARN]  bValues.txt NOT found at " << bFilePath
+                    << "  ➜  disabling φ- and η-corrections.\n";
+          isFitDoneForPhi = false;
+          isFitDoneForEta = false;
         }
         else
         {
-          // Not enough lines matched => no correction
-          isFitDoneForB = false;
-          std::cout << "[WARNING] bValues.txt found but did NOT have the 4 needed lines.\n"
-                    << "          => no phi correction.\n";
-        }
-      }
-    } // end reading bValues.txt
+          std::cout << "[INFO]  Reading b-values from " << bFilePath << '\n';
+
+          /*----------------------------------------------------------*/
+          /* 1)  Local book-keeping                                   */
+          /*----------------------------------------------------------*/
+          std::vector<bool> gotBinPhi(N_Ebins,false);
+          std::vector<bool> gotBinEta(N_Ebins,false);
+
+          /*  PHI [2,4) 0.123  or  ETA [10,12) 0.456  */
+          const std::regex lineRe(
+            R"(^\s*(PHI|ETA)\s*\[\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)\s*([0-9]*\.?[0-9]+)\s*$)"
+          );
+
+          std::string line;
+          while (std::getline(bfile,line))
+          {
+            if (line.empty() || line[0]=='#') continue;
+
+            std::smatch m;
+            if (!std::regex_match(line,m,lineRe)) continue;
+
+            const std::string dim = m[1];
+            const float  eLo = std::stof(m[2]);
+            const float  eHi = std::stof(m[3]);
+            const float  bVal= std::stof(m[4]);
+
+            /* find matching energy slice */
+            for (int i=0;i<N_Ebins;++i)
+            {
+              if (std::fabs(eLo-expectedLo[i])<1e-3 &&
+                  std::fabs(eHi-expectedHi[i])<1e-3)
+              {
+                if (dim=="PHI")
+                {
+                  m_bValsPhi[i] = bVal;
+                  gotBinPhi[i]  = true;
+                } else {
+                  m_bValsEta[i] = bVal;
+                  gotBinEta[i]  = true;
+                }
+                break;
+              }
+            }
+          } // while getline
+          bfile.close();
+
+          /*----------------------------------------------------------*/
+          /* 2)  Decide whether we have a complete set                */
+          /*----------------------------------------------------------*/
+          const bool allPhi = std::all_of(gotBinPhi.begin(),gotBinPhi.end(),
+                                          [](bool x){return x;});
+          const bool allEta = std::all_of(gotBinEta.begin(),gotBinEta.end(),
+                                          [](bool x){return x;});
+
+          isFitDoneForPhi &= allPhi;   // keep previous request, but veto if incomplete
+          isFitDoneForEta &= allEta;
+
+          /*----------------------------------------------------------*/
+          /* 3)  Print a slice-by-slice summary                       */
+          /*----------------------------------------------------------*/
+          auto printTable = [&](const char* tag,
+                                const std::vector<bool>& got,
+                                const float*  bArr,
+                                bool enabled)
+          {
+            std::cout << "[INFO]  " << tag << (enabled ? "  (enabled)\n"
+                                                       : "  (DISABLED — missing slices)\n");
+            for (int i=0;i<N_Ebins;++i)
+            {
+              std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i]
+                        << ")  : ";
+              if (got[i])
+                std::cout << bArr[i] << '\n';
+              else
+                std::cout << "-- missing --\n";
+            }
+          };
+
+          printTable("PHI b-values",gotBinPhi,m_bValsPhi,isFitDoneForPhi);
+          printTable("ETA b-values",gotBinEta,m_bValsEta,isFitDoneForEta);
+        } // file opened OK
+      }   // end “user asked for correction”
+    }
 
     
 
@@ -1004,10 +1018,6 @@ float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float bphi)
     std::cout << "  --> Applying the hyperbolic formula shift in [-0.5, +0.5] domain." << std::endl;
   }
 
-  // localPhi is the block coordinate in [0,1].
-  // Shift it to [-0.5,+0.5], apply the hyperbolic formula,
-  // shift back. It's basically the same logic as getBlockCordCorr but for phi only.
-
   float Xcg_phi = (localPhi < 0.5) ? localPhi : (localPhi - 1.0);
 
   TF1 finv("finv", "[0]*TMath::ASinH(2*x*sinh(1/(2*[0])))", -0.5, 0.5);
@@ -1024,6 +1034,22 @@ float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float bphi)
     std::cout << "PositionDependentCorrection::doPhiBlockCorr - END" << std::endl << std::endl;
   }
 
+  return corrected;
+}
+
+// Same logic for localEta => doEtaBlockCorr(...):
+float PositionDependentCorrection::doEtaBlockCorr(float localEta, float bEta)
+{
+  // SHIFT from [0..1] => [-0.5..+0.5]
+  float Xcg_eta = (localEta < 0.5f) ? localEta : (localEta - 1.f);
+
+  // asinh transform with parameter bEta
+  TF1 finv("finv_eta", "[0]*TMath::ASinH(2*x*sinh(1/(2*[0])))", -0.5, 0.5);
+  finv.SetParameter(0, bEta);
+  float t_eta = finv.Eval(Xcg_eta);
+
+  // SHIFT back to [0..1]
+  float corrected = (localEta < 0.5f) ? t_eta : (t_eta + 1.f);
   return corrected;
 }
 
@@ -1193,6 +1219,33 @@ float PositionDependentCorrection::convertBlockToGlobalPhi(int block_phi_bin, fl
 }
 
 
+// ----------------------------------------------------------------------------
+float PositionDependentCorrection::convertBlockToGlobalEta(int block_eta_bin,
+                                                           float localEta)
+{
+  // Each 2×2 “block” spans two towers in η.
+  const float coarseTowerEta  = block_eta_bin * 2.0f;          // tower index (0…95)
+  const float fullEtaIndex    = coarseTowerEta + localEta*2.0f; // fractional index
+
+  // Geometry constants for the sPHENIX EMCal barrel
+  constexpr float ETA_MIN      = -1.1f;          // lower edge of first tower
+  constexpr float TOWER_Deltaη = 2.2f / 96.0f;   // ≈ 0.0229167
+
+  // Map *tower index* → centre of that tower → pseudorapidity
+  const float globalEta = ETA_MIN + (fullEtaIndex + 0.5f)*TOWER_Deltaη;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "convertBlockToGlobalEta: blockEtaBin=" << block_eta_bin
+              << "  localEta=" << localEta
+              << "  ⇒ fullEtaIndex=" << fullEtaIndex
+              << "  ⇒ η=" << globalEta << std::endl;
+  }
+  return globalEta;
+}
+
+
+
 ////////////////////////////////////////////////////////////////////////
 // doAshShift(...)
 //    Minimal "ash" formula that parallels doPhiBlockCorr but is simpler.
@@ -1270,318 +1323,182 @@ float PositionDependentCorrection::doLogWeightCoord(const std::vector<int>& towe
 }
 
 
+//--------------------------------------------------------------------------
+//  Fill Δx  (Ash-b & Log-w0 scans) – verbose version
+//--------------------------------------------------------------------------
 void PositionDependentCorrection::fillAshLogDx(
-    RawCluster* cluster,               // pass in the cluster we are analyzing
-    const TLorentzVector& recoPhoton,
-    const TLorentzVector& truthPhoton,
-    const std::pair<float,float>& blockCord, // local block coords in [0,1]
-    int blockPhiBin,
-    const std::vector<int>& tower_phis,
-    const std::vector<float>& tower_energies
-)
+    RawCluster*                     cluster,
+    const TLorentzVector&           recoPhoton,
+    const TLorentzVector&           truthPhoton,
+    const std::pair<float,float>&   blockCord,   // local (η,φ)
+    int                             blockPhiBin,
+    const std::vector<int>&         tower_phis,
+    const std::vector<float>&       tower_energies )
 {
-  //====================================================================
-  // 0) Identify which pT slice the reco photon is in [2..12]
-  //====================================================================
-  float ptReco = recoPhoton.Pt();
-  int iPtSlice = -1;
+  //======================================================================
+  // 0) Energy slice
+  //======================================================================
+  const float eReco = recoPhoton.E();
+  int iEslice = -1;
+  for (int i = 0; i < N_Ebins; ++i)
+    if (eReco >= eEdge[i] && eReco < eEdge[i+1]) { iEslice = i; break; }
 
-  for (int i = 0; i < N_PT; ++i)
-  {
-    if (ptReco >= ptEdge[i] && ptReco < ptEdge[i+1])
-    {
-      iPtSlice = i;
-      break;
-    }
-  }
-  if (iPtSlice < 0)
-  {
+  if (iEslice < 0) {
     if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] fillAshLogDx => Reco pT=" << ptReco
-                << " is not in [2..12], skipping.\n";
-    }
+      std::cout << "[fillAshLogDx]  E=" << eReco
+                << " GeV is outside [" << eEdge[0] << ',' << eEdge[N_Ebins]
+                << ") – skip\n";
     return;
   }
-
-  //====================================================================
-  // 1) Retrieve the cluster’s “lead tower” geometry by scanning
-  //====================================================================
-  // We require a valid cluster & BEmcRec pointer for further steps.
-  if (!cluster)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[WARN] fillAshLogDx => 'cluster' is NULL => skipping fill.\n";
-    }
-    return;
-  }
-  if (!m_bemcRec)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[WARN] fillAshLogDx => m_bemcRec is NULL => cannot do shower-depth correction.\n"
-                << "       => skipping fill.\n";
-    }
-    return;
-  }
-
-  // Loop over all towers in this cluster to find the one with the largest energy.
-  RawCluster::TowerConstRange towers = cluster->get_towers();
-  RawCluster::TowerConstIterator bestTowIter = towers.first;
-  float maxE = -1.f;
-  for (auto it = towers.first; it != towers.second; ++it)
-  {
-    float towerE = it->second;  // energy contributed by this tower
-    if (towerE > maxE)
-    {
-      maxE        = towerE;
-      bestTowIter = it;
-    }
-  }
-
-  // If no tower has positive energy, skip
-  if (maxE < 1e-9)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[WARN] fillAshLogDx => no positive-energy tower in cluster => skipping.\n";
-    }
-    return;
-  }
-
-  // Retrieve this tower’s geometry
-  RawTowerDefs::keytype bestTowerKey = bestTowIter->first;
-  RawTowerGeom* leadTowerGeom = m_geometry->get_tower_geometry(bestTowerKey);
-  if (!leadTowerGeom)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[ERROR] fillAshLogDx => tower geom is NULL for key="
-                << bestTowerKey << " => skipping.\n";
-    }
-    return;
-  }
-
-  // Extract the integer bin indices for optional QA/logging
-  int leadEta = leadTowerGeom->get_bineta();
-  int leadPhi = leadTowerGeom->get_binphi();
-
-  // Approx. front-face radius
-  double rFront = leadTowerGeom->get_center_radius();
-
   if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] fillAshLogDx => found lead tower with binEta=" << leadEta
-              << ", binPhi=" << leadPhi << ", E=" << maxE << "\n"
-              << "                cluster pT=" << ptReco
-              << ", iPtSlice=" << iPtSlice << "\n"
-              << "                rFront ~ " << rFront << std::endl;
-  }
+    std::cout << "[fillAshLogDx]  slice " << iEslice
+              << "  (" << eEdge[iEslice] << "–" << eEdge[iEslice+1]
+              << " GeV)  recoE=" << eReco << '\n';
 
-  //====================================================================
-  // 2) Project the TRUTH photon to that same radius => apply CorrectShowerDepth
-  //====================================================================
-  float pxTruth = truthPhoton.Px();
-  float pyTruth = truthPhoton.Py();
-  float pzTruth = truthPhoton.Pz();
-  double ptTruth = std::sqrt(pxTruth*pxTruth + pyTruth*pyTruth);
-  if (ptTruth < 1e-9)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] fillAshLogDx => truth photon pT ~ 0 => skipping fill.\n";
-    }
-    return;
-  }
+  //======================================================================
+  // 1) Guard checks & lead-tower geometry
+  //======================================================================
+  if (!cluster || !m_bemcRec || !m_geometry) return;
 
-  // Solve for how far we need to project in x,y to hit radius = rFront
-  double tTruth = rFront / ptTruth;
-  double xAtrue = pxTruth * tTruth;
-  double yAtrue = pyTruth * tTruth;
-  double zAtrue = pzTruth * tTruth;  // If there’s vertex offset, you could add it here
+  float eMax = -1.f;  RawCluster::TowerConstIterator best{};
+  for (auto it = cluster->get_towers().first;
+            it != cluster->get_towers().second; ++it)
+    if (it->second > eMax) { eMax = it->second; best = it; }
+  if (eMax < 1e-6) return;
 
-  // Depth-correct for the truth photon’s energy
-  float xT=0.f, yT=0.f, zT=0.f;
+  RawTowerGeom* leadGeo = m_geometry->get_tower_geometry(best->first);
+  if (!leadGeo) return;
+
+  const double rFront = leadGeo->get_center_radius();
+  const double zFront = leadGeo->get_center_z();
+
+  //======================================================================
+  // 2) Truth photon → shower-depth position
+  //======================================================================
+  TVector3 pT(truthPhoton.Px(), truthPhoton.Py(), truthPhoton.Pz());
+  const double tScale = rFront / pT.Pt();
+  float xTsd,yTsd,zTsd;
   m_bemcRec->CorrectShowerDepth(truthPhoton.E(),
-                                xAtrue, yAtrue, zAtrue,
-                                xT,      yT,     zT);
+                                pT.x()*tScale, pT.y()*tScale, pT.z()*tScale,
+                                xTsd,yTsd,zTsd);
+  const double xTrue = std::hypot(xTsd,yTsd)*std::atan2(yTsd,xTsd);
 
-  // Convert to “arc-length”: xTrue = rTrue * phiTrue
-  double rTrue   = std::sqrt(xT*xT + yT*yT);
-  double phiTrue = std::atan2(yT, xT);
-  double xTrue   = rTrue * phiTrue;
+  if (Verbosity() > 1)
+    std::cout << "  truth (SD):  x=" << xTsd << "  y=" << yTsd
+              << "  → xTrue=" << xTrue << '\n';
 
+  //======================================================================
+  // 3) Ash-b scan
+  //======================================================================
+  int nAshOK = 0, nAshMiss = 0;
+  if (blockCord.second >= 0.f && blockCord.second <= 1.f)
+  {
+    for (double bCell : m_bScan)
+    {
+      const double bVal = std::round(bCell*10000.)/10000.;
+      const float  localAsh = doAshShift(blockCord.second, bVal);
+      const float  globalPhi = (blockPhiBin*2 + localAsh)*(2.*M_PI/256.);
+
+      const float xA = rFront*std::cos(globalPhi);
+      const float yA = rFront*std::sin(globalPhi);
+
+      float xRsd,yRsd,zRsd;
+      m_bemcRec->CorrectShowerDepth(eReco, xA,yA,zFront, xRsd,yRsd,zRsd);
+      const double xReco = std::hypot(xRsd,yRsd)*std::atan2(yRsd,xRsd);
+
+      const TString hN = Form("h_dx_ash_b%.4f_E%d", bVal, iEslice);
+      if (auto* h = dynamic_cast<TH1F*>( hm->getHisto( hN.Data() ) )) {
+        h->Fill(xReco - xTrue);
+        ++nAshOK;
+        if (Verbosity() > 2)
+          std::cout << "    [Ash] b=" << bVal
+                    << "  Δx=" << xReco-xTrue << "  ► filled\n";
+      } else {
+        ++nAshMiss;
+        if (Verbosity() > 2)
+          std::cout << "    [Ash] b=" << bVal
+                    << "  ► missing histo " << hN << '\n';
+      }
+    }
+  }
+
+  //======================================================================
+  // 4) Log-w0 scan
+  //======================================================================
+  int nLogOK = 0, nLogMiss = 0;
+  if (!tower_phis.empty() && !tower_energies.empty())
+  {
+    for (double w0 : m_w0Scan)
+    {
+      const double w0Val = std::round(w0*100.)/100.;
+      const float  localLog = doLogWeightCoord(tower_phis,tower_energies,w0Val);
+      const float  globalPhi = (blockPhiBin*2 + localLog*2.f)*(2.*M_PI/256.);
+
+      const float xA = rFront*std::cos(globalPhi);
+      const float yA = rFront*std::sin(globalPhi);
+
+      float xRsd,yRsd,zRsd;
+      m_bemcRec->CorrectShowerDepth(eReco, xA,yA,zFront, xRsd,yRsd,zRsd);
+      const double xReco = std::hypot(xRsd,yRsd)*std::atan2(yRsd,xRsd);
+
+        // --- Log section ---------------------------------------------------------
+      const TString hN = Form("h_dx_log_w0%.2f_E%d", w0Val, iEslice);
+      if (auto* h = dynamic_cast<TH1F*>( hm->getHisto( hN.Data() ) )) {
+        h->Fill(xReco - xTrue);
+        ++nLogOK;
+        if (Verbosity() > 2)
+          std::cout << "    [Log] w0=" << w0Val
+                    << "  Δx=" << xReco-xTrue << "  ► filled\n";
+      } else {
+        ++nLogMiss;
+        if (Verbosity() > 2)
+          std::cout << "    [Log] w0=" << w0Val
+                    << "  ► missing histo " << hN << '\n';
+      }
+    }
+  }
+
+  //======================================================================
+  // 5) Summary for this cluster
+  //======================================================================
   if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] fillAshLogDx => truth E=" << truthPhoton.E()
-              << ", front-face coords (" << xAtrue << "," << yAtrue << "," << zAtrue << ")\n"
-              << "                       => after depth corr => ("
-              << xT << "," << yT << "," << zT << ")\n"
-              << "                       => xTrue = " << xTrue << "\n";
-  }
-
-  //====================================================================
-  // 3) Ash formula: local block φ => global => shower-depth => fill
-  //====================================================================
-  if (blockCord.second < 0.f || blockCord.second > 1.f)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[WARN] fillAshLogDx => local block φ=" << blockCord.second
-                << " is not in [0,1], skipping Ash loop.\n";
-    }
-  }
-  else
-  {
-    for (double bVal : m_bScan)
-    {
-      float localAsh = doAshShift(blockCord.second, bVal);
-
-      // Convert that local-φ to a global tower φ index => multiply by 2 => total
-      float coarsePhiInd = blockPhiBin*2 + localAsh;
-      float globalPhi    = coarsePhiInd * (2.f*M_PI / 256.f);
-
-      float xA = rFront * std::cos(globalPhi);
-      float yA = rFront * std::sin(globalPhi);
-
-      // Depth-correct for the *reco* cluster’s energy
-      float xC=0.f, yC=0.f, zC=0.f;
-      m_bemcRec->CorrectShowerDepth(recoPhoton.E(),
-                                    xA, yA, /*zA=*/0.f,
-                                    xC, yC, zC);
-
-      double rReco   = std::sqrt(xC*xC + yC*yC);
-      double phiReco = std::atan2(yC, xC);
-      double xReco   = rReco * phiReco;
-
-      // Fill “h_dx_ash_bXX_ptYY” if it exists
-      TString hname = Form("h_dx_ash_b%.3f_pt%d", bVal, iPtSlice);
-      TH1F* hAsh = dynamic_cast<TH1F*>(hm->getHisto(hname.Data()));
-      if (!hAsh)
-      {
-        if (Verbosity() > 0)
-        {
-          std::cout << "[WARN] fillAshLogDx => histogram " << hname
-                    << " not found => no fill.\n";
-        }
-      }
-      else
-      {
-        double dx = xReco - xTrue;
-        hAsh->Fill(dx);
-
-        if (Verbosity() > 1)
-        {
-          std::cout << "[DBX] fillAshLogDx => bVal=" << bVal
-                    << ", localAsh=" << localAsh
-                    << ", globalPhi=" << globalPhi
-                    << ", xReco=" << xReco
-                    << " => dx=" << dx << "\n";
-        }
-      }
-    }
-  }
-
-  //====================================================================
-  // 4) Log-weight formula: localLog => global => shower-depth => fill
-  //====================================================================
-  if (tower_phis.empty() || tower_energies.empty())
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[WARN] fillAshLogDx => tower_phis or tower_energies empty => skipping log-weight loop.\n";
-    }
-  }
-  else
-  {
-    for (double w0Val : m_w0Scan)
-    {
-      float localLog = doLogWeightCoord(tower_phis, tower_energies, w0Val);
-
-      float coarsePhiInd = blockPhiBin*2 + localLog*2.f;
-      float globalPhi    = coarsePhiInd * (2.f*M_PI / 256.f);
-
-      float xA = rFront * std::cos(globalPhi);
-      float yA = rFront * std::sin(globalPhi);
-
-      float xC=0.f, yC=0.f, zC=0.f;
-      m_bemcRec->CorrectShowerDepth(recoPhoton.E(),
-                                    xA, yA, /*zA=*/0.f,
-                                    xC, yC, zC);
-
-      double rReco   = std::sqrt(xC*xC + yC*yC);
-      double phiReco = std::atan2(yC, xC);
-      double xReco   = rReco * phiReco;
-
-      TString hname2 = Form("h_dx_log_w0%.2f_pt%d", w0Val, iPtSlice);
-      TH1F* hLog = dynamic_cast<TH1F*>(hm->getHisto(hname2.Data()));
-      if (!hLog)
-      {
-        if (Verbosity() > 0)
-        {
-          std::cout << "[WARN] fillAshLogDx => histogram " << hname2
-                    << " not found => no fill.\n";
-        }
-      }
-      else
-      {
-        double dx = xReco - xTrue;
-        hLog->Fill(dx);
-
-        if (Verbosity() > 1)
-        {
-          std::cout << "[DBX] fillAshLogDx => w0Val=" << w0Val
-                    << ", localLog=" << localLog
-                    << ", globalPhi=" << globalPhi
-                    << ", xReco=" << xReco
-                    << " => dx=" << dx << "\n";
-        }
-      }
-    }
-  }
-
-  //====================================================================
-  // Summary
-  //====================================================================
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] fillAshLogDx => DONE for pT slice=" << iPtSlice
-              << ", cluster pT=" << ptReco
-              << "\n                 lead tower (binEta=" << leadEta
-              << ", binPhi=" << leadPhi
-              << "), possibly filled Ash & Log histograms.\n";
-  }
+    std::cout << "  ➜ Ash  filled/miss: " << nAshOK << '/' << nAshMiss
+              << "   |   Log  filled/miss: " << nLogOK << '/' << nLogMiss
+              << "\n";
 }
+
+
+
 
 
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
     const TLorentzVector& recoPhoton,
     const TLorentzVector& truthPhoton,
-    const std::pair<float,float>& blockCord,
+    const std::pair<float,float>& blockCord, // local block coords in [0,1]
     int blockPhiBin,
     float delPhi
 )
 {
-  // 1) Determine which of the 4 pT bins we are in
-  float thisPt = recoPhoton.Pt();  // could also use clus_pt
+  float thisE = recoPhoton.E();  // use energy, not pT
 
-  int iPtBin = -1;
-  for (int i = 0; i < NPTBINS; ++i)  // NPTBINS == 4
+  int iEbin = -1;
+  for (int i = 0; i < N_Ebins; ++i)
   {
-    if (thisPt >= ptEdge[i] && thisPt < ptEdge[i+1])
+    if (thisE >= eEdge[i] && thisE < eEdge[i+1])
     {
-      iPtBin = i;
+      iEbin = i;
       break;
     }
   }
-  // If the cluster’s pT is not in [2..12], skip
-  if (iPtBin < 0) return;
+  // If the cluster’s energy is not in [2..10], skip
+  if (iEbin < 0) return;
 
-  // 2) Compute the uncorrected Δφ in range (-π..+π)
+  // ----------------------------------------------------------------
+  // 2) Compute the uncorrected Δφ in (-π..+π)
+  // ----------------------------------------------------------------
   delPhi = TVector2::Phi_mpi_pi(delPhi);
 
-  // Optional debug
+  // (Optional) debug print
   if (Verbosity() > 0)
   {
     std::cout << "[DEBUG] fillDPhiRawAndCorrected:\n"
@@ -1592,26 +1509,37 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
               << std::endl;
   }
 
-  // 3) Fill uncorrected histogram
-  if (h_phi_diff_raw_pt[iPtBin])
+  // ----------------------------------------------------------------
+  // 3) Fill the UNCORRECTED Δφ histogram
+  // ----------------------------------------------------------------
+  if (h_phi_diff_raw_E[iEbin]) // (the array name might still say “_pt”, but it’s an E-slice)
   {
-    h_phi_diff_raw_pt[iPtBin]->Fill(delPhi);
+    h_phi_diff_raw_E[iEbin]->Fill(delPhi);
   }
   else if (Verbosity() > 0)
   {
-    std::cout << "[WARNING] h_phi_diff_raw_pt[" << iPtBin << "] is null => no fill!" << std::endl;
+    std::cout << "[WARNING] h_phi_diff_raw_E[" << iEbin
+              << "] is null => no fill!" << std::endl;
   }
 
-  // 4) (Optional) fill TProfile vs. local block φ coordinate
+  // ----------------------------------------------------------------
+  // 4) Optionally fill TProfile vs local block φ
+  // ----------------------------------------------------------------
   if (pr_phi_vs_blockcoord)
   {
     pr_phi_vs_blockcoord->Fill(blockCord.second, delPhi);
   }
 
-  // 5) If we have read in b-values, apply the correction
-  if (isFitDoneForB)
+  // ----------------------------------------------------------------
+  // 5) If φ b-values are read in, apply the correction
+  // ----------------------------------------------------------------
+  //   Note: We check “isFitDoneForPhi” to see if we have valid φ b-values.
+  //   Also note the code you showed uses `isFitDoneForB` and `m_bVals[]`,
+  //   but you said you have `m_bValsPhi[]`. So we adapt accordingly.
+  // ----------------------------------------------------------------
+  if (isFitDoneForPhi)
   {
-    float bPhiUsed = m_bVals[iPtBin];  // pick the b-value for this pT bin
+    float bPhiUsed = m_bValsPhi[iEbin];  // pick the b-value for this E bin
     if (bPhiUsed > 1e-9)
     {
       //----------------------------------------------------------------
@@ -1619,10 +1547,10 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
       //----------------------------------------------------------------
       float correctedBlockPhi = doPhiBlockCorr(blockCord.second, bPhiUsed);
 
-      // Keep track of how that local φ changes (optional QA)
-      if (h_localPhi_corrected[iPtBin])
+      // Fill “corrected local φ” QA histogram if it exists
+      if (h_localPhi_corrected[iEbin])
       {
-        h_localPhi_corrected[iPtBin]->Fill(correctedBlockPhi);
+        h_localPhi_corrected[iEbin]->Fill(correctedBlockPhi);
       }
 
       //----------------------------------------------------------------
@@ -1631,38 +1559,21 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
       float correctedPhi = convertBlockToGlobalPhi(blockPhiBin, correctedBlockPhi);
 
       //----------------------------------------------------------------
-      // (c) Recompute ∆φ in (-π..+π)
+      // (c) Recompute Δφ in (-π..+π)
       //----------------------------------------------------------------
       float delPhiCorr = TVector2::Phi_mpi_pi(correctedPhi - truthPhoton.Phi());
 
       //----------------------------------------------------------------
-      // (d) Fill corrected Δφ histogram
+      // (d) Fill CORRECTED Δφ histogram
       //----------------------------------------------------------------
-      if (h_phi_diff_corrected_pt[iPtBin])
+      if (h_phi_diff_corrected_E[iEbin])
       {
-        h_phi_diff_corrected_pt[iPtBin]->Fill(delPhiCorr);
+        h_phi_diff_corrected_E[iEbin]->Fill(delPhiCorr);
       }
       else if (Verbosity() > 0)
       {
-        std::cout << "[WARNING] h_phi_diff_corrected_pt[" << iPtBin
+        std::cout << "[WARNING] h_phi_diff_corrected_E[" << iEbin
                   << "] is null => no fill!" << std::endl;
-      }
-
-      //----------------------------------------------------------------
-      // (e) (NEW) Fill a *parallel* 3D histogram with the corrected φ
-      //----------------------------------------------------------------
-      // We'll store:
-      //    X = blockCord.first (unchanged local-eta)
-      //    Y = correctedBlockPhi
-      //    Z = thisPt (or recoPhoton.Pt())
-      //----------------------------------------------------------------
-      if (h3_cluster_block_cord_corr_pt)
-      {
-        h3_cluster_block_cord_corr_pt->Fill(blockCord.first, correctedBlockPhi, thisPt);
-      }
-      else if (Verbosity() > 0)
-      {
-        std::cout << "[WARNING] h3_cluster_block_cord_corr_pt is null => no fill for corrected local φ!" << std::endl;
       }
     }
     else if (Verbosity() > 0)
@@ -1670,10 +1581,16 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
       std::cout << "[DEBUG] bPhiUsed=0 => skipping local φ correction.\n";
     }
   }
-  // else not isFitDoneForB => do nothing special
 
-  // Done!
+  // else if not isFitDoneForPhi => do nothing special
+
+  // Done
 }
+
+
+
+
+
 
 void PositionDependentCorrection::finalClusterLoop(
     PHCompositeNode* /*topNode*/,
@@ -1692,403 +1609,577 @@ void PositionDependentCorrection::finalClusterLoop(
     float weight)
 {
   // -----------------------------------------------------------------
-  // 0) Trigger decoding and check
+  // 0) Basic information about the number of clusters & tower sum
   // -----------------------------------------------------------------
-//  if (!trigAna)
-//  {
-//    // Original error message:
-//    std::cerr << "[ERROR] No TriggerAnalyzer pointer!\n"
-//              << "Cannot determine triggers -> skipping event.\n";
-//
-//    // Additional verbosity-based info:
-//    if (Verbosity() > 0)
-//    {
-//      std::cout << "[Verbosity] finalClusterLoop: 'trigAna' is nullptr. This prevents decoding triggers." << std::endl;
-//      std::cout << "  --> Returning early from finalClusterLoop." << std::endl;
-//    }
-//    return; // or return Fun4AllReturnCodes::ABORTEVENT; if you prefer.
-//  }
+  if (Verbosity() > 0)
+  {
+    std::cout << "\n\n"
+              << ANSI_BOLD << "[DEBUG] finalClusterLoop() ENTER" << ANSI_RESET << "\n"
+              << "    tower_tot_e  = " << tower_tot_e << "\n"
+              << "    nClusCount   = " << nClusCount << "\n"
+              << "    max_nClusCount = " << max_nClusCount << "\n"
+              << "    pt1ClusCut   = " << pt1ClusCut << ", pt2ClusCut = " << pt2ClusCut << "\n"
+              << "    maxAlpha     = " << maxAlpha << "\n"
+              << "    pi0ptcut     = " << pi0ptcut << "\n"
+              << "    maxPtCut     = " << ptMaxCut << "\n"
+              << "    weight       = " << weight << "\n"
+              << "    vtx_z        = " << vtx_z << std::endl;
+  }
 
-//  // Optionally print debug info (note: existing logic checks Verbosity, not the 'debug' variable here):
-//  if (Verbosity() > 0)
-//  {
-//    std::cout << "[Verbosity] finalClusterLoop: About to call trigAna->decodeTriggers() on topNode = "
-//              << topNode << std::endl;
-//  }
-//    if (!isSimulation)  // or however you detect data vs sim
-//    {
-//       trigAna->decodeTriggers(topNode);
-//    }
+  // Fill #clusters in event
+  h_nclusters->Fill(nClusCount);
 
-
-//  if (Verbosity() > 0)
-//  {
-//    std::cout << "[Verbosity] finalClusterLoop: Building list of fired triggers from triggerNameMap..." << std::endl;
-//  }
-//
-//  // Build a vector of short-name triggers that fired
-//  std::vector<std::string> activeTriggerNames;
-//  activeTriggerNames.reserve(triggerNameMap.size());
-//
-//  for (const auto &kv : triggerNameMap)
-//  {
-//    const std::string &dbTriggerName   = kv.first;   // e.g. "MBD N&S >= 1"
-//    const std::string &histFriendlyStr = kv.second;  // e.g. "MBD_NandS_geq_1"
-//
-//    if (trigAna->didTriggerFire(dbTriggerName))
-//    {
-//      activeTriggerNames.push_back(histFriendlyStr);
-//
-//      if (Verbosity() > 0)
-//      {
-//        std::cout << "[Verbosity]  -> Trigger fired: \"" << dbTriggerName
-//                  << "\" => short name \"" << histFriendlyStr << "\"\n";
-//      }
-//    }
-//  }
-
-//  // If none of our triggers fired, skip the hist-filling
-//  if (activeTriggerNames.empty())
-//  {
-//    if (Verbosity() > 0)
-//    {
-//      std::cout << "[Verbosity] finalClusterLoop: No triggers from triggerNameMap are active. Skipping event." << std::endl;
-//    }
-//    return;
-//  }
-    // -----------------------------------------------------------------
-    // 1) Basic cluster counting and QA
-    // -----------------------------------------------------------------
-    if (debug)
+  // If the number of clusters is too large => skip
+  if (nClusCount > max_nClusCount)
+  {
+    if (Verbosity() > 0)
     {
-      // Print tower totals in bold green for easy scanning
-      std::cout << ANSI_BOLD << ANSI_GREEN
-                << "[DEBUG] tower tot E=" << tower_tot_e
-                << "    nClusContainer=" << nClusCount
+      std::cout << ANSI_BOLD << ANSI_YELLOW
+                << "[DEBUG] finalClusterLoop: nClusCount=" << nClusCount
+                << " > max_nClusCount=" << max_nClusCount
+                << " => SKIPPING event"
                 << ANSI_RESET << std::endl;
     }
+    return;
+  }
 
-    // Fill a histogram with the count of clusters in this event
-    h_nclusters->Fill(nClusCount);
+  // Retrieve all clusters
+  RawClusterContainer::ConstRange clusterRange = clusterContainer->getClusters();
+  RawClusterContainer::ConstIterator cIt1, cIt2;
 
-    // If the number of clusters is too large, skip
-    if (nClusCount > max_nClusCount)
+  // For optional pT smearing
+  float smear = 0.00;
+
+  // Will hold booleans to see if first/second matched to meson photons
+  bool match1 = false;
+  bool match2 = false;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] finalClusterLoop: Starting OUTER loop over clusters...\n";
+  }
+
+  // -----------------------------------------------------------------
+  // 1) Outer loop over clusters
+  // -----------------------------------------------------------------
+  for (cIt1 = clusterRange.first; cIt1 != clusterRange.second; ++cIt1)
+  {
+    RawCluster* clus1 = cIt1->second;
+    if (!clus1) continue;
+
+    // Recompute cluster 4-vector given event vertex
+    CLHEP::Hep3Vector vertex(0,0,vtx_z);
+      // ------------------------------------------------------------
+      // Print debug: what's our input vertex z?
+      // ------------------------------------------------------------
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG] finalClusterLoop: Using vtx_z=" << vtx_z
+                  << " => vertex(0,0," << vtx_z << ")\n";
+      }
+
+    CLHEP::Hep3Vector E_vec_1 = RawClusterUtility::GetEVec(*clus1, vertex);
+      
+      // ------------------------------------------------------------
+      // Additional check to see if the returned 3-vector is valid
+      // ------------------------------------------------------------
+      if (std::isnan(E_vec_1.mag()))
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG] finalClusterLoop: WARNING - E_vec_1.mag() is NaN!\n"
+                    << " -> cluster ID=" << clus1->get_id()
+                    << "  vtx_z=" << vtx_z
+                    << std::endl;
+        }
+        // Optionally continue or skip here, depending on what you prefer
+        continue;
+      }
+      else if (E_vec_1.mag() < 1e-9)
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG] finalClusterLoop: E_vec_1.mag() < 1e-9!"
+                    << " -> Possibly zero energy cluster?\n"
+                    << " -> cluster ID=" << clus1->get_id()
+                    << "  vtx_z=" << vtx_z
+                    << std::endl;
+        }
+        // Potentially skip or keep going
+        continue;
+      }
+
+    float clusE   = E_vec_1.mag();
+    float clusEta = E_vec_1.pseudoRapidity();
+    float clusPhi = E_vec_1.phi();
+    float clusPt  = E_vec_1.perp();
+    float clusChi2= clus1->get_chi2();
+      
+      // ------------------------------------------------------------
+      // Print debug: check cluster 4-vector values
+      // ------------------------------------------------------------
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG] finalClusterLoop: cluster ID=" << clus1->get_id()
+                  << " => E="   << clusE
+                  << "  Pt="    << clusPt
+                  << "  Eta="   << clusEta
+                  << "  Phi="   << clusPhi
+                  << "  Chi2="  << clusChi2
+                  << std::endl;
+      }
+
+    // If we want to smear pT:
+    clusPt *= rnd->Gaus(1, smear);
+
+    // For QA, we note the lead tower indices
+    int lt_eta = clus1->get_lead_tower().first;
+    int lt_phi = clus1->get_lead_tower().second;
+
+    // -----------------------------------------------------------------
+    // (A) Basic cluster-level cuts
+    // -----------------------------------------------------------------
+    // 1) Minimum cluster E
+    if (clusE < 0.1f)
     {
       if (Verbosity() > 0)
       {
-        std::cout << ANSI_BOLD << ANSI_YELLOW
-                  << "[Verbosity] finalClusterLoop: nClusCount (" << nClusCount
-                  << ") exceeds max_nClusCount (" << max_nClusCount
-                  << "). Skipping event."
-                  << ANSI_RESET << std::endl;
+        std::cout << "[DEBUG]  => Skipping cluster with E=" << clusE
+                  << " (<0.1). \n";
       }
-      return;
+      continue;
     }
-
-    // Retrieve cluster range
-    RawClusterContainer::ConstRange clusterEnd = clusterContainer->getClusters();
-    RawClusterContainer::ConstIterator clusterIter, clusterIter2;
-
-    // optional pT smearing
-    float smear = 0.00;
-
-    // Booleans for tracking matches to meson photons
-    bool match1 = false;
-    bool match2 = false;
-
-    // Optionally store kinematics in these vectors (unused, but retained)
-    std::vector<float> save_pt;
-    std::vector<float> save_eta;
-    std::vector<float> save_phi;
-    std::vector<float> save_e;
-
-    if (Verbosity() > 0)
+    // 2) Large chi2
+    if (clusChi2 > 10000)
     {
-      std::cout << ANSI_BOLD
-                << "[Verbosity] finalClusterLoop: Beginning outer loop over clusters."
-                << ANSI_RESET << std::endl;
-    }
-
-    // -----------------------------------------------------------------
-    // 2) Outer loop over clusters
-    // -----------------------------------------------------------------
-    for (clusterIter = clusterEnd.first; clusterIter != clusterEnd.second; ++clusterIter)
-    {
-      RawCluster* recoCluster = clusterIter->second;
-
-      // Recompute vector with event vertex
-      CLHEP::Hep3Vector vertex(0, 0, vtx_z);
-      CLHEP::Hep3Vector E_vec_cluster = RawClusterUtility::GetEVec(*recoCluster, vertex);
-
-      float clusE      = E_vec_cluster.mag();
-      float clus_eta   = E_vec_cluster.pseudoRapidity();
-      float clus_phi   = E_vec_cluster.phi();
-      float clus_pt    = E_vec_cluster.perp();
-      float clus_chisq = recoCluster->get_chi2();
-
-      // optional pT smearing (default = 0)
-      clus_pt *= rnd->Gaus(1, smear);
-
-      // lead tower (eta, phi) bins from the cluster
-      int lt_eta = recoCluster->get_lead_tower().first;
-      int lt_phi = recoCluster->get_lead_tower().second;
-
-      // Basic cluster cuts
-      if (clusE < 0.1)         continue;
-      if (clus_chisq > 10000)  continue;
-
-      // Fill cluster‐energy QA
-      h_clusE->Fill(clusE);
-
-      // Gather the towers in this cluster
-      RawCluster::TowerConstRange towerCR = recoCluster->get_towers();
-      int nTow = 0;
-      std::vector<int> tower_etas, tower_phis;
-      std::vector<float> tower_energies;
-
-      for (auto toweriter = towerCR.first; toweriter != towerCR.second; ++toweriter)
+      if (Verbosity() > 0)
       {
-        nTow++;
-        tower_etas.push_back( m_geometry->get_tower_geometry(toweriter->first)->get_bineta() );
-        tower_phis.push_back( m_geometry->get_tower_geometry(toweriter->first)->get_binphi() );
-        tower_energies.push_back( toweriter->second );
+        std::cout << "[DEBUG]  => Skipping cluster with chi2=" << clusChi2
+                  << " (>10000). \n";
       }
+      continue;
+    }
+    // 3) If lead tower index is out of range
+    if (lt_eta > 95)
+    {
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG]  => Skipping cluster lead_tower eta="
+                  << lt_eta << " (>95). \n";
+      }
+      continue;
+    }
 
-      // Compute local (block) coordinates for the cluster
-      std::pair<float,float> blockCord = getBlockCord(tower_etas, tower_phis, tower_energies);
+    // Fill cluster‐energy QA
+    h_clusE->Fill(clusE);
 
-      // Convert local coordinates to discrete block indices
-      int block_eta_bin = h_block_bin->FindBin(blockCord.first)  - 1;
+    // Gather the towers that make up this cluster (for block coords, etc.)
+    RawCluster::TowerConstRange towerCR = clus1->get_towers();
+    std::vector<int> towerEtas, towerPhis;
+    std::vector<float> towerEs;
+
+    int nTow=0;
+    for (auto tIter = towerCR.first; tIter != towerCR.second; ++tIter)
+    {
+      nTow++;
+      float twE = tIter->second;
+
+      // geometry for bin indices
+      RawTowerDefs::keytype tk = tIter->first;
+      int iEta = m_geometry->get_tower_geometry(tk)->get_bineta();
+      int iPhi = m_geometry->get_tower_geometry(tk)->get_binphi();
+
+      towerEtas.push_back(iEta);
+      towerPhis.push_back(iPhi);
+      towerEs.push_back(twE);
+    }
+
+    // Fill cluster-size correlation
+    h_clusE_nTow->Fill(clusE, nTow);
+
+    // Build a TLorentzVector for cluster #1
+    TLorentzVector photon1;
+    photon1.SetPtEtaPhiE(clusPt, clusEta, clusPhi, clusE);
+
+    // -----------------------------------------------------------------
+    // (B) Check pT cut for the first photon
+    // -----------------------------------------------------------------
+    if (clusPt < pt1ClusCut || clusPt > ptMaxCut)
+    {
+      if (Verbosity() > 0)
+      {
+        std::cout << "[DEBUG]  => cluster #1 pT=" << clusPt
+                  << " fails cut ( <" << pt1ClusCut << " or >" << ptMaxCut
+                  << "). \n";
+      }
+      continue;
+    }
+
+      // -----------------------------------------------------------------
+      // (C) Fill block coordinates
+      // -----------------------------------------------------------------
+      std::pair<float,float> blockCord = getBlockCord(towerEtas, towerPhis, towerEs);
+      int block_eta_bin = h_block_bin->FindBin(blockCord.first) - 1;
       int block_phi_bin = h_block_bin->FindBin(blockCord.second) - 1;
 
-      // Fill 3D histogram: local coord (x,y) vs. cluster energy (z)
-      h3_cluster_block_cord_pt->Fill(blockCord.first, blockCord.second, clus_pt);
-
-      // Fill cluster‐size correlation
-      h_clusE_nTow->Fill(clusE, nTow);
-
-      // lead tower range check
-      if (lt_eta > 95) continue;
-
-      // Fill pT vs. lead tower
-      h_pt_eta->Fill(clus_pt, lt_eta);
-      h_pt_eta_rw->Fill(clus_pt, lt_eta, weight);
-
-      // Fill cluster-level eta/phi QA
-      h_etaphi_clus->Fill(clus_eta, clus_phi);
-
-      // Build TLorentzVector for the candidate cluster
-      TLorentzVector photon1;
-      photon1.SetPtEtaPhiE(clus_pt, clus_eta, clus_phi, clusE);
-
-      // ----------------------------------------------------
-      // Compare with truth photons (NOT necessarily pi0 decays)
-      // ----------------------------------------------------
-      for (auto &tr_phot : truth_photons)
+      // Identify which pT bin we are in (2..4,4..6,6..8,8..10)
+      int iEbin = -1;
+      for (int i = 0; i < N_Ebins; ++i)
       {
-        float delR   = photon1.DeltaR(tr_phot);
-        float res    = (photon1.E() / tr_phot.E());
-        float delPhi = photon1.Phi() - tr_phot.Phi();
-
-        // Keep delPhi in (-pi, +pi)
-        if (delPhi > TMath::TwoPi())  delPhi -= TMath::TwoPi();
-        if (delPhi < -TMath::TwoPi()) delPhi += TMath::TwoPi();
-
-        // Fill global distribution
-        h_delR_recTrth->Fill(delR);
-
-        // Check if cluster is matched
-        if (delR < 0.03 && res < 1.3 && res > 0.3)
+        if (clusE >= eEdge[i] && clusE < eEdge[i + 1])
         {
-          if (debug)
-          {
-            std::cout << ANSI_BOLD << "[DEBUG] match clusE=" << photon1.E()
-                      << "  truthE=" << tr_phot.E()
-                      << "  delPhi=" << delPhi
-                      << ANSI_RESET << std::endl;
-          }
-          // Fill resolution histograms
-          h_matched_res->Fill(res, photon1.Eta());
-          h_res_e->Fill(res, photon1.E());
-          h_res->Fill(res);
-
-          h_res_e_eta->Fill(res, tr_phot.E(), lt_eta);
-          h_res_e_phi->Fill(res, tr_phot.E(), lt_phi);
-
-          h_delEta_e_eta->Fill(photon1.Eta() - tr_phot.Eta(), tr_phot.E(), lt_eta);
-          h_delR_e_eta->Fill(delR, tr_phot.E(), lt_eta);
-          h_delPhi_e_eta->Fill(delPhi, tr_phot.E(), lt_eta);
-          h_delPhi_e_phi->Fill(delPhi, tr_phot.E(), lt_phi);
-
-          h_truthE->Fill(tr_phot.E());
-            
-
-            // snippet inside finalClusterLoop, after matching a photon:
-            fillAshLogDx(
-                recoCluster,          // <--- first argument is RawCluster*
-                photon1,              // recoPhoton
-                tr_phot,              // truthPhoton
-                blockCord,
-                block_phi_bin,
-                tower_phis,
-                tower_energies
-            );
-
-          fillDPhiRawAndCorrected(photon1, tr_phot, blockCord, block_phi_bin, delPhi);
-
-            
-          // position‐dependent resolution
-          if (block_eta_bin >= 0 && block_eta_bin < NBinsBlock &&
-              block_phi_bin >= 0 && block_phi_bin < NBinsBlock)
-          {
-            h_res_block_E[block_eta_bin][block_phi_bin]->Fill(res, tr_phot.E());
-          }
-        }
-      } // end loop over truth_photons
-
-      // ----------------------------------------------------
-      // Check if photon1 matches a meson‐decay photon
-      // ----------------------------------------------------
-      TLorentzVector ph1_trEtaPhi(0,0,0,0);
-      match1 = false;
-
-      for (auto &tr_phot : truth_meson_photons)
-      {
-        float delR = photon1.DeltaR(tr_phot);
-        float res  = photon1.E() / tr_phot.E();
-
-        // If matched in ΔR and ratio, store direction from truth, energy from cluster
-        if (delR < 0.03 && res > 0.7 && res < 1.5)
-        {
-          ph1_trEtaPhi.SetPtEtaPhiE(clusE / TMath::CosH(tr_phot.Eta()),
-                                    tr_phot.Eta(),
-                                    tr_phot.Phi(),
-                                    clusE);
-
-          if (debug)
-          {
-            std::cout << ANSI_BOLD
-                      << "[DEBUG] meson-decay match  eta=" << ph1_trEtaPhi.Eta()
-                      << " E="   << ph1_trEtaPhi.E()
-                      << ANSI_RESET << std::endl;
-          }
-          match1 = true;
-          break; // found a match
+          iEbin = i;
+          break;
         }
       }
 
-      // pT cut for the first photon candidate
-      if (clus_pt < pt1ClusCut || clus_pt > ptMaxCut) continue;
-
-      // -----------------------------------------------------------------
-      // 3) Inner loop over a second cluster to form pi0
-      // -----------------------------------------------------------------
-      for (clusterIter2 = clusterEnd.first; clusterIter2 != clusterEnd.second; ++clusterIter2)
+      // If user wants an in-depth debug print:
+      if (Verbosity() > 0)
       {
-        // Avoid pairing the same cluster with itself
-        if (clusterIter2 == clusterIter) continue;
+        std::cout
+          << "[DEBUG] finalClusterLoop => \n"
+          << "   blockCoord = (" << blockCord.first << ", " << blockCord.second << ")\n"
+          << "   block_eta_bin = " << block_eta_bin
+          << ", block_phi_bin = " << block_phi_bin
+          << ", iEbin = " << iEbin << "\n"
+          << "   clusE = " << clusE
+          << ", clusPt = " << clusPt << "\n"
+          << "   #towers = " << towerEtas.size() << "\n"
+          << "   towerEtas.size()=" << towerEtas.size()
+          << ", towerPhis.size()=" << towerPhis.size()
+          << ", towerEs.size()=" << towerEs.size()
+          << std::endl;
+      }
 
-        RawCluster* recoCluster2 = clusterIter2->second;
-        CLHEP::Hep3Vector E_vec_cluster2 = RawClusterUtility::GetEVec(*recoCluster2, vertex);
+      // ---------------------------------------------
+      // 1)  RAW local-block coordinates  (no b-shift)
+      // ---------------------------------------------
+      {
+        constexpr double kFillW = 1.0;      // weight per fill
+        h3_cluster_block_cord_E->Fill(blockCord.first,   // η-coord   (x-axis)
+                                      blockCord.second,  // φ-coord   (y-axis)
+                                      clusE,             // energy    (z-axis)
+                                      kFillW);
 
-        float clus2E      = E_vec_cluster2.mag();
-        float clus2_eta   = E_vec_cluster2.pseudoRapidity();
-        float clus2_phi   = E_vec_cluster2.phi();
-        float clus2_pt    = E_vec_cluster2.perp();
-        float clus2_chisq = recoCluster2->get_chi2();
-
-        if (clus2_pt < pt2ClusCut || clus2_pt > ptMaxCut)    continue;
-        if (clus2_chisq > 10000)                            continue;
-
-        TLorentzVector photon2;
-        photon2.SetPtEtaPhiE(clus2_pt, clus2_eta, clus2_phi, clus2E);
-
-        // alpha cut
-        float alpha = std::fabs(clusE - clus2E) / (clusE + clus2E);
-        if (alpha > maxAlpha) continue;
-
-        // check if cluster2 also matches meson photon
-        TLorentzVector ph2_trEtaPhi(0,0,0,0);
-        match2 = false;
-
-        for (auto &tr_phot : truth_meson_photons)
+        if (Verbosity() > 0)
         {
-          float delR = photon2.DeltaR(tr_phot);
-          float res  = photon2.E() / tr_phot.E();
+          const int bx = h3_cluster_block_cord_E->GetXaxis()->FindBin(blockCord.first);
+          const int by = h3_cluster_block_cord_E->GetYaxis()->FindBin(blockCord.second);
+          const int bz = h3_cluster_block_cord_E->GetZaxis()->FindBin(clusE);
 
-          if (delR < 0.02 && res > 0.7 && res < 1.5)
+          std::cout << "[RAW-FILL]  ηloc="  << blockCord.first
+                    << "  φloc="           << blockCord.second
+                    << "  E="              << clusE
+                    << "  (binX,Y,Z = "    << bx << "," << by << "," << bz << ")  "
+                    << "→ new content = "
+                    << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
+                    << '\n';
+        }
+      }
+
+      // -------------------------------------------------------------
+      // 2)  CORRECTED local-block coordinates  (η and/or φ b-shift)
+      //     – always fill so raw & corrected have the same statistics
+      // -------------------------------------------------------------
+      {
+        /* ---- original raw local coordinates ---------------- */
+        const float rawEta = blockCord.first;    // [0,1]
+        const float rawPhi = blockCord.second;   // [0,1]
+
+        /* ---- start from raw; apply shifts only if we have a fit --- */
+        float corrEta = rawEta;
+        float corrPhi = rawPhi;
+
+        if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
+        {
+          const float bPhi = m_bValsPhi[iEbin];
+          if (bPhi > 1e-9f) corrPhi = doPhiBlockCorr(rawPhi, bPhi);
+        }
+
+        if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
+        {
+          const float bEta = m_bValsEta[iEbin];
+          if (bEta > 1e-9f) corrEta = doEtaBlockCorr(rawEta, bEta);
+        }
+
+        /* ---- always fill the corrected histogram ------------------ */
+        constexpr double kFillW = 1.0;
+        h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
+
+        /* ---- optional diagnostics (verbosity-gated) ---------------- */
+        if (Verbosity() > 0)
+        {
+          const int bxC = h3_cluster_block_cord_E_corrected
+                            ->GetXaxis()->FindBin(corrEta);
+          const int byC = h3_cluster_block_cord_E_corrected
+                            ->GetYaxis()->FindBin(corrPhi);
+          const int bzC = h3_cluster_block_cord_E_corrected
+                            ->GetZaxis()->FindBin(clusE);
+
+          const double rawCnt =
+              h3_cluster_block_cord_E->GetBinContent(bxC, byC, bzC);
+          const double corCnt =
+              h3_cluster_block_cord_E_corrected->GetBinContent(bxC, byC, bzC);
+
+          std::cout << "[CORR-FILL] raw(η,φ)=(" << rawEta  << ',' << rawPhi  << ")  "
+                    << "→ corr(η,φ)=("          << corrEta << ',' << corrPhi << ")  "
+                    << "E=" << clusE
+                    << "  (binX,Y,Z = " << bxC << ',' << byC << ',' << bzC << ")\n"
+                    << "             rawHist now has " << rawCnt
+                    << "  |  corrHist now has "        << corCnt << '\n';
+
+          /*  global entry-count check (once per event) */
+          static Long64_t prevRawEntries = 0, prevCorEntries = 0;
+          const Long64_t totRaw = h3_cluster_block_cord_E            ->GetEntries();
+          const Long64_t totCor = h3_cluster_block_cord_E_corrected  ->GetEntries();
+          if (totRaw != prevRawEntries || totCor != prevCorEntries)
           {
-            ph2_trEtaPhi.SetPtEtaPhiE(clus2E / TMath::CosH(tr_phot.Eta()),
-                                      tr_phot.Eta(),
-                                      tr_phot.Phi(),
-                                      clus2E);
-
-            if (debug)
-            {
-              std::cout << ANSI_BOLD
-                        << "[DEBUG] meson-decay match  eta=" << ph2_trEtaPhi.Eta()
-                        << " E="   << ph2_trEtaPhi.E()
-                        << ANSI_RESET << std::endl;
-            }
-            if (match1) match2 = true;
+            std::cout << "[SUMMARY]  total entries – raw: " << totRaw
+                      << " | corrected: " << totCor
+                      << "  (Δ = " << (totRaw - totCor) << ")\n";
+            prevRawEntries = totRaw;
+            prevCorEntries = totCor;
           }
         }
+      }   // end corrected-block scope
 
-        // build pi0 4‐vectors
-        TLorentzVector pi0_trKin = ph1_trEtaPhi + ph2_trEtaPhi; // truth-based directions
-        TLorentzVector pi0       = photon1 + photon2;           // reco-based
 
-        // check pi0 pT
-        if (pi0.Pt() < pi0ptcut) continue;
+    // QA: fill pT vs leadTower, fill cluster-level eta/phi
+    h_pt_eta->Fill(clusPt, lt_eta);
+    h_pt_eta_rw->Fill(clusPt, lt_eta, weight);
+    h_etaphi_clus->Fill(clusEta, clusPhi);
 
-        // fill single cluster pT
-        h_pt1->Fill(photon1.Pt());
-        h_pt2->Fill(photon2.Pt());
-
-        // fill diphoton mass distributions
-        h_InvMass->Fill(pi0.M());
-        h_InvMass_w->Fill(pi0.M(), weight);
-
-        // fill mass vs lead tower eta
-        h_mass_eta_lt->Fill(pi0.M(), lt_eta);
-        h_mass_eta_lt_rw->Fill(pi0.M(), lt_eta, weight);
-
-        // fill 3D distribution (mass, pi0 E, tower eta)
-        h_m_pt_eta->Fill(pi0.M(), pi0.E(), lt_eta);
-
-        // fill block histogram if valid
-        if (block_eta_bin >= 0 && block_eta_bin < NBinsBlock &&
-            block_phi_bin >= 0 && block_phi_bin < NBinsBlock)
-        {
-          h_mass_block_pt[block_eta_bin][block_phi_bin]->Fill(pi0.M(), pi0.E());
-        }
-
-        // If both clusters matched meson photons => fill truth-based hist
-        if (match2 && pi0_trKin.M() > 0.001)
-        {
-          // you might choose the first meson photon or apply more logic
-          h_m_ptTr_eta->Fill(pi0.M(), truth_meson_photons.at(0).E(), lt_eta);
-          h_m_ptTr_eta_trKin->Fill(pi0_trKin.M(), truth_meson_photons.at(0).E(), lt_eta);
-        }
-
-      } // end inner loop (clusterIter2)
-
-    } // end outer loop (clusterIter)
-
-    // Optionally print a final summary if Verbosity is set:
-    if (Verbosity() > 0)
+    // -----------------------------------------------------------------
+    // (D) Compare with TRUTH photons
+    // -----------------------------------------------------------------
+    for (auto & trPhoton : truth_photons)
     {
-      // Simple tabular summary:
-      // Example of an ASCII table row: we can do more columns if you like
-      // or just keep it minimal:
-      std::cout << ANSI_BOLD << "\n[Verbosity] finalClusterLoop: Completed analysis of clusters.\n"
-                << "    -> # of clusters that passed the QA: " << nClusCount << "\n"
-                << "    -> Weighted histograms filled with weight = " << weight << "\n"
-                << "[Verbosity] finalClusterLoop: End of function.\n"
-                << ANSI_RESET << std::endl;
+      float dR   = photon1.DeltaR(trPhoton);
+      float ratio= (photon1.E() / trPhoton.E());
+      float dPhi = photon1.Phi() - trPhoton.Phi();
+
+      // keep dPhi in (-pi..+pi)
+      if (dPhi > TMath::Pi())   dPhi -= 2.f*TMath::Pi();
+      if (dPhi < -TMath::Pi())  dPhi += 2.f*TMath::Pi();
+
+      // fill a distribution of dR
+      h_delR_recTrth->Fill(dR);
+
+      // check if matched
+      if (dR < 0.03 && ratio < 1.3 && ratio > 0.3)
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG] => cluster1 E=" << photon1.E()
+                    << " matched to truthE=" << trPhoton.E()
+                    << " dPhi=" << dPhi << " ratio=" << ratio << "\n";
+        }
+        // fill resolution hists
+        h_matched_res->Fill(ratio, photon1.Eta());
+        h_res_e->Fill(ratio, photon1.E());
+        h_res->Fill(ratio);
+
+        int iLTeta=lt_eta, iLTphi=lt_phi;
+
+        h_res_e_eta->Fill(ratio, trPhoton.E(), iLTeta);
+        h_res_e_phi->Fill(ratio, trPhoton.E(), iLTphi);
+
+        h_delEta_e_eta->Fill(photon1.Eta()-trPhoton.Eta(), trPhoton.E(), iLTeta);
+        h_delR_e_eta->Fill(dR, trPhoton.E(), iLTeta);
+        h_delPhi_e_eta->Fill(dPhi, trPhoton.E(), iLTeta);
+        h_delPhi_e_phi->Fill(dPhi, trPhoton.E(), iLTphi);
+
+        h_truthE->Fill(trPhoton.E());
+
+        // fill the ash/log-hist dx
+        fillAshLogDx(clus1, photon1, trPhoton, blockCord,
+                     block_phi_bin, towerPhis, towerEs);
+
+        fillDPhiRawAndCorrected(photon1, trPhoton,
+                                blockCord, block_phi_bin, dPhi);
+
+        // position-dependent resolution
+        if (block_eta_bin >=0 && block_eta_bin < NBinsBlock &&
+            block_phi_bin >=0 && block_phi_bin < NBinsBlock)
+        {
+          h_res_block_E[block_eta_bin][block_phi_bin]->Fill(ratio, trPhoton.E());
+        }
+      }
+    } // end loop truth_photons
+
+    // -----------------------------------------------------------------
+    // (E) Check if photon1 matches a meson‐decay photon
+    // -----------------------------------------------------------------
+    match1 = false;
+    TLorentzVector ph1_trEtaPhi(0,0,0,0);
+    for (auto & trPhot : truth_meson_photons)
+    {
+      float dR2   = photon1.DeltaR(trPhot);
+      float ratio2= (photon1.E() / trPhot.E());
+      if (dR2 < 0.03 && ratio2>0.7 && ratio2<1.5)
+      {
+        ph1_trEtaPhi.SetPtEtaPhiE( clusE / TMath::CosH(trPhot.Eta()),
+                                   trPhot.Eta(),
+                                   trPhot.Phi(),
+                                   clusE );
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG] => meson-decay match found, E="
+                    << ph1_trEtaPhi.E() << "  eta="
+                    << ph1_trEtaPhi.Eta() << "\n";
+        }
+        match1 = true;
+        break;
+      }
     }
 
-} // end finalClusterLoop
+    // -----------------------------------------------------------------
+    // 2) Inner loop over second cluster => form pi0
+    // -----------------------------------------------------------------
+    if (Verbosity() > 0)
+    {
+      std::cout << "[DEBUG] => Starting INNER loop for cluster pairs.\n";
+    }
+
+    RawClusterContainer::ConstRange cRange2 = clusterContainer->getClusters();
+    for (cIt2 = cRange2.first; cIt2 != cRange2.second; ++cIt2)
+    {
+      // avoid pairing with itself
+      if (cIt2 == cIt1) continue;
+
+      RawCluster* clus2 = cIt2->second;
+      if (!clus2) continue;
+
+      CLHEP::Hep3Vector E_vec_2 = RawClusterUtility::GetEVec(*clus2, vertex);
+
+      float clus2E     = E_vec_2.mag();
+      float clus2Eta   = E_vec_2.pseudoRapidity();
+      float clus2Phi   = E_vec_2.phi();
+      float clus2Pt    = E_vec_2.perp();
+      float clus2Chi2  = clus2->get_chi2();
+
+      // skip if pT < pt2ClusCut or pT>ptMaxCut
+      if (clus2Pt < pt2ClusCut || clus2Pt > ptMaxCut)
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG]    => cluster2 pT=" << clus2Pt
+                    << " fails cut (<" << pt2ClusCut << " or >" << ptMaxCut
+                    << "). \n";
+        }
+        continue;
+      }
+      if (clus2Chi2 > 10000)
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG]    => cluster2 Chi2=" << clus2Chi2
+                    << " (>10000), skipping.\n";
+        }
+        continue;
+      }
+
+      // check alpha
+      float alpha = std::fabs(clusE - clus2E)/(clusE + clus2E);
+      if (alpha>maxAlpha)
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG]    => alpha=" << alpha
+                    << " > maxAlpha=" << maxAlpha
+                    << ", skipping.\n";
+        }
+        continue;
+      }
+
+      // Build TLorentzVector for cluster2
+      TLorentzVector photon2;
+      photon2.SetPtEtaPhiE(clus2Pt, clus2Eta, clus2Phi, clus2E);
+
+      // optional check for meson-decay match #2
+      match2 = false;
+      TLorentzVector ph2_trEtaPhi(0,0,0,0);
+
+      for (auto & trPhot : truth_meson_photons)
+      {
+        float dR3   = photon2.DeltaR(trPhot);
+        float ratio3= (photon2.E()/ trPhot.E());
+        if (dR3<0.02 && ratio3>0.7 && ratio3<1.5)
+        {
+          ph2_trEtaPhi.SetPtEtaPhiE( clus2E / TMath::CosH(trPhot.Eta()),
+                                     trPhot.Eta(),
+                                     trPhot.Phi(),
+                                     clus2E);
+          if (Verbosity() > 0)
+          {
+            std::cout << "[DEBUG]    => cluster2 matched meson-decay E="
+                      << ph2_trEtaPhi.E() << "\n";
+          }
+          if (match1) match2 = true;
+        }
+      }
+
+      // form pi0 4-vector
+      TLorentzVector pi0_trKin = ph1_trEtaPhi + ph2_trEtaPhi; // truth-based
+      TLorentzVector pi0       = photon1 + photon2;           // reco-based
+
+      // check pi0 pT
+      if (pi0.Pt()< pi0ptcut)
+      {
+        if (Verbosity() > 0)
+        {
+          std::cout << "[DEBUG]    => pi0 pT=" << pi0.Pt()
+                    << " < pi0ptcut=" << pi0ptcut
+                    << ", skipping.\n";
+        }
+        continue;
+      }
+
+      // If we get here => fill final histos
+      h_pt1->Fill(photon1.Pt());
+      h_pt2->Fill(photon2.Pt());
+
+      h_InvMass->Fill(pi0.M());
+      h_InvMass_w->Fill(pi0.M(), weight);
+
+      // fill mass vs lead tower index
+      h_mass_eta_lt->Fill(pi0.M(), lt_eta);
+      h_mass_eta_lt_rw->Fill(pi0.M(), lt_eta, weight);
+
+      // fill 3D distribution
+      h_m_pt_eta->Fill(pi0.M(), pi0.E(), lt_eta);
+
+      // fill block histogram if in valid bin
+      if (block_eta_bin>=0 && block_eta_bin<NBinsBlock &&
+          block_phi_bin>=0 && block_phi_bin<NBinsBlock)
+      {
+        h_mass_block_pt[block_eta_bin][block_phi_bin]->Fill(pi0.M(), pi0.E());
+      }
+
+      // if both matched => fill truth-based meson hist
+      if (match2 && pi0_trKin.M()>0.001)
+      {
+        h_m_ptTr_eta->Fill(pi0.M(), truth_meson_photons.at(0).E(), lt_eta);
+        h_m_ptTr_eta_trKin->Fill(pi0_trKin.M(), truth_meson_photons.at(0).E(), lt_eta);
+      }
+
+    } // end cluster2 loop
+
+  } // end cluster1 loop
+
+  // -----------------------------------------------------------------
+  // Final summary
+  // -----------------------------------------------------------------
+  if (Verbosity() > 0)
+  {
+    std::cout << ANSI_BOLD
+              << "[DEBUG] finalClusterLoop: COMPLETED cluster loops.\n"
+              << " => # of clusters in event = " << nClusCount << "\n"
+              << " => weight=" << weight << "\n"
+              << "finalClusterLoop() EXIT"
+              << ANSI_RESET << "\n\n";
+  }
+}
 
 
 int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
@@ -2249,9 +2340,9 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   // ------------------------------------------------------------------------
   // 7) Final cluster-level loop (pi0 reconstruction, etc.)
   // ------------------------------------------------------------------------
-  float ptMaxCut   = 100.f;
-  float pt1ClusCut = 0.9f;
-  float pt2ClusCut = 0.9f;
+  float ptMaxCut   = 100;
+  float pt1ClusCut = 0.9;  // 1.3
+  float pt2ClusCut = 0.9;  // 0.7
   float pi0ptcut   = 0.f; // was 0 by default
 
   finalClusterLoop(topNode,
@@ -2684,73 +2775,6 @@ void PositionDependentCorrection::fitEtaSlices(const std::string& infile,
   std::cout << "finish fitting suc" << std::endl; // original line maintained
 
   return;
-}
-
-
-std::pair<float,float> PositionDependentCorrection::getBlockCordCorr(
-    std::vector<int> etas,
-    std::vector<int> phis,
-    std::vector<float> Es)
-{
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] getBlockCordCorr() called. Computing raw local block coordinate." << std::endl;
-  }
-
-  // Maintain exact functionality
-  std::pair<float,float> raw_cord = getBlockCord(etas, phis, Es);
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Raw block coordinate: (" << raw_cord.first
-              << ", " << raw_cord.second << ")" << std::endl;
-  }
-
-  float Xcg_eta = (raw_cord.first  < 0.5) ? raw_cord.first  : (raw_cord.first  - 1.0);
-  float Xcg_phi = (raw_cord.second < 0.5) ? raw_cord.second : (raw_cord.second - 1.0);
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Adjusted local coordinates for asinh domain: Xcg_eta="
-              << Xcg_eta << ", Xcg_phi=" << Xcg_phi << std::endl;
-  }
-
-  float b_eta = 0.155;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Using b_eta=" << b_eta << " and b_phi=" << b_phi
-              << " for correction." << std::endl;
-  }
-
-  TF1 finv("finv", "[0]*TMath::ASinH(2*x*sinh(1/(2*[0])))", -0.5, 0.5);
-
-  // Evaluate for eta direction
-  finv.SetParameter(0, b_eta);
-  float t_eta = finv.Eval(Xcg_eta);
-
-  // Evaluate for phi direction
-  finv.SetParameter(0, b_phi);
-  float t_phi = finv.Eval(Xcg_phi);
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Corrected local coordinates: t_eta="
-              << t_eta << ", t_phi=" << t_phi << std::endl;
-  }
-
-  std::pair<float,float> res;
-  res.first  = (raw_cord.first  < 0.5) ? t_eta : (t_eta + 1.0);
-  res.second = (raw_cord.second < 0.5) ? t_phi : (t_phi + 1.0);
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Final block coordinate after shift: ("
-              << res.first << ", " << res.second << ")" << std::endl;
-    std::cout << "[DEBUG] getBlockCordCorr() returning corrected coordinates." << std::endl;
-  }
-
-  return res;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////

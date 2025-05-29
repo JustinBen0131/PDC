@@ -1,4 +1,9 @@
 #pragma once
+#if defined(__GNUC__) && !defined(__clang__)
+  // real GCC – it understands the flag
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wvirtual-function-default"
+#endif
 #if ROOT_VERSION_CODE >= ROOT_VERSION(6,00,0)
 
 ////////////////////////////////////////////////////////////
@@ -14,12 +19,14 @@
 #include <fun4all/Fun4AllUtils.h>
 #include <fun4all/Fun4AllInputManager.h>
 #include <fun4all/Fun4AllDstInputManager.h>
+#include <calobase/TowerInfoDefs.h>
 #include <fun4all/SubsysReco.h>
 #include <fun4all/Fun4AllServer.h>
 #include <fun4all/Fun4AllDstOutputManager.h>
 #include <fun4allraw/Fun4AllPrdfInputManager.h>
 #include <phool/recoConsts.h>
 #include <phool/PHCompositeNode.h>
+#include <phool/PHNodeIterator.h>
 #include <phool/PHRandomSeed.h>
 #include <phool/getClass.h>
 #include <caloreco/RawClusterDeadHotMask.h>
@@ -29,6 +36,8 @@
 #include <caloreco/CaloTowerCalib.h>
 #include <caloreco/CaloTowerBuilder.h>
 #include <caloreco/CaloTowerStatus.h>
+#include <calobase/RawTowerGeom.h>
+#include <calobase/RawTowerGeomContainer_Cylinderv1.h>
 #include <caloreco/RawClusterPositionCorrection.h>
 
 #include <g4detectors/PHG4FullProjSpacalCellReco.h>
@@ -52,6 +61,9 @@
 ////////////////////////////////////////////////////////////
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src/PositionDependentCorrection.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
+#if defined(__GNUC__) && !defined(__clang__)
+  #pragma GCC diagnostic pop
+#endif
 
 R__LOAD_LIBRARY(libcdbobjects)
 R__LOAD_LIBRARY(libfun4all.so)
@@ -100,6 +112,8 @@ void Fun4All_PDC(int nevents = 0,
   // We'll guess that the "TIMESTAMP" or run # is 21 (or parse from the file)
   rc->set_uint64Flag("TIMESTAMP", 24);
   rc->set_IntFlag("RUNNUMBER", 24);
+    
+  CDBInterface::instance()->getUrl("EMCTOWERCALIB");
 
   // Allow the conditions DB
   // (some older code might do 'Enable::CDB = true;' or similar)
@@ -148,37 +162,38 @@ void Fun4All_PDC(int nevents = 0,
   se->registerSubsystem(gvertex);
 
 
-    bool doG4Reco = true; // presumably we want to convert from G4Hits if present
+    bool doG4Reco = false; // presumably we want to convert from G4Hits if present
     if (doG4Reco)
     {
       // [DEBUG PRINT] Announce that we are entering the doG4Reco block
       std::cout << "[DEBUG] doG4Reco is TRUE => Setting up G4Hits to tower pipeline." << std::endl;
 
-      PHG4FullProjSpacalCellReco *cemc_cells
-        = new PHG4FullProjSpacalCellReco("CEMCCYLCELLRECO");
-      cemc_cells->Detector("CEMC");
-      cemc_cells->Verbosity(0);
-
-      // [DEBUG PRINT] Show the environment variable for CALIBRATIONROOT
-      const char* calrootEnv = std::getenv("CALIBRATIONROOT");
-      std::cout << "[DEBUG] CALIBRATIONROOT = "
-                << (calrootEnv ? calrootEnv : "(null)") << std::endl;
-
-      // [DEBUG PRINT] Print out the path we are about to load
-      std::string lightCollectionFile =
-          std::string(calrootEnv ? calrootEnv : "") + "/CEMC/LightCollection/Prototype3Module.xml";
-      std::cout << "[DEBUG] Loading light-collection data from: "
-                << lightCollectionFile << std::endl;
-
-      cemc_cells->get_light_collection_model().load_data_file(
-        lightCollectionFile,
-        "data_grid_light_guide_efficiency",
-        "data_grid_fiber_trans"
-      );
-
-      // [DEBUG PRINT] Confirm we are about to register this subsystem
-      std::cout << "[DEBUG] Registering 'cemc_cells' subsystem => PHG4FullProjSpacalCellReco" << std::endl;
-      se->registerSubsystem(cemc_cells);
+        PHG4FullProjSpacalCellReco *cemc_cells =
+            new PHG4FullProjSpacalCellReco("CEMCCellReco");
+        cemc_cells->Detector("CEMC");
+        cemc_cells->Verbosity(0);
+        se->registerSubsystem(cemc_cells);
+//
+//      // [DEBUG PRINT] Show the environment variable for CALIBRATIONROOT
+//      const char* calrootEnv = std::getenv("CALIBRATIONROOT");
+//      std::cout << "[DEBUG] CALIBRATIONROOT = "
+//                << (calrootEnv ? calrootEnv : "(null)") << std::endl;
+//
+//      // [DEBUG PRINT] Print out the path we are about to load
+//      std::string lightCollectionFile =
+//          std::string(calrootEnv ? calrootEnv : "") + "/CEMC/LightCollection/Prototype3Module.xml";
+//      std::cout << "[DEBUG] Loading light-collection data from: "
+//                << lightCollectionFile << std::endl;
+//
+//      cemc_cells->get_light_collection_model().load_data_file(
+//        lightCollectionFile,
+//        "data_grid_light_guide_efficiency",
+//        "data_grid_fiber_trans"
+//      );
+//
+//      // [DEBUG PRINT] Confirm we are about to register this subsystem
+//      std::cout << "[DEBUG] Registering 'cemc_cells' subsystem => PHG4FullProjSpacalCellReco" << std::endl;
+////      se->registerSubsystem(cemc_cells);
 
       RawTowerBuilder *towerBuilder = new RawTowerBuilder("EmcRawTowerBuilder");
       towerBuilder->Detector("CEMC");
@@ -189,79 +204,79 @@ void Fun4All_PDC(int nevents = 0,
       std::cout << "[DEBUG] Registering 'towerBuilder' => RawTowerBuilder" << std::endl;
       se->registerSubsystem(towerBuilder);
 
-      const double sampling_fraction = 2e-02;
-      const double photoelectron_per_GeV = 500;
-      RawTowerDigitizer::enu_digi_algorithm TowerDigi = RawTowerDigitizer::kNo_digitization;
+//      const double sampling_fraction = 2e-02;
+//      const double photoelectron_per_GeV = 500;
+//      RawTowerDigitizer::enu_digi_algorithm TowerDigi = RawTowerDigitizer::kNo_digitization;
+//
+//      // [DEBUG PRINT] Show which digitization mode was chosen
+//      std::cout << "[DEBUG] TowerDigi algorithm = " << TowerDigi << " (kNo_digitization=0, kSimple_photon_digitization=1, etc.)" << std::endl;
+//
+//      RawTowerDigitizer *TowerDigitizer = new RawTowerDigitizer("EmcRawTowerDigitizer");
+//      TowerDigitizer->Detector("CEMC");
+//      TowerDigitizer->Verbosity(0);
+//      TowerDigitizer->set_digi_algorithm(TowerDigi);
+//
+//      if (TowerDigi == RawTowerDigitizer::kSimple_photon_digitization)
+//      {
+//        // [DEBUG PRINT] We are in the photon-digitization block
+//        std::cout << "[DEBUG] TowerDigi == kSimple_photon_digitization => setting variable pedestals, zero-suppression, etc." << std::endl;
+//
+//        TowerDigitizer->set_variable_pedestal(true);
+//        TowerDigitizer->set_pedstal_central_ADC(0);
+//        TowerDigitizer->set_pedstal_width_ADC(0);
+//        TowerDigitizer->set_photonelec_ADC(1);
+//        TowerDigitizer->set_photonelec_yield_visible_GeV(photoelectron_per_GeV / sampling_fraction);
+//        TowerDigitizer->set_variable_zero_suppression(true);
+//        TowerDigitizer->set_zero_suppression_ADC(0);
+//
+//        // [DEBUG PRINT] Print out we are filling from "EMCTOWERCALIB"
+//        std::cout << "[DEBUG] TowerDigitizer => PHParameterUtils::FillPHParametersFromCDB(..., \"EMCTOWERCALIB\")" << std::endl;
+//        PHParameterUtils::FillPHParametersFromCDB(TowerDigitizer->GetParameters(), "EMCTOWERCALIB");
+//        // TowerDigitizer->GetParameters().ReadFromCDB("EMCTOWERCALIB");
+//      }
+//
+//      // [DEBUG PRINT] Next subsystem: TowerDigitizer
+//      std::cout << "[DEBUG] Registering 'TowerDigitizer' => RawTowerDigitizer" << std::endl;
+//      se->registerSubsystem(TowerDigitizer);
 
-      // [DEBUG PRINT] Show which digitization mode was chosen
-      std::cout << "[DEBUG] TowerDigi algorithm = " << TowerDigi << " (kNo_digitization=0, kSimple_photon_digitization=1, etc.)" << std::endl;
+//      RawTowerCalibration *TowerCalibration = new RawTowerCalibration("EmcRawTowerCalibration");
+//      TowerCalibration->Detector("CEMC");
+//
+//      // e.g. simple linear sampling fraction
+//      if (TowerDigi == RawTowerDigitizer::kNo_digitization)
+//      {
+//        std::cout << "[DEBUG] TowerCalibration => set_calib_algorithm(kSimple_linear_calibration)" << std::endl;
+//        TowerCalibration->set_calib_algorithm(RawTowerCalibration::kSimple_linear_calibration);
+//        TowerCalibration->set_calib_const_GeV_ADC(1.0 / sampling_fraction);
+//      }
 
-      RawTowerDigitizer *TowerDigitizer = new RawTowerDigitizer("EmcRawTowerDigitizer");
-      TowerDigitizer->Detector("CEMC");
-      TowerDigitizer->Verbosity(0);
-      TowerDigitizer->set_digi_algorithm(TowerDigi);
+//      TowerCalibration->set_pedstal_ADC(0);
+//      if (TowerDigi == RawTowerDigitizer::kSimple_photon_digitization)
+//      {
+//        // [DEBUG PRINT] Show we are in the photon-digitization block for calibration
+//        std::cout << "[DEBUG] TowerCalibration => set_calib_algorithm(kTower_by_tower_calibration) and read from EMCTOWERCALIB" << std::endl;
+//
+//        TowerCalibration->set_calib_algorithm(RawTowerCalibration::kTower_by_tower_calibration);
+//        //TowerCalibration->GetCalibrationParameters().ReadFromCDB("EMCTOWERCALIB");
+//        PHParameterUtils::FillPHParametersFromCDB(TowerCalibration->GetCalibrationParameters(), "EMCTOWERCALIB");
+//        TowerCalibration->set_variable_GeV_ADC(true);
+//        TowerCalibration->set_variable_pedestal(true);
+//      }
+//
+//      // [DEBUG PRINT] Register the calibration subsystem
+//      std::cout << "[DEBUG] Registering 'TowerCalibration' => RawTowerCalibration" << std::endl;
+//      se->registerSubsystem(TowerCalibration);
 
-      if (TowerDigi == RawTowerDigitizer::kSimple_photon_digitization)
-      {
-        // [DEBUG PRINT] We are in the photon-digitization block
-        std::cout << "[DEBUG] TowerDigi == kSimple_photon_digitization => setting variable pedestals, zero-suppression, etc." << std::endl;
-
-        TowerDigitizer->set_variable_pedestal(true);
-        TowerDigitizer->set_pedstal_central_ADC(0);
-        TowerDigitizer->set_pedstal_width_ADC(0);
-        TowerDigitizer->set_photonelec_ADC(1);
-        TowerDigitizer->set_photonelec_yield_visible_GeV(photoelectron_per_GeV / sampling_fraction);
-        TowerDigitizer->set_variable_zero_suppression(true);
-        TowerDigitizer->set_zero_suppression_ADC(0);
-
-        // [DEBUG PRINT] Print out we are filling from "EMCTOWERCALIB"
-        std::cout << "[DEBUG] TowerDigitizer => PHParameterUtils::FillPHParametersFromCDB(..., \"EMCTOWERCALIB\")" << std::endl;
-        PHParameterUtils::FillPHParametersFromCDB(TowerDigitizer->GetParameters(), "EMCTOWERCALIB");
-        // TowerDigitizer->GetParameters().ReadFromCDB("EMCTOWERCALIB");
-      }
-
-      // [DEBUG PRINT] Next subsystem: TowerDigitizer
-      std::cout << "[DEBUG] Registering 'TowerDigitizer' => RawTowerDigitizer" << std::endl;
-      se->registerSubsystem(TowerDigitizer);
-
-      RawTowerCalibration *TowerCalibration = new RawTowerCalibration("EmcRawTowerCalibration");
-      TowerCalibration->Detector("CEMC");
-
-      // e.g. simple linear sampling fraction
-      if (TowerDigi == RawTowerDigitizer::kNo_digitization)
-      {
-        std::cout << "[DEBUG] TowerCalibration => set_calib_algorithm(kSimple_linear_calibration)" << std::endl;
-        TowerCalibration->set_calib_algorithm(RawTowerCalibration::kSimple_linear_calibration);
-        TowerCalibration->set_calib_const_GeV_ADC(1.0 / sampling_fraction);
-      }
-
-      TowerCalibration->set_pedstal_ADC(0);
-      if (TowerDigi == RawTowerDigitizer::kSimple_photon_digitization)
-      {
-        // [DEBUG PRINT] Show we are in the photon-digitization block for calibration
-        std::cout << "[DEBUG] TowerCalibration => set_calib_algorithm(kTower_by_tower_calibration) and read from EMCTOWERCALIB" << std::endl;
-
-        TowerCalibration->set_calib_algorithm(RawTowerCalibration::kTower_by_tower_calibration);
-        //TowerCalibration->GetCalibrationParameters().ReadFromCDB("EMCTOWERCALIB");
-        PHParameterUtils::FillPHParametersFromCDB(TowerCalibration->GetCalibrationParameters(), "EMCTOWERCALIB");
-        TowerCalibration->set_variable_GeV_ADC(true);
-        TowerCalibration->set_variable_pedestal(true);
-      }
-
-      // [DEBUG PRINT] Register the calibration subsystem
-      std::cout << "[DEBUG] Registering 'TowerCalibration' => RawTowerCalibration" << std::endl;
-      se->registerSubsystem(TowerCalibration);
-
-      std::string calib_fname = "/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/mc_calib_NoDigi.root";
-      CaloTowerCalib *calibEMC = new CaloTowerCalib("CEMCCALIB");
-      calibEMC->set_detector_type(CaloTowerDefs::CEMC);
-      calibEMC->set_directURL(calib_fname.c_str());
-      calibEMC->set_inputNodePrefix("TOWERINFO_RAW_");
-      calibEMC->set_outputNodePrefix("TOWERINFO_CALIB_");
+//      std::string calib_fname = "/sphenix/u/bseidlitz/work/analysis/EMCal_pi0_Calib_2023/macros/mc_calib_NoDigi.root";
+//      CaloTowerCalib *calibEMC = new CaloTowerCalib("CEMCCALIB");
+//      calibEMC->set_detector_type(TowerInfoDefs::CEMC);
+//      calibEMC->set_directURL(calib_fname.c_str());
+//      calibEMC->set_inputNodePrefix("TOWERINFO_RAW_");
+//      calibEMC->set_outputNodePrefix("TOWERINFO_CALIB_");
 
       // [DEBUG PRINT] We also register the final "CaloTowerCalib" => "CEMCCALIB"
-      std::cout << "[DEBUG] Registering 'calibEMC' => CaloTowerCalib with directURL=" << calib_fname << std::endl;
-      se->registerSubsystem(calibEMC);
+//      std::cout << "[DEBUG] Registering 'calibEMC' => CaloTowerCalib with directURL=" << calib_fname << std::endl;
+//      se->registerSubsystem(calibEMC);
 
       RawClusterBuilderTemplate *ClusterBuilder = new RawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
       ClusterBuilder->Detector("CEMC");
@@ -368,7 +383,6 @@ void Fun4All_PDC(int nevents = 0,
 //  Process_Calo_Calib();
     
     
-    
   BEmcRecCEMC *bemcPtr = new BEmcRecCEMC();
   bemcPtr->SetCylindricalGeometry();
 
@@ -385,11 +399,20 @@ void Fun4All_PDC(int nevents = 0,
                     ? (isSimulation ? "output_PositionDep_sim.root"
                                     : "output_PositionDep_data.root")
                     : outFileName;
+    
+    
+//    // --- Cluster position module ---------------------------------------
+//    RawClusterPositionCorrection *posCorr =
+//        new RawClusterPositionCorrection("CEMC_ClusterPosCorr");
+//    posCorr->Detector("CEMC");   // ← new API
+//    se->registerSubsystem(posCorr);
+//    
+    
   PositionDependentCorrection *pdc
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
   pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
-  pdc->Verbosity(2);
+  pdc->Verbosity(0);
   se->registerSubsystem(pdc);
 
   ////////////////////////////////////////////////////////////
