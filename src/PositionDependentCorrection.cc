@@ -67,6 +67,7 @@
 #include "TFile.h"
 #include "TH1F.h"
 #include"TRandom3.h"
+#include <algorithm>
 
 #include <cdbobjects/CDBTTree.h>  // for CDBTTree
 #include <ffamodules/CDBInterface.h>
@@ -81,6 +82,7 @@ constexpr const char* ANSI_RESET = "\033[0m";
 constexpr const char* ANSI_GREEN = "\033[32m";
 constexpr const char* ANSI_YELLOW= "\033[33m";
 constexpr const char* ANSI_CYAN    = "\033[36m";
+constexpr const char* ANSI_RED   = "\033[31m";
 
 R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 
@@ -97,7 +99,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
   , clusterntuple(nullptr)
 {
   _eventcounter = 0;
-  _vz = 60.0;;
+  _vz = 10.0;;
 }
 
 PositionDependentCorrection::~PositionDependentCorrection()
@@ -328,6 +330,18 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
   //   2D histogram collecting the x–y positions of the global event vertex. Useful for verifying
   //   the distribution of vertex positions in the plane, which can affect angles/incidences.
   h_vert_xy = new TH2F("h_vert_xy","",500,-120,120,500,-120,120);
+    
+    // 1D histograms for truth and reco vertex Z
+  h_truth_vz = new TH1F("h_truth_vz","Truth Vertex Z;z_{truth} (cm);Counts",200,-100,100);
+  hm->registerHisto(h_truth_vz);
+
+  h_reco_vz = new TH1F("h_reco_vz","Reco Vertex Z;z_{reco} (cm);Counts",200,-100,100);
+  hm->registerHisto(h_reco_vz);
+
+  // 2D histogram for truth vs reco vertex Z
+  h2_truthReco_vz = new TH2F("h2_truthReco_vz","Truth vs Reco Vertex Z;z_{truth} (cm);z_{reco} (cm)",
+                               200,-100,100, 200,-100,100);
+  hm->registerHisto(h2_truthReco_vz);
 
   // h_truthE:
   //   1D histogram of the truth-level energies of photons or relevant particles.
@@ -359,20 +373,46 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
 
 
 
+    // 1) Define edges for X (uniform -0.5..1.5, 14 bins => 15 edges)
+    Double_t xEdges[15];
+    {
+      const double xMin = -0.5;
+      const double xMax =  1.5;
+      const double step = (xMax - xMin) / 14.0; // =2.0/14=0.142857...
+      for(int i=0; i<=14; i++)
+        xEdges[i] = xMin + i*step;
+    }
+
+    // 2) Define edges for Y (uniform -0.5..1.5, 14 bins => 15 edges)
+    Double_t yEdges[15];
+    {
+      const double yMin = -0.5;
+      const double yMax =  1.5;
+      const double step = (yMax - yMin) / 14.0; // same as above
+      for(int i=0; i<=14; i++)
+        yEdges[i] = yMin + i*step;
+    }
+
+    // 3) Z bin edges: 2..4..6..8..10..12..15..20..30
+    //    You already have this in your eEdge[] array; ensure it's a Double_t[].
+    static constexpr Double_t eEdges[9] = {2,4,6,8,10,12,15,20,30};
+
+    // 4) Now create the “uncorrected” TH3F with array-of-edges constructor:
     h3_cluster_block_cord_E = new TH3F(
-        "h2_cluster_block_cord_E",
-        "Uncorrected local block coords vs. pT",
-        14, -0.5, 1.5,   // X
-        14, -0.5, 1.5,   // Y
-         5,  0.0, 10.0   // Z
+        "h2_cluster_block_cord_E",                // name
+        "Uncorrected local block coords vs. E",   // title
+        14, xEdges,                               // X: 14 bins
+        14, yEdges,                               // Y: 14 bins
+        8,  eEdges                                // Z: 8 bins, from eEdges[]
     );
 
+    // 5) Create the “corrected” TH3F likewise:
     h3_cluster_block_cord_E_corrected = new TH3F(
         "h2_cluster_block_cord_E_corrected",
-        "Corrected local block coords vs. pT",
-        14, -0.5, 1.5,   // X
-        14, -0.5, 1.5,   // Y
-         5,  0.0, 10.0   // Z
+        "Corrected local block coords vs. E",
+        14, xEdges,
+        14, yEdges,
+        8,  eEdges
     );
   // h_block_bin:
   //   1D histogram that may be used to look at the block coordinate axis in discrete steps (0–1, or subdivided further).
@@ -445,33 +485,39 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
         );
     }
  
-    // ----------------------------------------------------------------------
+    // ──────────────────────────────────────────────────────────────────────────────
     //  Ash-b   and   Log-w0  trial grids  (energy-binned version, PHENIX-like)
-    // ----------------------------------------------------------------------
+    // ──────────────────────────────────────────────────────────────────────────────
     {
-      // Cell size at the EMCal front face (sPHENIX barrel)
-      constexpr double cellSize = 5.55;        // [cm]
+      // Geometry constant – cell size at the EMCal front face (sPHENIX barrel)
+      constexpr double cellSize = 5.55;     // [cm]
 
-      // ────────────────────────────────────────────────────────────────────
-      // 1) Ash scan – b parameter in *cm*  (0.00 – 1.60 cm, 0.05-cm grid)
-      // ────────────────────────────────────────────────────────────────────
+      // Histogram window for Δx  (= xreco – xtrue)
+      constexpr double DX_MAX  = 12.0;      // [cm]  covers the full observed range
+      constexpr double BIN_W   = 0.10;      // [cm]  keep 0.1-cm resolution
+      constexpr int    NBINS   = int( 2*DX_MAX / BIN_W + 0.5 );   // → 240 bins
+
+      // ────────────────────────────────────────────────────────────────────────
+      // 1) Ash scan – b parameter in *cm*  (0.00 … 1.60 cm, 0.05-cm grid)
+      //    NOTE: the list here ***MUST*** match the list probed later in doAshScan.
+      // ────────────────────────────────────────────────────────────────────────
       m_bScan.clear();
-      for (double b_cm = 0.00; b_cm <= 1.60 + 1e-9; b_cm += 0.05)
+      for (double b_cm = 0.00; b_cm <= 1.60 + 1e-9; b_cm += 0.05)   // ← start at 0.00
       {
-        const double b_cell = b_cm / cellSize;                 // convert → cell units
-        m_bScan.push_back( std::round(b_cell*10000.)/10000. ); // keep 4-dec precision
+        const double b_cell = b_cm / cellSize;                      // dimensionless
+        m_bScan.push_back( std::round(b_cell*10000.)/10000. );      // 4-dec precision
       }
 
-      // ────────────────────────────────────────────────────────────────────
-      // 2) Log-weight scan – w0 parameter (1.5 – 7.0 in 0.10 increments)
-      // ────────────────────────────────────────────────────────────────────
+      // ────────────────────────────────────────────────────────────────────────
+      // 2) Log-weight scan – w0 parameter (1.5 … 7.0 in 0.10 steps)
+      // ────────────────────────────────────────────────────────────────────────
       m_w0Scan.clear();
       for (double w0 = 1.5; w0 <= 7.0 + 1e-9; w0 += 0.10)
-        m_w0Scan.push_back( std::round(w0*100.)/100. );        // 2-dec precision
+        m_w0Scan.push_back( std::round(w0*100.)/100. );             // 2-dec precision
 
-      // ────────────────────────────────────────────────────────────────────
-      // 3) Declare the (E-slice dependent) histograms ONCE
-      // ────────────────────────────────────────────────────────────────────
+      // ────────────────────────────────────────────────────────────────────────
+      // 3) Declare the (E-slice dependent) histograms  **ONCE**
+      // ────────────────────────────────────────────────────────────────────────
       if (!alreadyDeclaredHistograms)
       {
         for (int iE = 0; iE < N_Ebins; ++iE)          // ← energy-bin loop
@@ -479,28 +525,27 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
           // 3a)  Ash  (b scan)
           for (double bVal : m_bScan)
           {
-            const TString hName =
-              Form("h_dx_ash_b%.4f_E%d", bVal, iE);   // **** four decimals ****
-            auto h = new TH1F(hName,
-                              ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                              80, -4, 4);
+            const TString hName = Form("h_dx_ash_b%.4f_E%d", bVal, iE);
+            auto* h = new TH1F(hName,
+                               ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                               NBINS, -DX_MAX, +DX_MAX);             // **expanded axis**
             hm->registerHisto(h);
           }
 
           // 3b)  Log  (w0 scan)
           for (double w0 : m_w0Scan)
           {
-            const TString hName =
-              Form("h_dx_log_w0%.2f_E%d", w0, iE);
-            auto h = new TH1F(hName,
-                              ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                              80, -4, 4);
+            const TString hName = Form("h_dx_log_w0%.2f_E%d", w0, iE);
+            auto* h = new TH1F(hName,
+                               ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                               NBINS, -DX_MAX, +DX_MAX);             // **expanded axis**
             hm->registerHisto(h);
           }
         }
         alreadyDeclaredHistograms = true;
       }
     }
+
 
 
   rnd = new TRandom3();
@@ -689,6 +734,7 @@ float PositionDependentCorrection::retrieveVertexZ(PHCompositeNode* topNode)
       if (vtx)
       {
         vtx_z = vtx->get_z();
+        if (std::isfinite(vtx_z)) h_reco_vz->Fill(vtx_z);        // finally fill
         if (Verbosity() > 0)
         {
           std::cout << "[DEBUG] Retrieved vertex Z position: "
@@ -719,8 +765,9 @@ float PositionDependentCorrection::retrieveVertexZ(PHCompositeNode* topNode)
   // Return the found or defaulted z position
   return vtx_z;
 }
-// ----------------------------------------------------------------------------
 
+
+// ----------------------------------------------------------------------------
 ///////////////////////////////////////////////////////////////////////////////
 // fillTowerInfo(...)
 // ------------------
@@ -973,6 +1020,7 @@ void PositionDependentCorrection::fillTruthInfo(
     if (vtx->get_id() == 1)
     {
       vtx_z = vtx->get_z();
+      h_truth_vz->Fill(vtx_z);
     }
 
     // Hidden debug block if 'false' changed to 'true'
@@ -1181,38 +1229,66 @@ int PositionDependentCorrection::countClusters(
 
 // ----------------------------------------------------------------------------
 
-float PositionDependentCorrection::convertBlockToGlobalPhi(int block_phi_bin, float localPhi)
+/* ========================================================================
+ *  Convert local φ within a 2×2 block  →  absolute calorimeter φ  (radians)
+ *  ------------------------------------------------------------------------
+ *  • block_phi_bin  : 0 … 127   (coarse 2-tower bin)
+ *  • localPhi       : [0,1)     (fractional coordinate in that block)
+ *  • result         : φ ∈ (−π,π]
+ * ======================================================================== */
+float PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
+                                                           float localPhi)
 {
+  constexpr int   kNCoarseBlocks = 128;   // 256 fine bins / 2 towers per block
+  constexpr int   kNTowerBins    = 256;   // full EMCal division in φ
+  constexpr float kRadPerBin     = 2.f * M_PI / kNTowerBins;
+
+  /*--------------------------------------------------
+   * 0)  verbose header
+   *--------------------------------------------------*/
   if (Verbosity() > 0)
   {
-    std::cout << "PositionDependentCorrection::convertBlockToGlobalPhi - START" << std::endl;
-    std::cout << "  --> block_phi_bin: " << block_phi_bin
-              << ", localPhi: " << localPhi << std::endl;
-    std::cout << "  --> Computing coarseTowerPhi = block_phi_bin * 2.0, etc..." << std::endl;
+    std::cout << ANSI_BOLD << "[convertBlockToGlobalPhi] ENTER" << ANSI_RESET
+              << "\n  input  block_phi_bin = " << block_phi_bin
+              << "  |  localPhi = " << localPhi << std::endl;
   }
 
-  // block_phi_bin is the integer bin (0..255 for CEMC).
-  // localPhi is in [0,1].
-  // so the "global" tower phi index is block_phi_bin*2 + localPhi*(2).
-  // Then map to [-pi, +pi].
-
-  float coarseTowerPhi = block_phi_bin * 2.0; // each block is 2 wide
-  float fullPhiIndex   = coarseTowerPhi + localPhi*2.0;
-
-  // Now convert that “phi index” to actual radians:
-  // typical mapping: index=0 => phi=0, index=256 => phi=2π
-  // so 1 index = 2π/256 = ~0.0245 rad
-  float radPerBin = (2.0 * M_PI) / 256.0;
-  float globalPhi = fullPhiIndex * radPerBin;
-
-  // shift into [-π, π] if needed:
-  globalPhi = TVector2::Phi_mpi_pi(globalPhi);
-
+  /*--------------------------------------------------
+   * 1)  basic sanity checks
+   *--------------------------------------------------*/
   if (Verbosity() > 0)
   {
-    std::cout << "  --> fullPhiIndex = " << fullPhiIndex << ", radPerBin = " << radPerBin << std::endl;
-    std::cout << "  --> Final globalPhi (mapped into [-π, π]) = " << globalPhi << std::endl;
-    std::cout << "PositionDependentCorrection::convertBlockToGlobalPhi - END" << std::endl << std::endl;
+    if (block_phi_bin < 0 || block_phi_bin >= kNCoarseBlocks)
+      std::cout << ANSI_YELLOW << "  [WARN] block_phi_bin outside [0,"
+                << kNCoarseBlocks-1 << "] !" << ANSI_RESET << std::endl;
+
+    if (localPhi < 0.f || localPhi >= 1.f)
+      std::cout << ANSI_YELLOW << "  [WARN] localPhi outside [0,1) !"
+                << ANSI_RESET << std::endl;
+  }
+
+  /*--------------------------------------------------
+   * 2)  compute global tower index
+   *--------------------------------------------------*/
+  const float coarseTowerPhi = block_phi_bin * 2.f;   // 2 towers / coarse block
+  const float fullPhiIndex   = coarseTowerPhi + localPhi * 2.f;  // 0 … 256
+
+  /*--------------------------------------------------
+   * 3)  convert to radians and wrap to (−π,π]
+   *--------------------------------------------------*/
+  float globalPhi = fullPhiIndex * kRadPerBin;        // 0 … 2π
+  globalPhi       = TVector2::Phi_mpi_pi(globalPhi);  // −π … +π
+
+  /*--------------------------------------------------
+   * 4)  verbose footer
+   *--------------------------------------------------*/
+  if (Verbosity() > 0)
+  {
+    std::cout << "  coarseTowerPhi = " << coarseTowerPhi
+              << "  |  fullPhiIndex = " << fullPhiIndex << '\n'
+              << "  kRadPerBin      = " << kRadPerBin    << '\n'
+              << "  → global φ(rad) = " << globalPhi     << '\n'
+              << "[convertBlockToGlobalPhi] EXIT\n" << std::endl;
   }
 
   return globalPhi;
@@ -1391,13 +1467,13 @@ void PositionDependentCorrection::fillAshLogDx(
   // 3) Ash-b scan
   //======================================================================
   int nAshOK = 0, nAshMiss = 0;
-  if (blockCord.second >= 0.f && blockCord.second <= 1.f)
+  if (blockCord.second >= 0.f && blockCord.second <  1.f)
   {
     for (double bCell : m_bScan)
     {
       const double bVal = std::round(bCell*10000.)/10000.;
       const float  localAsh = doAshShift(blockCord.second, bVal);
-      const float  globalPhi = (blockPhiBin*2 + localAsh)*(2.*M_PI/256.);
+      const float  globalPhi = (blockPhiBin*2 + localAsh*2.f)*(2.*M_PI/256.);
 
       const float xA = rFront*std::cos(globalPhi);
       const float yA = rFront*std::sin(globalPhi);
@@ -1472,122 +1548,157 @@ void PositionDependentCorrection::fillAshLogDx(
 
 
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
-    const TLorentzVector& recoPhoton,
-    const TLorentzVector& truthPhoton,
-    const std::pair<float,float>& blockCord, // local block coords in [0,1]
-    int blockPhiBin,
-    float delPhi
+    const TLorentzVector&  recoPhoton,
+    const TLorentzVector&  truthPhoton,
+    const std::pair<float,float>& blockCord,   // local (η,φ) ∈ [0,1]²
+    int                     blockPhiBin,       // coarse φ-block 0…127
+    float                   delPhi             // raw Δφ (reco – truth)
 )
 {
-  float thisE = recoPhoton.E();  // use energy, not pT
-
-  int iEbin = -1;
-  for (int i = 0; i < N_Ebins; ++i)
-  {
-    if (thisE >= eEdge[i] && thisE < eEdge[i+1])
-    {
-      iEbin = i;
-      break;
-    }
-  }
-  // If the cluster’s energy is not in [2..10], skip
-  if (iEbin < 0) return;
-
-  // ----------------------------------------------------------------
-  // 2) Compute the uncorrected Δφ in (-π..+π)
-  // ----------------------------------------------------------------
-  delPhi = TVector2::Phi_mpi_pi(delPhi);
-
-  // (Optional) debug print
+  /*--------------------------------------------------
+   * 0) entrance summary
+   *--------------------------------------------------*/
   if (Verbosity() > 0)
   {
-    std::cout << "[DEBUG] fillDPhiRawAndCorrected:\n"
-              << "   * cluster E=" << recoPhoton.E()
-              << "   * truth E="   << truthPhoton.E()
-              << "   * ∆R="        << recoPhoton.DeltaR(truthPhoton)
-              << "   * ∆φ(raw)="   << delPhi
+    std::cout << ANSI_BOLD << "[fillDPhiRawAndCorrected] ENTER" << ANSI_RESET
+              << "\n  reco:(E,η,φ)=("  << recoPhoton.E()  << ','
+                                        << recoPhoton.Eta() << ','
+                                        << recoPhoton.Phi() << ')'
+              << "\n  true:(E,η,φ)=("  << truthPhoton.E() << ','
+                                        << truthPhoton.Eta() << ','
+                                        << truthPhoton.Phi() << ')'
+              << "\n  raw blockCord=(ηloc=" << blockCord.first
+              << ", φloc="               << blockCord.second << ')'
+              << "  blockPhiBin="        << blockPhiBin
+              << "\n  input Δφ(raw)= "   << delPhi
               << std::endl;
   }
 
-  // ----------------------------------------------------------------
-  // 3) Fill the UNCORRECTED Δφ histogram
-  // ----------------------------------------------------------------
-  if (h_phi_diff_raw_E[iEbin]) // (the array name might still say “_pt”, but it’s an E-slice)
+  /*------------------------------------------------------------
+   * 1) energy-slice selection
+   *----------------------------------------------------------*/
+  const float thisE = recoPhoton.E();        // use full energy, not pT
+  int iEbin = -1;
+  for (int i = 0; i < N_Ebins; ++i)
+    if (thisE >= eEdge[i] && thisE < eEdge[i+1]) { iEbin = i; break; }
+
+  if (iEbin < 0)
   {
-    h_phi_diff_raw_E[iEbin]->Fill(delPhi);
+    if (Verbosity() > 0)
+      std::cout << ANSI_YELLOW
+                << "  [WARN] E=" << thisE
+                << " GeV is outside histogram range [" << eEdge[0]
+                << ',' << eEdge[N_Ebins] << ") – skipping Δφ fill\n"
+                << ANSI_RESET;
+    return;
   }
   else if (Verbosity() > 0)
   {
-    std::cout << "[WARNING] h_phi_diff_raw_E[" << iEbin
-              << "] is null => no fill!" << std::endl;
+    std::cout << "  Energy slice  = " << iEbin
+              << "  (" << eEdge[iEbin] << "–" << eEdge[iEbin+1] << " GeV)"
+              << std::endl;
   }
 
-  // ----------------------------------------------------------------
-  // 4) Optionally fill TProfile vs local block φ
-  // ----------------------------------------------------------------
+  /*------------------------------------------------------------
+   * 2) Δφ in (−π,π]
+   *----------------------------------------------------------*/
+  delPhi = TVector2::Phi_mpi_pi(delPhi);
+
+  /*------------------------------------------------------------
+   * 3) RAW histogram fills
+   *----------------------------------------------------------*/
+  if (h_phi_diff_raw_E[iEbin])
+      h_phi_diff_raw_E[iEbin]->Fill(delPhi);
+  else if (Verbosity() > 0)
+      std::cout << ANSI_YELLOW << "  [WARN] h_phi_diff_raw_E[" << iEbin
+                << "] pointer is null – RAW Δφ not filled\n" << ANSI_RESET;
+
   if (pr_phi_vs_blockcoord)
+      pr_phi_vs_blockcoord->Fill(blockCord.second, delPhi);
+  else if (Verbosity() > 0)
+      std::cout << ANSI_YELLOW << "  [WARN] pr_phi_vs_blockcoord pointer is null\n"
+                << ANSI_RESET;
+
+  /*------------------------------------------------------------
+   * 4)  Ash-b φ-correction
+   *----------------------------------------------------------*/
+  if (!isFitDoneForPhi)
   {
-    pr_phi_vs_blockcoord->Fill(blockCord.second, delPhi);
+    if (Verbosity() > 0)
+      std::cout << "  (No φ-fit available ⇒ only RAW filled)\n";
+    return;
   }
 
-  // ----------------------------------------------------------------
-  // 5) If φ b-values are read in, apply the correction
-  // ----------------------------------------------------------------
-  //   Note: We check “isFitDoneForPhi” to see if we have valid φ b-values.
-  //   Also note the code you showed uses `isFitDoneForB` and `m_bVals[]`,
-  //   but you said you have `m_bValsPhi[]`. So we adapt accordingly.
-  // ----------------------------------------------------------------
-  if (isFitDoneForPhi)
+  float bPhiUsed = m_bValsPhi[iEbin];        // cm if <1, otherwise block units
+  constexpr float kCellSize = 5.55f;         // cm
+
+  if (bPhiUsed > 1.f)  bPhiUsed /= kCellSize;  // convert from cm to “b”
+  if (Verbosity() > 0)
+    std::cout << "  Using bΦ = " << bPhiUsed << '\n';
+
+  if (bPhiUsed <= 1e-9f)      /* nothing to correct */
   {
-    float bPhiUsed = m_bValsPhi[iEbin];  // pick the b-value for this E bin
-    if (bPhiUsed > 1e-9)
-    {
-      //----------------------------------------------------------------
-      // (a) Correct the local block φ coordinate
-      //----------------------------------------------------------------
-      float correctedBlockPhi = doPhiBlockCorr(blockCord.second, bPhiUsed);
-
-      // Fill “corrected local φ” QA histogram if it exists
-      if (h_localPhi_corrected[iEbin])
-      {
-        h_localPhi_corrected[iEbin]->Fill(correctedBlockPhi);
-      }
-
-      //----------------------------------------------------------------
-      // (b) Convert that corrected local coordinate to global φ
-      //----------------------------------------------------------------
-      float correctedPhi = convertBlockToGlobalPhi(blockPhiBin, correctedBlockPhi);
-
-      //----------------------------------------------------------------
-      // (c) Recompute Δφ in (-π..+π)
-      //----------------------------------------------------------------
-      float delPhiCorr = TVector2::Phi_mpi_pi(correctedPhi - truthPhoton.Phi());
-
-      //----------------------------------------------------------------
-      // (d) Fill CORRECTED Δφ histogram
-      //----------------------------------------------------------------
-      if (h_phi_diff_corrected_E[iEbin])
-      {
-        h_phi_diff_corrected_E[iEbin]->Fill(delPhiCorr);
-      }
-      else if (Verbosity() > 0)
-      {
-        std::cout << "[WARNING] h_phi_diff_corrected_E[" << iEbin
-                  << "] is null => no fill!" << std::endl;
-      }
-    }
-    else if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] bPhiUsed=0 => skipping local φ correction.\n";
-    }
+    if (Verbosity() > 0)
+      std::cout << "  bΦ≈0  ⇒ skipping correction\n";
+    return;
   }
 
-  // else if not isFitDoneForPhi => do nothing special
+  /* 4.1  local φ within block */
+  float corrBlockPhi = doPhiBlockCorr(blockCord.second, bPhiUsed);
 
-  // Done
+  /* wrap into [0,1) for safety */
+  if (corrBlockPhi < 0.f)  corrBlockPhi += 1.f;
+  if (corrBlockPhi >= 1.f) corrBlockPhi -= 1.f;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "    raw  φloc=" << blockCord.second
+              << "  →  corrected φloc=" << corrBlockPhi << '\n';
+    if (corrBlockPhi < 0.f || corrBlockPhi >= 1.f)
+      std::cout << ANSI_YELLOW
+                << "    [WARN] corrected φloc fell outside [0,1) after wrap!\n"
+                << ANSI_RESET;
+  }
+
+  if (h_localPhi_corrected[iEbin])
+      h_localPhi_corrected[iEbin]->Fill(corrBlockPhi);
+  else if (Verbosity() > 0)
+      std::cout << ANSI_YELLOW << "  [WARN] h_localPhi_corrected[" << iEbin
+                << "] pointer is null – local φ not filled\n" << ANSI_RESET;
+
+  /* guard for illegal block index */
+  if (blockPhiBin < 0 || blockPhiBin >= 128)
+  {
+    if (Verbosity() > 0)
+      std::cout << ANSI_YELLOW
+                << "  [WARN] blockPhiBin=" << blockPhiBin
+                << " is outside [0,127] – global φ conversion skipped\n"
+                << ANSI_RESET;
+    return;
+  }
+
+  /* 4.2  convert to calorimeter global φ */
+  float corrPhi = convertBlockToGlobalPhi(blockPhiBin, corrBlockPhi);
+
+  if (Verbosity() > 0)
+    std::cout << "    block(" << blockPhiBin << ") + φloc=" << corrBlockPhi
+              << "  →  global φ=" << corrPhi << '\n';
+
+  /* 4.3  corrected Δφ */
+  float delPhiCorr = TVector2::Phi_mpi_pi(corrPhi - truthPhoton.Phi());
+
+  if (h_phi_diff_corrected_E[iEbin])
+      h_phi_diff_corrected_E[iEbin]->Fill(delPhiCorr);
+  else if (Verbosity() > 0)
+      std::cout << ANSI_YELLOW << "  [WARN] h_phi_diff_corrected_E[" << iEbin
+                << "] pointer is null – CORR Δφ not filled\n" << ANSI_RESET;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << "    Δφ(corrected)= " << delPhiCorr
+              << "\n[fillDPhiRawAndCorrected] EXIT\n";
+  }
 }
-
-
 
 
 
@@ -1750,7 +1861,7 @@ void PositionDependentCorrection::finalClusterLoop(
       continue;
     }
     // 2) Large chi2
-    if (clusChi2 > 10000)
+    if (clusChi2 > 10)
     {
       if (Verbosity() > 0)
       {
@@ -1816,39 +1927,35 @@ void PositionDependentCorrection::finalClusterLoop(
     }
 
       // -----------------------------------------------------------------
-      // (C) Fill block coordinates
+      // (C) Determine block coordinates (coarse & local)
       // -----------------------------------------------------------------
-      std::pair<float,float> blockCord = getBlockCord(towerEtas, towerPhis, towerEs);
-      int block_eta_bin = h_block_bin->FindBin(blockCord.first) - 1;
-      int block_phi_bin = h_block_bin->FindBin(blockCord.second) - 1;
+      /* 1) energy–weighted tower indices ................................ */
+      const float avgEta = getAvgEta (towerEtas, towerEs);      // 0 … 95.999
+      const float avgPhi = getAvgPhi (towerPhis, towerEs);      // 0 … 255.999
 
-      // Identify which pT bin we are in (2..4,4..6,6..8,8..10)
+      /* 2) coarse 2×2-block indices – now truly 0 … 47 / 0 … 127 */
+      const int   block_eta_bin = int(std::floor(avgEta)) / 2;
+      const int   block_phi_bin = int(std::floor(avgPhi)) / 2;
+
+      /* 3) fine (local) coordinates inside that block, ∈ [0,1)²          */
+      const std::pair<float,float> blockCord =
+              getBlockCord(towerEtas, towerPhis, towerEs);        // (ηloc, φloc)
+
+      /* 4) find energy slice ........................................... */
       int iEbin = -1;
       for (int i = 0; i < N_Ebins; ++i)
-      {
-        if (clusE >= eEdge[i] && clusE < eEdge[i + 1])
-        {
-          iEbin = i;
-          break;
-        }
-      }
+        if (clusE >= eEdge[i] && clusE < eEdge[i+1]) { iEbin = i; break; }
 
-      // If user wants an in-depth debug print:
+      /* optional detailed print ........................................ */
       if (Verbosity() > 0)
       {
-        std::cout
-          << "[DEBUG] finalClusterLoop => \n"
-          << "   blockCoord = (" << blockCord.first << ", " << blockCord.second << ")\n"
-          << "   block_eta_bin = " << block_eta_bin
-          << ", block_phi_bin = " << block_phi_bin
-          << ", iEbin = " << iEbin << "\n"
-          << "   clusE = " << clusE
-          << ", clusPt = " << clusPt << "\n"
-          << "   #towers = " << towerEtas.size() << "\n"
-          << "   towerEtas.size()=" << towerEtas.size()
-          << ", towerPhis.size()=" << towerPhis.size()
-          << ", towerEs.size()=" << towerEs.size()
-          << std::endl;
+        std::cout << "[DEBUG] finalClusterLoop →"
+                  << "  blockCord=(" << blockCord.first << ',' << blockCord.second << ")"
+                  << "  |  coarse (η,φ)=(" << block_eta_bin << ',' << block_phi_bin << ")"
+                  << "  |  iEbin=" << iEbin
+                  << "  |  E=" << clusE << "  pT=" << clusPt
+                  << "  |  #towers=" << towerEs.size()
+                  << '\n';
       }
 
       // ---------------------------------------------
@@ -2217,7 +2324,7 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 
   // Define cuts
   float maxAlpha       = 0.6;
-  float clus_chisq_cut = 10000;
+  float clus_chisq_cut = 4.0;
   float nClus_ptCut    = 0.5;
   int   max_nClusCount = 3000000;
 
@@ -2225,6 +2332,7 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   // 1) Retrieve vertex z-position
   // ------------------------------------------------------------------------
   float vtx_z = retrieveVertexZ(topNode);
+  float truth_vz = 0.0;
   if (Verbosity() > 0)
   {
     std::cout << ANSI_BOLD
@@ -2258,6 +2366,7 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   std::vector<TLorentzVector> truth_photons;
   std::vector<TLorentzVector> truth_meson_photons;
   fillTruthInfo(topNode, vtx_z, truth_photons, truth_meson_photons);
+  h2_truthReco_vz->Fill(truth_vz, vtx_z);
 
   if (Verbosity() > 0)
   {
@@ -2550,363 +2659,156 @@ float PositionDependentCorrection::getWeight(int ieta, float pt)
 }
 
 
-TF1* PositionDependentCorrection::fitHistogram(TH1* h)
+// ============================================================================
+//  getBlockCord – local (η,φ) of a cluster inside its 2×2 super-cell
+//  ----------------------------------------------------------------------------
+//  INPUT  towerEtas   int   vector, fine-tower η rows      (0 … 95)
+//         towerPhis   int   vector, fine-tower φ columns   (0 … 255)
+//         towerEs     float vector, tower energies (GeV)
+//
+//  OUTPUT std::pair<float,float>   (ηloc , φloc) in detector *tower units*
+//
+//  Range   −0.5 … +1.5  on each axis   ──> matches the X/Y edges you booked
+// ============================================================================
+std::pair<float,float>
+PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
+                                          const std::vector<int>   &towerPhis,
+                                          const std::vector<float> &towerEs)
 {
+  // -------------------------------------------------------------------------
+  // 0) Verbose banner
+  // -------------------------------------------------------------------------
   if (Verbosity() > 0)
   {
-    std::cout << "[DEBUG] fitHistogram() called. Setting up the fit function parameters now." << std::endl;
+    std::cout << ANSI_CYAN << "[getBlockCord] START  nTowers = "
+              << towerEs.size() << ANSI_RESET << '\n';
   }
 
-  // Maintain exact functionality
-  TF1* fitFunc = new TF1("fitFunc",
-                         "[0]/[2]/2.5*exp(-0.5*((x-[1])/[2])^2) + [3] + [4]*x + [5]*x^2 + [6]*x^3",
-                         h->GetXaxis()->GetXmin(),
-                         h->GetXaxis()->GetXmax());
-
-  fitFunc->SetParameter(0, 5);
-  fitFunc->SetParameter(1, target_pi0_mass);
-  fitFunc->SetParameter(2, 0.01);
-  fitFunc->SetParameter(3, 0.0);
-  fitFunc->SetParameter(4, 0.0);
-  fitFunc->SetParameter(5, 0.0);
-  fitFunc->SetParameter(6, 100);
-
-  fitFunc->SetParLimits(0, 0, 10);
-  fitFunc->SetParLimits(1, 0.113, 0.25);
-  fitFunc->SetParLimits(2, 0.01, 0.04);
-  fitFunc->SetParLimits(3, -2, 1);
-  fitFunc->SetParLimits(4, 0, 40);
-  fitFunc->SetParLimits(5, -150, 50);
-  fitFunc->SetParLimits(6, 0, 200);
-
-  fitFunc->SetRange(0.05, 0.7);
+  // -------------------------------------------------------------------------
+  // 1) Energy–weighted centres of gravity in *raw tower space*
+  // -------------------------------------------------------------------------
+  const float etaCoG = getAvgEta(towerEtas , towerEs);   //  0.0 … 95.0
+  const float phiCoG = getAvgPhi(towerPhis , towerEs);   //  0.0 … 255.999
 
   if (Verbosity() > 0)
   {
-    std::cout << "[DEBUG] Performing fit on histogram '" << (h ? h->GetName() : "null")
-              << "' using option 'QN'." << std::endl;
+    std::cout << "  ⟨η⟩_tower = " << etaCoG
+              << "   ⟨φ⟩_tower = " << phiCoG << '\n';
   }
 
-  // Perform the fit
-  h->Fit("fitFunc", "QN");
+  // -------------------------------------------------------------------------
+  // 2) Which 2×2 super-cell owns that point?
+  //    Each super-cell spans *two* fine towers.
+  // -------------------------------------------------------------------------
+  const int iBlkEta = static_cast<int>(std::floor(etaCoG)) / 2;   // 0 … 47
+  const int iBlkPhi = static_cast<int>(std::floor(phiCoG)) / 2;   // 0 … 127
+
+  if (Verbosity() > 0)
+    std::cout << "  → super-cell index (η,φ) = (" << iBlkEta
+              << ',' << iBlkPhi << ")\n";
+
+  // -------------------------------------------------------------------------
+  // 3) Local coordinates inside that super-cell
+  //    (subtract the block origin = 2·index)
+  // -------------------------------------------------------------------------
+  float locEta = etaCoG - 2.f * iBlkEta;   // −0.5 … +1.5
+  float locPhi = phiCoG - 2.f * iBlkPhi;   // −0.5 … +1.5
+
+  // Rare protection against pathological inputs: wrap η into the legal band.
+  if (locEta >  1.5f) locEta -= 2.f;
+  if (locEta < -0.5f) locEta += 2.f;
+    
+  if (locPhi >  1.5f) locPhi -= 2.f;
+  if (locPhi < -0.5f) locPhi += 2.f;
+    
 
   if (Verbosity() > 0)
   {
-    std::cout << "[DEBUG] fitHistogram() completed the fit. Returning TF1 pointer." << std::endl;
+    std::cout << "  local(η,φ) inside cell = ("
+              << locEta << ',' << locPhi << ")  [−0.5 … +1.5]\n";
   }
-  return fitFunc;
+
+  // -------------------------------------------------------------------------
+  // 4) Done
+  // -------------------------------------------------------------------------
+  if (Verbosity() > 0)
+  {
+    std::cout << ANSI_GREEN << "[getBlockCord] RETURN  "
+              << "(ηloc,φloc)=(" << locEta << ',' << locPhi << ')'
+              << ANSI_RESET << "\n\n";
+  }
+
+  return { locEta , locPhi };
 }
 
 
-void PositionDependentCorrection::fitEtaSlices(const std::string& infile,
-                                              const std::string& fitOutFile,
-                                              const std::string& cdbFile)
+
+// ============================================================================
+//  getAvgEta – energy–weighted η–centre of a cluster (no wrapping necessary)
+//  ----------------------------------------------------------------------------
+//  INPUT  towerEtas       int  vector, raw η–row of every tower hit (0 … 95)
+//         towerEnergies   float vector, same length, tower energy in GeV
+//
+//  OUTPUT float           fractional η–index in the 96-row grid
+//                         0.0 ≤  avgη  ≤ 95.0
+// ============================================================================
+float PositionDependentCorrection::getAvgEta(const std::vector<int>   &towerEtas,
+                                             const std::vector<float> &towerEnergies)
 {
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] fitEtaSlices() called with infile='" << infile
-              << "', fitOutFile='" << fitOutFile
-              << "', cdbFile='" << cdbFile << "'." << std::endl;
-  }
+  const int nTowers = towerEtas.size();
 
-  // Maintain exact functionality
-  TFile* fin = new TFile(infile.c_str());
-  if (!fin)
+  // -------------------------------------------------------------------------
+  // 0) Sanity checks
+  // -------------------------------------------------------------------------
+  if (Verbosity() > 0)
+    std::cout << ANSI_CYAN << "[getAvgEta] called with nTowers = "
+              << nTowers << ANSI_RESET << '\n';
+
+  if (nTowers == 0 || nTowers != static_cast<int>(towerEnergies.size()))
   {
     if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] fitEtaSlices(): input TFile pointer is null! Exiting." << std::endl;
-    }
-    std::cout << "PositionDependentCorrection::fitEtaSlices null fin" << std::endl;
-    exit(1);
+      std::cout << ANSI_RED << "  ERROR – empty or size-mismatched vectors!"
+                << ANSI_RESET << std::endl;
+    return 0.f;
   }
+
+  // Single-tower cluster – fast exit
+  if (nTowers == 1) return static_cast<float>( towerEtas[0] );
+
+  // -------------------------------------------------------------------------
+  // 1) Energy-weighted sum
+  // -------------------------------------------------------------------------
+  double sumE      = 0.0;   // ΣE
+  double sumEeta   = 0.0;   // Σ(E · η)
+
+  for (int i = 0; i < nTowers; ++i)
+  {
+    const double E   = towerEnergies[i];
+    const int    eta = towerEtas[i];          // 0 … 95
+
+    sumE    += E;
+    sumEeta += E * eta;
+
+    if (Verbosity() > 1)
+      std::cout << "    tower[" << i << "]  η=" << eta
+                << "  E=" << E << '\n';
+  }
+
+  if (sumE < 1e-9) return 0.f;                // guard against ΣE ≈ 0
+
+  // -------------------------------------------------------------------------
+  // 2) Energy-weighted centroid
+  // -------------------------------------------------------------------------
+  const double avgEta = sumEeta / sumE;       // guaranteed 0.0 … 95.0
 
   if (Verbosity() > 0)
   {
-    std::cout << "[DEBUG] Successfully opened input file: " << infile << std::endl;
-    std::cout << "[DEBUG] Starting to retrieve histograms for fit..." << std::endl;
+    std::cout << ANSI_GREEN << "  RESULT ⟨η⟩ = " << avgEta
+              << ANSI_RESET << '\n'
+              << ANSI_CYAN  << "[getAvgEta] END"
+              << ANSI_RESET << "\n";
   }
-
-  std::cout << "getting hists" << std::endl; // preserving original line
-
-  TH1F* h_peak_eta  = new TH1F("h_peak_eta",  "", 96, 0, 96);
-  TH1F* h_sigma_eta = new TH1F("h_sigma_eta", "", 96, 0, 96);
-  TH1F* h_p3_eta    = new TH1F("h_p3_eta",    "", 96, 0, 96);
-  TH1F* h_p4_eta    = new TH1F("h_p4_eta",    "", 96, 0, 96);
-  TH1F* h_p5_eta    = new TH1F("h_p5_eta",    "", 96, 0, 96);
-  TH1F* h_p6_eta    = new TH1F("h_p6_eta",    "", 96, 0, 96);
-  TH1F* h_p0_eta    = new TH1F("h_p0_eta",    "", 96, 0, 96);
-
-  TH1F* h_M_eta[96];
-  for (int i = 0; i < 96; i++)
-  {
-    h_M_eta[i] = (TH1F*) fin->Get(Form("h_mass_eta_lt_rw%d", i));
-    if (h_M_eta[i])
-    {
-      h_M_eta[i]->Scale(1. / h_M_eta[i]->Integral(), "width");
-    }
-    else
-    {
-      if (Verbosity() > 0)
-      {
-        std::cout << "[DEBUG] fitEtaSlices(): histogram 'h_mass_eta_lt_rw" << i
-                  << "' does not exist in file. This may cause issues but continuing." << std::endl;
-      }
-    }
-  }
-
-  TF1* fitFunOut[96];
-  for (int i = 0; i < 96; i++)
-  {
-    if (!h_M_eta[i])
-    {
-      if (Verbosity() > 0)
-      {
-        std::cout << "[DEBUG] PositionDependentCorrection::fitEtaSlices null hist 'h_mass_eta_lt_rw"
-                  << i << "'. Continuing." << std::endl;
-      }
-      std::cout << "PositionDependentCorrection::fitEtaSlices null hist" << std::endl;
-      continue;
-    }
-
-    fitFunOut[i] = fitHistogram(h_M_eta[i]);
-    fitFunOut[i]->SetName(Form("f_pi0_eta%d", i));
-
-    float mass_val_out = fitFunOut[i]->GetParameter(1);
-    float mass_err_out = fitFunOut[i]->GetParError(1);
-    h_peak_eta->SetBinContent(i + 1, mass_val_out);
-
-    if (isnan(h_M_eta[i]->GetEntries()))
-    {
-      h_peak_eta->SetBinError(i + 1, 0);
-      continue;
-    }
-    h_peak_eta->SetBinError(i + 1, mass_err_out);
-
-    h_sigma_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(2));
-    h_sigma_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(2));
-
-    h_p3_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(3));
-    h_p3_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(3));
-
-    h_p4_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(4));
-    h_p4_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(4));
-
-    h_p5_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(5));
-    h_p5_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(5));
-
-    h_p6_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(6));
-    h_p6_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(6));
-
-    h_p0_eta->SetBinContent(i + 1, fitFunOut[i]->GetParameter(0));
-    h_p0_eta->SetBinError(i + 1, fitFunOut[i]->GetParError(0));
-  }
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Initial fit loops completed. Proceeding with CDBTTree usage..." << std::endl;
-  }
-
-  CDBTTree* cdbttree1 = new CDBTTree(cdbFile.c_str());
-  CDBTTree* cdbttree2 = new CDBTTree(cdbFile.c_str());
-  std::string m_fieldname = "Femc_datadriven_qm1_correction";
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Updating CDBTTree values with pi0 mass corrections." << std::endl;
-  }
-
-  for (int i = 0; i < 96; i++)
-  {
-    for (int j = 0; j < 256; j++)
-    {
-      float correction = target_pi0_mass / h_peak_eta->GetBinContent(i + 1);
-      unsigned int key = TowerInfoDefs::encode_emcal(i, j);
-      float val1 = cdbttree1->GetFloatValue(key, m_fieldname);
-      cdbttree2->SetFloatValue(key, m_fieldname, val1 * correction);
-    }
-  }
-
-  cdbttree2->Commit();
-  cdbttree2->WriteCDBTTree();
-  delete cdbttree2;
-  delete cdbttree1;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Committed updated corrections to the CDBTTree." << std::endl;
-    std::cout << "[DEBUG] Creating output fit file: " << fitOutFile << std::endl;
-  }
-
-  TFile* fit_out = new TFile(fitOutFile.c_str(), "recreate");
-  fit_out->cd();
-
-  for (auto& i : h_M_eta)
-  {
-    if (i)
-    {
-      i->Write();
-      delete i;
-    }
-  }
-
-  for (auto& i : fitFunOut)
-  {
-    if (i) i->Write();
-    delete i;
-  }
-
-  h_p3_eta->Write();
-  h_p4_eta->Write();
-  h_p5_eta->Write();
-  h_p6_eta->Write();
-  h_p0_eta->Write();
-  h_sigma_eta->Write();
-  h_peak_eta->Write();
-
-  fin->Close();
-  delete fin;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Fit results and histograms written to " << fitOutFile << std::endl;
-  }
-
-  std::cout << "finish fitting suc" << std::endl; // original line maintained
-
-  return;
-}
-
-/////////////////////////////////////////////////////////////////////////////////////
-// getBlockCord(...)
-// -----------------
-// This method calculates the "raw" local block coordinate (eta, phi) within a 2×2
-// cluster block based on tower indices. It does this by computing a "weighted average"
-// in tower (eta, phi) space and then mapping that to the 0–2 range in each dimension.
-// For example, if the cluster is near the middle of one tower, the block coordinate
-// might be near (0.5, 0.5). If it's near the boundary of a 2×2 set, it might be
-// (1.9, 0.1), etc. Then we shift that range into ~[0,1] by subtracting the block indices.
-/////////////////////////////////////////////////////////////////////////////////////
-
-std::pair<float,float> PositionDependentCorrection::getBlockCord(
-    std::vector<int> etas,
-    std::vector<int> phis,
-    std::vector<float> Es)
-{
-  // Maintain original functionality, adding verbosity prints:
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] getBlockCord() called. Computing average tower indices..." << std::endl;
-  }
-
-  // Get the average tower index in eta and phi directions
-  // weighted by tower energies (like an energy-weighted center of gravity).
-  float avgEta = getAvgEta(etas, Es);
-  float avgPhi = getAvgPhi(phis, Es);
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Calculated avgEta=" << avgEta
-              << ", avgPhi=" << avgPhi << std::endl;
-    std::cout << "[DEBUG] Converting to integer bins, dividing by 2 for block indexing..." << std::endl;
-  }
-
-  // Convert floating tower indices into integer bins, then find the block index
-  // by dividing by 2. This concept lumps towers into 2×2 blocks in the geometry.
-  int avgIPhi    = std::floor(avgPhi);
-  int avgIEta    = std::floor(avgEta);
-  int iblockphi  = avgIPhi  / 2;
-  int iblocketa  = avgIEta  / 2;
-
-  // Subtract the block indices times 2 so that we get an offset
-  // within that 2×2 block (range 0 to 2).
-  float interBlockPhi = avgPhi - iblockphi * 2;
-  float interBLockEta = avgEta - iblocketa * 2;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] interBlockPhi=" << interBlockPhi
-              << ", interBLockEta=" << interBLockEta << std::endl;
-    std::cout << "[DEBUG] Checking for local eta coordinate above 1.5..." << std::endl;
-  }
-
-  // If the local eta coordinate ended up above 1.5, shift it by -2.
-  // This is typically to keep it in [0,2) range rather than [2, something bigger].
-  if (interBLockEta > 1.5)
-  {
-    interBLockEta -= 2;
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] interBLockEta was >1.5, shifted by 2 => "
-                << interBLockEta << std::endl;
-    }
-  }
-
-  // Return the final "blockCord" pair, which is the coordinate inside that 2×2 block.
-  // Typically, we interpret interBLockEta and interBlockPhi in the range [0,1].
-  std::pair<float,float> blockCord = {interBLockEta, interBlockPhi};
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] getBlockCord() returning block coordinates: ("
-              << blockCord.first << ", " << blockCord.second << ")" << std::endl;
-  }
-  return blockCord;
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////////
-// getAvgEta(...)
-// --------------
-// Calculates the energy-weighted average of the tower 'eta indices' for all towers in
-// the cluster. The index itself is an integer tower bin, but we treat it as a float
-// when we do the weighting. This effectively returns the cluster's position in tower
-// eta-bin space.
-/////////////////////////////////////////////////////////////////////////////////////
-
-float PositionDependentCorrection::getAvgEta(
-    const std::vector<int> &toweretas,
-    const std::vector<float> &towerenergies)
-{
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] getAvgEta() called with toweretas.size()="
-                << toweretas.size() << std::endl;
-    }
-
-    float etamult = 0;
-    float etasum  = 0;
-
-    // If only one tower is present, simply return its integer index
-    // without weighting.
-    if (toweretas.size() == 1)
-    {
-      if (Verbosity() > 0)
-      {
-        std::cout << "[DEBUG] Only one tower in cluster => returning that tower's eta index: "
-                  << toweretas[0] << std::endl;
-      }
-      return toweretas[0];
-    }
-
-    // Otherwise, sum up eta_index × energy for each tower, and also sum energies.
-    for (UInt_t j = 0; j < towerenergies.size(); j++)
-    {
-        float energymult = towerenergies[j] * toweretas[j];
-        etamult += energymult;
-        etasum  += towerenergies[j];
-    }
-
-    // The ratio gives the "average" tower-eta bin for this cluster.
-    float result = etamult / etasum;
-
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] getAvgEta() returning "
-                << result << " as the energy-weighted average eta-index."
-                << std::endl;
-    }
-    return result;
+  return static_cast<float>(avgEta);
 }
 
 
@@ -2998,12 +2900,6 @@ float PositionDependentCorrection::getAvgPhi(
                    << avgphi << " by subtracting nphibin=" << nphibin << std::endl;
        }
     }
-
-    // Additional offset: we then shift by +0.5 and apply modulo 2, then subtract 0.5.
-    // This is a final step to keep the average phi in some narrower block coordinate range
-    // for local tower indexing or cluster block identification. The details of why 0.5 is used
-    // can be geometry-specific, ensuring the center of a tower is at .5, for instance.
-    avgphi = fmod(avgphi + 0.5, 2) - 0.5;
 
     if (Verbosity() > 0)
     {

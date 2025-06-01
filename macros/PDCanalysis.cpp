@@ -26,101 +26,214 @@
 #include <memory>
 #include <cfloat>  // for DBL_MAX
 
-////////////////////////////////////////////////////////////////////////////////
-// 1) New energy‐bin array => 8 intervals
-////////////////////////////////////////////////////////////////////////////////
-constexpr double E_edges[] = {2, 4, 6, 8, 10, 12, 15, 20, 30};
-constexpr int    N_E       = (sizeof(E_edges)/sizeof(E_edges[0])) - 1;
-// => N_E=8
+/**
+ * \brief 8 energy bins: E_edges[] = {2,4,6,8,10,12,15,20,30}
+ *        => N_E=8
+ */
+constexpr double E_edges[] = {2,4,6,8,10,12,15,20,30};
+constexpr int    N_E = (sizeof(E_edges)/sizeof(E_edges[0])) - 1;
 
-////////////////////////////////////////////////////////////////////////////////
-// (A) "core Gaussian fit" method
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * \brief Enhanced Gaussian fit:
+ *   - use quartiles for initial range
+ *   - fallback to ±2 RMS if quartiles invalid
+ *   - multiple guesses for amplitude, mean, sigma
+ *   - debug prints
+ */
 double coreGaussianSigma(TH1* h, const TString& pngSavePath)
 {
-  if(!h || h->GetEntries() < 20) return 0.;
+  std::cout << "\n[VERBOSE] coreGaussianSigma() called for hist='"
+            << (h ? h->GetName() : "NULL") << "', pngSave='" << pngSavePath << "'\n";
 
-  // quartiles [25%,50%,75%]
+  if(!h)
+  {
+    std::cout << "  [DEBUG] => Hist pointer is null => returning 0.\n";
+    return 0.;
+  }
+  double nEntries = h->GetEntries();
+  if(nEntries < 20)
+  {
+    std::cout << "  [DEBUG] => Hist '" << h->GetName()
+              << "' has <20 entries => returning 0.\n";
+    return 0.;
+  }
+
+  double inRange = h->Integral();
+  if(inRange <= 0.)
+  {
+    std::cout << "  [DEBUG] => Hist '"<<h->GetName()
+              <<"' has 0 total integral => returning 0.\n";
+    return 0.;
+  }
+
+  // 1) Quartiles
   double q[3], probs[3] = {0.25, 0.50, 0.75};
   h->GetQuantiles(3, q, probs);
-
   double xMin = q[0];
   double xMax = q[2];
-  if(xMin >= xMax) return 0.;
 
+  std::cout << "  [DEBUG] => quartiles for '"<<h->GetName()<<"' => "
+            << "Q25="<<q[0]<<", Q50="<<q[1]<<", Q75="<<q[2]
+            <<". => Proposed fit range=["<<xMin<<","<<xMax<<"]\n";
+
+  // fallback if quartiles are invalid
+  if(xMin >= xMax)
+  {
+    double mean = h->GetMean();
+    double rms  = h->GetRMS();
+    xMin = mean - 2.*rms;
+    xMax = mean + 2.*rms;
+    std::cout << "  [WARN] => quartiles invalid => using fallback ±2 RMS => mean="
+              << mean <<", rms="<<rms<< " => range=["<<xMin<<","<<xMax<<"]\n";
+  }
+
+  // 2) Build TF1 in [xMin,xMax]
   TF1 fitG("fitG","gaus", xMin, xMax);
-  fitG.SetParameters(h->GetMaximum(), q[1], 0.3*(xMax-xMin));
 
-  int fitStatus = h->Fit(&fitG, "QN0R");
-  double sigma  = (fitStatus==0) ? fitG.GetParameter(2) : h->GetRMS();
+  // multiple guesses
+  std::vector<std::tuple<double,double,double>> initGuesses = {
+    { h->GetMaximum(),           h->GetMean(),        h->GetRMS()/2. },
+    { h->GetMaximum()*1.2,       h->GetMean(),        h->GetRMS()    },
+    { h->GetMaximum()*0.8,       h->GetMean()+0.3*h->GetRMS(), 0.5*h->GetRMS() },
+    { h->GetMaximum()*1.5,       h->GetMean()-0.3*h->GetRMS(), 1.5*h->GetRMS()}
+  };
 
-  // If we want the visual diagnostic:
+  double bestSigma = 0.;
+  bool fitOK       = false;
+  double bestChi2  = 1e15;
+
+  // we'll do a "S" to store fit result properly
+  const char* fitOpts = "RQNS"; // R => use range, Q => quiet, N => no draw, S => store result
+
+  for(size_t i=0; i<initGuesses.size(); i++)
+  {
+    double A0 = std::get<0>(initGuesses[i]);
+    double M0 = std::get<1>(initGuesses[i]);
+    double S0 = std::fabs(std::get<2>(initGuesses[i]));
+    if(S0<1e-6) S0=0.5; // avoid zero
+
+    fitG.SetParameter(0,A0);
+    fitG.SetParameter(1,M0);
+    fitG.SetParameter(2,S0);
+
+    std::cout <<"    [DEBUG] Attempt #"<<i<<" => A0="<<A0<<", M0="<<M0<<", S0="<<S0
+              <<" => Fit range=["<<xMin<<","<<xMax<<"]\n";
+
+    TFitResultPtr rp = h->Fit(&fitG, fitOpts, "", xMin, xMax);
+    int fitStatus = rp; // cast to int
+    bool valid    = (rp.Get()!=nullptr && rp->IsValid());
+    double chi2   = (valid ? rp->Chi2() : 1e15);
+
+    std::cout <<"        => Fit result: fitStatus="<<fitStatus<<", chi2="<<chi2
+              <<", valid="<<(valid?"Yes":"No")<<"\n";
+
+    if(fitStatus==0 && valid && chi2<bestChi2)
+    {
+      bestChi2   = chi2;
+      bestSigma  = fitG.GetParameter(2);
+      fitOK      = true;
+      std::cout <<"        => new bestSigma="<<bestSigma<<"\n";
+    }
+  }
+
+  if(!fitOK)
+  {
+    bestSigma = h->GetRMS();
+    std::cout <<"  [WARN] => all fits failed => returning RMS="<<bestSigma<<"\n";
+  }
+  else
+  {
+    std::cout <<"  [INFO] => final bestSigma="<<bestSigma
+              <<", bestChi2="<<bestChi2<<"\n";
+  }
+
+  // 3) optional debug plot
   if(!pngSavePath.IsNull())
   {
-    TCanvas ctmp("ctmp","ctmp",600,500);
-    h->Draw("E");
+    std::cout <<"  [DEBUG] => making debug canvas => '"<<pngSavePath<<"'\n";
+    TCanvas ctmp("ctmp","coreGaussianSigma debug canvas",600,500);
+    ctmp.cd();
 
-    fitG.SetLineColor(kRed);
-    fitG.SetLineWidth(2);
-    fitG.Draw("SAME");
+    h->Draw("E");
+    if(fitOK) fitG.Draw("SAME");
 
     TLatex lat;
     lat.SetNDC(true);
     lat.SetTextSize(0.04);
+    lat.SetTextColor(kRed);
 
     double fitMean = fitG.GetParameter(1);
-    lat.SetTextColor(kRed);
     lat.DrawLatex(0.58, 0.82, Form("#mu=%.3f", fitMean));
-    lat.DrawLatex(0.58, 0.74, Form("#sigma=%.3f", sigma));
+    lat.DrawLatex(0.58, 0.74, Form("#sigma=%.3f", bestSigma));
 
     ctmp.SaveAs(pngSavePath);
-    ctmp.Close();
+    std::cout <<"  [INFO] => Wrote debug PNG => "<<pngSavePath<<"\n";
   }
 
-  return sigma;
+  return bestSigma;
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-// (B) "raw RMS" method
-////////////////////////////////////////////////////////////////////////////////
-double rawRMS(TH1* h, const TString& /*unusedPNG*/)
+/**
+ * \brief rawRMS
+ * Basic RMS approach, with debug prints
+ */
+double rawRMS(TH1* h, const TString& debugPNG)
 {
-  // We won't produce a diagnostic figure for raw RMS, or you can if you want.
-  // Just return h->GetRMS().
-  if(!h || h->GetEntries()<2) return 0.;
-  return h->GetRMS();
+  std::cout << "\n[VERBOSE] rawRMS() called for hist='"
+            << (h ? h->GetName() : "NULL")
+            <<"', debugPNG="<<debugPNG<<"\n";
+
+  if(!h)
+  {
+    std::cout<<"  => hist pointer null => return 0.\n";
+    return 0.;
+  }
+  double nE = h->GetEntries();
+  if(nE<2)
+  {
+    std::cout<<"  => hist '"<<h->GetName()<<"' has <2 entries => return 0.\n";
+    return 0.;
+  }
+  double val = h->GetRMS();
+  std::cout<<"  => hist '"<<h->GetName()<<"' => RMS="<<val<<"\n";
+
+  // (Optional) if you want a debug canvas for RMS only:
+  /*
+  if(!debugPNG.IsNull())
+  {
+    TCanvas ctmp("ctmpRMS","RMS debug",600,500);
+    ctmp.cd();
+    h->Draw("E");
+    ctmp.SaveAs(debugPNG);
+  }
+  */
+
+  return val;
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-// Helper structure to store the results of scanning (Ash or Log)
-////////////////////////////////////////////////////////////////////////////////
+/** \brief Container for scanning results across multiple E-slices */
 struct ScanResults
 {
-  // For each E‐bin, we store a TGraph of (parameter vs sigma)
-  std::vector<TGraph*> tgVec;
-
-  // In each E‐bin, we track best parameter + best sigma
-  std::vector<double> bestParam;  // best b (cm) or best w0
-  std::vector<double> bestSigma;
-
-  // global min/max for the Y-axis across all E-bins
+  std::vector<TGraph*> tgVec;      ///< One TGraph per E bin
+  std::vector<double> bestParam;   ///< best b or w0
+  std::vector<double> bestSigma;   ///< best sigma
   double minY=DBL_MAX, maxY=-DBL_MAX;
-
-  // counters
   int totalHist=0, missingHist=0, zeroEntry=0, usedHist=0;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-// doAshScan(...): scans b in [0.05..0.60], reads histograms, calls sigmaFunc
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * \brief doAshScan
+ *  - loops over bScan in [0..1.60] cm, steps of 0.05 cm (user-provided)
+ *  - for each E-slice => tries to retrieve h_dx_ash_bXYZ_Ei
+ *  - calls sigmaFunc on that histogram
+ *  - saves TGraph of sigma vs bVal (in cm)
+ */
 ScanResults doAshScan(
     TFile* f,
     int N_E,
     const double* E_edges,
-    const std::vector<double>& bScan,
-    double cellSize,
+    const std::vector<double>& bScan_cm,    // in actual cm steps (like 0.00..1.60)
+    double cellSize,                        // 5.55 cm
     const std::function<double(TH1*,const TString&)>& sigmaFunc,
     const TString& suffix,
     const TString& histOutDir
@@ -129,75 +242,124 @@ ScanResults doAshScan(
   ScanResults results;
   results.tgVec.resize(N_E);
 
+  std::cout << "\n[DEBUG] doAshScan => ENTER. suffix='"<<suffix<<"', #Ebins="<<N_E
+            <<", #bScan="<<bScan_cm.size()<<", cellSize="<<cellSize<<"\n";
+
   for(int iE=0; iE<N_E; iE++)
   {
-    auto g = new TGraph;
+    double eLo = E_edges[iE];
+    double eHi = E_edges[iE+1];
+    TGraph* g  = new TGraph;
     g->SetName( Form("gAsh_%s_E%d", suffix.Data(), iE) );
 
-    for(double bValRaw : bScan)
-    {
-      // replicate 4-dec rounding
-      double bValCell = std::round(bValRaw*10000.)/10000.;
+    std::cout <<"\n[DEBUG]  => E-bin="<<iE<<" => E=["<<eLo<<","<<eHi<<")\n"
+              <<"           #bScan="<<bScan_cm.size()<<" steps.\n";
 
+    int nPointsUsed = 0;
+    for(double bRaw_cm : bScan_cm)
+    {
       results.totalHist++;
 
-      // histogram name => "h_dx_ash_b%.4f_E{iE}"
-      TString hName = Form("h_dx_ash_b%.4f_E%d", bValCell, iE);
-      TH1* h = dynamic_cast<TH1*>( f->Get(hName) );
-      if(!h)
+      // convert from cm to "dimensionless"
+      double bCell = bRaw_cm / cellSize;
+      double bVal  = std::round(bCell*10000.)/10000.;
+
+      // build histogram name
+      TString hName = Form("h_dx_ash_b%.4f_E%d", bVal, iE);
+      TH1* hptr = dynamic_cast<TH1*>( f->Get(hName) );
+
+      std::cout<<"  [DEBUG] => bRaw_cm="<<bRaw_cm<<", => bVal="<<bVal
+               <<" => histName='"<<hName<<"'\n";
+
+      if(!hptr)
       {
         results.missingHist++;
+        std::cout<<"     [WARN] => missing histogram => skip.\n";
         continue;
       }
 
-      double ent = h->GetEntries();
-      if(ent <= 0) {
+      double ent    = hptr->GetEntries();
+      double inrange= hptr->Integral();
+      std::cout<<"     [INFO] => found '"<<hName<<"' => entries="<<ent
+               <<", integral="<<inrange<<"\n";
+
+      if(inrange<=0 || ent<=0)
+      {
         results.zeroEntry++;
-      } else {
-        results.usedHist++;
+        std::cout<<"       => no in-range counts => skip.\n";
+        continue;
       }
+      results.usedHist++;
 
-      // create a little name for the optional PNG
-      // e.g. "h_dx_ash_b0.2000_E2_fit.png"
+      // build diagName if you want to save a PNG
       TString diagName = Form("%s/%s_%s.png", histOutDir.Data(), hName.Data(), suffix.Data());
-      double sVal = sigmaFunc(h, diagName);
 
-      double bCm = bValCell * cellSize;
+      // compute sigma
+      double sVal = sigmaFunc(hptr, diagName);
+      std::cout<<"       => sigmaFunc => sVal="<<sVal<<"\n";
 
-      g->SetPoint(g->GetN(), bCm, sVal);
+      // fill TGraph if sVal>0
       if(sVal>0)
       {
-        results.minY = std::min(results.minY, sVal);
-        results.maxY = std::max(results.maxY, sVal);
+        g->SetPoint( g->GetN(), bRaw_cm, sVal );
+        nPointsUsed++;
+        if(sVal<results.minY) results.minY=sVal;
+        if(sVal>results.maxY) results.maxY=sVal;
 
-        if(iE >= (int)results.bestSigma.size()) {
+        // update best param
+        if( (int)results.bestSigma.size() < N_E )
+        {
           results.bestSigma.resize(N_E, DBL_MAX);
           results.bestParam.resize(N_E, 0.);
         }
-        if(sVal < results.bestSigma[iE]) {
-          results.bestSigma[iE]  = sVal;
-          results.bestParam[iE]  = bCm;
+        if(sVal < results.bestSigma[iE])
+        {
+          results.bestSigma[iE] = sVal;
+          results.bestParam[iE] = bRaw_cm;
+          std::cout<<"         => new best sigma="<<sVal<<" at bRaw_cm="<<bRaw_cm<<"\n";
         }
       }
-    } // end for bVal
+      else
+      {
+        std::cout<<"       => sVal<=0 => skip.\n";
+      }
+    } // end bScan
 
+    // style
+    int col = 1 + (iE % 10);
     g->SetMarkerStyle(20 + (iE % 10));
-    g->SetMarkerColor(1 + (iE % 10));
-    g->SetLineColor  (1 + (iE % 10));
+    g->SetMarkerColor(col);
+    g->SetLineColor  (col);
     g->SetMarkerSize(1.2);
 
     results.tgVec[iE] = g;
-  } // end for iE
+    std::cout<<"   => TGraph for Ebin="<<iE<<" has n="<<nPointsUsed<<" points used.\n";
+  }
 
-  if(results.minY == DBL_MAX) { results.minY=0.; results.maxY=1.; }
+  if(results.minY==DBL_MAX)
+  {
+    results.minY = 0.;
+    results.maxY = 1.;
+    std::cout<<"[WARN] doAshScan => no valid sigma => forcing [0..1] range.\n";
+  }
+
+  std::cout<<"\n[DEBUG] doAshScan => done. Summary:\n"
+           <<"   totalHist="<<results.totalHist<<"\n"
+           <<"   missing  ="<<results.missingHist<<"\n"
+           <<"   zeroEntry="<<results.zeroEntry<<"\n"
+           <<"   usedHist ="<<results.usedHist<<"\n"
+           <<"   minY="<<results.minY<<", maxY="<<results.maxY<<"\n";
 
   return results;
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-// doLogScan(...): scans w0 in [2..6], reads histos, calls sigmaFunc
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * \brief doLogScan
+ *   - w0 in [1.5..7.0], step=0.1
+ *   - retrieve h_dx_log_w0XX_Ei
+ *   - call sigmaFunc
+ *   - fill TGraph => sigma vs w0
+ */
 ScanResults doLogScan(
     TFile* f,
     int N_E,
@@ -210,228 +372,347 @@ ScanResults doLogScan(
 {
   ScanResults results;
   results.tgVec.resize(N_E);
+  results.minY=DBL_MAX;
+  results.maxY=-DBL_MAX;
+
+  std::cout<<"\n[DEBUG] doLogScan => ENTER. suffix='"<<suffix<<"', #Ebins="<<N_E
+           <<" w0Scan.size="<<w0Scan.size()<<"\n";
 
   for(int iE=0; iE<N_E; iE++)
   {
-    auto g = new TGraph;
-    g->SetName( Form("gLog_%s_E%d", suffix.Data(), iE) );
+    double eLo = E_edges[iE];
+    double eHi = E_edges[iE+1];
 
-    for(double w0Raw : w0Scan)
+    TGraph* g = new TGraph;
+    g->SetName(Form("gLog_%s_E%d", suffix.Data(), iE));
+
+    std::cout<<"\n[DEBUG] => Ebin="<<iE<<" => E=["<<eLo<<","<<eHi<<") => scanning w0...\n";
+
+    for(double wraw : w0Scan)
     {
-      double wVal = std::round(w0Raw*100.)/100.;
-
       results.totalHist++;
 
-      // name => "h_dx_log_w0%.2f_E{iE}"
-      TString hName = Form("h_dx_log_w0%.2f_E%d", wVal, iE);
-      TH1* h = dynamic_cast<TH1*>( f->Get(hName) );
-      if(!h)
+      double wVal = std::round(wraw*100.)/100.;
+      TString hN  = Form("h_dx_log_w0%.2f_E%d", wVal, iE);
+
+      TH1* hptr = dynamic_cast<TH1*>( f->Get(hN) );
+      if(!hptr)
       {
         results.missingHist++;
+        std::cout<<"   [WARN] => missing '"<<hN<<"'\n";
         continue;
       }
+      double ent = hptr->GetEntries();
+      double ing = hptr->Integral();
+      std::cout<<"   [INFO] => histName='"<<hN<<"' => entries="<<ent<<", integral="<<ing<<"\n";
 
-      double ent = h->GetEntries();
-      if(ent<=0) {
+      if(ent<=0 || ing<=0)
+      {
         results.zeroEntry++;
-      } else {
-        results.usedHist++;
+        std::cout<<"     => skip => no data.\n";
+        continue;
       }
+      results.usedHist++;
 
-      TString diagName = Form("%s/%s_%s.png", histOutDir.Data(), hName.Data(), suffix.Data());
-      double sVal = sigmaFunc(h, diagName);
+      TString diagName = Form("%s/%s_%s.png", histOutDir.Data(), hN.Data(), suffix.Data());
 
-      g->SetPoint(g->GetN(), wVal, sVal);
+      double sVal = sigmaFunc(hptr, diagName);
+      std::cout<<"     => sVal="<<sVal<<" => wVal="<<wVal<<"\n";
+
       if(sVal>0)
       {
-        results.minY = std::min(results.minY, sVal);
-        results.maxY = std::max(results.maxY, sVal);
+        g->SetPoint(g->GetN(), wVal, sVal);
+        if(sVal<results.minY) results.minY=sVal;
+        if(sVal>results.maxY) results.maxY=sVal;
 
-        if(iE >= (int)results.bestSigma.size()) {
+        if( (int)results.bestSigma.size()<N_E )
+        {
           results.bestSigma.resize(N_E, DBL_MAX);
           results.bestParam.resize(N_E, 0.);
         }
-        if(sVal < results.bestSigma[iE]) {
-          results.bestSigma[iE] = sVal;
-          results.bestParam[iE] = wVal;
+        if(sVal<results.bestSigma[iE])
+        {
+          results.bestSigma[iE]=sVal;
+          results.bestParam[iE]=wVal;
+          std::cout<<"       => new bestSigma="<<sVal<<" at w0="<<wVal<<"\n";
         }
       }
-    } // end w0Raw
+      else
+      {
+        std::cout<<"     => sVal<=0 => skip.\n";
+      }
+    } // end w0Scan
 
+    // style
+    int col = 2 + (iE % 10);
     g->SetMarkerStyle(21 + (iE % 10));
-    g->SetMarkerColor(2 + (iE % 10));
-    g->SetLineColor  (2 + (iE % 10));
+    g->SetMarkerColor(col);
+    g->SetLineColor  (col);
     g->SetMarkerSize(1.2);
 
     results.tgVec[iE] = g;
-  } // end iE
+  }
 
-  if(results.minY==DBL_MAX){ results.minY=0.; results.maxY=1.; }
+  if(results.minY==DBL_MAX)
+  {
+    results.minY=0.;
+    results.maxY=1.;
+  }
   return results;
 }
 
 
-////////////////////////////////////////////////////////////////////////////////
-// drawAshLogSideBySide(...):
-//   Takes 2 ScanResults: one for Ash, one for Log, plus “method name” (e.g. "fit" or "rms")
-//   => draws them on a single 1×2 canvas (left=Ash, right=Log) and saves a PNG
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * \brief drawAshLogSideBySide
+ *   Draws two sets of TGraphs:
+ *    - left = asinh scan
+ *    - right= log scan
+ *   Each TGraph is for a different E-slice
+ *   Also prints debug info about minY, maxY, best param
+ */
 void drawAshLogSideBySide(
     const ScanResults& ashRes,
     const ScanResults& logRes,
-    const char* methodName,  // e.g. "FIT" or "RMS"
+    const char* methodName,
     const double* E_edges,
     int N_E,
     const TString& baseDir
 )
 {
-  // 1) Make the 1×2 canvas
-  TString canName = Form("cSideBySide_%s", methodName);
-  TCanvas cSide(canName, canName, 1600, 600);
+  std::cout << "\n[DEBUG] drawAshLogSideBySide => method='"<<methodName<<"', N_E="
+            <<N_E<<", baseDir='"<<baseDir<<"'\n";
+
+  // 1) Canvas with 2 pads
+  TString cName = Form("cSideBySide_%s", methodName);
+  TCanvas cSide(cName, cName, 1600,600);
   cSide.Divide(2,1);
 
-  // 2) Left pad => Ash
+  // 2) LEFT pad => Ash
   cSide.cd(1);
   gPad->SetLeftMargin(0.12);
   gPad->SetBottomMargin(0.12);
   gPad->SetGrid();
 
-  // if we have at least 1 E bin
-  if(!ashRes.tgVec.empty())
-  {
-    ashRes.tgVec[0]->Draw("ALP");
-    ashRes.tgVec[0]->GetXaxis()->SetTitle("b (cm)");
-    ashRes.tgVec[0]->GetYaxis()->SetTitle("#sigma_{x} (cm)");
-    ashRes.tgVec[0]->GetYaxis()->SetRangeUser(ashRes.minY - 0.1*fabs(ashRes.minY),
-                                              ashRes.maxY + 0.1*fabs(ashRes.maxY));
+  double asMin = ashRes.minY;
+  double asMax = ashRes.maxY;
+  std::cout<<"[DEBUG] => Ash => global minY="<<asMin<<", maxY="<<asMax<<"\n";
 
-    for(size_t i=1; i<ashRes.tgVec.size(); i++){
-      ashRes.tgVec[i]->Draw("LP SAME");
+  if(!ashRes.tgVec.empty() && ashRes.tgVec[0])
+  {
+    TGraph* firstGr = ashRes.tgVec[0];
+    std::cout<<"   => first Ash TGraph has N="<<firstGr->GetN()<<" points.\n";
+
+    firstGr->Draw("ALP");
+    firstGr->GetXaxis()->SetTitle("b (cm)");
+    firstGr->GetYaxis()->SetTitle("#sigma_{x} (cm)");
+
+    double yLo = asMin - 0.1*fabs(asMin);
+    double yHi = asMax + 0.1*fabs(asMax);
+    if(yLo<0) yLo=0.;
+    firstGr->GetYaxis()->SetRangeUser(yLo, yHi);
+
+    // overlay the other E-bins
+    for(size_t i=1; i<ashRes.tgVec.size(); i++)
+    {
+      TGraph* gA = ashRes.tgVec[i];
+      if(gA && gA->GetN()>0) gA->Draw("LP SAME");
+      else std::cout<<"   [WARN] => Ash i="<<i<<" => TGraph missing or empty!\n";
     }
   }
+  else
+  {
+    std::cout<<"[WARN] => No Ash TGraph to draw => skipping.\n";
+  }
 
-  TLegend legA(0.15,0.65,0.48,0.88);
+  // build a legend for left pad
+  TLegend legA(0.13,0.65,0.48,0.88);
   legA.SetBorderSize(0);
   legA.SetFillStyle(0);
-  for(int iE=0;iE<N_E;iE++){
-    double bBest = (iE<(int)ashRes.bestParam.size()) ? ashRes.bestParam[iE] : 0.;
-    double sBest = (iE<(int)ashRes.bestSigma.size()) ? ashRes.bestSigma[iE] : 0.;
-    legA.AddEntry(
-      (iE<(int)ashRes.tgVec.size()? ashRes.tgVec[iE] : nullptr),
-      Form("%.1f< E<%.1f (b=%.3f, #sigma=%.3f)", E_edges[iE], E_edges[iE+1], bBest, sBest),
-      "lp"
-    );
+  for(int iE=0; iE<N_E; iE++)
+  {
+    double bBest=(iE<(int)ashRes.bestParam.size()? ashRes.bestParam[iE]: 0.);
+    double sBest=(iE<(int)ashRes.bestSigma.size()? ashRes.bestSigma[iE]: 0.);
+    TGraph* gr= (iE<(int)ashRes.tgVec.size()? ashRes.tgVec[iE]: nullptr);
+
+    if(!gr || gr->GetN()==0)
+    {
+      legA.AddEntry((TObject*)nullptr,
+        Form("%.1f< E<%.1f => NO data", E_edges[iE], E_edges[iE+1]), "");
+      continue;
+    }
+    legA.AddEntry(gr,
+       Form("%.1f< E<%.1f (b=%.3g, #sigma=%.3f)", E_edges[iE], E_edges[iE+1],
+            bBest, sBest),
+       "lp");
   }
   legA.Draw();
 
-  // top label => e.g. "Ash [FIT]" or "Ash [RMS]"
   TLatex latA; latA.SetNDC(true);
-  latA.DrawLatex(0.2, 0.92, Form("Ash [%s]", methodName));
+  latA.SetTextSize(0.04);
+  latA.DrawLatex(0.15,0.93, Form("Ash scan [%s]", methodName));
 
-  // 3) Right pad => Log
+  // 3) RIGHT pad => Log
   cSide.cd(2);
   gPad->SetLeftMargin(0.12);
   gPad->SetBottomMargin(0.12);
   gPad->SetGrid();
 
-  if(!logRes.tgVec.empty())
+  double lgMin = logRes.minY;
+  double lgMax = logRes.maxY;
+  std::cout<<"[DEBUG] => Log => global minY="<<lgMin<<", maxY="<<lgMax<<"\n";
+
+  if(!logRes.tgVec.empty() && logRes.tgVec[0])
   {
-    logRes.tgVec[0]->Draw("ALP");
-    logRes.tgVec[0]->GetXaxis()->SetTitle("w_{0}");
-    logRes.tgVec[0]->GetYaxis()->SetTitle("#sigma_{x} (cm)");
-    logRes.tgVec[0]->GetYaxis()->SetRangeUser(logRes.minY - 0.1*fabs(logRes.minY),
-                                              logRes.maxY + 0.1*fabs(logRes.maxY));
-    for(size_t i=1;i<logRes.tgVec.size(); i++){
-      logRes.tgVec[i]->Draw("LP SAME");
+    TGraph* firstGr= logRes.tgVec[0];
+    std::cout<<"   => first Log TGraph => N="<<firstGr->GetN()<<" points.\n";
+
+    firstGr->Draw("ALP");
+    firstGr->GetXaxis()->SetTitle("w_{0}");
+    firstGr->GetYaxis()->SetTitle("#sigma_{x} (cm)");
+
+    double yLo = lgMin - 0.1*fabs(lgMin);
+    double yHi = lgMax + 0.1*fabs(lgMax);
+    if(yLo<0) yLo=0.;
+    firstGr->GetYaxis()->SetRangeUser(yLo, yHi);
+
+    // overlay for other E
+    for(size_t i=1; i<logRes.tgVec.size(); i++)
+    {
+      TGraph* gL=logRes.tgVec[i];
+      if(gL && gL->GetN()>0) gL->Draw("LP SAME");
+      else std::cout<<"   [WARN] => Log i="<<i<<" => TGraph missing or empty!\n";
     }
   }
+  else
+  {
+    std::cout<<"[WARN] => No Log TGraph to draw => skipping.\n";
+  }
 
-  TLegend legB(0.15,0.65,0.48,0.88);
+  // legend right
+  TLegend legB(0.6,0.65,0.85,0.88);
   legB.SetBorderSize(0);
   legB.SetFillStyle(0);
-  for(int iE=0;iE<N_E;iE++){
-    double wBest = (iE<(int)logRes.bestParam.size()) ? logRes.bestParam[iE] : 0.;
-    double sBest = (iE<(int)logRes.bestSigma.size()) ? logRes.bestSigma[iE] : 0.;
-    legB.AddEntry(
-      (iE<(int)logRes.tgVec.size()? logRes.tgVec[iE] : nullptr),
-      Form("%.1f< E<%.1f (w0=%.2f, #sigma=%.3f)", E_edges[iE], E_edges[iE+1], wBest, sBest),
-      "lp"
-    );
+  for(int iE=0; iE<N_E; iE++)
+  {
+    double wBest=(iE<(int)logRes.bestParam.size()? logRes.bestParam[iE]: 0.);
+    double sBest=(iE<(int)logRes.bestSigma.size()? logRes.bestSigma[iE]: 0.);
+    TGraph* gr= (iE<(int)logRes.tgVec.size()? logRes.tgVec[iE]: nullptr);
+
+    if(!gr || gr->GetN()==0)
+    {
+      legB.AddEntry((TObject*)nullptr,
+        Form("%.1f< E<%.1f => NO data", E_edges[iE], E_edges[iE+1]), "");
+      continue;
+    }
+    legB.AddEntry(gr,
+      Form("%.1f< E<%.1f (w0=%.2f, #sigma=%.3f)", E_edges[iE], E_edges[iE+1],
+           wBest, sBest),
+      "lp");
   }
   legB.Draw();
 
   TLatex latB; latB.SetNDC(true);
-  latB.DrawLatex(0.2, 0.92, Form("Log [%s]", methodName));
+  latB.SetTextSize(0.04);
+  latB.DrawLatex(0.15,0.93, Form("Log scan [%s]", methodName));
 
-  // 4) Save the 1×2 canvas
+  // 4) Save
   TString outName = Form("%s/SideBySide_%s.png", baseDir.Data(), methodName);
   cSide.SaveAs(outName);
-  std::cout << "[INFO] Wrote combined (Ash & Log) canvas => " << outName << std::endl;
+  std::cout<<"\n[INFO] => wrote side-by-side Ash/Log => "<<outName<<"\n";
 }
 
 
-////////////////////////////////////////////////////////////////////////////////
-// The main function that does 2 methods => “fit” & “rms”
-//   Each produces 1 row × 2 columns => left=Ash, right=Log
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * \brief Main function that orchestrates the scanning and plotting
+ *        of Ash-b and Log-w0 histograms.
+ *
+ * Usage:   root -l plotAshLogRMS_sideBySide.cpp\(\"PositionDep_sim_ALL.root\"\)
+ */
 void plotAshLogRMS_sideBySide(const char* infile="PositionDep_sim_ALL.root")
 {
-  // b-scan
-  const double bMin=0.05, bMax=0.60, bStep=0.01;
-  std::vector<double> bScan;
-  for(double b=bMin; b<=bMax+1e-9; b+=bStep) bScan.push_back(b);
+  // 1) Build the bScan in cm => [0..1.60], step=0.05
+  std::vector<double> bScan_cm;
+  for(double b=0.00; b<=1.60+1e-9; b+=0.05)
+    bScan_cm.push_back(b);
 
-  // log-scan
-  const double w0Min=2.0, w0Max=6.0, w0Step=0.1;
+  // 2) Build the w0Scan => [1.5..7.0], step=0.1
   std::vector<double> w0Scan;
-  for(double w=w0Min; w<=w0Max+1e-9; w+=w0Step) w0Scan.push_back(w);
+  for(double w=1.5; w<=7.0+1e-9; w+=0.1)
+  {
+    double val = std::round(w*100.)/100.;
+    w0Scan.push_back(val);
+  }
 
-  // output
+  // 3) Output directory
   TString baseDir    = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput";
   TString histOutDir = baseDir + "/ASH_LOG_PLOTS";
-  gSystem->mkdir(baseDir,true);
+
+  gSystem->mkdir(baseDir, true);
   gSystem->mkdir(histOutDir,true);
 
-  // 2) Open file
-  std::unique_ptr<TFile> f(TFile::Open(infile,"READ"));
-  if(!f || f->IsZombie()){
-    std::cerr << "[ERROR] Could not open file => abort.\n";
+  // 4) Open input file
+  std::unique_ptr<TFile> fIn( TFile::Open(infile,"READ") );
+  if(!fIn || fIn->IsZombie())
+  {
+    std::cerr<<"[ERROR] => Could not open file='"<<infile<<"'. Aborting.\n";
     return;
   }
-  std::cout << "[INFO] Successfully opened '" << infile << "'\n";
+  std::cout<<"[INFO] => Successfully opened '"<<infile<<"'.\n";
 
+  // Global style
   gStyle->SetOptStat(0);
-  gStyle->SetTitleFontSize(0.045);
+  gStyle->SetTitleFontSize(0.04);
 
-  constexpr double cellSize=5.55; // cm
+  // 5) We'll do two approaches:
+  //    (A) "FIT" => uses coreGaussianSigma
+  //    (B) "RMS" => uses rawRMS
+  // and plot side-by-side.
 
-  // We'll define two "sigma" functions:
-  //   (A) coreGaussianSigma
-  //   (B) rawRMS  (we can create a small lambda that just calls rawRMS)
-  auto rawRMSlambda = [&](TH1* h, const TString&) {
-    if(!h || h->GetEntries()<2) return 0.;
-    return h->GetRMS();
-  };
-
-  // 3) (FIT) doAshScan & doLogScan => produce (AshFit, LogFit)
-  std::cout<<"\n=== Doing FIT-based scanning (coreGaussianSigma) ===\n";
-  auto ashFit = doAshScan(f.get(), N_E, E_edges, bScan, cellSize, coreGaussianSigma, "fit", histOutDir);
-  auto logFit = doLogScan(f.get(), N_E, E_edges, w0Scan, coreGaussianSigma, "fit", histOutDir);
-
-  // Then draw them side-by-side in a single 1×2 canvas
+  // 5A) "FIT"
+  std::cout<<"\n=== [STEP] Doing *FIT* approach with coreGaussianSigma ===\n";
+  auto ashFit = doAshScan(fIn.get(),
+                          N_E,
+                          E_edges,
+                          bScan_cm,
+                          5.55, // cellSize
+                          coreGaussianSigma, // function pointer
+                          "fit",
+                          histOutDir
+                          );
+  auto logFit = doLogScan(fIn.get(),
+                          N_E,
+                          E_edges,
+                          w0Scan,
+                          coreGaussianSigma,
+                          "fit",
+                          histOutDir
+                          );
   drawAshLogSideBySide(ashFit, logFit, "FIT", E_edges, N_E, baseDir);
 
-  // 4) (RMS) doAshScan & doLogScan => produce (AshRMS, LogRMS)
-  std::cout<<"\n=== Doing RMS-based scanning (h->GetRMS) ===\n";
-  auto ashRMS = doAshScan(f.get(), N_E, E_edges, bScan, cellSize, rawRMSlambda, "rms", histOutDir);
-  auto logRMS = doLogScan(f.get(), N_E, E_edges, w0Scan, rawRMSlambda, "rms", histOutDir);
-
-  // Then draw them side-by-side in a single 1×2 canvas
+  // 5B) "RMS"
+  std::cout<<"\n=== [STEP] Doing *RMS* approach with rawRMS ===\n";
+  // Wrap rawRMS in a lambda if you like, or use directly
+  auto ashRMS = doAshScan(fIn.get(),
+                          N_E,
+                          E_edges,
+                          bScan_cm,
+                          5.55,
+                          rawRMS,
+                          "rms",
+                          histOutDir
+                          );
+  auto logRMS = doLogScan(fIn.get(),
+                          N_E,
+                          E_edges,
+                          w0Scan,
+                          rawRMS,
+                          "rms",
+                          histOutDir
+                          );
   drawAshLogSideBySide(ashRMS, logRMS, "RMS", E_edges, N_E, baseDir);
 
-  std::cout<<"\n[DONE] plotAshLogRMS_sideBySide completed.\n";
+  std::cout<<"\n[INFO] => plotAshLogRMS_sideBySide completed all tasks.\n\n";
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Asinh-based function for local phi fits:

@@ -25,6 +25,7 @@ class TH1;
 class TH1F;
 class TH3;
 class TH2;
+class TH2F;
 class TF1;
 class TProfile2D;
 class TProfile;
@@ -170,8 +171,8 @@ class PositionDependentCorrection : public SubsysReco
   int Getpeaktime(TH1 *h);
   Fun4AllHistoManager *hm = nullptr;
   TFile *outfile = nullptr;
-  bool  isFitDoneForPhi = false;
-  bool  isFitDoneForEta = false;
+  bool  isFitDoneForPhi = true;
+  bool  isFitDoneForEta = true;
     //--------------------------------------------------------------------
     //  Energy–slice constants  (barrel EMCAL photons)
     //--------------------------------------------------------------------
@@ -312,6 +313,9 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_truth_eta;
   TH1* h_truth_e;
   TH1* h_truth_pt;
+  TH1F* h_truth_vz       {nullptr};   // truth vz   distribution
+  TH1F* h_reco_vz        {nullptr};   // reconstructed vz distribution
+  TH2F* h2_truthReco_vz  {nullptr};   // 2-D truth vs reco correlation
   TH1* h_pt_rw[96];
     
   TFile* frw;
@@ -348,7 +352,9 @@ class PositionDependentCorrection : public SubsysReco
   float getAvgPhi(const std::vector<int> &towerphis,
                   const std::vector<float> &towerenergies);
 
-  std::pair<float,float> getBlockCord(std::vector<int>, std::vector<int>, std::vector<float>);
+  std::pair<float,float> getBlockCord(const std::vector<int>&,
+                                        const std::vector<int>&,
+                                        const std::vector<float>&);
 
   std::map<std::string, std::string> triggerNameMap = {
     {"MBD N&S >= 1", "MBD_NandS_geq_1"}
