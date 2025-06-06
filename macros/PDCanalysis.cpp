@@ -1,30 +1,33 @@
 #include <TFile.h>
-#include <TKey.h>
-#include <TClass.h>
-#include <TH1.h>
-#include <TH2.h>
-#include <TH3.h>
+#include <algorithm>
+#include <TGraph.h>
+#include <TGraphErrors.h>
+#include <TLine.h>
+#include <TPad.h>
+#include <TPaveText.h>
+#include <TProfile2D.h>
+#include <TH2F.h>
+#include <TH3F.h>
+#include <TH2D.h>
+#include <TH1D.h>
 #include <TF1.h>
 #include <TCanvas.h>
-#include <TProfile.h>
-#include <TSystem.h>
-#include <TROOT.h>
-#include <TStyle.h>
-#include <TLegend.h>
-#include <TDirectory.h>
-#include <TPaveText.h>
 #include <TMath.h>
-#include <TIterator.h>
-#include <iostream>
-#include <iomanip>
-#include <fstream>
+#include <TLegend.h>
 #include <TFitResult.h>
 #include <TLatex.h>
+#include <TSystem.h>
+#include <TStyle.h>
+#include <iostream>
+#include <fstream>
 #include <vector>
 #include <utility>
-#include <cmath>
-#include <memory>
-#include <cfloat>  // for DBL_MAX
+
+/**
+ * \brief Toggle: If isFirstPass=false, we overlay corrected histograms.
+ *                If true, we do uncorrected only.
+ */
+static bool isFirstPass = false;
 
 /**
  * \brief 8 energy bins: E_edges[] = {2,4,6,8,10,12,15,20,30}
@@ -711,710 +714,1375 @@ void plotAshLogRMS_sideBySide(const char* infile="PositionDep_sim_ALL.root")
   std::cout<<"\n[INFO] => plotAshLogRMS_sideBySide completed all tasks.\n\n";
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Asinh-based function for local phi fits:
-//
-//   Y(X) = Normalization * [ 2*b / sqrt(1 + 4*X^2 * sinh^2(1/(2*b))) ]
-////////////////////////////////////////////////////////////////////////////////
-double asinhModel(double *x, double *par)
+/**
+ * \brief asinhModel
+ * Y(X) = Norm × [ 2·b / sqrt(1 + 4·X² · sinh²(1/(2·b)) ) ]
+ */
+double asinhModel(double* x, double* par)
 {
-  double Norm = par[0];  // overall scale
-  double b    = par[1];  // the "b" parameter
-  if (b <= 1e-9) return 1e-12; // avoid division by zero if b is small
+  double Norm = par[0];
+  double b    = par[1];
 
-  double Xcg = x[0];
-  double arg = 1.0 + 4.0*Xcg*Xcg*TMath::SinH(1.0/(2.0*b))*TMath::SinH(1.0/(2.0*b));
-  double denom = TMath::Sqrt(arg);
+  if(b < 1e-9) return 1e-12; // prevent division-by-zero anomalies
 
-  double numer = 2.0 * b;
-  double result = Norm * (numer / denom);
-  return result;
+  double X   = x[0];
+  double sh  = TMath::SinH(1.0/(2.0*b));
+  double arg = 1.0 + 4.0*X*X*sh*sh;
+
+  return Norm * ( (2.0*b) / TMath::Sqrt(arg) );
 }
 
 
-////////////////////////////////////////////////////////////////////////////////
-// doLocalPhiEtaFits(...)
-//
-//  1) Projects local-φ or local-η from h3 in slices of pT (here E-slices).
-//  2) Overlays all E-bins on one canvas => LocalPhiFits.png or LocalEtaFits.png
-//  3) If coord=phi, also does single‐bin overlays of raw vs corrected Δφ
-//  4) Finally, we produce a canvas with each bin's local‐φ distribution & fit.
-//
-// **Changed**: now it's a 4×2 canvas for 8 bins (instead of 2×2).
-////////////////////////////////////////////////////////////////////////////////
-void doLocalPhiEtaFits(TH3F* h3,
-                       const double pT_bins_low[/*N_E*/],
-                       const double pT_bins_high[/*N_E*/],
-                       std::ofstream& bResults,
-                       const TString& outDirPhi)
+// ===========================================================================
+void FitLocalPhiEta(TH3F*  hUnc3D,
+                    TH3F*  hCor3D,
+                    bool   isFirstPass,
+                    const std::vector<std::pair<double,double>>& eEdges,
+                    const char* outDir,
+                    std::ofstream& bOut)
+// ===========================================================================
 {
-  // We have N_E=8 bins
-  // Ensure output directory exists
-  gSystem->mkdir(outDirPhi, /*recursive=*/true);
+    // ----------( B )  Local-φ ------------------------------------------------
+    TCanvas cFitsPhi("LocalPhiFits_4by2","Local #phi fits",1600,1200);
+    cFitsPhi.Divide(4,2);
 
-  /////////////////////////////////////////////////////////////////////////////
-  // Equation strings for φ vs η
-  /////////////////////////////////////////////////////////////////////////////
-  TString eqPhiString =
-    "Y(X) = Norm #times #frac{2b_{#phi}}{#sqrt{1 + 4X^{2} sinh^{2}(1/(2b_{#phi}))}}";
-  TString eqEtaString =
-    "Y(X) = Norm #times #frac{2b_{#eta}}{#sqrt{1 + 4X^{2} sinh^{2}(1/(2b_{#eta}))}}";
+    const int N_E = static_cast<int>(eEdges.size());
+    std::vector<std::unique_ptr<TH1D>> vPhiUnc , vPhiCor ;
+    std::vector<std::unique_ptr<TF1>>  vPhiFit ;
 
-  // For drawing the equation text
-  TLatex eqLatex;
-  eqLatex.SetNDC(true);
-  eqLatex.SetTextFont(42);
-  eqLatex.SetTextSize(0.028);
-  eqLatex.SetTextAlign(13);
+    for (int i = 0; i < N_E; ++i)
+    {
+        double eLo = eEdges[i].first , eHi = eEdges[i].second;
+        std::cout << "\n[Φ] slice " << i << "  E=[" << eLo << ',' << eHi << ")\n";
+        cFitsPhi.cd(i+1);
 
-  // Style arrays for the bins
-  int colors[N_E]   = { kBlack, kRed+1, kBlue+1, kGreen+2,
-                        kMagenta+1, kOrange+2, kAzure+2, kSpring+9 };
-  int markers[N_E]  = {20, 20, 20, 20, 21, 21, 21, 21};
+        int zLo = std::max(1 , hUnc3D->GetZaxis()->FindBin(eLo+1e-9));
+        int zHi = std::min(hUnc3D->GetNbinsZ(),
+                           hUnc3D->GetZaxis()->FindBin(eHi-1e-9));
 
-  // -------------------------------------------------------------------------
-  // Helper lambda for the quadruple overlay
-  // -------------------------------------------------------------------------
-  auto fitCoordAndMakePlot =
-    [&](const char* coordName,    // "phi" or "eta"
-        const char* projectOpt,   // "y" for φ, "x" for η
-        const TString& outPNGname,
-        const TString& xTitle)
+        hUnc3D->GetZaxis()->SetRange(zLo,zHi);
+        hUnc3D->GetXaxis()->SetRange(1,hUnc3D->GetNbinsX());
+
+        auto hUnc = std::unique_ptr<TH1D>(
+                     static_cast<TH1D*>(hUnc3D->Project3D("y")));
+        if(!hUnc){ std::cerr<<"[WARN] no uncor φ slice\n"; continue; }
+
+        hUnc->SetDirectory(nullptr);
+        hUnc->SetName (Form("hUncPhi_E%d",i));
+        hUnc->SetTitle(Form("Local #phi : E=[%.1f,%.1f)",eLo,eHi));
+        hUnc->GetXaxis()->SetTitle("block #phi_{CG}");
+        hUnc->GetYaxis()->SetTitle("counts");
+        hUnc->SetMarkerStyle(20);
+        hUnc->Draw("E");
+        vPhiUnc.emplace_back(std::move(hUnc));
+
+        // ---------- 2)  asinh fit ------------------------------------------
+        TF1 trial("asinhφ",asinhModel,-0.5,0.5,2);
+        trial.SetParNames("Norm","bVal");
+        trial.SetParLimits(0,1e-9,1e9);
+        trial.SetParLimits(1,1e-5,2.0);
+
+        double bestChi2 = 1e50, bestB=0.; int bestNdf=0;
+        std::unique_ptr<TF1> bestFit;
+
+        for(auto g : {std::pair{0.1,0.10}, {0.2,0.14},
+                      std::pair{0.3,0.20}, {0.5,0.08}})
+        {
+            trial.SetParameters(g.first,g.second);
+            TFitResultPtr r = vPhiUnc.back()->Fit(&trial,"RQL0S","",-0.5,0.5);
+            if(!r.Get() || !r->IsValid()) continue;
+            if(r->Chi2() < bestChi2){
+                bestChi2=r->Chi2(); bestB=trial.GetParameter(1); bestNdf=r->Ndf();
+                bestFit = std::make_unique<TF1>(trial);
+                bestFit->SetName(Form("bestF_phi_E%d",i));
+            }
+        }
+
+        double maxU = vPhiUnc.back()->GetMaximum();
+        vPhiUnc.back()->GetYaxis()->SetRangeUser(0,1.3*std::max(maxU,1.));
+
+        if(bestFit){
+            bestFit->SetLineColor(kBlue+1); bestFit->SetLineWidth(2);
+            bestFit->Draw("SAME"); vPhiFit.emplace_back(std::move(bestFit));
+        }
+
+        // ---------- 4)  Corrected overlay ----------------------------------
+        TH1D* hCorRaw=nullptr;
+        if(!isFirstPass && hCor3D){
+            hCor3D->GetZaxis()->SetRange(zLo,zHi);
+            hCor3D->GetXaxis()->SetRange(1,hCor3D->GetNbinsX());
+            auto hCor = std::unique_ptr<TH1D>(
+                         static_cast<TH1D*>(hCor3D->Project3D("y")));
+            if(hCor){
+                hCor->SetDirectory(nullptr);
+                hCor->SetName(Form("hCorPhi_E%d",i));
+                hCor->SetMarkerStyle(21); hCor->SetMarkerColor(kRed);
+                hCor->SetLineColor(kRed); hCor->Draw("SAME E");
+                double maxC=hCor->GetMaximum();
+                if(maxC>maxU) vPhiUnc.back()->GetYaxis()
+                                      ->SetRangeUser(0,1.3*maxC);
+                hCorRaw=hCor.get(); vPhiCor.emplace_back(std::move(hCor));
+            }
+        }
+
+        // ---------- 5)  Legend & TLatex ------------------------------------
+        double nUnc=vPhiUnc.back()->GetEntries();
+        double nCor=hCorRaw? hCorRaw->GetEntries():0.;
+        TLegend lg(0.54,0.75,0.88,0.8); lg.SetBorderSize(0);
+        lg.SetFillStyle(0); lg.SetTextSize(0.035);
+        lg.AddEntry(vPhiUnc.back().get(),"Uncorrected","lp");
+        if(hCorRaw) lg.AddEntry(hCorRaw,"Corrected","lp");
+        if(bestFit) lg.AddEntry(bestFit.get(),
+                                Form("asinh fit (b=%.3g)",bestB),"l");
+        lg.Draw();
+
+        TLatex tl; tl.SetNDC(); tl.SetTextSize(0.042);
+        tl.DrawLatex(0.14,0.84,Form("b = %.3g",bestB));
+        tl.DrawLatex(0.14,0.76,Form("#chi^{2}_{LL}/NDF = %.2f",
+                        bestNdf>0? bestChi2/bestNdf : 0.));
+        tl.SetTextAlign(32);
+        tl.DrawLatex(0.88,0.85,Form("Uncorr: %.0f",nUnc));
+        if(hCorRaw) tl.DrawLatex(0.88,0.82,Form("Corr: %.0f",nCor));
+
+        if(bOut.is_open() && bestB>0)
+            bOut << Form("PHI [%.1f,%.1f)  %.6f\n",eLo,eHi,bestB);
+    } // end φ loop
+
+    cFitsPhi.SaveAs(Form("%s/LocalPhiFits_4by2.png",outDir));
+    std::cout << "[INFO] φ canvas written\n";
+
+    // ----------( C )  Local-η  --------------------------------------------
+    TCanvas cFitsEta("LocalEtaFits_4by2","Local #eta fits",1600,1200);
+    cFitsEta.Divide(4,2);
+
+    std::vector<std::unique_ptr<TH1D>> vEtaUnc , vEtaCor ;
+    std::vector<std::unique_ptr<TF1>>  vEtaFit ;
+
+    for (int i = 0; i < N_E; ++i)
+    {
+        double eLo = eEdges[i].first , eHi = eEdges[i].second;
+        std::cout << "\n[η] slice " << i << "  E=[" << eLo << ',' << eHi << ")\n";
+        cFitsEta.cd(i+1);
+
+        int zLo = std::max(1 , hUnc3D->GetZaxis()->FindBin(eLo+1e-9));
+        int zHi = std::min(hUnc3D->GetNbinsZ(),
+                           hUnc3D->GetZaxis()->FindBin(eHi-1e-9));
+
+        hUnc3D->GetZaxis()->SetRange(zLo,zHi);
+        hUnc3D->GetYaxis()->SetRange(1,hUnc3D->GetNbinsY());
+
+        auto hUnc = std::unique_ptr<TH1D>(
+                     static_cast<TH1D*>(hUnc3D->Project3D("x")));
+        if(!hUnc){ std::cerr<<"[WARN] no uncor η slice\n"; continue; }
+
+        hUnc->SetDirectory(nullptr);
+        hUnc->SetName(Form("hUncEta_E%d",i));
+        hUnc->SetTitle(Form("Local #eta : E=[%.1f,%.1f)",eLo,eHi));
+        hUnc->GetXaxis()->SetTitle("block #eta_{CG}");
+        hUnc->GetYaxis()->SetTitle("counts");
+        hUnc->SetMarkerStyle(20);
+        hUnc->Draw("E");
+        vEtaUnc.emplace_back(std::move(hUnc));
+
+        TF1 trial("asinhη",asinhModel,-0.5,0.5,2);
+        trial.SetParNames("Norm","bVal");
+        trial.SetParLimits(0,1e-9,1e9);
+        trial.SetParLimits(1,1e-5,2.0);
+
+        double bestChi2=1e50,bestB=0.; int bestNdf=0;
+        std::unique_ptr<TF1> bestFit;
+
+        for(auto g : {std::pair{0.1,0.10}, {0.2,0.14},
+                      std::pair{0.3,0.20}, {0.5,0.08}})
+        {
+            trial.SetParameters(g.first,g.second);
+            TFitResultPtr r = vEtaUnc.back()->Fit(&trial,"RQL0S","",-0.5,0.5);
+            if(!r.Get() || !r->IsValid()) continue;
+            if(r->Chi2()<bestChi2){
+                bestChi2=r->Chi2(); bestB=trial.GetParameter(1); bestNdf=r->Ndf();
+                bestFit=std::make_unique<TF1>(trial);
+                bestFit->SetName(Form("bestF_eta_E%d",i));
+            }
+        }
+
+        double maxU=vEtaUnc.back()->GetMaximum();
+        vEtaUnc.back()->GetYaxis()->SetRangeUser(0,1.3*std::max(maxU,1.));
+
+        if(bestFit){
+            bestFit->SetLineColor(kBlue+1); bestFit->SetLineWidth(2);
+            bestFit->Draw("SAME"); vEtaFit.emplace_back(std::move(bestFit));
+        }
+
+        TH1D* hCorRaw=nullptr;
+        if(!isFirstPass && hCor3D){
+            hCor3D->GetZaxis()->SetRange(zLo,zHi);
+            hCor3D->GetYaxis()->SetRange(1,hCor3D->GetNbinsY());
+            auto hCor = std::unique_ptr<TH1D>(
+                         static_cast<TH1D*>(hCor3D->Project3D("x")));
+            if(hCor){
+                hCor->SetDirectory(nullptr);
+                hCor->SetName(Form("hCorEta_E%d",i));
+                hCor->SetMarkerStyle(21); hCor->SetMarkerColor(kRed);
+                hCor->SetLineColor(kRed); hCor->Draw("SAME E");
+                double maxC=hCor->GetMaximum();
+                if(maxC>maxU) vEtaUnc.back()->GetYaxis()
+                                    ->SetRangeUser(0,1.3*maxC);
+                hCorRaw=hCor.get(); vEtaCor.emplace_back(std::move(hCor));
+            }
+        }
+
+        double nUnc=vEtaUnc.back()->GetEntries();
+        double nCor=hCorRaw? hCorRaw->GetEntries():0.;
+        TLegend lg(0.54,0.75,0.88,0.8); lg.SetBorderSize(0);
+        lg.SetFillStyle(0); lg.SetTextSize(0.035);
+        lg.AddEntry(vEtaUnc.back().get(),"Uncorrected","lp");
+        if(hCorRaw) lg.AddEntry(hCorRaw,"Corrected","lp");
+        if(bestFit) lg.AddEntry(bestFit.get(),
+                                Form("asinh fit (b=%.3g)",bestB),"l");
+        lg.Draw();
+
+        TLatex tl; tl.SetNDC(); tl.SetTextSize(0.042);
+        tl.DrawLatex(0.14,0.84,Form("b = %.3g",bestB));
+        tl.DrawLatex(0.14,0.76,Form("#chi^{2}_{LL}/NDF = %.2f",
+                        bestNdf>0? bestChi2/bestNdf : 0.));
+        tl.SetTextAlign(32);
+        tl.DrawLatex(0.88,0.85,Form("Uncorr: %.0f",nUnc));
+        if(hCorRaw) tl.DrawLatex(0.88,0.82,Form("Corr: %.0f",nCor));
+
+        if(bOut.is_open() && bestB>0)
+            bOut << Form("ETA [%.1f,%.1f)  %.6f\n",eLo,eHi,bestB);
+    } // end η loop
+
+    cFitsEta.SaveAs(Form("%s/LocalEtaFits_4by2.png",outDir));
+    std::cout << "[INFO] η canvas written\n";
+}
+
+
+
+
+void PlotPhiShiftAndWidth(TH3F*  hUnc3D,
+                          TH3F*  hCor3D,
+                          const std::vector<std::pair<double,double>>& eEdges,
+                          const char* outDir)
+{
+  if(!hUnc3D || !hCor3D){
+      std::cerr << "[PhiShift] need both uncorrected *and* corrected 3-D hists – abort\n";
+      return;
+  }
+
+  /* ————————————————————————
+     Style tuned for publications
+     ———————————————————————— */
+  gStyle->SetOptStat(0);
+  gStyle->SetTitleFont  (42,"XYZ");
+  gStyle->SetLabelFont  (42,"XYZ");
+  gStyle->SetTitleSize  (0.045,"XYZ");
+  gStyle->SetLabelSize  (0.040,"XYZ");
+  gStyle->SetPadTickX(1);   // ticks on all four sides
+  gStyle->SetPadTickY(1);
+
+  const int N_E = (int)eEdges.size();
+  std::vector<double> vEcen, vShift, vShiftErr, vRmsRatio;
+
+  /* ———————————————————————————————————————————
+     loop: project each (η,φ,E) cube on local φ
+     ——————————————————————————————————————————— */
+  for(int i=0;i<N_E;++i)
   {
-    bool isPhi = (strcmp(coordName, "phi") == 0);
-    TString eqString = isPhi ? eqPhiString : eqEtaString;
+      const double eLo=eEdges[i].first , eHi=eEdges[i].second ;
+      const double eC =0.5*(eLo+eHi);
 
-    // If writing to bResults, label which coordinate we’re fitting
-    if (bResults.is_open())
-    {
-      if (isPhi)
+      auto slice = [&](TH3F* h)->std::unique_ptr<TH1D>
       {
-        bResults << "\n# -- Now processing local phi fits --\n"
-                 << "# E_low  E_high  b_phi\n";
-      }
-      else
-      {
-        bResults << "\n# -- Now processing local eta fits --\n"
-                 << "# E_low  E_high  b_eta\n";
-      }
-    }
-
-    // 1) Create a canvas for the “overlay” of all N_E=8 bins
-    TCanvas cCoord(Form("cCoord_%s", coordName),
-                   Form("Local %s distributions", coordName),
-                   900, 700);
-    cCoord.SetLeftMargin(0.12);
-    cCoord.SetRightMargin(0.05);
-    cCoord.SetBottomMargin(0.12);
-    cCoord.cd();
-
-    TLegend leg(0.18, 0.68, 0.55, 0.88);
-    leg.SetBorderSize(0);
-    leg.SetFillStyle(0);
-    leg.SetTextSize(0.028);
-
-    // We'll store the 1D projections and best-fit b-values
-    std::vector<TH1D*> hLocalVec(N_E, nullptr);
-    std::vector<double> bestBvals(N_E, 0.0);
-
-    // 2) Loop over the 8 E-slices => single overlay
-    for(int i=0; i<N_E; i++)
-    {
-      // Determine Z range for that E slice
-      int zLo = h3->GetZaxis()->FindFixBin(pT_bins_low[i] + 1e-9);
-      int zHi = h3->GetZaxis()->FindFixBin(pT_bins_high[i] - 1e-9);
-      if(zLo < 1) zLo=1;
-      if(zHi> h3->GetNbinsZ()) zHi= h3->GetNbinsZ();
-
-      // Set the range & do the 1D projection
-      h3->GetXaxis()->SetRange(1, h3->GetNbinsX());
-      h3->GetZaxis()->SetRange(zLo, zHi);
-
-      TH1D* hLocal = (TH1D*) h3->Project3D(projectOpt);
-      if(!hLocal)
-      {
-        std::cerr << "[WARNING] Could not project " << coordName
-                  << " for E bin i=" << i << std::endl;
-        continue;
-      }
-      hLocalVec[i] = hLocal;
-
-      hLocal->SetName(Form("hLocal%s_%.1fto%.1f",
-                           coordName, pT_bins_low[i], pT_bins_high[i]));
-      hLocal->SetTitle(Form(";%s; scaled counts", xTitle.Data()));
-
-      // Normalize
-      double integral = hLocal->Integral();
-      if(integral > 1e-9) hLocal->Scale(1. / integral);
-
-      // Style
-      hLocal->SetMarkerStyle(markers[i]);
-      hLocal->SetMarkerColor(colors[i]);
-      hLocal->SetLineColor  (colors[i]);
-      hLocal->SetMarkerSize(1.2);
-
-      // Draw: one big overlay with all bins
-      if (i == 0)
-      {
-        hLocal->Draw("E");
-        hLocal->GetYaxis()->SetRangeUser(0, 0.4);
-        hLocal->GetXaxis()->SetTitle(xTitle);
-        hLocal->GetYaxis()->SetTitle("counts (normalized)");
-      }
-      else
-      {
-        hLocal->Draw("SAME E");
-      }
-
-      // ---------------------------------------------------------------------
-      // Multi‐start fit approach to find the best b-parameter
-      // ---------------------------------------------------------------------
-      TF1* fAsinh = new TF1(Form("fAsinh_%s_%d", coordName, i),
-                            asinhModel, -0.5, 0.5, 2);
-      fAsinh->SetParNames("Norm", "bVal");
-      // Reasonable parameter limits
-      fAsinh->SetParLimits(0, 1e-6, 1e6);
-      fAsinh->SetParLimits(1, 1e-5, 1.0);
-
-      // Some initial guesses
-      std::vector<std::pair<double,double>> initialGuesses = {
-        {0.2, 0.14},
-        {0.1, 0.10},
-        {0.3, 0.20},
-        {0.5, 0.08}
+          const int zLo = std::max(1 , h->GetZaxis()->FindBin(eLo+1e-9));
+          const int zHi = std::min(h->GetNbinsZ(),
+                                   h->GetZaxis()->FindBin(eHi-1e-9));
+          h->GetZaxis()->SetRange(zLo,zHi);
+          h->GetXaxis()->SetRange(1,h->GetNbinsX());   // full η range
+          auto hphi = std::unique_ptr<TH1D>(
+                         (TH1D*)h->Project3D("y") );
+          hphi->SetDirectory(nullptr);
+          return hphi;
       };
 
-      double bestChi2 = 1e15;
-      TF1* bestFunc   = nullptr;
+      auto hU = slice(hUnc3D);
+      auto hC = slice(hCor3D);
+      if(!hU || !hC) continue;
 
-      double fitMinX = -0.5;
-      double fitMaxX =  0.5;
+      const double meanU  = hU->GetMean();
+      const double meanC  = hC->GetMean();
+      const double rmsU   = hU->GetRMS();
+      const double rmsC   = hC->GetRMS();
+      const double nU     = std::max(1.0 , hU->GetEntries());
 
-      // Try each guess
-      for(auto& guess : initialGuesses)
-      {
-        fAsinh->SetParameter(0, guess.first);
-        fAsinh->SetParameter(1, guess.second);
+      vEcen    .push_back(eC);
+      vShift   .push_back(meanC - meanU);
+      vShiftErr.push_back(rmsU/std::sqrt(nU));      // statistical error
+      vRmsRatio.push_back(rmsU>0 ? rmsC/rmsU : 0.0);
+  }
 
-        TFitResultPtr fitRes = hLocal->Fit(fAsinh, "RQE0S", "",
-                                           fitMinX, fitMaxX);
-        if(fitRes.Get() && fitRes->IsValid())
-        {
-          double thisChi2 = fitRes->Chi2();
-          if(thisChi2 < bestChi2)
-          {
-            bestChi2 = thisChi2;
-            if(bestFunc) delete bestFunc;
-            bestFunc = (TF1*) fAsinh->Clone(
-              Form("bestFunc_%s_%d", coordName, i)
-            );
-          }
-        }
-      }
+  if(vEcen.empty()){
+      std::cerr<<"[PhiShift] no valid slices\n"; return;
+  }
 
-      double bVal = 0.0;
-      if(bestFunc)
-      {
-        bestFunc->SetLineColor(colors[i]);
-        bestFunc->SetLineWidth(2);
-        bestFunc->Draw("SAME");
+  /* ———————————————————————————————————————————
+     build graphs
+     ——————————————————————————————————————————— */
+  const int N = (int)vEcen.size();
+  TGraphErrors gShift (N, &vEcen[0], &vShift[0]   , nullptr, &vShiftErr[0]);
+  TGraph       gRms   (N, &vEcen[0], &vRmsRatio[0]);
 
-        bVal = bestFunc->GetParameter(1);
-        // Attach the final best-func to the histogram so we can retrieve it later
-        hLocal->GetListOfFunctions()->Add(bestFunc);
+  gShift.SetMarkerStyle(20);
+  gShift.SetMarkerColor(kRed+1);  gShift.SetLineColor(kRed+1);
+  gShift.SetLineWidth(2);
+
+  gRms.SetMarkerStyle(25);
+  gRms.SetMarkerColor(kAzure+2);  gRms.SetLineColor(kAzure+2);
+  gRms.SetLineWidth(2);
+
+  /* ———————————————————————————————————————————
+     lay-out: two pads sharing the x-axis
+     ——————————————————————————————————————————— */
+  const double xMin = eEdges.front().first  - 0.5;
+  const double xMax = eEdges.back ().second + 0.5;
+
+  TCanvas c("PhiShift_vs_E","",1000,900);
+  c.cd();
+  TPad *p1 = new TPad("p1","",0,0.42,1,1);   // top 58 %
+  TPad *p2 = new TPad("p2","",0,0   ,1,0.42); // bottom 42 %
+  for(auto p : {p1,p2}){
+      p->SetLeftMargin (0.14);
+      p->SetRightMargin(0.04);
+      p->SetTickx(); p->SetTicky();
+      p->Draw();
+  }
+
+  /* ————————————————————
+     (a) mean shift
+     ———————————————————— */
+  p1->cd();
+  TH2F f1("f1",";E_{slice}  [GeV];#Delta#LT#varphi#GT  (corr - raw)",
+          100,xMin,xMax, 100, -0.05, 0.05);
+  f1.GetYaxis()->SetTitleOffset(1.2);
+  f1.Draw();
+  gShift.Draw("PZ SAME");
+
+  TLine l0(xMin,0,xMax,0); l0.SetLineStyle(2); l0.Draw();
+
+  TLatex lat; lat.SetNDC(); lat.SetTextFont(42);
+  lat.SetTextSize(0.045);
+  lat.DrawLatex(0.16,0.93,"#bf{(a)}  Mean shift");
+
+  /* ————————————————————
+     (b) width ratio
+     ———————————————————— */
+  p2->cd();
+  TH2F f2("f2",";E_{slice}  [GeV];RMS_{corr} / RMS_{raw}",
+          100,xMin,xMax, 100, 0.7, 1.25);
+  f2.GetYaxis()->SetTitleOffset(1.35);
+  f2.GetXaxis()->SetTitleOffset(1.2);
+  f2.Draw();
+  gRms.Draw("P SAME");
+
+  TLine l1(xMin,1,xMax,1); l1.SetLineStyle(2); l1.Draw();
+
+  lat.DrawLatex(0.16,0.84,"#bf{(b)}  Width ratio");
+
+  /* ————————————————————
+     Legend – unobtrusive, transparent
+     ———————————————————— */
+  TPaveText leg(0.70,0.78,0.93,0.90,"NDC");
+  leg.SetFillStyle(0); leg.SetBorderSize(0);
+  leg.SetTextAlign(12); leg.SetTextFont(42); leg.SetTextSize(0.036);
+  leg.AddText("#color[kRed+1]{#square}  #Delta#LT#varphi#GT");
+  leg.AddText("#color[kAzure+2]{#square}  RMS ratio");
+  p1->cd();      // place it in the upper pad
+  leg.Draw();
+
+  /* ————————————————————
+     write file
+     ———————————————————— */
+  TString out = Form("%s/PhiShift_vs_E.png",outDir);
+  c.SaveAs(out);
+  std::cout<<"[PhiShift] wrote "<<out<<"\n";
+}
+
+void Plot2DBlockEtaPhi(TH3F* hUnc3D,
+                       TH3F* hCor3D,
+                       bool  isFirstPass,
+                       const std::vector<std::pair<double,double>>& eEdges,
+                       const char* outDir)
+{
+  // Number of energy slices
+  const int N_E = eEdges.size(); // typically 8
+
+  // ===================================================================
+  // (A) 2D blockEta vs blockPhi (4×2)
+  // ===================================================================
+  TCanvas c2D_unc("c2D_unc","Uncorrected 2D block coords vs E",2400,1200);
+  c2D_unc.Divide(4,2);
+  for (int p = 1; p <= 8; ++p) {
+        TPad *pad = (TPad*) c2D_unc.cd(p);
+        pad->SetRightMargin(0.18);   // or whatever fraction you like
+        pad->SetLeftMargin (0.12);
+        pad->SetBottomMargin(0.12);
+  }
+
+  TCanvas* c2D_cor = nullptr;
+  if(!isFirstPass)
+  {
+    c2D_cor = new TCanvas("c2D_cor","Corrected 2D block coords vs E",2400,1200);
+    c2D_cor->Divide(4,2);
+    for (int p = 1; p <= 8; ++p) {
+          TPad *pad = (TPad*) c2D_cor->cd(p);   //  <-  use ->
+          pad->SetRightMargin(0.18);
+          pad->SetLeftMargin (0.12);
+          pad->SetBottomMargin(0.12);
+    }
+  }
+
+  for(int i=0; i<N_E; i++)
+  {
+    double eLo = eEdges[i].first;
+    double eHi = eEdges[i].second;
+
+    // locate Z bins in uncorrected
+    int zLo = hUnc3D->GetZaxis()->FindBin(eLo+1e-9);
+    int zHi = hUnc3D->GetZaxis()->FindBin(eHi-1e-9);
+    if(zLo<1) zLo=1;
+    if(zHi>hUnc3D->GetNbinsZ()) zHi=hUnc3D->GetNbinsZ();
+    hUnc3D->GetZaxis()->SetRange(zLo,zHi);
+
+    TH2D* h2_unc = (TH2D*) hUnc3D->Project3D("xy");
+    if (h2_unc) {
+          h2_unc->SetName(Form("h2_unc_xy_Ebin%d", i));   // ❶ UNIQUE NAME
+          h2_unc->SetTitle(Form("Uncorr: E=[%.1f,%.1f)", eLo, eHi));
+          c2D_unc.cd(i+1);
+          h2_unc->GetZaxis()->SetTitle("Energy [GeV]");
+          h2_unc->GetZaxis()->CenterTitle();          // optional
+          h2_unc->GetZaxis()->SetTitleOffset(2.1);    // move label away
+          h2_unc->Draw("COLZ");
+          // do NOT delete here – wait until after SaveAs()
+    }
+    else
+    {
+      std::cerr << "[WARN] Could not get uncorrected 2D for slice i=" << i << "\n";
+    }
+
+    // corrected if available
+    if(!isFirstPass && hCor3D)
+    {
+      int zLoC = hCor3D->GetZaxis()->FindBin(eLo+1e-9);
+      int zHiC = hCor3D->GetZaxis()->FindBin(eHi-1e-9);
+      if(zLoC<1) zLoC=1;
+      if(zHiC>hCor3D->GetNbinsZ()) zHiC=hCor3D->GetNbinsZ();
+      hCor3D->GetZaxis()->SetRange(zLoC,zHiC);
+
+      TH2D* h2_cor = (TH2D*) hCor3D->Project3D("xy");
+      if (h2_cor) {
+            h2_cor->SetName(Form("h2_cor_xy_Ebin%d", i));   // ❶ UNIQUE NAME
+            h2_cor->SetTitle(Form("Corr: E=[%.1f,%.1f)", eLo, eHi));
+            c2D_cor->cd(i+1);
+            // NB: The original code uses "Uncorr" in the next line (likely a typo),
+            // but we keep it EXACTLY as requested:
+            h2_cor->SetTitle(Form("Corr: E=[%.1f,%.1f)", eLo, eHi));
+            h2_cor->GetXaxis()->SetTitle("blockEta_{CG}");
+            h2_cor->GetYaxis()->SetTitle("blockPhi_{CG}");
+            h2_cor->GetZaxis()->SetTitle("Energy [GeV]");
+            h2_cor->GetZaxis()->SetTitleOffset(2.1);
+            h2_cor->GetZaxis()->CenterTitle();
+            h2_cor->Draw("COLZ");
       }
       else
       {
-        std::cerr << "[WARNING] No valid multi‐start fit for "
-                  << coordName << ", E bin i=" << i
-                  << " => bVal=0.\n";
+        std::cerr << "[WARN] Could not project corrected 2D => i="<< i <<"\n";
       }
-      bestBvals[i] = bVal;
-
-      // Legend entry
-      TString legEntry = Form("E=[%.1f,%.1f] GeV : b=%.3g",
-                              pT_bins_low[i], pT_bins_high[i], bVal);
-      leg.AddEntry(hLocal, legEntry, "lp");
-
-      // Possibly record b-values
-      if (isPhi && bResults.is_open() && bestFunc
-          && (pT_bins_high[i] > pT_bins_low[i])
-          && (bVal > 1e-9))
-      {
-        bResults << pT_bins_low[i]  << "  "
-                 << pT_bins_high[i] << "   "
-                 << bVal << "\n";
-      }
-    } // end loop over i
-
-    // Add eq label and legend on the big overlay
-    leg.Draw();
-    eqLatex.DrawLatex(0.57, 0.82, eqString);
-
-    // Save that “overlay”
-    TString mainOut = outDirPhi + "/" + outPNGname;
-    cCoord.SaveAs(mainOut);
-    std::cout << "[INFO] Wrote overlay " << coordName
-              << " => " << mainOut << std::endl;
-
-    // -----------------------------------------------------------------------
-    // If it's local φ, also produce:
-    //   (a) single‐bin overlay of raw vs. corrected Δφ
-    //   (b) a **4×2** layout for 8 bin local‐φ distributions + asinh fits
-    // -----------------------------------------------------------------------
-    if (isPhi)
-    {
-        //----------------------------------------------------------------------
-        // (a) Single‐bin overlay: raw vs corrected, if those histograms exist
-        //----------------------------------------------------------------------
-        for(int i=0; i<N_E; i++)
-        {
-            double ptLo = pT_bins_low[i];
-            double ptHi = pT_bins_high[i];
-            
-            // 1) Retrieve the RAW Δφ histogram
-            TString rawName = Form("h_phi_diff_raw_%.0f_%.0f", ptLo, ptHi);
-            TH1F* hRaw = dynamic_cast<TH1F*>(gROOT->FindObject(rawName));
-            if(!hRaw)
-            {
-                std::cerr << "[WARNING] No raw Δphi hist '" << rawName
-                          << "' => skip overlay for E bin i=" << i << std::endl;
-                continue;
-            }
-            
-            // 2) Retrieve the CORRECTED Δφ histogram
-            TString corrName = Form("h_phi_diff_corr_%.1f_%.1f", ptLo, ptHi);
-            TH1F* hCorr = dynamic_cast<TH1F*>(gROOT->FindObject(corrName));
-            if(!hCorr)
-            {
-                std::cerr << "[WARNING] No corrected Δphi hist '" << corrName
-                          << "' => skip overlay for E bin i=" << i << std::endl;
-                continue;
-            }
-            
-            // 3) Make a canvas & style each histogram
-            TString cName  = Form("cDeltaPhiCompare_%.1fto%.1f", ptLo, ptHi);
-            TString cTitle = Form("#Delta#phi overlay [%.1f < E < %.1f]",
-                                  ptLo, ptHi);
-            
-            TCanvas cSingle(cName, cTitle, 800, 600);
-            cSingle.SetLeftMargin(0.12);
-            cSingle.SetRightMargin(0.05);
-            cSingle.SetBottomMargin(0.12);
-            cSingle.cd();
-            
-            // Normalize each to area=1
-            double rInt = hRaw->Integral();
-            double cInt = hCorr->Integral();
-            if(rInt  > 1e-9) hRaw ->Scale(1./rInt);
-            if(cInt  > 1e-9) hCorr->Scale(1./cInt);
-            
-            // Style: raw in black
-            hRaw->SetLineColor(kBlack);
-            hRaw->SetMarkerColor(kBlack);
-            hRaw->SetMarkerStyle(20);
-            hRaw->SetMarkerSize(1);
-            hRaw->SetTitle(cTitle);
-            hRaw->GetXaxis()->SetTitle("#Delta#phi (reco - truth) [radians]");
-            hRaw->GetYaxis()->SetTitle("counts (normalized)");
-            hRaw->GetYaxis()->SetTitleOffset(1.2);
-            
-            // corrected in red
-            hCorr->SetLineColor(kRed);
-            hCorr->SetMarkerColor(kRed);
-            hCorr->SetMarkerStyle(21);
-            hCorr->SetMarkerSize(1);
-            
-            // 4) Draw them
-            hRaw->Draw("E");
-            double maxRaw  = hRaw->GetMaximum();
-            double maxCorr = hCorr->GetMaximum();
-            double newMax  = TMath::Max(maxRaw, maxCorr)*1.25;
-            hRaw->GetYaxis()->SetRangeUser(0, newMax);
-            
-            hCorr->Draw("SAME E");
-            
-            // 5) Add a legend
-            TLegend legSingle(0.55, 0.70, 0.85, 0.85);
-            legSingle.SetBorderSize(0);
-            legSingle.SetFillStyle(0);
-            legSingle.SetTextSize(0.035);
-            
-            legSingle.AddEntry(hRaw,
-                               Form("Raw #Delta#phi (%.1f< E<%.1f)", ptLo, ptHi),
-                               "lp");
-            legSingle.AddEntry(hCorr,
-                               Form("Corrected #Delta#phi (%.1f< E<%.1f)", ptLo, ptHi),
-                               "lp");
-            legSingle.Draw();
-            
-            // 6) Save
-            TString singleOut = Form("%s/DeltaPhiCompare_%.1fto%.1f.png",
-                                     outDirPhi.Data(), ptLo, ptHi);
-            cSingle.SaveAs(singleOut);
-            
-            std::cout << "[INFO] Single-bin Δphi overlay E=["
-            << ptLo << "," << ptHi
-            << "] => " << singleOut << std::endl;
-        } // end loop over i
-        
-        //----------------------------------------------------------------------
-        // (b) A **4×2** canvas showing each bin's local‐φ distribution & best-fit,
-        //     possibly overlaying the corrected local‐φ projection
-        //----------------------------------------------------------------------
-        TCanvas c2by2("cLocalPhi4by2", "Local φ fits per E bin", 1600, 1000);
-        c2by2.Divide(4, 2);  // 4 columns, 2 rows = 8 pads
-
-        // Attempt to retrieve the corrected TH3
-        TH3F* h3corr = dynamic_cast<TH3F*>(gROOT->FindObject("h2_cluster_block_cord_E_corrected"));
-        if(!h3corr)
-        {
-            std::cout << "[WARNING] 'h2_cluster_block_cord_E_corrected' not found; no overlay.\n";
-        }
-        
-        for (int i=0; i<N_E; i++)
-        {
-            c2by2.cd(i+1);
-            // from the big overlay
-            TH1D* histLocal = hLocalVec[i];
-            if (!histLocal) continue;  // skip if empty
-            
-            // Put E range + b param in the title
-            double bVal = 0.0;
-            TF1* bf = dynamic_cast<TF1*>(
-                       histLocal->GetListOfFunctions()->FindObject(
-                         Form("bestFunc_phi_%d", i)
-                       )
-                     );
-            if(bf) bVal = bf->GetParameter(1);
-
-            TString binTitle = Form("Local #phi: E=[%.1f,%.1f], b=%.3g",
-                                    pT_bins_low[i], pT_bins_high[i], bVal);
-            histLocal->SetTitle(binTitle);
-            histLocal->GetXaxis()->SetTitle("local #phi_{CG}");
-            histLocal->GetYaxis()->SetTitle("counts (normalized)");
-            histLocal->Draw("E");
-            
-            // Overlay the best function
-            if(bf) bf->Draw("SAME");
-            
-            //-------------------------------------------------------------
-            // Overlap the corrected local-φ from h3corr, if present
-            //-------------------------------------------------------------
-            if (h3corr)
-            {
-                // Define the pT bin range
-                int zLoCorr = h3corr->GetZaxis()->FindFixBin(pT_bins_low[i] + 1e-9);
-                int zHiCorr = h3corr->GetZaxis()->FindFixBin(pT_bins_high[i] - 1e-9);
-                if(zLoCorr < 1) zLoCorr=1;
-                if(zHiCorr> h3corr->GetNbinsZ()) zHiCorr= h3corr->GetNbinsZ();
-                
-                // Project in the φ dimension => "y"
-                h3corr->GetXaxis()->SetRange(1, h3corr->GetNbinsX());
-                h3corr->GetZaxis()->SetRange(zLoCorr, zHiCorr);
-                
-                TH1D* hCorrLocal = (TH1D*) h3corr->Project3D("y");
-                if (hCorrLocal)
-                {
-                    double integC = hCorrLocal->Integral();
-                    if (integC > 1e-9) hCorrLocal->Scale(1./integC);
-                    
-                    hCorrLocal->SetLineColor(kMagenta+1);
-                    hCorrLocal->SetMarkerColor(kMagenta+1);
-                    hCorrLocal->SetMarkerStyle(25);
-                    hCorrLocal->SetMarkerSize(1.0);
-                    hCorrLocal->SetTitle("");
-                    
-                    hCorrLocal->Draw("SAME E");
-                    
-                    // Possibly add a small local legend
-                    TLegend legCorr(0.50, 0.65, 0.88, 0.82);
-                    legCorr.SetBorderSize(0);
-                    legCorr.SetFillStyle(0);
-                    legCorr.SetTextSize(0.035);
-                    legCorr.AddEntry(histLocal, "Uncorrected", "lp");
-                    legCorr.AddEntry(hCorrLocal, "Corrected", "lp");
-                    legCorr.Draw("SAME");
-                }
-                else
-                {
-                    std::cout << "[WARNING] Could not project corrected local-φ for bin " << i << std::endl;
-                }
-            } // end if(h3corr)
-        }
-        
-        // Save the 4×2 layout
-        TString out2by2 = outDirPhi + "/LocalPhiFits_4by2.png";
-        c2by2.SaveAs(out2by2);
-        std::cout << "[INFO] Wrote 4×2 local φ bin-by-bin fits => "
-        << out2by2 << std::endl;
     }
+  } // end 2D loop
 
-  }; // end fitCoordAndMakePlot
+  // Save results
+  TString out2D_unc = Form("%s/BlockCoord2D_E_unc.png", outDir);
+  c2D_unc.SaveAs(out2D_unc);
+  std::cout << "[INFO] Wrote uncorrected => " << out2D_unc << "\n";
 
-
-  // -----------------------------------------------------------------------
-  // (1) call for φ => “LocalPhiFits.png”
-  // -----------------------------------------------------------------------
-  fitCoordAndMakePlot(
-    "phi",
-    "y",
-    "LocalPhiFits.png",
-    "local #phi_{CG} in block"
-  );
-
-  // -----------------------------------------------------------------------
-  // (2) call for η => “LocalEtaFits.png”
-  // -----------------------------------------------------------------------
-  fitCoordAndMakePlot(
-    "eta",
-    "x",
-    "LocalEtaFits.png",
-    "local #eta_{CG} in block"
-  );
-
+  if(!isFirstPass && c2D_cor)
+  {
+    TString out2D_cor=Form("%s/BlockCoord2D_E_cor.png", outDir);
+    c2D_cor->SaveAs(out2D_cor);
+    std::cout << "[INFO] Wrote corrected => " << out2D_cor << "\n";
+    delete c2D_cor;
+    c2D_cor = nullptr;
+  }
 }
 
 
-////////////////////////////////////////////////////////////////////////////////
-// PDCanalysis()
-//
-//  1) Lists all histograms (like the original code).
-//  2) Makes a 2D block-eta vs block-phi plot from h2_cluster_block_cord_E
-//  3) Makes local-phi distributions for E slices [2,4], [4,6], [6,8], [8,10],
-//     [10,12], [12,15], [15,20], [20,30], fits them, and records b-values.
-//  4) Finally, saves *every* histogram as a PNG in:
-//       /Users/.../SimOutput/allHistOutput
-////////////////////////////////////////////////////////////////////////////////
-void PDCanalysis()
+// ---------------------------------------------------------------------------
+//  Overlay of *UNCORRECTED* η and φ block-CG coordinates, in one canvas
+//  • φ   (Y-proj)  = red   + red asinh fit
+//  • η   (X-proj)  = blue  + blue asinh fit
+//  • b-values (fit parameters) printed upper-right on every pad
+//  • eight energy bins  → 4×2 pads  →  LocalPhiEtaOverlay_4by2.png
+// ---------------------------------------------------------------------------
+void OverlayUncorrPhiEta(TH3F*  hUnc3D,
+                         const std::vector<std::pair<double,double>>& eEdges,
+                         const char* outDir)
+/* ------------------------------------------------------------------------ */
 {
-  ///////////////////////////////////////////////////////////////////////
-  // 0) Basic setup
-  ///////////////////////////////////////////////////////////////////////
+    if(!hUnc3D){
+        std::cerr << "[Overlay] null hUnc3D – abort\n";
+        return;
+    }
+
+    gStyle->SetOptStat(0);
+
+    const int N_E = static_cast<int>(eEdges.size());   // usually 8
+
+    TCanvas cOv("LocalPhiEtaOverlay_4by2",
+                "Uncorr #varphi (red) and #eta (blue) overlays", 1600, 1200);
+    cOv.Divide(4, 2);
+
+    // keep everything alive until after SaveAs()
+    std::vector<TObject*> keepAlive;
+
+    //----------------------------------------------------------------------
+    // helper: do a binned-LL fit to the asinh model and return (b, TF1*)
+    //----------------------------------------------------------------------
+    auto fitAsinh = [&](TH1D* h, Color_t col) -> std::pair<double, TF1*>
+    {
+        TF1 trial("trial", asinhModel, -0.5, 0.5, 2);
+        trial.SetParNames("Norm", "b");
+        trial.SetParLimits(0, 1e-9, 1e9);
+        trial.SetParLimits(1, 1e-5, 2.0);
+
+        double bestChi2 = 1e50, bestB = 0.0;
+        TF1*   bestFit  = nullptr;
+
+        for(auto seed : { std::pair{0.1,0.10}, {0.2,0.14},
+                          std::pair{0.3,0.20}, {0.5,0.08}})
+        {
+            trial.SetParameters(seed.first, seed.second);
+            TFitResultPtr r = h->Fit(&trial, "RQL0S", "", -0.5, 0.5);
+            if(!r.Get() || !r->IsValid()) continue;
+            if(r->Chi2() < bestChi2){
+                bestChi2 = r->Chi2();
+                bestB    = trial.GetParameter(1);
+                if(bestFit) delete bestFit;
+                bestFit   = new TF1(trial);
+            }
+        }
+        if(bestFit){
+            bestFit->SetLineColor(col);
+            bestFit->SetLineWidth(2);
+        }
+        return {bestB, bestFit};
+    };
+
+    //----------------------------------------------------------------------
+    // main loop over energy slices
+    //----------------------------------------------------------------------
+    for(int i = 0; i < N_E; ++i)
+    {
+        const double eLo = eEdges[i].first;
+        const double eHi = eEdges[i].second;
+
+        std::cout << "[Overlay] slice " << i
+                  << "  E=[" << eLo << ',' << eHi << ")\n";
+
+        cOv.cd(i + 1);
+
+        // ---- set Z-range for this energy slice --------------------------
+        const int zLo = std::max(1,
+              hUnc3D->GetZaxis()->FindBin(eLo + 1e-9));
+        const int zHi = std::min(hUnc3D->GetNbinsZ(),
+              hUnc3D->GetZaxis()->FindBin(eHi - 1e-9));
+
+        // -----------------------------------------------------------------
+        //  φ  distribution  (Y-projection)
+        // -----------------------------------------------------------------
+        hUnc3D->GetZaxis()->SetRange(zLo, zHi);
+        hUnc3D->GetXaxis()->SetRange(1, hUnc3D->GetNbinsX()); // full η
+
+        TH1D* hPhi = static_cast<TH1D*>( hUnc3D->Project3D("y") );
+        if(!hPhi){ std::cerr << "[Overlay] missing φ hist\n"; continue; }
+        hPhi->SetDirectory(nullptr);      // detach from current file
+        hPhi->SetName(Form("hPhi_E%d", i));
+        hPhi->SetMarkerStyle(21);
+        hPhi->SetMarkerColor(kRed);
+        hPhi->SetLineColor  (kRed);
+
+        // -----------------------------------------------------------------
+        //  η  distribution  (X-projection)
+        // -----------------------------------------------------------------
+        hUnc3D->GetYaxis()->SetRange(1, hUnc3D->GetNbinsY()); // full φ
+
+        TH1D* hEta = static_cast<TH1D*>( hUnc3D->Project3D("x") );
+        if(!hEta){ std::cerr << "[Overlay] missing η hist\n"; continue; }
+        hEta->SetDirectory(nullptr);
+        hEta->SetName(Form("hEta_E%d", i));
+        hEta->SetMarkerStyle(20);
+        hEta->SetMarkerColor(kBlue + 1);
+        hEta->SetLineColor  (kBlue + 1);
+
+        // -----------------------------------------------------------------
+        //  fits
+        // -----------------------------------------------------------------
+        auto [bPhi, fPhi] = fitAsinh(hPhi, kRed);
+        auto [bEta, fEta] = fitAsinh(hEta, kBlue + 1);
+
+        // -----------------------------------------------------------------
+        //  draw – set a common y-range
+        // -----------------------------------------------------------------
+        const double ymax = std::max(hPhi->GetMaximum(), hEta->GetMaximum());
+        hEta->GetYaxis()->SetRangeUser(0.0, 1.30 * std::max(1.0, ymax));
+
+        hEta->Draw("E");            // blue first
+        hPhi->Draw("E SAME");       // then red
+        if(fEta) fEta->Draw("SAME");
+        if(fPhi) fPhi->Draw("SAME");
+
+        TPad* pad = (TPad*) gPad;                  // current pad
+        TLegend* leg = new TLegend(0.15, 0.75,     // (x1,y1,x2,y2) in NDC
+                                   0.45, 0.90);
+        leg->SetBorderSize(0);
+        leg->SetFillStyle(0);
+        leg->SetTextSize(0.040);
+        leg->AddEntry(hPhi, "local #varphi", "lp");   // red squares
+        leg->AddEntry(hEta, "local #eta",     "lp");  // blue circles
+        leg->Draw();
+
+        /* keep it alive until after SaveAs() */
+        keepAlive.push_back(leg);
+        
+        // -----------------------------------------------------------------
+        //  text
+        // -----------------------------------------------------------------
+        TLatex tl; tl.SetNDC(); tl.SetTextSize(0.040);
+        tl.SetTextAlign(32);               // right-aligned
+        tl.DrawLatex(0.88, 0.88, Form("b_{#varphi}=%.3g", bPhi));
+        tl.DrawLatex(0.88, 0.82, Form("b_{#eta}=%.3g",     bEta));
+
+        // keep objects alive
+        keepAlive.insert(keepAlive.end(),
+                         {hPhi, hEta, fPhi, fEta});
+    } // end slice loop
+
+    //----------------------------------------------------------------------
+    //  save and clean-up
+    //----------------------------------------------------------------------
+    TString outName = Form("%s/LocalPhiEtaOverlay_4by2.png", outDir);
+    cOv.SaveAs(outName);
+    std::cout << "[Overlay] wrote " << outName << '\n';
+
+    for(auto obj : keepAlive) delete obj;
+}
+
+// ---------------------------------------------------------------------------
+//  Scatter-plot of best-fit 𝗯 values vs. energy slice
+//  • red squares = φ    (Y-projection)   b_{φ}
+//  • blue circles = η   (X-projection)   b_{η}
+//  • y-axis limits chosen automatically to include *all* points
+// ---------------------------------------------------------------------------
+void PlotBvaluesVsEnergy(TH3F*  hUnc3D,
+                         const std::vector<std::pair<double,double>>& eEdges,
+                         const char* outDir)
+/* ------------------------------------------------------------------------ */
+{
+    if(!hUnc3D){
+        std::cerr << "[bPlot] null hUnc3D – abort\n";
+        return;
+    }
+
+    gStyle->SetOptStat(0);
+
+    const int N_E = static_cast<int>(eEdges.size());
+
+    std::vector<double> vX, vBphi, vBeta;    // store results
+    vX.reserve(N_E);  vBphi.reserve(N_E);  vBeta.reserve(N_E);
+
+    // ───────────────────────────────────────────────────────────────────
+    // helper: identical to the fitter used elsewhere
+    // ───────────────────────────────────────────────────────────────────
+    auto fitAsinh = [&](TH1D* h)->double
+    {
+        TF1 trial("trial", asinhModel, -0.5, 0.5, 2);
+        trial.SetParNames("Norm", "b");
+        trial.SetParLimits(0, 1e-9, 1e9);
+        trial.SetParLimits(1, 1e-5, 2.0);
+
+        double bestChi2 = 1e50, bestB = 0.0;
+
+        for(auto seed : { std::pair{0.1,0.10}, {0.2,0.14},
+                          std::pair{0.3,0.20}, {0.5,0.08}})
+        {
+            trial.SetParameters(seed.first, seed.second);
+            TFitResultPtr r = h->Fit(&trial, "RQL0S", "", -0.5, 0.5);
+            if(!r.Get() || !r->IsValid()) continue;
+            if(r->Chi2() < bestChi2){
+                bestChi2 = r->Chi2();
+                bestB    = trial.GetParameter(1);
+            }
+        }
+        return bestB;
+    };
+
+    std::vector<TObject*> keepAlive;        // stop auto-deletion
+
+    // ───────────────────────────────────────────────────────────────────
+    //   loop over energy bins – compute bφ and bη
+    // ───────────────────────────────────────────────────────────────────
+    for(int i=0; i<N_E; ++i)
+    {
+        const double eLo = eEdges[i].first;
+        const double eHi = eEdges[i].second;
+
+        const int zLo = std::max(1,
+              hUnc3D->GetZaxis()->FindBin(eLo + 1e-9));
+        const int zHi = std::min(hUnc3D->GetNbinsZ(),
+              hUnc3D->GetZaxis()->FindBin(eHi - 1e-9));
+
+        // φ  (Y-projection)
+        hUnc3D->GetZaxis()->SetRange(zLo, zHi);
+        hUnc3D->GetXaxis()->SetRange(1, hUnc3D->GetNbinsX());
+
+        TH1D* hPhi = static_cast<TH1D*>( hUnc3D->Project3D("y") );
+        if(!hPhi){ std::cerr << "[bPlot] missing φ hist, slice "<<i<<"\n"; continue;}
+        hPhi->SetDirectory(nullptr);
+
+        // η  (X-projection)
+        hUnc3D->GetYaxis()->SetRange(1, hUnc3D->GetNbinsY());
+
+        TH1D* hEta = static_cast<TH1D*>( hUnc3D->Project3D("x") );
+        if(!hEta){ std::cerr << "[bPlot] missing η hist, slice "<<i<<"\n"; delete hPhi; continue;}
+        hEta->SetDirectory(nullptr);
+
+        const double bPhi = fitAsinh(hPhi);
+        const double bEta = fitAsinh(hEta);
+
+        vX   .push_back( 0.5*(eLo+eHi) );   // use bin centre
+        vBphi.push_back( bPhi );
+        vBeta.push_back( bEta );
+
+        keepAlive.insert(keepAlive.end(), {hPhi, hEta});
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    //  build graphs
+    // ───────────────────────────────────────────────────────────────────
+    TGraph* gPhi = new TGraph( (int)vX.size(), &vX[0], &vBphi[0] );
+    TGraph* gEta = new TGraph( (int)vX.size(), &vX[0], &vBeta[0] );
+
+    gPhi->SetMarkerStyle(21);  gPhi->SetMarkerColor(kRed);
+    gPhi->SetLineColor  (kRed);
+
+    gEta->SetMarkerStyle(20);  gEta->SetMarkerColor(kBlue+1);
+    gEta->SetLineColor  (kBlue+1);
+
+    // y-axis limits
+    const double ymin = std::min( *std::min_element(vBphi.begin(),vBphi.end()),
+                                  *std::min_element(vBeta.begin(),vBeta.end()) );
+    const double ymax = std::max( *std::max_element(vBphi.begin(),vBphi.end()),
+                                  *std::max_element(vBeta.begin(),vBeta.end()) );
+
+    const double yLo = 0.85 * ymin;
+    const double yHi = 1.15 * ymax;
+
+    // frame for axes
+    TH2F* hFrame = new TH2F("bFrame", ";E_{slice}  [GeV]; best–fit  b",
+                            100, vX.front()-1, vX.back()+1,
+                            100, yLo, yHi);
+    hFrame->SetStats(0);
+
+    TCanvas cB("bValues_vs_E","b values vs energy", 800, 600);
+    hFrame->Draw();
+    gPhi->Draw("P SAME");
+    gEta->Draw("P SAME");
+
+    TLegend leg(0.15,0.78,0.40,0.90);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.04);
+    leg.AddEntry(gPhi,"b_{#varphi}","lp");
+    leg.AddEntry(gEta,"b_{#eta}","lp");
+    leg.Draw();
+
+    keepAlive.insert(keepAlive.end(), {gPhi,gEta,hFrame});
+
+    TString outName = Form("%s/bValues_vs_E.png", outDir);
+    cB.SaveAs(outName);
+    std::cout << "[bPlot] wrote " << outName << '\n';
+
+    for(auto obj : keepAlive) delete obj;
+}
+
+
+/***************************************************************************
+ * PlotChi2QA
+ * ----------
+ *  • inFile : full path to a ROOT file that contains
+ *      h2_chi2_tot_etaPhi      (TH2F)   – all clusters, before χ² cut
+ *      h2_chi2_rej_etaPhi      (TH2F)   – clusters rejected by χ² cut
+ *      p_chi2_pass_etaPhi      (TProfile2D) – ⟨pass flag⟩ per tower
+ *  • outDir : directory where the PNGs will be written (created if absent)
+ *
+ *  The function produces:
+ *    (1) Chi2_Total.png        – total-occupancy heat-map
+ *    (2) Chi2_Rejected.png     – rejected-occupancy heat-map
+ *    (3) Chi2_PassFraction.png – ⟨pass⟩   (profile)   0 … 1
+ *    (4) Chi2_RejectFraction.png – 1−⟨pass⟩  for convenience
+ *
+ *  Author: <you>, 2025-06-03
+ ***************************************************************************/
+void PlotChi2QA(const char* inFile,
+                const char* outDir = "./Chi2_QA")
+{
   gStyle->SetOptStat(0);
-  gStyle->SetPalette(kBird);
-    
-  // Root file with merged histograms
-  const char* filename = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
-  TFile* f = TFile::Open(filename,"READ");
-  if(!f || f->IsZombie())
+  gSystem->mkdir(outDir, /*recursive=*/true);
+
+  /* ------------------------------------------------------------------ */
+  /* 1) open file & fetch histograms                                    */
+  /* ------------------------------------------------------------------ */
+  std::unique_ptr<TFile> fin( TFile::Open(inFile,"READ") );
+  if(!fin || fin->IsZombie()){
+      std::cerr << "[Chi2QA]  ERROR – cannot open " << inFile << '\n';
+      return;
+  }
+  auto* hTot = dynamic_cast<TH2F*>     ( fin->Get("h2_chi2_tot_etaPhi") );
+  auto* hRej = dynamic_cast<TH2F*>     ( fin->Get("h2_chi2_rej_etaPhi") );
+  auto* pPass= dynamic_cast<TProfile2D*>( fin->Get("p_chi2_pass_etaPhi") );
+
+  if(!hTot || !hRej || !pPass){
+      std::cerr << "[Chi2QA]  ERROR – one or more χ² QA histograms "
+                   "missing in file:\n"
+                << "          " << inFile << '\n';
+      return;
+  }
+
+  /* detach from the file so we can close it right away */
+  hTot ->SetDirectory(nullptr);
+  hRej ->SetDirectory(nullptr);
+  pPass->SetDirectory(nullptr);
+  fin->Close();
+
+  /* ------------------------------------------------------------------ */
+  /* 2) build reject-fraction TH2F  =  (1 – pass)                       */
+  /* ------------------------------------------------------------------ */
+    // construct an empty TH2D that has exactly the same axes as pPass
+  TH2D hRejFrac("h_chi2_rejFrac_etaPhi",
+                  "Reject fraction after #chi^{2} cut;"
+                  "Tower #eta index;Tower #varphi index;Reject fraction",
+                  pPass->GetNbinsX(), pPass->GetXaxis()->GetXmin(), pPass->GetXaxis()->GetXmax(),
+                  pPass->GetNbinsY(), pPass->GetYaxis()->GetXmin(), pPass->GetYaxis()->GetXmax());
+
+
+  hRejFrac.SetName ("h_chi2_rejFrac_etaPhi");
+  hRejFrac.SetTitle("Reject fraction after #chi^{2} cut;"
+                    "Tower #eta index;Tower #varphi index;Reject fraction");
+
+  const int nX = hRejFrac.GetNbinsX();
+  const int nY = hRejFrac.GetNbinsY();
+  for(int ix=1; ix<=nX; ++ix)
+     for(int iy=1; iy<=nY; ++iy){
+         double pass = pPass->GetBinContent(ix,iy);
+         if(pass<0) pass = 0;          // profile may be empty
+         hRejFrac.SetBinContent(ix,iy, 1.0 - pass);
+     }
+
+  /* colour palette nicer than default */
+  gStyle->SetPalette(kViridis);
+
+  /* helper lambda – draw & save one heat-map ------------------------- */
+  auto drawSave = [&](TH2* h,
+                      const char* cname,
+                      const char* png)
   {
-    std::cerr << "[ERROR] Could not open file: " << filename << std::endl;
+      TCanvas c(cname,cname,1000,760);
+      c.SetRightMargin(0.14);
+      h->Draw("COLZ");
+      c.SaveAs(Form("%s/%s",outDir,png));
+      std::cout << "[Chi2QA] wrote  " << outDir << '/' << png << '\n';
+  };
+
+  drawSave(hTot , "cChi2Tot" , "Chi2_Total.png");
+  drawSave(hRej , "cChi2Rej" , "Chi2_Rejected.png");
+  drawSave(pPass, "cChi2Pass", "Chi2_PassFraction.png");
+  drawSave(&hRejFrac,"cChi2Frac","Chi2_RejectFraction.png");
+
+  /* ------------------------------------------------------------------ */
+  /* 3) global numbers                                                  */
+  /* ------------------------------------------------------------------ */
+  const double totEntries = hTot->GetEntries();
+  const double rejEntries = hRej->GetEntries();
+  std::cout << "\n[Chi2QA]  GLOBAL SUMMARY\n"
+            << "          clusters before χ²  : " << totEntries << '\n'
+            << "          clusters rejected   : " << rejEntries << '\n'
+            << "          overall reject frac : "
+            << (totEntries>0 ? rejEntries/totEntries : 0) << "\n\n";
+}
+
+// ---------------------------------------------------------------------------
+//  Truth-vertex-Z spectrum  *with verbose QA*
+//  • Drawn as blue full circles
+//  • Y-axis is auto–scaled to the histogram maximum
+// ---------------------------------------------------------------------------
+void PlotVertexZTruthOnly(TH1F* h_truth_vz,
+                          const char* outDir)
+/* ------------------------------------------------------------------------ */
+{
+  /* ───────────────────────── sanity check ──────────────────────────── */
+  if (!h_truth_vz)
+  {
+    std::cerr << "\n[vtxZ]  ERROR  null pointer:  h_truth_vz=" << h_truth_vz << '\n';
     return;
   }
-  std::cout << "[INFO] Successfully opened: " << filename << std::endl;
 
-  ///////////////////////////////////////////////////////////////////////
-  // 1) Print a table of all histograms (the original function)
-  ///////////////////////////////////////////////////////////////////////
-  std::cout << std::left
-            << std::setw(30) << "HISTOGRAM NAME"
-            << std::setw(20) << "CLASS TYPE"
-            << std::setw(15) << "ENTRIES"
-            << std::endl;
-  std::cout << std::string(65, '=') << std::endl;
+  /* ───────────────────────── detach from any file ──────────────────── */
+  h_truth_vz->SetDirectory(nullptr);
+
+  /* ───────────────────────── global stats ──────────────────────────── */
+  const int    firstBin   = h_truth_vz->FindFirstBinAbove(0.0);
+  const int    lastBin    = h_truth_vz->FindLastBinAbove (0.0);
+  const double integral   = h_truth_vz->Integral();
+
+  std::cout << "[vtxZ] Truth  Entries=" << h_truth_vz->GetEntries()
+            << "  Integral="  << integral
+            << "  Mean="      << h_truth_vz->GetMean()
+            << "  RMS="       << h_truth_vz->GetRMS()
+            << "  FirstBin="  << firstBin
+            << "  LastBin="   << lastBin
+            << '\n';
+
+  /* ───────────────────────── style ─────────────────────────────────── */
+  h_truth_vz->SetMarkerStyle(20);
+  h_truth_vz->SetMarkerSize (0.8);
+  h_truth_vz->SetMarkerColor(kBlue+1);
+  h_truth_vz->SetLineColor  (kBlue+1);
+  h_truth_vz->SetLineWidth  (2);
+
+  /* ───────────────────────── y-axis range ──────────────────────────── */
+  const double yMax = 1.30 * h_truth_vz->GetMaximum();
+  std::cout << "[vtxZ] Y-axis will span 0 … " << yMax << '\n';
+
+  h_truth_vz->GetYaxis()->SetRangeUser(0.0, yMax);
+  h_truth_vz->GetYaxis()->SetTitle("Counts");
+  h_truth_vz->GetXaxis()->SetTitle("z_{vtx}  (cm)");
+
+  /* ───────────────────────── draw & save ───────────────────────────── */
+  TCanvas cV("VertexZ_Truth","Truth vertex-Z", 880, 620);
+  gStyle->SetOptStat(0);
+
+  h_truth_vz->Draw("E1");      // blue filled circles
+
+  TString outName = Form("%s/VertexZ_Truth.png", outDir);
+  cV.SaveAs(outName);
+
+  std::cout << "[vtxZ] wrote " << outName
+            << "  (Truth max=" << h_truth_vz->GetMaximum() << ")\n\n";
+}
+
+
+/******************************************************************************
+ * OverlayDeltaPhiSlices  (v3 – legend bottom-left, compact stats)
+ ******************************************************************************/
+void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
+                           bool   isFirstPass,
+                           const char* outDir)
+{
+    gSystem->mkdir(outDir, /*recursive=*/true);
+    gStyle->SetOptStat(0);
+
+    const int N_E = static_cast<int>(eEdges.size());
+    if(N_E==0){ std::cerr<<"[DeltaPhiOverlay] eEdges empty – abort\n"; return; }
+
+    /* helper for Gaussian fit → N, μ, σ ---------------------------------- */
+    struct Info { double N, mu, sigma; };
+    auto getInfo = [](TH1* h)->Info
+    {
+        if(!h || h->Integral()==0) return {0,0,0};
+        double m = h->GetMean(), r = h->GetRMS();
+        TF1 g("g","gaus", m-2.5*r, m+2.5*r);
+        g.SetParameters(h->GetMaximum(), m, r/2.);
+        h->Fit(&g,"RQ0");
+        return { h->GetEntries(), g.GetParameter(1), fabs(g.GetParameter(2)) };
+    };
+
+    /* summary canvas ------------------------------------------------------ */
+    TCanvas c4x2("DeltaPhiOverlay_4by2",
+                 "#Delta#phi raw vs corrected (normalised)",1600,1200);
+    c4x2.Divide(4,2);
+
+    std::vector<TObject*> keep;   // prevent premature deletion
+
+    for(int i=0;i<N_E;++i)
+    {
+        const double eLo=eEdges[i].first, eHi=eEdges[i].second;
+        TString rawName  = Form("h_phi_diff_raw_%.0f_%.0f", eLo, eHi);
+        TString corrName = Form("h_phi_diff_corr_%.1f_%.1f", eLo, eHi);
+
+        TH1F* hRawSrc  = dynamic_cast<TH1F*>( gROOT->FindObject(rawName)  );
+        TH1F* hCorrSrc = (!isFirstPass) ? dynamic_cast<TH1F*>( gROOT->FindObject(corrName) )
+                                        : nullptr;
+        if(!hRawSrc){ std::cerr<<"[DeltaPhiOverlay] missing "<<rawName<<"\n"; continue; }
+
+        /* clone (safe to modify) */
+        TH1F* hRaw  = static_cast<TH1F*>(hRawSrc ->Clone(Form("hRaw_%d",i)));
+        TH1F* hCorr = hCorrSrc ? static_cast<TH1F*>(hCorrSrc->Clone(Form("hCorr_%d",i))) : nullptr;
+        hRaw ->SetDirectory(nullptr); if(hCorr) hCorr->SetDirectory(nullptr);
+        keep.push_back(hRaw); if(hCorr) keep.push_back(hCorr);
+
+        /* area-normalise --------------------------------------------------- */
+        if(hRaw ->Integral()>0) hRaw ->Scale(1./hRaw ->Integral());
+        if(hCorr && hCorr->Integral()>0) hCorr->Scale(1./hCorr->Integral());
+
+        /* stats (after normalisation – entries unchanged) */
+        Info R = getInfo(hRaw);
+        Info C = hCorr ? getInfo(hCorr) : Info{0,0,0};
+
+        /* basic style ------------------------------------------------------ */
+        hRaw ->SetLineColor(kBlack); hRaw ->SetMarkerColor(kBlack);
+        hRaw ->SetMarkerStyle(20);   hRaw ->SetMarkerSize(0.8);
+
+        if(hCorr){
+            hCorr->SetLineColor(kRed); hCorr->SetMarkerColor(kRed);
+            hCorr->SetMarkerStyle(21); hCorr->SetMarkerSize(0.8);
+        }
+
+        /* ---- (A) summary pad -------------------------------------------- */
+        c4x2.cd(i+1);
+        TString ttl=Form("#Delta#phi  [%.1f, %.1f)  GeV",eLo,eHi);
+        hRaw->SetTitle(ttl);
+        hRaw->GetXaxis()->SetTitle("#Delta#phi (reco - truth)  [rad]");
+        hRaw->GetYaxis()->SetTitle("Normalised counts");
+        hRaw->GetYaxis()->SetTitleOffset(1.3);
+
+        double ymax=hRaw->GetMaximum(); if(hCorr) ymax=std::max(ymax,hCorr->GetMaximum());
+        hRaw->GetYaxis()->SetRangeUser(0,1.25*ymax);
+        hRaw->Draw("E"); if(hCorr) hCorr->Draw("E SAME");
+
+        /* legend – bottom-left */
+        TLegend* legS = new TLegend(0.15,0.2,0.45,0.3);
+        legS->SetBorderSize(0); legS->SetFillStyle(0); legS->SetTextSize(0.03);
+        legS->AddEntry(hRaw ,"RAW"      ,"lp");
+        if(hCorr) legS->AddEntry(hCorr,"CORRECTED","lp");
+        legS->Draw(); keep.push_back(legS);
+
+        /* text (compact) */
+        TLatex tl; tl.SetNDC(); tl.SetTextFont(42); tl.SetTextSize(0.024);
+        tl.SetTextAlign(13);
+        tl.DrawLatex(0.15,0.85,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
+                                    (int)R.N, R.mu, R.sigma));
+        if(hCorr)
+            tl.DrawLatex(0.15,0.81,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
+                                        (int)C.N, C.mu, C.sigma));
+
+        /* ---- (B) individual canvas -------------------------------------- */
+        TString cNm = Form("cDeltaPhi_%d",i);
+        TString cTi = Form("#Delta#phi overlay  %.1f–%.1f GeV",eLo,eHi);
+        TCanvas cInd(cNm,cTi,800,600);
+        cInd.SetLeftMargin(0.13); cInd.SetRightMargin(0.06); cInd.SetBottomMargin(0.12);
+
+        hRaw->Draw("E"); hRaw->GetYaxis()->SetRangeUser(0,1.25*ymax);
+        if(hCorr) hCorr->Draw("E SAME");
+
+        TLegend legI(0.15,0.08,0.45,0.23);
+        legI.SetBorderSize(0); legI.SetFillStyle(0); legI.SetTextSize(0.03);
+        legI.AddEntry(hRaw ,"RAW"      ,"lp");
+        if(hCorr) legI.AddEntry(hCorr,"CORRECTED","lp");
+        legI.Draw();
+
+        TLatex tlI; tlI.SetNDC(); tlI.SetTextFont(42); tlI.SetTextSize(0.030);
+        tlI.SetTextAlign(13);
+        tlI.DrawLatex(0.15,0.85,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
+                                     (int)R.N, R.mu, R.sigma));
+        if(hCorr)
+            tlI.DrawLatex(0.15,0.81,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
+                                         (int)C.N, C.mu, C.sigma));
+
+        TString outPNG=TString(outDir)+Form("/DeltaPhiCompare_%.0fto%.0f.png",eLo,eHi);
+        cInd.SaveAs(outPNG);
+        std::cout<<"   ↳ wrote "<<outPNG<<'\n';
+    }
+
+    TString sumPNG=TString(outDir)+"/DeltaPhiCompare_AllOutput.png";
+    c4x2.SaveAs(sumPNG);
+    std::cout<<"[DeltaPhiOverlay] wrote summary → "<<sumPNG<<'\n';
+
+    for(auto* obj:keep) delete obj;
+}
+
+
+/**
+ * \brief LocalPhiOnly2by2
+ * Reads two TH3Fs:
+ *   "h2_cluster_block_cord_E"           (UNCORRECTED)
+ *   "h2_cluster_block_cord_E_corrected" (CORRECTED, if isFirstPass==false)
+ *
+ * Each has axes:
+ *   X => blockEta  [-0.5 .. +1.5], 14 bins
+ *   Y => blockPhi  [-0.5 .. +1.5], 14 bins
+ *   Z => cluster E, 8 bins with edges {2,4,6,8,10,12,15,20,30}
+ *
+ * Produces:
+ * (A) 2D block‐eta vs block‐phi plots (4×2)
+ * (B) 1D local‐φ distributions => asinh fits
+ * (C) 1D local‐η distributions => asinh fits
+ *
+ * Then writes best-fit b-values to a text file (“bValues.txt”).
+ *
+ * Additional note:
+ *   To properly overlay corrected local‐φ or local‐η, remember to
+ *   set the Z axis to your E slice and reset the *unused* local axis
+ *   to its full range.
+ */
+void PDCanalysis()
+{
+  // 1) Style / stat
+  gStyle->SetOptStat(0);
+  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
+
+  // 2) Open input
+  std::cout << "[INFO] Opening file: " << inFile << "\n";
+  TFile* fIn = TFile::Open(inFile, "READ");
+  if(!fIn || fIn->IsZombie())
+  {
+    std::cerr << "[ERROR] Could not open file: " << inFile << std::endl;
+    return;
+  }
+  std::cout << "[INFO] Successfully opened file: " << inFile << "\n";
+    
+    // 6) Output directory + bValFile
+    const char* outDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput";
+    gSystem->mkdir(outDir, true);
+
+    const char* outDirAll = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/allHistOutput";
+    gSystem->mkdir(outDirAll, true);
+    
+    std::cout << std::left
+              << std::setw(30) << "HISTOGRAM NAME"
+              << std::setw(20) << "CLASS TYPE"
+              << std::setw(15) << "ENTRIES"
+              << std::endl;
+    std::cout << std::string(65, '=') << std::endl;
 
   // We'll store the list of keys for reuse
-  TList* keyList = f->GetListOfKeys();
+  TList* keyList = fIn->GetListOfKeys();
   if(!keyList || keyList->IsEmpty())
   {
     std::cerr << "[WARNING] The file has no keys/histograms.\n";
   }
   else
-  {
-    TIter nextkey(keyList);
-    TKey* key;
-    while((key = (TKey*) nextkey()))
     {
-      TClass* cl = gROOT->GetClass(key->GetClassName());
-      if(!cl) continue;
-      if(cl->InheritsFrom("TH1"))
+      TIter nextkey(keyList);
+      TKey* key;
+      while((key = (TKey*) nextkey()))
       {
-        TH1* hist = (TH1*) key->ReadObj();
-        if(!hist) continue;
-        std::cout << std::setw(30) << hist->GetName()
-                  << std::setw(20) << hist->ClassName()
-                  << std::setw(15) << (long long)hist->GetEntries()
-                  << std::endl;
-      }
-    }
+        TClass* cl = gROOT->GetClass(key->GetClassName());
+        if(!cl) continue;
+        if(cl->InheritsFrom("TH1"))
+        {
+          TH1* hist = (TH1*) key->ReadObj();
+          if(!hist) continue;
+          std::cout << std::setw(30) << hist->GetName()
+                    << std::setw(20) << hist->ClassName()
+                    << std::setw(15) << (long long)hist->GetEntries()
+                    << std::endl;
+        }
+     }
   }
   std::cout << "[INFO] Finished listing histograms.\n" << std::endl;
-
-  ///////////////////////////////////////////////////////////////////////
-  // 2) Grab the 3D histogram for block coords vs E
-  ///////////////////////////////////////////////////////////////////////
-  TH3F* h3 = (TH3F*) f->Get("h2_cluster_block_cord_E");
     
-  if(!h3)
-  {
-    std::cerr << "[ERROR] 'h2_cluster_block_cord_E' not found => can't do block-eta vs. block-phi.\n";
-    f->Close(); delete f;
-    return;
-  }
-
-  // Output directories
-  const TString baseDir   = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput";
-  const TString outDir2D  = baseDir + "/2DPlots";
-  const TString outDirPhi = baseDir + "/LocalPhiFits";
-  const TString outDirAll = baseDir + "/allHistOutput";
-
-  // Make sure directories exist
-  gSystem->mkdir(baseDir,   true);
-  gSystem->mkdir(outDir2D,  true);
-  gSystem->mkdir(outDirPhi, true);
-  gSystem->mkdir(outDirAll, true);
-
-  ///////////////////////////////////////////////////////////////////////
-  // 3) Create 2D plot from h3 by integrating over entire E
-  ///////////////////////////////////////////////////////////////////////
-    {
-      // First, restore the Z-axis range to include all E
-      h3->GetZaxis()->SetRange(1, h3->GetNbinsZ());
-      TH2F* h2_block2D = (TH2F*) h3->Project3D("xy");
-      h2_block2D->SetName("h2_blockCoord2D");
-      h2_block2D->SetTitle("Block #eta vs Block #phi;block #eta;block #phi");
-
-      TCanvas c2d("c2d","Block Eta-Phi (integrated)",900,700);
-      c2d.SetLeftMargin(0.12);
-      c2d.SetRightMargin(0.15);
-      c2d.SetBottomMargin(0.12);
-
-      h2_block2D->SetStats(false);
-      h2_block2D->Draw("COLZ");
-
-      c2d.SaveAs(outDir2D + "/BlockEtaPhi_2D.png");
-      std::cout << "[INFO] Wrote 2D block-eta vs block-phi (all E) => "
-                << (outDir2D + "/BlockEtaPhi_2D.png") << std::endl;
-    }
-
-    ///////////////////////////////////////////////////////////////////
-    // 3b) Also produce 2D plots for each E slice
-    ///////////////////////////////////////////////////////////////////
-    {
-      for(int i=0; i<N_E; i++)
-      {
-        // Determine Z-range in the 3D histogram (E axis)
-        int zLo = h3->GetZaxis()->FindFixBin( E_edges[i] + 1e-9 );
-        int zHi = h3->GetZaxis()->FindFixBin( E_edges[i+1] - 1e-9 );
-        if(zLo < 1) zLo = 1;
-        if(zHi > h3->GetNbinsZ()) zHi = h3->GetNbinsZ();
-
-        // Apply that Z-range, then project onto X-Y => 2D
-        h3->GetZaxis()->SetRange(zLo, zHi);
-        TH2F* h2_slice = (TH2F*) h3->Project3D("xy");
-
-        // Name & title
-        h2_slice->SetName( Form("h2_blockCoord2D_E%.0fto%.0f", E_edges[i], E_edges[i+1]) );
-        h2_slice->SetTitle( Form("Block #eta vs Block #phi (%.1f < E < %.1f);block #eta;block #phi",
-                                   E_edges[i], E_edges[i+1]) );
-
-        // Draw
-        TCanvas c2dSlice( Form("c2d_E%.0fto%.0f", E_edges[i], E_edges[i+1]),
-                          "Block Eta-Phi (E slice)", 900, 700);
-        c2dSlice.SetLeftMargin(0.12);
-        c2dSlice.SetRightMargin(0.15);
-        c2dSlice.SetBottomMargin(0.12);
-
-        h2_slice->SetStats(false);
-        h2_slice->Draw("COLZ");
-
-        // Save a PNG for each slice
-        TString outName = Form("/BlockEtaPhi_2D_E%.0fto%.0f.png",
-                               E_edges[i], E_edges[i+1]);
-        c2dSlice.SaveAs(outDir2D + outName);
-
-        std::cout << "[INFO] Wrote 2D block-eta vs block-phi => "
-                  << (outDir2D + outName)
-                  << " for E=[" << E_edges[i] << ", " << E_edges[i+1] << "]" << std::endl;
-      }
-    }
-
-  ///////////////////////////////////////////////////////////////////////
-  // 4) Local φ slices in E bins => do 1D projections, fits
-  ///////////////////////////////////////////////////////////////////////
-
-  // We'll record b-values to a text file
-  std::ofstream bResults(Form("%s/bValues.txt", baseDir.Data()));
-  if(!bResults.is_open()) {
-    std::cerr << "[WARNING] Could not open bValues.txt for writing.\n";
-  } else {
-    bResults << "# E_low  E_high   bValue\n";
-  }
-
-  double pT_bins_low[N_E], pT_bins_high[N_E];
-  for(int j=0; j<N_E; j++){
-      pT_bins_low[j]  = E_edges[j];
-      pT_bins_high[j] = E_edges[j+1];
-  }
-  doLocalPhiEtaFits(h3, pT_bins_low, pT_bins_high, bResults, outDirPhi);
-    
-  std::cout << "[INFO] Wrote local phi slice overlay => "
-            << (outDirPhi + "/LocalPhiFits.png") << std::endl;
-
-  if(bResults.is_open()) {
-    bResults.close();
-    std::cout << "[INFO] Wrote b-values to " << (baseDir + "/bValues.txt") << std::endl;
-  }
-
-  ///////////////////////////////////////////////////////////////////////
-  // 5) Save *every* histogram in the file as a PNG in /allHistOutput/
-  ///////////////////////////////////////////////////////////////////////
   std::cout << "\n[INFO] Now saving *every* histogram as a PNG => " << outDirAll << std::endl;
 
-  TIter nextAll(f->GetListOfKeys());
+  TIter nextAll(fIn->GetListOfKeys());
   TKey* keyAll;
   while( (keyAll = (TKey*) nextAll()) )
   {
-    TClass* cl = gROOT->GetClass(keyAll->GetClassName());
-    if(!cl) continue;
+      TClass* cl = gROOT->GetClass(keyAll->GetClassName());
+      if(!cl) continue;
 
-    TObject* obj = keyAll->ReadObj();
-    if(!obj) continue;
+      TObject* obj = keyAll->ReadObj();
+      if(!obj) continue;
 
-    // We'll skip non-histogram objects
-    if(!cl->InheritsFrom("TH1") && !cl->InheritsFrom("TProfile")) continue;
+      // We'll skip non-histogram objects
+      if(!cl->InheritsFrom("TH1") && !cl->InheritsFrom("TProfile")) continue;
 
-    TH1* htmp = dynamic_cast<TH1*>(obj);
-    if(!htmp) continue;
+      TH1* htmp = dynamic_cast<TH1*>(obj);
+      if(!htmp) continue;
 
-    // Build output PNG name
-    TString histName = htmp->GetName();
-    TString outPNG   = outDirAll + "/" + histName + ".png";
+      // Build output PNG name
+      TString histName = htmp->GetName();
+      TString outPNG = TString(outDirAll) + "/" + histName + ".png";
 
-    TCanvas ctemp("ctemp","",800,600);
-    ctemp.SetLeftMargin(0.12);
-    ctemp.SetRightMargin(0.15);
-    ctemp.SetBottomMargin(0.12);
+      TCanvas ctemp("ctemp","",800,600);
+      ctemp.SetLeftMargin(0.12);
+      ctemp.SetRightMargin(0.15);
+      ctemp.SetBottomMargin(0.12);
 
-    // Decide how to draw
-    if( htmp->InheritsFrom("TH2") ) {
-      htmp->Draw("COLZ");
-    }
-    else if(htmp->InheritsFrom("TH3")) {
-      // 3D is tricky to visualize. We'll do "BOX".
-      htmp->Draw("BOX");
-    }
-    else if(htmp->InheritsFrom("TProfile")) {
-      htmp->Draw("E1");
-    }
-    else {
-      // presumably TH1
-      htmp->Draw("E");
-    }
+      // Decide how to draw
+      if( htmp->InheritsFrom("TH2") ) {
+        htmp->Draw("COLZ");
+      }
+      else if(htmp->InheritsFrom("TH3")) {
+        // 3D is tricky to visualize. We'll do "BOX".
+        htmp->Draw("BOX");
+      }
+      else if(htmp->InheritsFrom("TProfile")) {
+        htmp->Draw("E1");
+      }
+      else {
+        // presumably TH1
+        htmp->Draw("E");
+      }
 
-    ctemp.SaveAs(outPNG);
-    delete htmp;
+      ctemp.SaveAs(outPNG);
+      delete htmp;
   }
 
-  // Finally call the side‐by‐side RMS vs b/w0
-  plotAshLogRMS_sideBySide(filename);
+  // 3) Grab uncorrected TH3F
+  TH3F* hUnc3D = dynamic_cast<TH3F*>( fIn->Get("h2_cluster_block_cord_E") );
+  if(!hUnc3D)
+  {
+    std::cerr << "[ERROR] 'h2_cluster_block_cord_E' not found. Aborting.\n";
+    fIn->Close();
+    return;
+  }
+  hUnc3D->Sumw2();
+  std::cout << "[DEBUG] Uncorrected TH3F => hUnc3D\n";
 
-  ///////////////////////////////////////////////////////////////////////
-  // 6) Done
-  ///////////////////////////////////////////////////////////////////////
-  f->Close();
-  delete f;
+  // 4) If isFirstPass==false => also get corrected TH3F
+  TH3F* hCor3D = nullptr;
+  if(!isFirstPass)
+  {
+    hCor3D = dynamic_cast<TH3F*>( fIn->Get("h2_cluster_block_cord_E_corrected") );
+    if(!hCor3D)
+    {
+      std::cerr << "[WARN] isFirstPass=false but no 'h2_cluster_block_cord_E_corrected' found.\n";
+    }
+    else
+    {
+      hCor3D->Sumw2();
+      std::cout << "[DEBUG] Corrected TH3F => hCor3D\n";
+    }
+  }
 
-  std::cout << "[INFO] PDCanalysis() completed successfully.\n";
+  // 5) Our 8 energy slices => [2..4), [4..6), etc.
+  std::vector<std::pair<double,double>> eEdges = {
+    {2.0,4.0},{4.0,6.0},{6.0,8.0},{8.0,10.0},
+    {10.0,12.0},{12.0,15.0},{15.0,20.0},{20.0,30.0}
+  };
+
+    
+  std::string bValFile = std::string(outDir) + "/bValues.txt";
+  std::ofstream bOut(bValFile);
+  if(!bOut.is_open())
+  {
+    std::cerr << "[WARN] Cannot open " << bValFile << " => won't save b-values.\n";
+  }
+  else
+  {
+    bOut << "# E range    best-b  (PHI or ETA)\n";
+  }
+
+
+  Plot2DBlockEtaPhi(hUnc3D, hCor3D, isFirstPass, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots");
+
+  FitLocalPhiEta(hUnc3D,           // uncorrected 3-D histogram
+                   hCor3D,           // corrected 3-D histogram (may be nullptr)
+                   isFirstPass,      // same toggle you already use
+                   eEdges,           // vector with the eight E-ranges
+                    "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits",           // where PNGs will be written
+                   bOut);            // SAME open ofstream instance
+
+  OverlayUncorrPhiEta(hUnc3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+    
+  PlotBvaluesVsEnergy(hUnc3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+    
+  PlotPhiShiftAndWidth(hUnc3D, hCor3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+    
+  OverlayDeltaPhiSlices(eEdges, isFirstPass, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+    
+
+  {
+      gStyle->SetNumberContours(50);      // smooth colours
+
+      auto beautify = [](TH3F* h)
+      {
+        // X axis
+        h->GetXaxis()->SetTitle("block #eta_{CG}");
+        h->GetXaxis()->CenterTitle();
+        h->GetXaxis()->SetTitleOffset(1.45);
+        h->GetXaxis()->SetLabelOffset(0.007);
+
+        // Y axis
+        h->GetYaxis()->SetTitle("block #phi_{CG}");
+        h->GetYaxis()->CenterTitle();
+        h->GetYaxis()->SetTitleOffset(1.90);
+        h->GetYaxis()->SetLabelOffset(0.007);
+
+        // Z axis
+        h->GetZaxis()->SetTitle("Cluster E  [GeV]");
+        h->GetZaxis()->CenterTitle();
+        h->GetZaxis()->SetTitleOffset(1.35);
+        h->GetZaxis()->SetLabelOffset(0.007);
+      };
+
+        auto drawWithEntries = [&beautify]               // <-- add &
+                (TH3F* h,
+                 const char* canvName,
+                 const char* pngPath)
+        {
+          if (!h) return;
+
+          TCanvas c(canvName, canvName, 1200, 900);
+          beautify(h);                                   // now allowed
+          h->Draw("LEGO2Z");
+
+          TLatex txt;
+          txt.SetNDC(kTRUE);
+          txt.SetTextFont(42);
+          txt.SetTextSize(0.035);
+          txt.SetTextAlign(13);
+          txt.DrawLatex(0.12, 0.92,
+                        Form("#bf{Entries: %.0f}", h->GetEntries()));
+
+          c.SaveAs(pngPath);
+          std::cout << "[INFO] wrote 3-D plot → " << pngPath << '\n';
+        };
+
+
+      // --------------------------- un-corrected ------------------------------
+      drawWithEntries(hUnc3D,
+                      "c3D_unc",
+                      Form("%s/2DPlots/h2_cluster_block_cord_E.png", outDir));
+
+      // ----------------------------- corrected -------------------------------
+      drawWithEntries(hCor3D,
+                      "c3D_cor",
+                      Form("%s/2DPlots/h2_cluster_block_cord_E_corrected.png", outDir));
+  } // end LEGO block
+
+  // after opening the file …
+  TH1F* h_truth_vz = static_cast<TH1F*>( fIn->Get("h_truth_vz") );
+
+  if(!h_truth_vz){
+      std::cerr << "[ERROR] vertex-Z histograms not found!\n";
+  } else {
+      PlotVertexZTruthOnly(h_truth_vz, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/QA");
+  }
+
+    
+  plotAshLogRMS_sideBySide(inFile);
+    
+  std::string chi2Dir = std::string(outDir) + "/QA/Chi2_QA";
+  PlotChi2QA(inFile, chi2Dir.c_str());
+  // (final) close text file if open
+  if(bOut.is_open())
+  {
+    bOut.close();
+    std::cout << "[INFO] Wrote b-values => " << bValFile << "\n"
+              << "[INFO] (Check file for lines labeled PHI vs ETA.)\n";
+  }
+
+  // close input
+  fIn->Close();
+  delete fIn;
+
+  std::cout << "[INFO] LocalPhiOnly2by2() completed successfully.\n\n";
 }
