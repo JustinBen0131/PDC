@@ -1,3 +1,5 @@
+#include "sPhenixStyle.h"
+#include "sPhenixStyle.C"
 #include <TFile.h>
 #include <algorithm>
 #include <TGraph.h>
@@ -502,8 +504,8 @@ void drawAshLogSideBySide(
     std::cout<<"   => first Ash TGraph has N="<<firstGr->GetN()<<" points.\n";
 
     firstGr->Draw("ALP");
-    firstGr->GetXaxis()->SetTitle("b (cm)");
-    firstGr->GetYaxis()->SetTitle("#sigma_{x} (cm)");
+    firstGr->GetXaxis()->SetTitle("b (local tower units)");
+    firstGr->GetYaxis()->SetTitle("#sigma_{x} (local tower units)");
 
     double yLo = asMin - 0.1*fabs(asMin);
     double yHi = asMax + 0.1*fabs(asMax);
@@ -567,7 +569,7 @@ void drawAshLogSideBySide(
 
     firstGr->Draw("ALP");
     firstGr->GetXaxis()->SetTitle("w_{0}");
-    firstGr->GetYaxis()->SetTitle("#sigma_{x} (cm)");
+    firstGr->GetYaxis()->SetTitle("#sigma_{x} (local tower units)");
 
     double yLo = lgMin - 0.1*fabs(lgMin);
     double yHi = lgMax + 0.1*fabs(lgMax);
@@ -613,6 +615,192 @@ void drawAshLogSideBySide(
   TLatex latB; latB.SetNDC(true);
   latB.SetTextSize(0.04);
   latB.DrawLatex(0.15,0.93, Form("Log scan [%s]", methodName));
+    
+    
+    /* ---------------------------------------------------------------------------
+     *  Single-panel Ash-only and Log-only plots   (publication style)
+     *  – vivid, mutually-distinct colours
+     *  – thick lines, large markers
+     *  – legend moved to **upper-right** corner
+     *  – saved as  AshScan_<TAG>.png  and  LogScan_<TAG>.png
+     * ------------------------------------------------------------------------- */
+    {
+      /* common prettiness ---------------------------------------------------- */
+      gStyle->SetOptStat(0);
+      gStyle->SetTitleFont      (42,"XYZ");
+      gStyle->SetTitleSize      (0.050,"XYZ");
+      gStyle->SetLabelFont      (42,"XYZ");
+      gStyle->SetLabelSize      (0.042,"XYZ");
+      gStyle->SetPadTickX       (1);
+      gStyle->SetPadTickY       (1);
+
+      /* quick helper: assign eye-friendly colours/markers ------------------- */
+      const int kCols[] = {kBlack , kRed+1 , kAzure+2 , kGreen+2 ,
+                           kMagenta+1 , kOrange+1 , kTeal+3 , kBlue+1 };
+      const int nCols = sizeof(kCols)/sizeof(int);
+
+      auto styleGraph = [&](TGraph* g, int idx)
+      {
+        if(!g) return;
+        int col = kCols[idx % nCols];
+        g->SetLineColor (col);
+        g->SetMarkerColor(col);
+        g->SetLineWidth (2);
+        g->SetMarkerStyle(20 + idx%10);
+        g->SetMarkerSize (1.35);
+      };
+
+        /* ===================================================================== *
+         *                            ASH  –  σx(b)                              *
+         * ===================================================================== */
+        {
+          TString cAshName = Form("cAshScan_%s", methodName);
+          TCanvas cAsh(cAshName, cAshName, 900, 650);
+          cAsh.SetLeftMargin(0.13);
+          cAsh.SetBottomMargin(0.12);
+          cAsh.SetRightMargin(0.04);
+          cAsh.SetGrid();
+
+          /* --- colour / marker for every energy slice ---------------------- */
+          for (size_t i = 0; i < ashRes.tgVec.size(); ++i)
+            styleGraph(ashRes.tgVec[i], i);          // your helper
+
+          /* --- find first valid graph to set the frame --------------------- */
+          TGraph* gAsh0 = nullptr;
+          for (auto* g : ashRes.tgVec) { if (g && g->GetN()) { gAsh0 = g; break; } }
+
+          double yLo = 0, yHi = 1;                   // will be overwritten
+          if (gAsh0)
+          {
+            yLo = std::max(0.0, ashRes.minY * 0.90);
+            yHi =               ashRes.maxY * 1.10;
+
+            gAsh0->Draw("ALP");
+            gAsh0->GetXaxis()->SetTitle("b  (local tower units)");
+            gAsh0->GetYaxis()->SetTitle("#sigma_{x}  (local tower units)");
+            gAsh0->GetYaxis()->SetRangeUser(yLo, yHi);
+
+            /* overlay the other curves */
+            for (size_t i = 0; i < ashRes.tgVec.size(); ++i)
+              if (ashRes.tgVec[i] && ashRes.tgVec[i]->GetN())
+                ashRes.tgVec[i]->Draw("LP SAME");
+          }
+
+          /* --- vertical lines at b-min ------------------------------------- */
+          std::vector<TObject*> keepLines;            // keep alive until SaveAs
+          for (int iE = 0; iE < N_E; ++iE)
+          {
+            const double bBest = (iE < (int)ashRes.bestParam.size()) ? ashRes.bestParam[iE] : -1.;
+            if (bBest <= 0) continue;                 // skip if not filled
+
+            TGraph* g = (iE < (int)ashRes.tgVec.size()) ? ashRes.tgVec[iE] : nullptr;
+            if (!g || !g->GetN()) continue;           // safety
+
+            int col = g->GetLineColor();
+            TLine* v = new TLine(bBest, yLo, bBest, yHi);
+            v->SetLineColor(col);
+            v->SetLineStyle(2);                       // dashed
+            v->SetLineWidth(2);
+            v->Draw("SAME");
+
+            keepLines.push_back(v);
+          }
+
+          /* ------------------------ legend ---------------------------------- */
+          TLegend legAsh(0.64, 0.70, 0.89, 0.91);     // (x1,y1,x2,y2) NDC
+          legAsh.SetBorderSize(0);
+          legAsh.SetFillStyle(0);
+          legAsh.SetTextFont(42);
+          legAsh.SetTextSize(0.025);
+
+          for (int iE = 0; iE < N_E; ++iE)
+          {
+            TGraph* g = (iE < (int)ashRes.tgVec.size()) ? ashRes.tgVec[iE] : nullptr;
+            if (!g || g->GetN() == 0) continue;
+
+            const double bBest = (iE < (int)ashRes.bestParam .size()) ? ashRes.bestParam [iE] : 0.;
+            const double sBest = (iE < (int)ashRes.bestSigma.size()) ? ashRes.bestSigma[iE] : 0.;
+
+            legAsh.AddEntry(g,
+              Form("[%.0f, %.0f] GeV  (b=%.2f,  σ=%.3f)",
+                   E_edges[iE], E_edges[iE+1], bBest, sBest),
+              "lp");
+          }
+          legAsh.Draw();
+
+          /* ------------------------ title ----------------------------------- */
+          TLatex label; label.SetNDC(); label.SetTextFont(42); label.SetTextSize(0.04);
+          label.DrawLatex(0.20, 0.87, Form("Ash scan  [%s]", methodName));
+
+          /* ------------------------ output ---------------------------------- */
+          const TString outAsh = Form("%s/AshScan_%s.png", baseDir.Data(), methodName);
+          cAsh.SaveAs(outAsh);
+          std::cout << "[INFO]  wrote " << outAsh << '\n';
+
+          /* clean up lines (after canvas saved) */
+          for (auto* o : keepLines) delete o;
+        }
+
+
+      /* ===================================================================== *
+       *                           LOG  –  σx(w0)                              *
+       * ===================================================================== */
+      {
+        TString cLogName = Form("cLogScan_%s", methodName);
+        TCanvas cLog(cLogName, cLogName, 900, 650);
+        cLog.SetLeftMargin(0.13);
+        cLog.SetBottomMargin(0.12);
+        cLog.SetRightMargin(0.04);
+        cLog.SetGrid();
+
+        for(size_t i=0;i<logRes.tgVec.size();++i) styleGraph(logRes.tgVec[i],i);
+
+        TGraph* gLog0 = nullptr;
+        for(auto* g: logRes.tgVec){ if(g && g->GetN()){ gLog0=g; break; } }
+        if(gLog0)
+        {
+          double yLo = std::max(0.0 , logRes.minY*0.90);
+          double yHi =                logRes.maxY*1.10;
+
+          gLog0->Draw("ALP");
+          gLog0->GetXaxis()->SetTitle("w_{0}");
+          gLog0->GetYaxis()->SetTitle("#sigma_{x}  (cm)");
+          gLog0->GetYaxis()->SetRangeUser(yLo, yHi);
+
+          for(size_t i=0;i<logRes.tgVec.size();++i)
+            if(logRes.tgVec[i] && logRes.tgVec[i]->GetN())
+              logRes.tgVec[i]->Draw("LP SAME");
+        }
+
+        TLegend legLog(0.60,0.60,0.92,0.90);
+        legLog.SetBorderSize(0);
+        legLog.SetFillStyle(0);
+        legLog.SetTextFont(42);
+        legLog.SetTextSize(0.032);
+
+        for(int iE=0;iE<N_E;++iE)
+        {
+          TGraph* g = (iE<(int)logRes.tgVec.size()) ? logRes.tgVec[iE] : nullptr;
+          if(!g || g->GetN()==0) continue;
+
+          const double wBest = (iE<(int)logRes.bestParam .size()) ? logRes.bestParam [iE] : 0.;
+          const double sBest = (iE<(int)logRes.bestSigma.size()) ? logRes.bestSigma[iE] : 0.;
+
+          legLog.AddEntry(g,
+            Form("%.1f–%.1f GeV  (w_{0}=%.2f, #sigma=%.3f)",
+                 E_edges[iE], E_edges[iE+1], wBest, sBest),
+            "lp");
+        }
+        legLog.Draw();
+
+        TLatex label; label.SetNDC(); label.SetTextFont(42); label.SetTextSize(0.047);
+        label.DrawLatex(0.14,0.93, Form("Log scan  [%s]", methodName));
+
+        const TString outLog = Form("%s/LogScan_%s.png", baseDir.Data(), methodName);
+        cLog.SaveAs(outLog);
+        std::cout << "[INFO]  wrote " << outLog << '\n';
+      }
+    }   // end block
 
   // 4) Save
   TString outName = Form("%s/SideBySide_%s.png", baseDir.Data(), methodName);
@@ -1330,18 +1518,30 @@ void OverlayUncorrPhiEta(TH3F*  hUnc3D,
         auto [bEta, fEta] = fitAsinh(hEta, kBlue + 1);
 
         // -----------------------------------------------------------------
-        //  draw – set a common y-range
+        //  draw – set a common y-range   <-- keep your existing lines
         // -----------------------------------------------------------------
         const double ymax = std::max(hPhi->GetMaximum(), hEta->GetMaximum());
         hEta->GetYaxis()->SetRangeUser(0.0, 1.30 * std::max(1.0, ymax));
 
-        hEta->Draw("E");            // blue first
+        /* >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> */
+        // (1) unified x–axis label for BOTH histograms
+        hEta->GetXaxis()->SetTitle("#phi_{CG}/#eta_{CG}");
+        hPhi->GetXaxis()->SetTitle("#phi_{CG}/#eta_{CG}");
+
+        // (2) pad title: energy window + “uncorrected”
+        TString sliceTitle = Form("Uncorrected: %.1f < E < %.1f  GeV", eLo, eHi);
+        hEta->SetTitle(sliceTitle);   // the first histogram drawn defines the title
+        hPhi->SetTitle(sliceTitle);   // keep both in sync
+        /* <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< */
+
+        hEta->Draw("E");            // blue first → defines axes & title
         hPhi->Draw("E SAME");       // then red
         if(fEta) fEta->Draw("SAME");
         if(fPhi) fPhi->Draw("SAME");
 
+
         TPad* pad = (TPad*) gPad;                  // current pad
-        TLegend* leg = new TLegend(0.15, 0.75,     // (x1,y1,x2,y2) in NDC
+        TLegend* leg = new TLegend(0.2, 0.8,     // (x1,y1,x2,y2) in NDC
                                    0.45, 0.90);
         leg->SetBorderSize(0);
         leg->SetFillStyle(0);
@@ -1497,7 +1697,7 @@ void PlotBvaluesVsEnergy(TH3F*  hUnc3D,
     gPhi->Draw("P SAME");
     gEta->Draw("P SAME");
 
-    TLegend leg(0.15,0.78,0.40,0.90);
+    TLegend leg(0.2,0.78,0.40,0.90);
     leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.04);
     leg.AddEntry(gPhi,"b_{#varphi}","lp");
     leg.AddEntry(gEta,"b_{#eta}","lp");
@@ -1764,9 +1964,9 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
         legS->Draw(); keep.push_back(legS);
 
         /* text (compact) */
-        TLatex tl; tl.SetNDC(); tl.SetTextFont(42); tl.SetTextSize(0.024);
+        TLatex tl; tl.SetNDC(); tl.SetTextFont(42); tl.SetTextSize(0.042);
         tl.SetTextAlign(13);
-        tl.DrawLatex(0.15,0.85,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
+        tl.DrawLatex(0.15,0.87,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
                                     (int)R.N, R.mu, R.sigma));
         if(hCorr)
             tl.DrawLatex(0.15,0.81,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
@@ -1787,12 +1987,12 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
         if(hCorr) legI.AddEntry(hCorr,"CORRECTED","lp");
         legI.Draw();
 
-        TLatex tlI; tlI.SetNDC(); tlI.SetTextFont(42); tlI.SetTextSize(0.030);
+        TLatex tlI; tlI.SetNDC(); tlI.SetTextFont(42); tlI.SetTextSize(0.032);
         tlI.SetTextAlign(13);
-        tlI.DrawLatex(0.15,0.85,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
+        tlI.DrawLatex(0.2,0.91,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
                                      (int)R.N, R.mu, R.sigma));
         if(hCorr)
-            tlI.DrawLatex(0.15,0.81,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
+            tlI.DrawLatex(0.2,0.85,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
                                          (int)C.N, C.mu, C.sigma));
 
         TString outPNG=TString(outDir)+Form("/DeltaPhiCompare_%.0fto%.0f.png",eLo,eHi);
@@ -1834,6 +2034,9 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
 void PDCanalysis()
 {
   // 1) Style / stat
+  gROOT->LoadMacro("sPhenixStyle.C");
+  SetsPhenixStyle();
+    
   gStyle->SetOptStat(0);
   const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
 
@@ -1888,52 +2091,52 @@ void PDCanalysis()
   }
   std::cout << "[INFO] Finished listing histograms.\n" << std::endl;
     
-  std::cout << "\n[INFO] Now saving *every* histogram as a PNG => " << outDirAll << std::endl;
-
-  TIter nextAll(fIn->GetListOfKeys());
-  TKey* keyAll;
-  while( (keyAll = (TKey*) nextAll()) )
-  {
-      TClass* cl = gROOT->GetClass(keyAll->GetClassName());
-      if(!cl) continue;
-
-      TObject* obj = keyAll->ReadObj();
-      if(!obj) continue;
-
-      // We'll skip non-histogram objects
-      if(!cl->InheritsFrom("TH1") && !cl->InheritsFrom("TProfile")) continue;
-
-      TH1* htmp = dynamic_cast<TH1*>(obj);
-      if(!htmp) continue;
-
-      // Build output PNG name
-      TString histName = htmp->GetName();
-      TString outPNG = TString(outDirAll) + "/" + histName + ".png";
-
-      TCanvas ctemp("ctemp","",800,600);
-      ctemp.SetLeftMargin(0.12);
-      ctemp.SetRightMargin(0.15);
-      ctemp.SetBottomMargin(0.12);
-
-      // Decide how to draw
-      if( htmp->InheritsFrom("TH2") ) {
-        htmp->Draw("COLZ");
-      }
-      else if(htmp->InheritsFrom("TH3")) {
-        // 3D is tricky to visualize. We'll do "BOX".
-        htmp->Draw("BOX");
-      }
-      else if(htmp->InheritsFrom("TProfile")) {
-        htmp->Draw("E1");
-      }
-      else {
-        // presumably TH1
-        htmp->Draw("E");
-      }
-
-      ctemp.SaveAs(outPNG);
-      delete htmp;
-  }
+//  std::cout << "\n[INFO] Now saving *every* histogram as a PNG => " << outDirAll << std::endl;
+//
+//  TIter nextAll(fIn->GetListOfKeys());
+//  TKey* keyAll;
+//  while( (keyAll = (TKey*) nextAll()) )
+//  {
+//      TClass* cl = gROOT->GetClass(keyAll->GetClassName());
+//      if(!cl) continue;
+//
+//      TObject* obj = keyAll->ReadObj();
+//      if(!obj) continue;
+//
+//      // We'll skip non-histogram objects
+//      if(!cl->InheritsFrom("TH1") && !cl->InheritsFrom("TProfile")) continue;
+//
+//      TH1* htmp = dynamic_cast<TH1*>(obj);
+//      if(!htmp) continue;
+//
+//      // Build output PNG name
+//      TString histName = htmp->GetName();
+//      TString outPNG = TString(outDirAll) + "/" + histName + ".png";
+//
+//      TCanvas ctemp("ctemp","",800,600);
+//      ctemp.SetLeftMargin(0.12);
+//      ctemp.SetRightMargin(0.15);
+//      ctemp.SetBottomMargin(0.12);
+//
+//      // Decide how to draw
+//      if( htmp->InheritsFrom("TH2") ) {
+//        htmp->Draw("COLZ");
+//      }
+//      else if(htmp->InheritsFrom("TH3")) {
+//        // 3D is tricky to visualize. We'll do "BOX".
+//        htmp->Draw("BOX");
+//      }
+//      else if(htmp->InheritsFrom("TProfile")) {
+//        htmp->Draw("E1");
+//      }
+//      else {
+//        // presumably TH1
+//        htmp->Draw("E");
+//      }
+//
+//      ctemp.SaveAs(outPNG);
+//      delete htmp;
+//  }
 
   // 3) Grab uncorrected TH3F
   TH3F* hUnc3D = dynamic_cast<TH3F*>( fIn->Get("h2_cluster_block_cord_E") );
