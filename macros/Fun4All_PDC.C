@@ -153,10 +153,7 @@ void Fun4All_PDC(int nevents = 0,
   in1->AddFile(g4HitsListFile);
   se->registerInputManager(in1);
 
-  ////////////////////////////////////////////////////////////
-  // 3) Reconstruct global vertex for MBD (for jets)
-  ////////////////////////////////////////////////////////////
-  std::cout << "[DEBUG] Setting up GlobalVertexReco for MBD-based vertex" << std::endl;
+
   GlobalVertexReco *gvertex = new GlobalVertexReco("GlobalVertexReco");
   gvertex->Verbosity(0);
   se->registerSubsystem(gvertex);
@@ -412,7 +409,7 @@ void Fun4All_PDC(int nevents = 0,
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
   pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
-  pdc->Verbosity(0);
+  pdc->Verbosity(3);
   se->registerSubsystem(pdc);
 
   ////////////////////////////////////////////////////////////

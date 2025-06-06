@@ -256,19 +256,15 @@ ScanResults doAshScan(
               <<"           #bScan="<<bScan_cm.size()<<" steps.\n";
 
     int nPointsUsed = 0;
-    for(double bRaw_cm : bScan_cm)
+    for(double bVal : bScan_cm)             // bVal *already* is in tower units
     {
       results.totalHist++;
-
-      // convert from cm to "dimensionless"
-      double bCell = bRaw_cm / cellSize;
-      double bVal  = std::round(bCell*10000.)/10000.;
 
       // build histogram name
       TString hName = Form("h_dx_ash_b%.4f_E%d", bVal, iE);
       TH1* hptr = dynamic_cast<TH1*>( f->Get(hName) );
 
-      std::cout<<"  [DEBUG] => bRaw_cm="<<bRaw_cm<<", => bVal="<<bVal
+      std::cout<<"  [DEBUG] => bVal(tower)="<<bVal<<", => bVal="<<bVal
                <<" => histName='"<<hName<<"'\n";
 
       if(!hptr)
@@ -301,7 +297,7 @@ ScanResults doAshScan(
       // fill TGraph if sVal>0
       if(sVal>0)
       {
-        g->SetPoint( g->GetN(), bRaw_cm, sVal );
+        g->SetPoint( g->GetN(), bVal, sVal );
         nPointsUsed++;
         if(sVal<results.minY) results.minY=sVal;
         if(sVal>results.maxY) results.maxY=sVal;
@@ -315,8 +311,8 @@ ScanResults doAshScan(
         if(sVal < results.bestSigma[iE])
         {
           results.bestSigma[iE] = sVal;
-          results.bestParam[iE] = bRaw_cm;
-          std::cout<<"         => new best sigma="<<sVal<<" at bRaw_cm="<<bRaw_cm<<"\n";
+          results.bestParam[iE] = bVal;
+          std::cout<<"         => new best sigma="<<sVal<<" at bVal="<<bVal<<"\n";
         }
       }
       else
@@ -630,10 +626,11 @@ void drawAshLogSideBySide(
  */
 void plotAshLogRMS_sideBySide(const char* infile="PositionDep_sim_ALL.root")
 {
-  // 1) Build the bScan in cm => [0..1.60], step=0.05
-  std::vector<double> bScan_cm;
-  for(double b=0.00; b<=1.60+1e-9; b+=0.05)
-    bScan_cm.push_back(b);
+  // 1) Build the b-scan in *tower-width units* 0.00 … 0.50, step 0.01
+  //    (histograms were booked with exactly these values)
+  std::vector<double> bScan_cm;               // keep the same variable name
+  for (double b = 0.01; b <= 0.50 + 1e-9; b += 0.01)   // skip 0.00
+      bScan_cm.push_back( std::round(b * 10000.) / 10000. );   // 4-dec precision
 
   // 2) Build the w0Scan => [1.5..7.0], step=0.1
   std::vector<double> w0Scan;

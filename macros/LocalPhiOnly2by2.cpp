@@ -1,4 +1,12 @@
 #include <TFile.h>
+#include <algorithm>
+#include <TGraph.h>
+#include <TGraphErrors.h>
+#include <TLine.h>
+#include <TPad.h>
+#include <TPaveText.h>
+#include <TProfile2D.h>
+#include <TH2F.h>
 #include <TH3F.h>
 #include <TH2D.h>
 #include <TH1D.h>
@@ -40,97 +48,63 @@ double asinhModel(double* x, double* par)
 }
 
 // ---------------------------------------------------------------------------
-//  Overlay of truth- and reco-vertex-Z distributions  *with verbose QA*
-//  • Truth  : blue  full circles
-//  • Reco   : red   open squares   (drawn with a thick line so you can’t miss it)
-//  • Y-axis is auto-scaled to the larger of the two spectra
+//  Truth-vertex-Z spectrum  *with verbose QA*
+//  • Drawn as blue full circles
+//  • Y-axis is auto–scaled to the histogram maximum
 // ---------------------------------------------------------------------------
-void PlotVertexZOverlay(TH1F* h_truth_vz,
-                        TH1F* h_reco_vz,
-                        const char* outDir)
+void PlotVertexZTruthOnly(TH1F* h_truth_vz,
+                          const char* outDir)
 /* ------------------------------------------------------------------------ */
 {
-  /* ───────────────────────── sanity checks ──────────────────────────── */
-  if(!h_truth_vz || !h_reco_vz){
-      std::cerr << "\n[vtxZ]  ERROR  null pointer:"
-                << " h_truth_vz=" << h_truth_vz
-                << "  h_reco_vz=" << h_reco_vz << '\n';
-      return;
+  /* ───────────────────────── sanity check ──────────────────────────── */
+  if (!h_truth_vz)
+  {
+    std::cerr << "\n[vtxZ]  ERROR  null pointer:  h_truth_vz=" << h_truth_vz << '\n';
+    return;
   }
 
-  /* ───────────────────────── detach from any file ───────────────────── */
+  /* ───────────────────────── detach from any file ──────────────────── */
   h_truth_vz->SetDirectory(nullptr);
-  h_reco_vz ->SetDirectory(nullptr);
 
-  /* ───────────────────────── print global stats ─────────────────────── */
-  auto printSummary = [](const char* tag, TH1F* h)
-  {
-      const int    first   = h->FindFirstBinAbove(0.0);
-      const int    last    = h->FindLastBinAbove (0.0);
-      const double integral= h->Integral();
-      std::cout << "[vtxZ] " << tag
-                << "  Entries=" << h->GetEntries()
-                << "  Integral=" << integral
-                << "  Mean="     << h->GetMean()
-                << "  RMS="      << h->GetRMS()
-                << "  FirstBin=" << first
-                << "  LastBin="  << last
-                << '\n';
-  };
-  printSummary("Truth", h_truth_vz);
-  printSummary("Reco ", h_reco_vz );
+  /* ───────────────────────── global stats ──────────────────────────── */
+  const int    firstBin   = h_truth_vz->FindFirstBinAbove(0.0);
+  const int    lastBin    = h_truth_vz->FindLastBinAbove (0.0);
+  const double integral   = h_truth_vz->Integral();
 
-  /* ───────────────────────── style — make them easy to tell apart ───── */
+  std::cout << "[vtxZ] Truth  Entries=" << h_truth_vz->GetEntries()
+            << "  Integral="  << integral
+            << "  Mean="      << h_truth_vz->GetMean()
+            << "  RMS="       << h_truth_vz->GetRMS()
+            << "  FirstBin="  << firstBin
+            << "  LastBin="   << lastBin
+            << '\n';
+
+  /* ───────────────────────── style ─────────────────────────────────── */
   h_truth_vz->SetMarkerStyle(20);
   h_truth_vz->SetMarkerSize (0.8);
   h_truth_vz->SetMarkerColor(kBlue+1);
   h_truth_vz->SetLineColor  (kBlue+1);
   h_truth_vz->SetLineWidth  (2);
 
-  h_reco_vz ->SetMarkerStyle(25);          // open square
-  h_reco_vz ->SetMarkerSize (1.0);
-  h_reco_vz ->SetMarkerColor(kRed  );
-  h_reco_vz ->SetLineColor  (kRed  );
-  h_reco_vz ->SetLineWidth  (3);
-
-  /* ───────────────────────── choose y-axis range transparently ──────── */
-  const double maxTruth = h_truth_vz->GetMaximum();
-  const double maxReco  = h_reco_vz ->GetMaximum();
-  const double yMax     = 1.30 * std::max(maxTruth, maxReco);
-
+  /* ───────────────────────── y-axis range ──────────────────────────── */
+  const double yMax = 1.30 * h_truth_vz->GetMaximum();
   std::cout << "[vtxZ] Y-axis will span 0 … " << yMax << '\n';
 
   h_truth_vz->GetYaxis()->SetRangeUser(0.0, yMax);
   h_truth_vz->GetYaxis()->SetTitle("Counts");
   h_truth_vz->GetXaxis()->SetTitle("z_{vtx}  (cm)");
 
-  /* ───────────────────────── draw ───────────────────────────────────── */
-  TCanvas cV("VertexZ_Truth_vs_Reco","Vertex-Z comparison", 880, 620);
+  /* ───────────────────────── draw & save ───────────────────────────── */
+  TCanvas cV("VertexZ_Truth","Truth vertex-Z", 880, 620);
   gStyle->SetOptStat(0);
 
-  h_truth_vz->Draw("E1");          // blue filled circles
-  h_reco_vz ->Draw("E1 SAME");     // red open squares (thick line)
+  h_truth_vz->Draw("E1");      // blue filled circles
 
-  /* ───────────────────────── legend ─────────────────────────────────── */
-  TLegend leg(0.57,0.78,0.87,0.90);   // x1,y1,x2,y2 in NDC
-  leg.SetBorderSize(0);
-  leg.SetFillStyle(0);
-  leg.SetTextSize(0.038);
-  leg.AddEntry(h_truth_vz,"Truth  z_{vtx}","lp");
-  leg.AddEntry(h_reco_vz ,"Reco   z_{vtx}","lp");
-  leg.Draw();
-
-  /* ───────────────────────── save & report ─────────────────────────── */
-  TString outName = Form("%s/VertexZ_Truth_vs_Reco.png", outDir);
+  TString outName = Form("%s/VertexZ_Truth.png", outDir);
   cV.SaveAs(outName);
 
   std::cout << "[vtxZ] wrote " << outName
-            << "  (Truth max=" << maxTruth
-            << ", Reco max="  << maxReco  << ")\n\n";
-
-  if(maxReco < 1e-3)
-      std::cout << "[vtxZ] WARNING  Reco histogram is essentially empty – "
-                   "red curve will not be visible.\n";
+            << "  (Truth max=" << h_truth_vz->GetMaximum() << ")\n\n";
 }
 
 
@@ -920,6 +894,111 @@ void PlotBvaluesVsEnergy(TH3F*  hUnc3D,
 }
 
 
+/***************************************************************************
+ * PlotChi2QA
+ * ----------
+ *  • inFile : full path to a ROOT file that contains
+ *      h2_chi2_tot_etaPhi      (TH2F)   – all clusters, before χ² cut
+ *      h2_chi2_rej_etaPhi      (TH2F)   – clusters rejected by χ² cut
+ *      p_chi2_pass_etaPhi      (TProfile2D) – ⟨pass flag⟩ per tower
+ *  • outDir : directory where the PNGs will be written (created if absent)
+ *
+ *  The function produces:
+ *    (1) Chi2_Total.png        – total-occupancy heat-map
+ *    (2) Chi2_Rejected.png     – rejected-occupancy heat-map
+ *    (3) Chi2_PassFraction.png – ⟨pass⟩   (profile)   0 … 1
+ *    (4) Chi2_RejectFraction.png – 1−⟨pass⟩  for convenience
+ *
+ *  Author: <you>, 2025-06-03
+ ***************************************************************************/
+void PlotChi2QA(const char* inFile,
+                const char* outDir = "./Chi2_QA")
+{
+  gStyle->SetOptStat(0);
+  gSystem->mkdir(outDir, /*recursive=*/true);
+
+  /* ------------------------------------------------------------------ */
+  /* 1) open file & fetch histograms                                    */
+  /* ------------------------------------------------------------------ */
+  std::unique_ptr<TFile> fin( TFile::Open(inFile,"READ") );
+  if(!fin || fin->IsZombie()){
+      std::cerr << "[Chi2QA]  ERROR – cannot open " << inFile << '\n';
+      return;
+  }
+  auto* hTot = dynamic_cast<TH2F*>     ( fin->Get("h2_chi2_tot_etaPhi") );
+  auto* hRej = dynamic_cast<TH2F*>     ( fin->Get("h2_chi2_rej_etaPhi") );
+  auto* pPass= dynamic_cast<TProfile2D*>( fin->Get("p_chi2_pass_etaPhi") );
+
+  if(!hTot || !hRej || !pPass){
+      std::cerr << "[Chi2QA]  ERROR – one or more χ² QA histograms "
+                   "missing in file:\n"
+                << "          " << inFile << '\n';
+      return;
+  }
+
+  /* detach from the file so we can close it right away */
+  hTot ->SetDirectory(nullptr);
+  hRej ->SetDirectory(nullptr);
+  pPass->SetDirectory(nullptr);
+  fin->Close();
+
+  /* ------------------------------------------------------------------ */
+  /* 2) build reject-fraction TH2F  =  (1 – pass)                       */
+  /* ------------------------------------------------------------------ */
+    // construct an empty TH2D that has exactly the same axes as pPass
+  TH2D hRejFrac("h_chi2_rejFrac_etaPhi",
+                  "Reject fraction after #chi^{2} cut;"
+                  "Tower #eta index;Tower #varphi index;Reject fraction",
+                  pPass->GetNbinsX(), pPass->GetXaxis()->GetXmin(), pPass->GetXaxis()->GetXmax(),
+                  pPass->GetNbinsY(), pPass->GetYaxis()->GetXmin(), pPass->GetYaxis()->GetXmax());
+
+
+  hRejFrac.SetName ("h_chi2_rejFrac_etaPhi");
+  hRejFrac.SetTitle("Reject fraction after #chi^{2} cut;"
+                    "Tower #eta index;Tower #varphi index;Reject fraction");
+
+  const int nX = hRejFrac.GetNbinsX();
+  const int nY = hRejFrac.GetNbinsY();
+  for(int ix=1; ix<=nX; ++ix)
+     for(int iy=1; iy<=nY; ++iy){
+         double pass = pPass->GetBinContent(ix,iy);
+         if(pass<0) pass = 0;          // profile may be empty
+         hRejFrac.SetBinContent(ix,iy, 1.0 - pass);
+     }
+
+  /* colour palette nicer than default */
+  gStyle->SetPalette(kViridis);
+
+  /* helper lambda – draw & save one heat-map ------------------------- */
+  auto drawSave = [&](TH2* h,
+                      const char* cname,
+                      const char* png)
+  {
+      TCanvas c(cname,cname,1000,760);
+      c.SetRightMargin(0.14);
+      h->Draw("COLZ");
+      c.SaveAs(Form("%s/%s",outDir,png));
+      std::cout << "[Chi2QA] wrote  " << outDir << '/' << png << '\n';
+  };
+
+  drawSave(hTot , "cChi2Tot" , "Chi2_Total.png");
+  drawSave(hRej , "cChi2Rej" , "Chi2_Rejected.png");
+  drawSave(pPass, "cChi2Pass", "Chi2_PassFraction.png");
+  drawSave(&hRejFrac,"cChi2Frac","Chi2_RejectFraction.png");
+
+  /* ------------------------------------------------------------------ */
+  /* 3) global numbers                                                  */
+  /* ------------------------------------------------------------------ */
+  const double totEntries = hTot->GetEntries();
+  const double rejEntries = hRej->GetEntries();
+  std::cout << "\n[Chi2QA]  GLOBAL SUMMARY\n"
+            << "          clusters before χ²  : " << totEntries << '\n'
+            << "          clusters rejected   : " << rejEntries << '\n'
+            << "          overall reject frac : "
+            << (totEntries>0 ? rejEntries/totEntries : 0) << "\n\n";
+}
+
+
 
 /**
  * \brief LocalPhiOnly2by2
@@ -1092,13 +1171,16 @@ void LocalPhiOnly2by2()
   TH1F* h_truth_vz = static_cast<TH1F*>( fIn->Get("h_truth_vz") );
   TH1F* h_reco_vz  = static_cast<TH1F*>( fIn->Get("h_reco_vz") );
 
-  if(!h_truth_vz || !h_reco_vz){
+  if(!h_truth_vz){
       std::cerr << "[ERROR] vertex-Z histograms not found!\n";
   } else {
-      PlotVertexZOverlay(h_truth_vz, h_reco_vz, outDir);
+      PlotVertexZTruthOnly(h_truth, outDir);
   }
     
   PlotPhiShiftAndWidth(hUnc3D, hCor3D, eEdges, outDir);
+    
+  std::string chi2Dir = std::string(outDir) + "/Chi2_QA";
+  PlotChi2QA(inFile, chi2Dir.c_str());
   // (final) close text file if open
   if(bOut.is_open())
   {

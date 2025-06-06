@@ -114,6 +114,24 @@ class PositionDependentCorrection : public SubsysReco
     
   float convertBlockToGlobalPhi(int block_phi_bin, float localPhi);
   float convertBlockToGlobalEta(int block_eta_bin, float localEta);
+    
+    // PositionDependentCorrection.h
+    //----------------------------------------------------
+    float  phiAtShowerDepth( float  energy,
+                             double rFront,
+                             double zFront,
+                             float  phiFront,
+                             int    ix,          ///< lead-tower fine φ-index
+                             int    iy ) const;  ///< lead-tower fine η-index
+
+    double xAtShowerDepth ( float  energy,
+                             double rFront,
+                             double zFront,
+                             float  phiFront,
+                             int    ix,
+                             int    iy ) const;
+    //----------------------------------------------------
+    
 
   float doAshShift(float localPhi, float bVal);
   float doLogWeightCoord(const std::vector<int>& towerphis,
@@ -145,16 +163,16 @@ class PositionDependentCorrection : public SubsysReco
         const std::vector<float>& tower_energies
     );
 
-    // --------------------------------------------------------------
-    // Extracted from finalClusterLoop for raw/corrected Δφ mechanism
-    // --------------------------------------------------------------
-  void fillDPhiRawAndCorrected(
-        const TLorentzVector& recoPhoton,
-        const TLorentzVector& truthPhoton,
-        const std::pair<float,float>& blockCord,
-        int blockPhiBin,
-        float delPhi
-  );
+    // ────────────────────────────────────────────────────────────
+    //  Public interface
+    // ────────────────────────────────────────────────────────────
+    void fillDPhiRawAndCorrected( RawCluster*            cluster,
+                                  const TLorentzVector&  recoPhoton,
+                                  const TLorentzVector&  truthPhoton,
+                                  const std::pair<float,float>& blkCoord,
+                                  int   blockPhiBin,
+                                  float rawDelPhi /* unused – kept for call-site compatibility */ );
+
   void fillDEtaRawAndCorrected(
         const TLorentzVector& recoPhoton,
         const TLorentzVector& truthPhoton,
@@ -301,6 +319,10 @@ class PositionDependentCorrection : public SubsysReco
   float _vz = 0;
   bool getVtx = true;
   bool debug = false;
+    
+  float m_phi0Offset  = 0.f;   ///< measured once at run time (radians)
+  bool  m_hasOffset   = false; ///< guard so we do the measurement only once
+
 
   TH1* h_pt1;
   TH1* h_pt2;
@@ -336,6 +358,14 @@ class PositionDependentCorrection : public SubsysReco
   TProfile* pr_phi_shower;
   TH2* h_vert_xy;
   TH1* h_truthE;
+    
+    //  --- χ² QA ------------------------------------------------------------
+    //  Denominator = all clusters (before χ² cut)
+    //  Numerator   = clusters rejected by χ² cut
+    //  Profile     = ⟨pass flag⟩  →   1 = kept    0 = rejected
+    TH2F*       h2_chi2_tot_etaPhi   {nullptr};
+    TH2F*       h2_chi2_rej_etaPhi   {nullptr};
+    TProfile2D* p_chi2_pass_etaPhi  {nullptr};
 
   static const int NBinsBlock = 14;
   TH2* h_mass_block_pt[NBinsBlock][NBinsBlock];
@@ -352,10 +382,10 @@ class PositionDependentCorrection : public SubsysReco
   float getAvgPhi(const std::vector<int> &towerphis,
                   const std::vector<float> &towerenergies);
 
-  std::pair<float,float> getBlockCord(const std::vector<int>&,
-                                        const std::vector<int>&,
-                                        const std::vector<float>&);
-
+    std::pair<float,float> getBlockCord(const std::vector<int>&   towerEtas,
+                                        const std::vector<int>&   towerPhis,
+                                        const std::vector<float>& towerEs,
+                                        int&                      blkPhiOut);
   std::map<std::string, std::string> triggerNameMap = {
     {"MBD N&S >= 1", "MBD_NandS_geq_1"}
   };
