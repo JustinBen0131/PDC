@@ -8,6 +8,7 @@
 #include <map>                   // for std::map
 #include <calotrigger/TriggerAnalyzer.h>
 #include <calobase/RawCluster.h>
+#include <cmath>
 
 // --------------------------------------------------------------------
 // 1) Forward declarations for classes we only use as pointers/references
@@ -82,8 +83,21 @@ class PositionDependentCorrection : public SubsysReco
   bool alreadyDeclaredHistograms = false;
     
   void UseSurveyGeometry(bool v = true) { m_useSurveyGeometry = v; }
-
-
+    
+  //------------------------------------------------------------------
+  // 0)  ENERGY‑BINNING SWITCH
+  //------------------------------------------------------------------
+    
+  /** Two interpretations of the eEdge[] table */
+  enum class EBinningMode { kRange,   ///< current  [Elo,Ehi)   slices
+        kDiscrete ///< new      E ≃ Elo     points
+  };
+    
+    /** Select at run time (defaults to kRange).
+     Call from the Fun4All macro before the first event. */
+  void setBinningMode(EBinningMode mode) { m_binningMode = mode; }
+  EBinningMode getBinningMode() const    { return m_binningMode; }
+    
  protected:
   // --------------------------------------------------------------------
   // 2) Method prototypes that reference RawClusterContainer, etc.
@@ -182,7 +196,8 @@ class PositionDependentCorrection : public SubsysReco
         int blockEtaBin,
         float delEta
   );
-
+  int  getEnergySlice(float E) const;
+    
   // --------------------------------------------------------------------
   // 3) Data members
   // --------------------------------------------------------------------
@@ -197,6 +212,13 @@ class PositionDependentCorrection : public SubsysReco
   bool m_useSurveyGeometry {false};   ///< load φ-tilt from CDB?
   uint64_t m_timeStamp      {0};      ///< can be set by macro if desired
   std::string m_cdbTag      {"MDC2"};
+    
+  //------------------------------------------------------------------
+  // 4)  Members controlling the energy‑bin behaviour
+  //------------------------------------------------------------------
+  EBinningMode m_binningMode { EBinningMode::kRange };  ///< current mode
+  static constexpr float kDiscreteTol = 0.25f;          ///< |E‑Ecentre| max (GeV)
+    
   //--------------------------------------------------------------------
   //  Energy–slice constants  (barrel EMCAL photons)
   //--------------------------------------------------------------------

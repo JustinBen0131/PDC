@@ -116,6 +116,34 @@ PositionDependentCorrection::~PositionDependentCorrection()
   if (clusterntuple) delete clusterntuple;
 }
 
+
+// ------------------------------------------------------------------
+// (helper) translate a photon/cluster energy into a slice index
+// ------------------------------------------------------------------
+int PositionDependentCorrection::getEnergySlice(float E) const
+{
+  constexpr int nBins = N_Ebins + 1;              // 9 edges = 8 slices
+
+  if (m_binningMode == EBinningMode::kRange)
+  {
+    for (int i = 0; i < nBins - 1; ++i)
+      if (E >= eEdge[i] && E < eEdge[i+1]) return i;
+    return -1;                                    // outside table
+  }
+  else                                            // DISCRETE
+  {
+    int    bestIdx  = -1;
+    double bestDiff = 1e99;
+    for (int i = 0; i < nBins - 1; ++i)
+    {
+      double diff = std::fabs(E - eEdge[i]);      // distance to centre
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    }
+    return (bestDiff < kDiscreteTol) ? bestIdx : -1;
+  }
+}
+
+
 int PositionDependentCorrection::Init(PHCompositeNode*)
 {
   // ------------------------------------------------------------------------------------
@@ -258,6 +286,14 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
                      "(m_useSurveyGeometry = false)."
                   << ANSI_RESET << '\n';
     }
+    
+    // Helper: human‑readable label for slice i
+    auto makeLabel = [&](int i)->std::string
+    {
+      return (m_binningMode == EBinningMode::kRange)
+             ? Form("%.0f_%.0f", eEdge[i], eEdge[i+1])      // “2_4”
+             : Form("E%.0f",      eEdge[i]);                // “E2”
+    };
 
   // ===========================
   //  CORRELATION PLOTS
@@ -515,24 +551,30 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
     // 3) Z bin edges: 2..4..6..8..10..12..15..20..30
     //    You already have this in your eEdge[] array; ensure it's a Double_t[].
     static constexpr Double_t eEdges[9] = {2,4,6,8,10,12,15,20,30};
+    
+    /* =======================================================================
+       BLOCK‑COORDINATE   ×   ENERGY    (TH3)
+       ======================================================================= */
+    const char* modeTag = (m_binningMode == EBinningMode::kRange ? "range"
+                                                                 : "disc");
 
-    // 4) Now create the “uncorrected” TH3F with array-of-edges constructor:
-    h3_cluster_block_cord_E = new TH3F(
-        "h2_cluster_block_cord_E",                // name
-        "Uncorrected local block coords vs. E",   // title
-        14, xEdges,                               // X: 14 bins
-        14, yEdges,                               // Y: 14 bins
-        8,  eEdges                                // Z: 8 bins, from eEdges[]
-    );
-
-    // 5) Create the “corrected” TH3F likewise:
-    h3_cluster_block_cord_E_corrected = new TH3F(
-        "h2_cluster_block_cord_E_corrected",
-        "Corrected local block coords vs. E",
+   h3_cluster_block_cord_E = new TH3F(
+        Form("h3_blockCoord_E_%s",  modeTag),                // name
+        (m_binningMode == EBinningMode::kRange               // title
+            ? "Uncorrected local block coords vs. E_{slice}"
+            : "Uncorrected local block coords vs. E_{centre}"),
         14, xEdges,
         14, yEdges,
-        8,  eEdges
-    );
+        8,  eEdges );
+
+    h3_cluster_block_cord_E_corrected = new TH3F(
+        Form("h3_blockCoord_Ecorr_%s", modeTag),
+        (m_binningMode == EBinningMode::kRange
+            ? "Corrected local block coords vs. E_{slice}"
+            : "Corrected local block coords vs. E_{centre}"),
+        14, xEdges,
+        14, yEdges,
+        8,  eEdges );
   // h_block_bin:
   //   1D histogram that may be used to look at the block coordinate axis in discrete steps (0–1, or subdivided further).
   //   Potentially used to label or count how many clusters end up in each sub-cell bin across the 2×2 block space.
@@ -544,18 +586,23 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
     {
       float eLo = eEdge[i];
       float eHi = eEdge[i+1];
-      h_phi_diff_raw_E[i] = new TH1F(
-        Form("h_phi_diff_raw_%.0f_%.0f", eLo, eHi),  // histogram name
-        Form("#Delta#phi raw, %.0f < pT < %.0f", eLo, eHi),
-        200, -0.1, 0.1
-      );
         
+      const std::string lab = makeLabel(i);
+
+      h_phi_diff_raw_E[i] = new TH1F(
+            Form("h_phi_diff_raw_%s", lab.c_str()),
+            (m_binningMode == EBinningMode::kRange)
+                ? Form("#Delta#phi raw;%.0f < E < %.0f GeV", eLo, eHi)
+                : Form("#Delta#phi raw;E = %.0f GeV",         eLo),
+            200, -0.1, 0.1 );
+
       h_eta_diff_raw_E[i] = new TH1F(
-          Form("h_eta_diff_raw_%.1f_%.1f", eLo, eHi),
-          Form("#Delta#eta raw, %.1f < E < %.1f", eLo, eHi),
-          200, -0.1, 0.1
-      );
-  }
+            Form("h_eta_diff_raw_%s", lab.c_str()),
+            (m_binningMode == EBinningMode::kRange)
+                ? Form("#Delta#eta raw;%.0f < E < %.0f GeV", eLo, eHi)
+                : Form("#Delta#eta raw;E = %.0f GeV",         eLo),
+            200, -0.1, 0.1 );
+    }
     
     // (B) Create the corrected Δφ histograms for each pT bin
     for (int i = 0; i < N_Ebins; i++)
@@ -563,19 +610,21 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
       // Use your already-declared static member array eEdge[]:
       float eLo = eEdge[i];
       float eHi = eEdge[i+1];
+      const std::string lab = makeLabel(i);
 
-      // Now you have a properly named eHi, so you can use it
       h_phi_diff_corrected_E[i] = new TH1F(
-        Form("h_phi_diff_corr_%.1f_%.1f", eLo, eHi),
-        Form("#Delta#phi corrected, %.1f < pT < %.1f", eLo, eHi),
-        200, -0.1, 0.1
-      );
-        
+            Form("h_phi_diff_corr_%s", lab.c_str()),
+            (m_binningMode == EBinningMode::kRange)
+                ? Form("#Delta#phi corrected;%.0f < E < %.0f GeV", eLo, eHi)
+                : Form("#Delta#phi corrected;E = %.0f GeV",         eLo),
+            200, -0.1, 0.1 );
+
       h_eta_diff_corrected_E[i] = new TH1F(
-          Form("h_eta_diff_corr_%.1f_%.1f", eLo, eHi),
-          Form("#Delta#eta corrected, %.1f < E < %.1f", eLo, eHi),
-          200, -0.1, 0.1
-      );
+            Form("h_eta_diff_corr_%s", lab.c_str()),
+            (m_binningMode == EBinningMode::kRange)
+                ? Form("#Delta#eta corrected;%.0f < E < %.0f GeV", eLo, eHi)
+                : Form("#Delta#eta corrected;E = %.0f GeV",         eLo),
+            200, -0.1, 0.1 );
     }
 
     
@@ -587,21 +636,23 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
     // GOOD: use eEdge[i] and eEdge[i+1]
     for (int i = 0; i < N_Ebins; i++)
     {
-      // e.g. eEdge[] = {2.0, 3.0, 5.0, 8.0, 12.0}
       float eLo = eEdge[i];
       float eHi = eEdge[i+1];
+      const std::string lab = makeLabel(i);
 
       h_localPhi_corrected[i] = new TH1F(
-        Form("h_localPhi_corrected_%.1f_%.1f", eLo, eHi),
-        Form("Corrected local #phi, %.1f < E < %.1f", eLo, eHi),
-        50, -0.5, 0.5
-      );
-        
-     h_localEta_corrected[i] = new TH1F(
-          Form("h_localEta_corrected_%.1f_%.1f", eLo, eHi),
-          Form("Corrected local #eta, %.1f < E < %.1f", eLo, eHi),
-          50, -0.5, 0.5
-        );
+            Form("h_localPhi_corr_%s", lab.c_str()),
+            (m_binningMode == EBinningMode::kRange)
+                ? Form("Corrected local #phi;%.0f < E < %.0f GeV", eLo, eHi)
+                : Form("Corrected local #phi;E = %.0f GeV",         eLo),
+            50, -0.5, 0.5 );
+
+      h_localEta_corrected[i] = new TH1F(
+            Form("h_localEta_corr_%s", lab.c_str()),
+            (m_binningMode == EBinningMode::kRange)
+                ? Form("Corrected local #eta;%.0f < E < %.0f GeV", eLo, eHi)
+                : Form("Corrected local #eta;E = %.0f GeV",         eLo),
+            50, -0.5, 0.5 );
     }
  
     // ──────────────────────────────────────────────────────────────────────────────
@@ -637,23 +688,24 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
       {
         for (int iE = 0; iE < N_Ebins; ++iE)            // energy-slice loop
         {
+          const std::string lab = makeLabel(iE);
           // 3a)  Ash-b histograms
           for (double bVal : m_bScan)
           {
-            const TString hName = Form("h_dx_ash_b%.4f_E%d", bVal, iE);
+            const TString hName = Form("h_dx_ash_b%.4f_%s", bVal, lab.c_str());
             auto* h = new TH1F( hName,
-                                ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                                NBINS, -DX_MAX, +DX_MAX );
+                                  ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                                  NBINS, -DX_MAX, +DX_MAX );
             hm->registerHisto(h);
           }
 
           // 3b)  Log-w0 histograms
           for (double w0 : m_w0Scan)
           {
-            const TString hName = Form("h_dx_log_w0%.2f_E%d", w0, iE);
+            const TString hName = Form("h_dx_log_w0%.2f_%s", w0, lab.c_str());
             auto* h = new TH1F( hName,
-                                ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                                NBINS, -DX_MAX, +DX_MAX );
+                                  ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                                  NBINS, -DX_MAX, +DX_MAX );
             hm->registerHisto(h);
           }
         }
@@ -1560,7 +1612,7 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
 
   /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
   float globalPhi = fullPhiIndex * kRadPerBin;  // ideal grid
-//  if (m_hasOffset) globalPhi += m_phi0Offset;   // shift to real detector
+  if (m_hasOffset) globalPhi += m_phi0Offset;   // shift to real detector
   globalPhi = TVector2::Phi_mpi_pi(globalPhi);
 
   if (Verbosity() > 0)
