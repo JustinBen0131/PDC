@@ -219,6 +219,20 @@ class PositionDependentCorrection : public SubsysReco
   EBinningMode m_binningMode { EBinningMode::kRange };  ///< current mode
   static constexpr float kDiscreteTol = 0.25f;          ///< |E‑Ecentre| max (GeV)
     
+    
+  // ------------------------------------------------------------------
+  // Human‑readable histogram tag for slice i
+  //   range‑mode   :  “2_4”
+  //   discrete‑mode:  “E2”
+  // ------------------------------------------------------------------
+  inline std::string
+  PositionDependentCorrection::sliceTag(int i) const
+  {
+      return (m_binningMode == EBinningMode::kRange)
+             ? Form("%.0f_%.0f", eEdge[i], eEdge[i+1])
+             : Form("E%.0f",      eEdge[i]);
+  }
+    
   //--------------------------------------------------------------------
   //  Energy–slice constants  (barrel EMCAL photons)
   //--------------------------------------------------------------------

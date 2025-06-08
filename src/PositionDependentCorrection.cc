@@ -1871,10 +1871,11 @@ void PositionDependentCorrection::fillAshLogDx(
   /* 0) energy slice --------------------------------------------------- */
   const float eReco = recoPhoton.E();
   int iEslice = -1;
-  for (int i = 0; i < N_Ebins; ++i)
-    if (eReco >= eEdge[i] && eReco < eEdge[i+1]) { iEslice = i; break; }
-  if (iEslice < 0) return;
-
+  const int   iSlice  = getEnergySlice( eReco );
+  if (iSlice < 0) return;
+  const std::string lab = sliceTag( iSlice );
+    
+    
   /* 1) guards & geometry --------------------------------------------- */
   if (!cluster || !m_geometry || !m_bemcRec) return;
 
@@ -1951,7 +1952,7 @@ void PositionDependentCorrection::fillAshLogDx(
       const double bVal   = std::round(b * 10000.) / 10000.;
       const float  phiLoc = doAshShift(blockCord.second, bVal);
       tryFill(phiLoc,
-              Form("h_dx_ash_b%.4f_E%d", bVal, iEslice),
+              Form("h_dx_ash_b%.4f_%s", bVal, lab.c_str()),
               nAshOK, nAshMiss);
     }
 
@@ -1964,7 +1965,7 @@ void PositionDependentCorrection::fillAshLogDx(
       const float  phiLoc = doLogWeightCoord(tower_phis, tower_energies,
                                              w0Val);
       tryFill(phiLoc,
-              Form("h_dx_log_w0%.2f_E%d", w0Val, iEslice),
+              Form("h_dx_log_w0%.2f_%s", w0Val, lab.c_str()),
               nLogOK, nLogMiss);
     }
 
@@ -2038,8 +2039,7 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
   /* ────────────────────────   1) energy slice id   ──────────────────────── */
   const float eReco = recoPhoton.E();
   int iSlice = -1;
-  for (int i = 0; i < N_Ebins; ++i)
-    if (eReco >= eEdge[i] && eReco < eEdge[i+1]) { iSlice = i; break; }
+  const int   iSlice = getEnergySlice( eReco );
 
   if (iSlice < 0)
   {
@@ -2407,9 +2407,7 @@ void PositionDependentCorrection::finalClusterLoop(
                                         blkPhiCoarse);   // ← new 4-th argument
 
       /* 4) find energy slice ........................................... */
-      int iEbin = -1;
-      for (int i = 0; i < N_Ebins; ++i)
-        if (clusE >= eEdge[i] && clusE < eEdge[i+1]) { iEbin = i; break; }
+      const int iEbin = getEnergySlice( clusE );
 
       /* optional detailed print ........................................ */
       if (Verbosity() > 0)
