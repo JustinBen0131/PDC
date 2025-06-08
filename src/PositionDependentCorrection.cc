@@ -1898,9 +1898,15 @@ void PositionDependentCorrection::fillAshLogDx(
     
     
   /* 2) truth reference ----------------------------------------------- */
-  const float  phiSDtruth = TVector2::Phi_mpi_pi( truthPhoton.Phi() );  // ← no depth propagation
+    const float  phiSDtruth = phiAtShowerDepth(truthPhoton.E(),
+                                               rFront, zFront,
+                                               truthPhoton.Phi(),
+                                               ixLead, iyLead);
     
-  const double xTrue = rFront * std::cos(phiSDtruth);                   // front‑face reference
+    const double xTrue = xAtShowerDepth(truthPhoton.E(),
+                                        rFront, zFront,
+                                        truthPhoton.Phi(),
+                                        ixLead, iyLead);
 
   if (Verbosity() > 1)
     std::cout << ANSI_CYAN
@@ -1974,8 +1980,6 @@ void PositionDependentCorrection::fillAshLogDx(
 }
 
 
-
-
 // ==========================================================================
 //  fillDPhiRawAndCorrected
 // --------------------------------------------------------------------------
@@ -1986,12 +1990,6 @@ void PositionDependentCorrection::fillAshLogDx(
 //  ► All φ’s are propagated to **shower depth** so they can be compared
 //    1-to-1 with the Δx study.
 //
-//  Verbosity levels
-//  ----------------
-//    0 : completely silent (fast production)
-//    1 : one-line banner, per-cluster RAW / CORR print
-//    2 : geometry details, tower radii, truth φ, warnings
-//    3 : everything above  +  individual diagnostic lines
 // ==========================================================================
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
         RawCluster*                  cluster,
