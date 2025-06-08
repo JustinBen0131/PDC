@@ -1898,15 +1898,9 @@ void PositionDependentCorrection::fillAshLogDx(
     
     
   /* 2) truth reference ----------------------------------------------- */
-    const float  phiSDtruth = phiAtShowerDepth(truthPhoton.E(),
-                                               rFront, zFront,
-                                               truthPhoton.Phi(),
-                                               ixLead, iyLead);
+  const float  phiSDtruth = TVector2::Phi_mpi_pi( truthPhoton.Phi() );  // ← no depth propagation
     
-    const double xTrue = xAtShowerDepth(truthPhoton.E(),
-                                        rFront, zFront,
-                                        truthPhoton.Phi(),
-                                        ixLead, iyLead);
+  const double xTrue = rFront * std::cos(phiSDtruth);                   // front‑face reference
 
   if (Verbosity() > 1)
     std::cout << ANSI_CYAN
@@ -1978,6 +1972,7 @@ void PositionDependentCorrection::fillAshLogDx(
               << "   |  Log filled/miss = "
               << nLogOK << '/' << nLogMiss << '\n';
 }
+
 
 
 
@@ -2067,11 +2062,8 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
                     << zFront  << " cm\n";
 
   /* ────────────────────────   3) truth φ at shower depth  ──────────────── */
-    const float phiSDtruth =
-      phiAtShowerDepth(truthPhoton.E(), rFront, zFront,
-                       truthPhoton.Phi(),        // unchanged
-                       ixLead, iyLead);          // NEW args
-
+  const float phiSDtruth =
+      TVector2::Phi_mpi_pi( truthPhoton.Phi() );   // ← no depth propagation
 
   /* ────────────────────────   4) RAW variant   ──────────────────────────── */
   const float rawPhiFront  =
@@ -2153,7 +2145,6 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
   };
   if (nSeen==2 || nSeen==5 || nSeen==10 || nSeen%50==0) printSnapshot("checkpoint");
 }
-
 
 
 void PositionDependentCorrection::finalClusterLoop(
