@@ -80,6 +80,8 @@ class PositionDependentCorrection : public SubsysReco
       m_bemcRec = bemcptr;
   }
   bool alreadyDeclaredHistograms = false;
+    
+  void UseSurveyGeometry(bool v = true) { m_useSurveyGeometry = v; }
 
 
  protected:
@@ -191,33 +193,37 @@ class PositionDependentCorrection : public SubsysReco
   TFile *outfile = nullptr;
   bool  isFitDoneForPhi = true;
   bool  isFitDoneForEta = true;
-    //--------------------------------------------------------------------
-    //  Energy–slice constants  (barrel EMCAL photons)
-    //--------------------------------------------------------------------
-    static constexpr int    N_Ebins = 8;          // 9 edges → 8 slices
+    
+  bool m_useSurveyGeometry {false};   ///< load φ-tilt from CDB?
+  uint64_t m_timeStamp      {0};      ///< can be set by macro if desired
+  std::string m_cdbTag      {"MDC2"};
+  //--------------------------------------------------------------------
+  //  Energy–slice constants  (barrel EMCAL photons)
+  //--------------------------------------------------------------------
+  static constexpr int    N_Ebins = 8;          // 9 edges → 8 slices
 
-    // master edges [GeV]
-    static constexpr double eEdge[N_Ebins + 1] =
-        { 2, 4, 6, 8, 10, 12, 15, 20, 30 };
+  // master edges [GeV]
+  static constexpr double eEdge[N_Ebins + 1] =
+      { 2, 4, 6, 8, 10, 12, 15, 20, 30 };
 
-    // derive {E_low} and {E_high} once, at compile-time, via a lambda
-    static constexpr std::array<float, N_Ebins> expectedLo =
-    []{
-        std::array<float, N_Ebins> lo{};
-        for (int i = 0; i < N_Ebins; ++i) lo[i] = static_cast<float>(eEdge[i]);
-        return lo;
-    }();
+  // derive {E_low} and {E_high} once, at compile-time, via a lambda
+  static constexpr std::array<float, N_Ebins> expectedLo =
+  []{
+      std::array<float, N_Ebins> lo{};
+      for (int i = 0; i < N_Ebins; ++i) lo[i] = static_cast<float>(eEdge[i]);
+      return lo;
+  }();
 
-    static constexpr std::array<float, N_Ebins> expectedHi =
-    []{
-        std::array<float, N_Ebins> hi{};
-        for (int i = 0; i < N_Ebins; ++i) hi[i] = static_cast<float>(eEdge[i+1]);
-        return hi;
-    }();
+  static constexpr std::array<float, N_Ebins> expectedHi =
+  []{
+      std::array<float, N_Ebins> hi{};
+      for (int i = 0; i < N_Ebins; ++i) hi[i] = static_cast<float>(eEdge[i+1]);
+      return hi;
+  }();
 
-    // everything that used to be length-4 must now be length-8
-    float m_bValsPhi[N_Ebins]{};
-    float m_bValsEta[N_Ebins]{};
+  // everything that used to be length-4 must now be length-8
+  float m_bValsPhi[N_Ebins]{};
+  float m_bValsEta[N_Ebins]{};
     
   std::vector<double> m_bScan;
   std::vector<double> m_w0Scan;

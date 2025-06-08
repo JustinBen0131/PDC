@@ -175,6 +175,90 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
     // We continue, but this may lead to limited functionality later.
   }
 
+    // ------------------------------------------------------------------
+    // (A)  Optional one-time load of surveyed tower geometry
+    // ------------------------------------------------------------------
+    if (m_useSurveyGeometry)
+    {
+      // ────────────────────────────────────────────────────────────────
+      // 0)  Banner
+      // ────────────────────────────────────────────────────────────────
+      if (Verbosity() > 0)
+        std::cout << ANSI_BOLD << ANSI_CYAN
+                  << "[PDC]  Loading CDB CALO_TOWER_GEOMETRY  "
+                  << "(tag = " << m_cdbTag << ",  ts = " << m_timeStamp << ")"
+                  << ANSI_RESET << '\n';
+
+      /* make CDB happy */
+      recoConsts* rc = recoConsts::instance();
+      rc->set_StringFlag("CDB_GLOBALTAG", m_cdbTag);
+      rc->set_uint64Flag("TIMESTAMP",     m_timeStamp);
+
+      // ────────────────────────────────────────────────────────────────
+      // 1)  Download + open the tree
+      // ────────────────────────────────────────────────────────────────
+      const std::string url =
+          CDBInterface::instance()->getUrl("CALO_TOWER_GEOMETRY");
+
+      std::unique_ptr<CDBTTree> geomTree(new CDBTTree(url));
+      geomTree->LoadCalibrations();                    // <— fills the tree
+
+      if (Verbosity() > 0)
+        std::cout << ANSI_GREEN
+                  << "      … geometry loaded from\n      " << url
+                  << ANSI_RESET << "\n";
+
+      // ────────────────────────────────────────────────────────────────
+      // 2)  Extract the rigid φ-offset and print a concise table
+      // ────────────────────────────────────────────────────────────────
+      if (Verbosity() > 0)
+      {
+        constexpr int kNPhi = 256;                     // full fine bins
+        std::cout << ANSI_BOLD << "[φ-survey summary]" << ANSI_RESET << '\n';
+
+        /* (a) shift = ideal – surveyed of bin 0 */
+        const double phi_first  = geomTree->GetDoubleValue(0, "cemc_phi_first");
+        const double phiOffset  = M_PI/2.0 - phi_first;    // your convention
+        std::cout << "      global Δφ₀ = "
+                  << ANSI_YELLOW << std::fixed << std::setprecision(6)
+                  << phiOffset
+                  << "  rad"
+                  << ANSI_RESET << "  =  "
+                  << ANSI_YELLOW << std::setprecision(4)
+                  << phiOffset * 180.0 / M_PI
+                  << "°" << ANSI_RESET << '\n';
+
+        /* (b) small header */
+        std::cout << ANSI_CYAN
+                  << "      bin   φ_first [rad]   φ_second [rad]\n"
+                  << "      ─────────────────────────────────────\n"
+                  << ANSI_RESET;
+
+        /* (c) print either all bins (verbosity>1) or the first few */
+        const int nPrint = (Verbosity() > 1) ? kNPhi : 6;
+
+        for (int i = 0; i < nPrint; ++i)
+        {
+          const double ph1 = geomTree->GetDoubleValue(i, "cemc_phi_first");
+          const double ph2 = geomTree->GetDoubleValue(i, "cemc_phi_second");
+          std::cout << std::setw(10) << i
+                    << std::setw(15) << std::setprecision(6) << ph1
+                    << std::setw(15) << ph2 << '\n';
+        }
+        if (Verbosity() == 1 && kNPhi > nPrint)
+          std::cout << "      … (" << kNPhi - nPrint
+                    << " more bins – increase Verbosity() for full table)\n";
+      }
+    }
+    else
+    {
+      if (Verbosity() > 0)
+        std::cout << ANSI_BOLD << ANSI_YELLOW
+                  << "[PDC]  Survey geometry NOT loaded "
+                     "(m_useSurveyGeometry = false)."
+                  << ANSI_RESET << '\n';
+    }
+
   // ===========================
   //  CORRELATION PLOTS
   // ===========================
@@ -1476,7 +1560,7 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
 
   /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
   float globalPhi = fullPhiIndex * kRadPerBin;  // ideal grid
-  if (m_hasOffset) globalPhi += m_phi0Offset;   // shift to real detector
+//  if (m_hasOffset) globalPhi += m_phi0Offset;   // shift to real detector
   globalPhi = TVector2::Phi_mpi_pi(globalPhi);
 
   if (Verbosity() > 0)
@@ -1754,8 +1838,8 @@ void PositionDependentCorrection::fillAshLogDx(
 
   const double rFront = leadGeo->get_center_radius();
   const double zFront = leadGeo->get_center_z();
-    int ixLead = leadGeo->get_binphi();   // 0 … 255   (column / φ)
-    int iyLead = leadGeo->get_bineta();   // 0 … 95    (row / η)
+  int ixLead = leadGeo->get_binphi();   // 0 … 255   (column / φ)
+  int iyLead = leadGeo->get_bineta();   // 0 … 95    (row / η)
     
     
   /* 2) truth reference ----------------------------------------------- */
