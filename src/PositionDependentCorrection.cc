@@ -1031,59 +1031,38 @@ void PositionDependentCorrection::fillTowerInfo(
     std::vector<float>& ht_eta,
     std::vector<float>& ht_phi)
 {
-  // Attempt to retrieve a TowerInfoContainer named "TOWERINFO_CALIB_CEMC" from the node tree.
-  // If missing or null, we won't fill these histograms.
   TowerInfoContainer* towers = findNode::getClass<TowerInfoContainer>(topNode, "TOWERINFO_CALIB_CEMC");
   if (towers)
   {
-    // 'size' is the total number of tower channels that exist in this container.
     int size = towers->size();
 
     // Loop over each tower channel index.
     for (int channel = 0; channel < size; channel++)
     {
-      // Get the TowerInfo object for this channel.
-      // TowerInfo contains the measured (or calibrated) energy plus flags for tower status.
       TowerInfo* tower = towers->get_tower_at_channel(channel);
 
-      // offlineenergy is the recorded or reconstructed energy of this tower.
       float offlineenergy = tower->get_energy();
 
-      // Each tower is associated with an encoded key that can be decoded
-      // into integer eta/phi indices that label where it sits in the calorimeter map.
       unsigned int towerkey = towers->encode_key(channel);
       int ieta = towers->getTowerEtaBin(towerkey);
       int iphi = towers->getTowerPhiBin(towerkey);
 
-      // Determine if the tower is flagged as good or bad
-      // (bad if tower->get_isBadChi2() was set, meaning suspicious or corrupt data).
       bool isGood = !(tower->get_isBadChi2());
 
-      // Add this tower's energy to the running total 'tower_tot_e'.
-      // This can be used later for overall QA or event-level checks.
       tower_tot_e += offlineenergy;
 
-      // Fill a 1D histogram of tower energies to observe the global energy distribution across towers.
       h_tower_e->Fill(offlineenergy);
 
-      // If the tower is flagged as 'bad' (isGood == false) but still has >0.2 GeV energy,
-      // record its ieta and iphi. This can be useful for diagnosing hot or misbehaving towers.
       if (!isGood && offlineenergy > 0.2)
       {
         ht_eta.push_back(ieta);
         ht_phi.push_back(iphi);
       }
-
-      // If the tower is good, fill a 2D histogram (eta index vs energy),
-      // to visualize how energy is distributed over eta for good towers.
       if (isGood)
       {
         h_emcal_e_eta->Fill(ieta, offlineenergy);
       }
 
-      // If the tower's energy is above a certain threshold (emcal_hit_threshold),
-      // fill a 2D occupancy histogram (ieta vs iphi). This is a common QA check
-      // to see where active towers are in the calorimeter.
       if (offlineenergy > emcal_hit_threshold)
       {
         h_cemc_etaphi->Fill(ieta, iphi);
@@ -1245,8 +1224,6 @@ void PositionDependentCorrection::fillTruthInfo(
       }
     }
   }
-
-  // If Verbosity is enabled, indicate we've finished secondary analysis
   if (Verbosity() > 0)
   {
     std::cout << "  --> Finished analyzing secondary particles."
@@ -1748,11 +1725,6 @@ float PositionDependentCorrection::doAshShift(float localPhi, float b)
 //   RETURNS:
 //     local φ inside its 2×2 block (0 ≤ φloc < 1)             (tower units)
 //
-//   NOTE:
-//     Verbosity-gated printouts (Verbosity()>0) give a concise trace of
-//     the internal steps without flooding the log.
-//
-//   2025-06-03  --  unified with Ash implementation
 ////////////////////////////////////////////////////////////////////////
 float
 PositionDependentCorrection::doLogWeightCoord( const std::vector<int>&   towerPhi,
@@ -1870,7 +1842,7 @@ void PositionDependentCorrection::fillAshLogDx(
 {
   /* 0) energy slice --------------------------------------------------- */
   const float eReco = recoPhoton.E();
-  int iEslice = -1;
+
   const int   iSlice  = getEnergySlice( eReco );
   if (iSlice < 0) return;
   const std::string lab = sliceTag( iSlice );
@@ -1908,7 +1880,7 @@ void PositionDependentCorrection::fillAshLogDx(
 
   if (Verbosity() > 1)
     std::cout << ANSI_CYAN
-              << "[fillAshLogDx] slice=" << iEslice
+              << "[fillAshLogDx] slice=" << iSlice
               << "  E=" << eReco << " GeV"
               << "  φSDtruth=" << phiSDtruth
               << "  → xTrue="  << xTrue  << " cm"
@@ -1995,9 +1967,6 @@ void PositionDependentCorrection::fillAshLogDx(
 //    1 : one-line banner, per-cluster RAW / CORR print
 //    2 : geometry details, tower radii, truth φ, warnings
 //    3 : everything above  +  individual diagnostic lines
-//
-//  QA snapshots are printed after               N = 2, 5, 10  clusters,
-//  then every 50th cluster afterwards.
 // ==========================================================================
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
         RawCluster*                  cluster,
@@ -2038,15 +2007,10 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
 
   /* ────────────────────────   1) energy slice id   ──────────────────────── */
   const float eReco = recoPhoton.E();
-  int iSlice = -1;
-  const int   iSlice = getEnergySlice( eReco );
+  const int iSlice = getEnergySlice( eReco );
+  if (iSlice < 0) return;
+  const std::string lab = sliceTag( iSlice );
 
-  if (iSlice < 0)
-  {
-    if (v1) std::cout << ANSI_YELLOW
-      << "  → reco-E outside slice table – SKIP\n" << ANSI_RESET;
-    return;
-  }
   if (v2)
     std::cout << "    • slice = " << iSlice
               << "  [" << eEdge[iSlice] << " – " << eEdge[iSlice+1] << ")\n";
@@ -2083,7 +2047,7 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
   const float rawPhiFront  =
     convertBlockToGlobalPhi( blockPhiBin, blkCoord.second );
     
-    const float phiSDrecoRaw =
+  const float phiSDrecoRaw =
       phiAtShowerDepth(eReco, rFront, zFront,
                        rawPhiFront, ixLead, iyLead);
     
@@ -2115,7 +2079,7 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
     const float corrPhiFront =
         convertBlockToGlobalPhi( blockPhiBin, locCorr );
       
-      const float phiSDrecoCorr =
+    const float phiSDrecoCorr =
         phiAtShowerDepth(eReco, rFront, zFront,
                          corrPhiFront, ixLead, iyLead);
       
@@ -2150,14 +2114,13 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
               << "    ⟨|Δφ_raw|⟩         : " << meanRaw << " rad\n";
       if (nCorrUsed)
         std::cout << "    ⟨|Δφ_corr|⟩        : " << meanCor << " rad  ("
-                  << (meanCor < meanRaw ? ANSI_GREEN : ANSI_RED)     // colour
-                  << (meanCor < meanRaw ? "improvement" : "worse")   // word
-                  << ANSI_RESET << ")\n";   // ← add this “)\n” and keep the semicolon
+                  << (meanCor < meanRaw ? ANSI_GREEN : ANSI_RED)
+                  << (meanCor < meanRaw ? "improvement" : "worse")
+                  << ANSI_RESET << ")\n";
       else
         std::cout << "    (no corrected clusters yet)\n";
     std::cout << "───────────────────────────────────────────────\n\n";
   };
-
   if (nSeen==2 || nSeen==5 || nSeen==10 || nSeen%50==0) printSnapshot("checkpoint");
 }
 
@@ -2582,10 +2545,7 @@ void PositionDependentCorrection::finalClusterLoop(
               h_res_block_E[block_eta_bin][block_phi_bin]
                   ->Fill(ratio, trPhoton.E());
           }
-
-          /* optional: break after first successful match to save CPU */
-          // break;
-    }   // end loop truth_photons
+    }
 
     // -----------------------------------------------------------------
     // (E) Check if photon1 matches a meson‐decay photon
@@ -3370,11 +3330,8 @@ float PositionDependentCorrection::getAvgEta(const std::vector<int>   &towerEtas
 //  getAvgPhi – energy-weighted φ–centroid  (0 ≤ ⟨φ⟩ < 256)
 // ----------------------------------------------------------------------------
 //  • Each tower is specified by its *fine* φ-bin (0 … 255) and energy (GeV).
-//  • The routine performs **exactly one** wrap relative to the max-energy
-//    reference tower so that every adjusted tower lies within ±128 bins
-//    of the reference.  No further modulo arithmetic is applied later.
 //  • If the caller supplies ill-formed input (size mismatch, ΣE≈0, …) the
-//    function degrades gracefully and returns 0 (with an optional warning).
+//    function degrades gracefully and returns 0
 // ============================================================================
 
 float

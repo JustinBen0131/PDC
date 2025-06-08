@@ -9,6 +9,7 @@
 #include <calotrigger/TriggerAnalyzer.h>
 #include <calobase/RawCluster.h>
 #include <cmath>
+#include <TString.h>
 
 // --------------------------------------------------------------------
 // 1) Forward declarations for classes we only use as pointers/references
@@ -225,8 +226,7 @@ class PositionDependentCorrection : public SubsysReco
   //   range‑mode   :  “2_4”
   //   discrete‑mode:  “E2”
   // ------------------------------------------------------------------
-  inline std::string
-  PositionDependentCorrection::sliceTag(int i) const
+  inline std::string sliceTag(int i) const             // extra scope removed
   {
       return (m_binningMode == EBinningMode::kRange)
              ? Form("%.0f_%.0f", eEdge[i], eEdge[i+1])
