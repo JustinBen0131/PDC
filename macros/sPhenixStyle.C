@@ -79,7 +79,7 @@ TStyle* sPhenixStyle()
   sphenixStyle->SetEndErrorSize(0.);
 
   // do not display any of the standard histogram decorations
-//  sphenixStyle->SetOptTitle(0); -- COMMENTED OUT
+  sphenixStyle->SetOptTitle(0); //-- COMMENTED OUT
   //sphenixStyle->SetOptStat(1111);
   sphenixStyle->SetOptStat(0);
   //sphenixStyle->SetOptFit(1111);

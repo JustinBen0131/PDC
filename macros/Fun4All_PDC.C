@@ -397,18 +397,15 @@ void Fun4All_PDC(int nevents = 0,
                                     : "output_PositionDep_data.root")
                     : outFileName;
     
-    
-//    // --- Cluster position module ---------------------------------------
-//    RawClusterPositionCorrection *posCorr =
-//        new RawClusterPositionCorrection("CEMC_ClusterPosCorr");
-//    posCorr->Detector("CEMC");   // ← new API
-//    se->registerSubsystem(posCorr);
-//    
-    
   PositionDependentCorrection *pdc
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
   pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
+  pdc->UseSurveyGeometry(true);
+  // optionally specify a different tag / timestamp
+  // pdc->SetCDBTag("MDC3");
+  // pdc->SetTimeStamp(runNumber);
+    
   pdc->Verbosity(3);
   se->registerSubsystem(pdc);
 

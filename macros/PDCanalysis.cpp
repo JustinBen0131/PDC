@@ -549,8 +549,8 @@ void drawAshLogSideBySide(
   legA.Draw();
 
   TLatex latA; latA.SetNDC(true);
-  latA.SetTextSize(0.04);
-  latA.DrawLatex(0.15,0.93, Form("Ash scan [%s]", methodName));
+  latA.SetTextSize(0.035);
+  latA.DrawLatex(0.12,0.93, Form("Ash scan [%s]", methodName));
 
   // 3) RIGHT pad => Log
   cSide.cd(2);
@@ -657,9 +657,9 @@ void drawAshLogSideBySide(
           TString cAshName = Form("cAshScan_%s", methodName);
           TCanvas cAsh(cAshName, cAshName, 900, 650);
           cAsh.SetLeftMargin(0.13);
-          cAsh.SetBottomMargin(0.12);
+          cAsh.SetBottomMargin(0.18);
           cAsh.SetRightMargin(0.04);
-          cAsh.SetGrid();
+//          cAsh.SetGrid();
 
           /* --- colour / marker for every energy slice ---------------------- */
           for (size_t i = 0; i < ashRes.tgVec.size(); ++i)
@@ -722,7 +722,7 @@ void drawAshLogSideBySide(
             const double sBest = (iE < (int)ashRes.bestSigma.size()) ? ashRes.bestSigma[iE] : 0.;
 
             legAsh.AddEntry(g,
-              Form("[%.0f, %.0f] GeV  (b=%.2f,  σ=%.3f)",
+              Form("[%.0f, %.0f] GeV  (b=%.2f,  #sigma_{x}=%.3f)",
                    E_edges[iE], E_edges[iE+1], bBest, sBest),
               "lp");
           }
@@ -815,8 +815,10 @@ void drawAshLogSideBySide(
  *
  * Usage:   root -l plotAshLogRMS_sideBySide.cpp\(\"PositionDep_sim_ALL.root\"\)
  */
-void plotAshLogRMS_sideBySide(const char* infile="PositionDep_sim_ALL.root")
+std::map<double,double>
+plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
 {
+
   // 1) Build the b-scan in *tower-width units* 0.00 … 0.50, step 0.01
   //    (histograms were booked with exactly these values)
   std::vector<double> bScan_cm;               // keep the same variable name
@@ -843,7 +845,7 @@ void plotAshLogRMS_sideBySide(const char* infile="PositionDep_sim_ALL.root")
   if(!fIn || fIn->IsZombie())
   {
     std::cerr<<"[ERROR] => Could not open file='"<<infile<<"'. Aborting.\n";
-    return;
+    return std::map<double,double>();   // or simply:  return {};
   }
   std::cout<<"[INFO] => Successfully opened '"<<infile<<"'.\n";
 
@@ -900,6 +902,18 @@ void plotAshLogRMS_sideBySide(const char* infile="PositionDep_sim_ALL.root")
   drawAshLogSideBySide(ashRMS, logRMS, "RMS", E_edges, N_E, baseDir);
 
   std::cout<<"\n[INFO] => plotAshLogRMS_sideBySide completed all tasks.\n\n";
+    
+  // ---------- NEW: build the look-up table for later use ---------- //
+  std::map<double,double> bOpt;           // {E_slice_centre  →  b_RMS_opt}
+  for (int i = 0; i < N_E; ++i)
+  {
+      const double eCtr = 0.5*(E_edges[i] + E_edges[i+1]);   // 2→4 → 3 GeV, …
+      const double bVal = (i < (int)ashRMS.bestParam.size())
+                           ? ashRMS.bestParam[i]               // optimal b from RMS scan
+                           : std::numeric_limits<double>::quiet_NaN();
+      bOpt[eCtr] = bVal;
+  }
+  return bOpt;                          // <── hand the table to the caller
 }
 
 /**
@@ -958,10 +972,22 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         hUnc->SetDirectory(nullptr);
         hUnc->SetName (Form("hUncPhi_E%d",i));
         hUnc->SetTitle(Form("Local #phi : E=[%.1f,%.1f)",eLo,eHi));
-        hUnc->GetXaxis()->SetTitle("block #phi_{CG}");
+        hUnc->GetXaxis()->SetTitle("block #phi_{local, 2#times 2}");
         hUnc->GetYaxis()->SetTitle("counts");
+        hUnc->GetYaxis()->SetTitleOffset(1.81);
         hUnc->SetMarkerStyle(20);
         hUnc->Draw("E");
+        
+        // ---------- ❶ INSERT HEADER --------------------------------------
+        { TLatex hd;  hd.SetNDC();
+          hd.SetTextFont(44);             // CMS style
+          hd.SetTextSize(0.045);
+          hd.SetTextAlign(22);            // centred
+          hd.DrawLatex(0.54,0.97,         // (x,y) in pad coords
+                       Form("#bf{%.1f #minus %.1f  GeV}", eLo, eHi));
+        }
+        // -----------------------------------------------------------------
+
         vPhiUnc.emplace_back(std::move(hUnc));
 
         // ---------- 2)  asinh fit ------------------------------------------
@@ -1025,8 +1051,8 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         lg.Draw();
 
         TLatex tl; tl.SetNDC(); tl.SetTextSize(0.042);
-        tl.DrawLatex(0.14,0.84,Form("b = %.3g",bestB));
-        tl.DrawLatex(0.14,0.76,Form("#chi^{2}_{LL}/NDF = %.2f",
+        tl.DrawLatex(0.25,0.88,Form("b = %.3g",bestB));
+        tl.DrawLatex(0.25,0.85,Form("#chi^{2}_{LL}/NDF = %.2f",
                         bestNdf>0? bestChi2/bestNdf : 0.));
         tl.SetTextAlign(32);
         tl.DrawLatex(0.88,0.85,Form("Uncorr: %.0f",nUnc));
@@ -1066,7 +1092,7 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         hUnc->SetDirectory(nullptr);
         hUnc->SetName(Form("hUncEta_E%d",i));
         hUnc->SetTitle(Form("Local #eta : E=[%.1f,%.1f)",eLo,eHi));
-        hUnc->GetXaxis()->SetTitle("block #eta_{CG}");
+        hUnc->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
         hUnc->GetYaxis()->SetTitle("counts");
         hUnc->SetMarkerStyle(20);
         hUnc->Draw("E");
@@ -1334,6 +1360,8 @@ void Plot2DBlockEtaPhi(TH3F* hUnc3D,
     double eLo = eEdges[i].first;
     double eHi = eEdges[i].second;
 
+    const TString hdrTxt = Form("E = %.1f - %.1f  GeV", eLo, eHi);   // ASCII "-"
+
     // locate Z bins in uncorrected
     int zLo = hUnc3D->GetZaxis()->FindBin(eLo+1e-9);
     int zHi = hUnc3D->GetZaxis()->FindBin(eHi-1e-9);
@@ -1351,6 +1379,11 @@ void Plot2DBlockEtaPhi(TH3F* hUnc3D,
           h2_unc->GetZaxis()->SetTitleOffset(2.1);    // move label away
           h2_unc->Draw("COLZ");
           // do NOT delete here – wait until after SaveAs()
+          /* TLatex header ------------------------------------------------ */
+          TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
+          tl.SetTextSize(0.045); tl.SetTextAlign(22);          // centred
+          tl.DrawLatex(0.50, 0.97,
+                     Form("#bf{UNCORR:  %s}", hdrTxt.Data()));   // E-range after the colon
     }
     else
     {
@@ -1380,6 +1413,12 @@ void Plot2DBlockEtaPhi(TH3F* hUnc3D,
             h2_cor->GetZaxis()->SetTitleOffset(2.1);
             h2_cor->GetZaxis()->CenterTitle();
             h2_cor->Draw("COLZ");
+          
+            TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
+            tl.SetTextSize(0.045); tl.SetTextAlign(22);
+            
+            tl.DrawLatex(0.50, 0.97,
+                       Form("#bf{CORR:    %s}", hdrTxt.Data()));
       }
       else
       {
@@ -1582,14 +1621,15 @@ void OverlayUncorrPhiEta(TH3F*  hUnc3D,
 //  • blue circles = η   (X-projection)   b_{η}
 //  • y-axis limits chosen automatically to include *all* points
 // ---------------------------------------------------------------------------
-void PlotBvaluesVsEnergy(TH3F*  hUnc3D,
-                         const std::vector<std::pair<double,double>>& eEdges,
-                         const char* outDir)
-/* ------------------------------------------------------------------------ */
+std::map<double,double>
+PlotBvaluesVsEnergy(TH3F* hUnc3D,
+                    const std::vector<std::pair<double,double>>& eEdges,
+                    const char* outDir)
 {
+    std::map<double,double> bMap;
     if(!hUnc3D){
         std::cerr << "[bPlot] null hUnc3D – abort\n";
-        return;
+        return bMap;     // ← FIX: return an empty map, not “nothing”
     }
 
     gStyle->SetOptStat(0);
@@ -1710,6 +1750,10 @@ void PlotBvaluesVsEnergy(TH3F*  hUnc3D,
     std::cout << "[bPlot] wrote " << outName << '\n';
 
     for(auto obj : keepAlive) delete obj;
+    
+    // ---------- NEW single line ---------- //
+    for(size_t i=0;i<vX.size();++i) bMap[vX[i]] = vBphi[i];
+    return bMap;
 }
 
 
@@ -1887,20 +1931,23 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
 {
     gSystem->mkdir(outDir, /*recursive=*/true);
     gStyle->SetOptStat(0);
+    
 
     const int N_E = static_cast<int>(eEdges.size());
     if(N_E==0){ std::cerr<<"[DeltaPhiOverlay] eEdges empty – abort\n"; return; }
 
     /* helper for Gaussian fit → N, μ, σ ---------------------------------- */
-    struct Info { double N, mu, sigma; };
+    struct Info { double N, mu, muErr, sigma, sigmaErr; };
     auto getInfo = [](TH1* h)->Info
     {
-        if(!h || h->Integral()==0) return {0,0,0};
-        double m = h->GetMean(), r = h->GetRMS();
-        TF1 g("g","gaus", m-2.5*r, m+2.5*r);
-        g.SetParameters(h->GetMaximum(), m, r/2.);
-        h->Fit(&g,"RQ0");
-        return { h->GetEntries(), g.GetParameter(1), fabs(g.GetParameter(2)) };
+      if(!h || h->Integral()==0) return {0,0,0,0,0};
+      double m = h->GetMean(), r = h->GetRMS();
+      TF1 g("g","gaus", m-2.5*r, m+2.5*r);
+      g.SetParameters(h->GetMaximum(), m, r/2.);
+      h->Fit(&g,"RQ0");
+      return { h->GetEntries(),
+               g.GetParameter(1), g.GetParError(1),
+               fabs(g.GetParameter(2)), g.GetParError(2) };
     };
 
     /* summary canvas ------------------------------------------------------ */
@@ -1909,6 +1956,9 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
     c4x2.Divide(4,2);
 
     std::vector<TObject*> keep;   // prevent premature deletion
+    
+    std::vector<double> eCtr, muRaw, muCorr, siRaw, siCorr;
+    std::vector<double> muRawErr, muCorrErr, siRawErr, siCorrErr;
 
     for(int i=0;i<N_E;++i)
     {
@@ -1944,44 +1994,91 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
             hCorr->SetMarkerStyle(21); hCorr->SetMarkerSize(0.8);
         }
 
-        /* ---- (A) summary pad -------------------------------------------- */
-        c4x2.cd(i+1);
-        TString ttl=Form("#Delta#phi  [%.1f, %.1f)  GeV",eLo,eHi);
+        eCtr .push_back( 0.5*(eLo+eHi) );
+        muRaw.push_back( R.mu   ); muRawErr .push_back(R.muErr);
+        siRaw.push_back( R.sigma); siRawErr .push_back(R.sigmaErr);
+        if(hCorr){
+            muCorr.push_back( C.mu   ); muCorrErr.push_back(C.muErr);
+            siCorr.push_back( C.sigma); siCorrErr.push_back(C.sigmaErr);
+        }
+        
+        /* ===================================================================== */
+        /*  (A) per-slice summary pad – wider canvas, clean legend, plain minus  */
+        /* ===================================================================== */
+
+        /* one-time canvas resize ---------------------------------------------- */
+        static bool firstPad = true;
+        if (firstPad) { c4x2.SetWindowSize(2000,1200); firstPad = false; }
+
+        /* select pad and tune margins ---------------------------------------- */
+        TPad* p = static_cast<TPad*>( c4x2.cd(i+1) );
+        p->SetLeftMargin  (0.24);
+        p->SetRightMargin (0.1);
+        p->SetTopMargin   (0.10);   // extra room for stats lines
+        p->SetBottomMargin(0.18);
+
+        /* frame & axes -------------------------------------------------------- */
+        TString ttl = Form("#Delta#phi  [%.1f, %.1f)  GeV",eLo,eHi);
         hRaw->SetTitle(ttl);
-        hRaw->GetXaxis()->SetTitle("#Delta#phi (reco - truth)  [rad]");
+        hRaw->GetXaxis()->SetTitle("#Delta#phi  (reco - truth)  [rad]");
         hRaw->GetYaxis()->SetTitle("Normalised counts");
-        hRaw->GetYaxis()->SetTitleOffset(1.3);
 
-        double ymax=hRaw->GetMaximum(); if(hCorr) ymax=std::max(ymax,hCorr->GetMaximum());
+        hRaw->GetXaxis()->SetLabelSize(0.034);
+        hRaw->GetXaxis()->SetTitleSize(0.045);
+        hRaw->GetXaxis()->SetTitleOffset(1.30);
+
+        hRaw->GetYaxis()->SetLabelSize(0.040);
+        hRaw->GetYaxis()->SetTitleSize(0.050);
+        hRaw->GetYaxis()->SetTitleOffset(1.18);
+
+        double ymax = hRaw->GetMaximum();
+        if (hCorr) ymax = std::max(ymax, hCorr->GetMaximum());
         hRaw->GetYaxis()->SetRangeUser(0,1.25*ymax);
-        hRaw->Draw("E"); if(hCorr) hCorr->Draw("E SAME");
 
-        /* legend – bottom-left */
-        TLegend* legS = new TLegend(0.15,0.2,0.45,0.3);
-        legS->SetBorderSize(0); legS->SetFillStyle(0); legS->SetTextSize(0.03);
-        legS->AddEntry(hRaw ,"RAW"      ,"lp");
-        if(hCorr) legS->AddEntry(hCorr,"CORRECTED","lp");
-        legS->Draw(); keep.push_back(legS);
+        hRaw->Draw("E");
+        if (hCorr) hCorr->Draw("E SAME");
 
-        /* text (compact) */
-        TLatex tl; tl.SetNDC(); tl.SetTextFont(42); tl.SetTextSize(0.042);
-        tl.SetTextAlign(13);
-        tl.DrawLatex(0.15,0.87,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
-                                    (int)R.N, R.mu, R.sigma));
-        if(hCorr)
-            tl.DrawLatex(0.15,0.81,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
-                                        (int)C.N, C.mu, C.sigma));
+        /* energy slice label (bottom-right) ---------------------------------- */
+        TLatex ebin; ebin.SetNDC(); ebin.SetTextFont(42);
+        ebin.SetTextSize(0.033); ebin.SetTextAlign(33);
+        ebin.DrawLatex(0.88,0.32,Form("%.1f - %.1f  GeV",eLo,eHi));
+        keep.push_back(ebin.Clone());
+
+        /* legend – bottom-left ----------------------------------------------- */
+        TLegend* leg = new TLegend(0.27,0.2,0.4,0.3);
+        leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.030);
+        leg->AddEntry(hRaw ,"RAW","lp");
+        if (hCorr) leg->AddEntry(hCorr,"CORRECTED","lp");
+        leg->Draw(); keep.push_back(leg);
+
+        /* stats – top-right, out of the way ---------------------------------- */
+        TLatex st; st.SetNDC(); st.SetTextFont(42); st.SetTextSize(0.028);
+        st.SetTextAlign(33);
+        st.DrawLatex(0.75,0.87,
+                     Form("RAW:  N=%d,  #mu=%.4f,  #sigma=%.4f",
+                          (int)R.N,R.mu,R.sigma));
+        if (hCorr)
+          st.DrawLatex(0.76,0.84,
+                       Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
+                            (int)C.N,C.mu,C.sigma));
+
 
         /* ---- (B) individual canvas -------------------------------------- */
         TString cNm = Form("cDeltaPhi_%d",i);
         TString cTi = Form("#Delta#phi overlay  %.1f–%.1f GeV",eLo,eHi);
         TCanvas cInd(cNm,cTi,800,600);
-        cInd.SetLeftMargin(0.13); cInd.SetRightMargin(0.06); cInd.SetBottomMargin(0.12);
+        cInd.SetLeftMargin(0.13); cInd.SetRightMargin(0.06); cInd.SetBottomMargin(0.18);
 
         hRaw->Draw("E"); hRaw->GetYaxis()->SetRangeUser(0,1.25*ymax);
         if(hCorr) hCorr->Draw("E SAME");
 
-        TLegend legI(0.15,0.08,0.45,0.23);
+        // energy label, top-right
+        TLatex ebinI;  ebinI.SetNDC();
+        ebinI.SetTextFont(42);  ebinI.SetTextSize(0.038);
+        ebinI.SetTextAlign(33);
+        ebinI.DrawLatex(0.9,0.88,Form("%.1f to %.1f GeV",eLo,eHi));
+        
+        TLegend legI(0.15,0.2,0.45,0.35);
         legI.SetBorderSize(0); legI.SetFillStyle(0); legI.SetTextSize(0.03);
         legI.AddEntry(hRaw ,"RAW"      ,"lp");
         if(hCorr) legI.AddEntry(hCorr,"CORRECTED","lp");
@@ -1989,22 +2086,221 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
 
         TLatex tlI; tlI.SetNDC(); tlI.SetTextFont(42); tlI.SetTextSize(0.032);
         tlI.SetTextAlign(13);
-        tlI.DrawLatex(0.2,0.91,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
+        tlI.DrawLatex(0.18,0.91,Form("RAW : N=%d,  #mu=%.4f,  #sigma=%.4f",
                                      (int)R.N, R.mu, R.sigma));
         if(hCorr)
-            tlI.DrawLatex(0.2,0.85,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
+            tlI.DrawLatex(0.18,0.85,Form("CORR: N=%d,  #mu=%.4f,  #sigma=%.4f",
                                          (int)C.N, C.mu, C.sigma));
 
         TString outPNG=TString(outDir)+Form("/DeltaPhiCompare_%.0fto%.0f.png",eLo,eHi);
         cInd.SaveAs(outPNG);
         std::cout<<"   ↳ wrote "<<outPNG<<'\n';
     }
+    
+    // ---------------------------------------------------------------------------
+    //  (C) summary graphs – μ(E)  (main pad)  and  σ(E)  (sub-pad)
+    //      RAW = black  (x-Δ)   |   CORR = red  (x+Δ)
+    // ---------------------------------------------------------------------------
+    {
+      const int nPts = static_cast<int>(eCtr.size());
+      if (!nPts) return;
+
+        const double dx   = 0.10;                 // point offset (unchanged)
+        const double xMin = eCtr.front() - 1.0;   // left edge as before
+        const double xMax = eEdges.back().second; // **exact RHS of last slice**
+
+      /* helper: build TGraphErrors with ±dx -------------------------------- */
+      auto makeG = [&](const std::vector<double>& y,const std::vector<double>& yErr,
+                       double off, Color_t c, int m)->TGraphErrors*
+      {
+        std::vector<double> x(nPts), ex(nPts,0.);
+        for(int i=0;i<nPts;++i) x[i]=eCtr[i]+off;
+        auto g=new TGraphErrors(nPts,x.data(),y.data(),ex.data(),yErr.data());
+        g->SetMarkerColor(c); g->SetLineColor(c);
+        g->SetMarkerStyle(m); g->SetMarkerSize(1.2);
+        return g;
+      };
+
+      TGraphErrors *gMuRaw = makeG(muRaw ,muRawErr ,-dx,kBlack,20);
+      TGraphErrors *gMuCor = muCorr.empty()?nullptr
+                                           :makeG(muCorr,muCorrErr,+dx,kRed,21);
+      TGraphErrors *gSiRaw = makeG(siRaw ,siRawErr ,-dx,kBlack,20);
+      TGraphErrors *gSiCor = siCorr.empty()?nullptr
+                                           :makeG(siCorr,siCorrErr,+dx,kRed,21);
+
+      keep.insert(keep.end(),{gMuRaw,gSiRaw});
+      if(gMuCor) keep.push_back(gMuCor);
+      if(gSiCor) keep.push_back(gSiCor);
+
+      /* ---------- canvas with two pads ----------------------------------- */
+      TCanvas cSum("cMuSi","#Delta#phi mean / RMS vs E",800,700);
+
+      /* ---------------- top pad : μ(E) ----------------------------------- */
+      TPad pTop("pTop","",0,0.30,1,1);
+      pTop.SetLeftMargin(0.20); pTop.SetRightMargin(0.06);
+      pTop.SetBottomMargin(0.03);
+      pTop.Draw();  pTop.cd();
+
+        TH1F fMu("fMu",
+                 ";E_{slice}  [GeV];  #mu_{Gauss}  [rad]",
+                 1,xMin,xMax);
+        fMu.GetXaxis()->SetLabelSize(0);        // x-labels only in sub-pad
+        fMu.GetYaxis()->SetTitleSize(0.060);
+        fMu.GetYaxis()->SetLabelSize(0.050);
+        fMu.SetMinimum(-0.005); fMu.SetMaximum(0.005);
+        fMu.Draw("AXIS");
+
+        // dashed reference line at μ = 0
+        TLine l0(xMin,0,xMax,0);  l0.SetLineStyle(2); l0.SetLineColor(kGray+2);
+        l0.Draw();
+
+        gMuRaw->Draw("P SAME");  if(gMuCor) gMuCor->Draw("P SAME");
+
+        TLegend legMu(0.21,0.80,0.51,0.92);
+        legMu.SetBorderSize(0); legMu.SetFillStyle(0);
+        legMu.AddEntry(gMuRaw ,"RAW","lp");
+        if(gMuCor) legMu.AddEntry(gMuCor,"CORRECTED","lp");
+        legMu.Draw();
+
+      cSum.cd();
+
+      /* ---------------- bottom pad : σ(E) -------------------------------- */
+      TPad pBot("pBot","",0,0,1,0.30);
+      pBot.SetLeftMargin(0.20); pBot.SetRightMargin(0.06);
+      pBot.SetTopMargin(0.00);
+      pBot.SetBottomMargin(0.44);
+      pBot.Draw();  pBot.cd();
+
+        const double yMax = 1.2*std::max( *std::max_element(siRaw.begin(),siRaw.end()),
+                                          siCorr.empty()?0:*std::max_element(siCorr.begin(),
+                                                                             siCorr.end()) );
+        TH1F fSi("fSi",
+                 ";E_{slice}  [GeV];  #sigma_{Gauss}  [rad]",
+                 1,xMin,xMax);
+        fSi.GetXaxis()->SetTitleSize(0.11);
+        fSi.GetXaxis()->SetLabelSize(0.10);
+        fSi.GetYaxis()->SetTitleSize(0.095);
+        fSi.GetYaxis()->SetLabelSize(0.085);
+        fSi.GetYaxis()->SetTitleOffset(0.78);
+        fSi.GetYaxis()->SetNdivisions(406);        // every 2nd label
+        fSi.SetMinimum(0); fSi.SetMaximum(yMax);
+        fSi.Draw("AXIS");
+
+        gSiRaw->Draw("P SAME");  if(gSiCor) gSiCor->Draw("P SAME");
+
+      cSum.SaveAs(TString(outDir)+"/DeltaPhi_MeanSigmaVsE.png");
+    }
+
+
 
     TString sumPNG=TString(outDir)+"/DeltaPhiCompare_AllOutput.png";
     c4x2.SaveAs(sumPNG);
     std::cout<<"[DeltaPhiOverlay] wrote summary → "<<sumPNG<<'\n';
 
     for(auto* obj:keep) delete obj;
+}
+
+/* ===================================================================== *
+ *  PlotBcompare … overlay bopt(RMS) with bφ-fit for every E slice
+ *
+ *  INPUT:
+ *      bRMS   – map< Ecentre , bopt >  from  plotAshLogRMS_sideBySide  (RMS)
+ *      bPhi   – map< Ecentre , bφ   >  from  PlotBvaluesVsEnergy       (fit)
+ *      outDir – directory that will receive  b_compare_RMS_vs_fit.png
+ *
+ *  OUTPUT:   <outDir>/b_compare_RMS_vs_fit.png
+ *            (red ▢ = RMS optimum, slightly left-jittered;
+ *             blue ○ = φ-fit,       slightly right-jittered)
+ * ===================================================================== */
+void PlotBcompare(const std::map<double,double>& bRMS,
+                  const std::map<double,double>& bPhi,
+                  const char*                    outDir)
+{
+  /* ---------- basic sanity ------------------------------------------ */
+  if (bRMS.empty() || bPhi.empty())
+  {
+    std::cerr << "[PlotBcompare] one (or both) maps are empty – skip.\n";
+    return;
+  }
+
+  /* ---------- collect common energy slices -------------------------- */
+  std::vector<double>   eCtr;   // common E-centres
+  std::vector<double>   vRMS;   // bopt (RMS)
+  std::vector<double>   vPhi;   // bφ  (fit)
+
+  for (const auto& kv : bRMS)
+  {
+    auto it = bPhi.find(kv.first);
+    if (it == bPhi.end())                              continue; // not common
+    if (!std::isfinite(kv.second) || !std::isfinite(it->second)) continue;
+
+    eCtr.push_back(kv.first);
+    vRMS.push_back(kv.second);
+    vPhi.push_back(it->second);
+  }
+
+  if (eCtr.empty())
+  {
+    std::cerr << "[PlotBcompare] no common energy bins found – skip.\n";
+    return;
+  }
+
+  /* ---------- compute a gentle horizontal jitter -------------------- *
+   * We shift RMS left and φ-fit right by ~7 % of the median bin width. */
+  double dE     = 0.0;
+  for (std::size_t i = 1; i < eCtr.size(); ++i) dE += (eCtr[i] - eCtr[i-1]);
+  dE           /= std::max<std::size_t>(1, eCtr.size() - 1);        // median≈mean
+  const double dx = 0.07 * dE;                                      // ±7 %
+
+  /* ---------- fill the two graphs ----------------------------------- */
+  auto* gRMS = new TGraph(static_cast<int>(eCtr.size()));
+  auto* gPhi = new TGraph(static_cast<int>(eCtr.size()));
+
+  for (std::size_t i = 0; i < eCtr.size(); ++i)
+  {
+    gRMS->SetPoint(static_cast<int>(i), eCtr[i] - dx, vRMS[i]);     // ← left
+    gPhi->SetPoint(static_cast<int>(i), eCtr[i] + dx, vPhi[i]);     // → right
+  }
+
+  gRMS->SetMarkerStyle(24); gRMS->SetMarkerColor(kRed+1);   gRMS->SetLineColor(kRed+1);
+  gPhi->SetMarkerStyle(20); gPhi->SetMarkerColor(kBlue+1);  gPhi->SetLineColor(kBlue+1);
+
+    /* ---------- axis frame & ranges ----------------------------------- */
+    const double yMin = std::min( *std::min_element(vRMS.begin(),vRMS.end()),
+                                  *std::min_element(vPhi.begin(),vPhi.end()) );
+    const double yMax = std::max( *std::max_element(vRMS.begin(),vRMS.end()),
+                                  *std::max_element(vPhi.begin(),vPhi.end()) );
+
+    // ---------------------------------  ONLY THIS LINE CHANGED  -------------------
+    TH2F* frame = new TH2F("frameB",
+        ";E_{slice centre}  [GeV];  b  (local tower units)",
+        100, eCtr.front() - dE,  30.0,          //   ←  upper x-limit fixed at 30
+        100, 0.90*yMin,          1.10*yMax);
+  frame->SetStats(0);
+
+  /* ---------- drawing canvas ---------------------------------------- */
+  TCanvas c("cCompareB","b_{opt} (RMS)  vs  b_{#varphi} (fit)", 900, 650);
+  c.SetLeftMargin(0.13);
+  c.SetBottomMargin(0.18);          // ↑ extra room for x-axis label
+  c.SetRightMargin(0.04);
+
+  frame->GetXaxis()->SetTitleOffset(1.25);  // ↑ pull the title upward
+  frame->Draw();
+  gRMS->Draw("P SAME");
+  gPhi->Draw("P SAME");
+
+  TLegend leg(0.7,0.78,0.9,0.90);
+  leg.SetBorderSize(0);  leg.SetFillStyle(0);  leg.SetTextSize(0.035);
+  leg.AddEntry(gRMS,"Ash  b_{opt}  (RMS)","lp");
+  leg.AddEntry(gPhi,"b_{#varphi}  from asinh fit","lp");
+  leg.Draw();
+
+  /* ---------- export ------------------------------------------------- */
+  TString outPNG = TString(outDir) + "/b_compare_RMS_vs_fit.png";
+  c.SaveAs(outPNG);
+  std::cout << "[PlotBcompare] wrote " << outPNG << '\n';
+
+  delete frame;  delete gRMS;  delete gPhi;
 }
 
 
@@ -2038,7 +2334,9 @@ void PDCanalysis()
   SetsPhenixStyle();
     
   gStyle->SetOptStat(0);
-  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
+    
+  //PositionDep_sim_ALL_withDeltaPhiOffset_normalNrgBins.root
+  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_withDeltaPhiOffset_normalNrgBins.root";
 
   // 2) Open input
   std::cout << "[INFO] Opening file: " << inFile << "\n";
@@ -2195,71 +2493,86 @@ void PDCanalysis()
 
   OverlayUncorrPhiEta(hUnc3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
     
-  PlotBvaluesVsEnergy(hUnc3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
-    
   PlotPhiShiftAndWidth(hUnc3D, hCor3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
     
   OverlayDeltaPhiSlices(eEdges, isFirstPass, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
     
+    {
+      /* ------------------------------------------------------------------
+       *  3-D LEGO plots of block-centroid occupancy
+       *  – slimmer axis labels
+       *  – TLatex header “UNCORRECTED / CORRECTED” + Entries counter
+       * ------------------------------------------------------------------ */
 
-  {
-      gStyle->SetNumberContours(50);      // smooth colours
+      gStyle->SetNumberContours(50);
 
+      /* common cosmetics for both histograms ----------------------------- */
       auto beautify = [](TH3F* h)
       {
-        // X axis
-        h->GetXaxis()->SetTitle("block #eta_{CG}");
+        const double tSz = 0.045;   // title‐size
+        const double lSz = 0.025;   // label‐size (smaller → avoids crowding)
+
+        // η-axis
+        h->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
         h->GetXaxis()->CenterTitle();
-        h->GetXaxis()->SetTitleOffset(1.45);
-        h->GetXaxis()->SetLabelOffset(0.007);
+        h->GetXaxis()->SetTitleSize(tSz);
+        h->GetXaxis()->SetLabelSize(lSz);
+        h->GetXaxis()->SetTitleOffset(1.50);
 
-        // Y axis
-        h->GetYaxis()->SetTitle("block #phi_{CG}");
+        // φ-axis
+        h->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
         h->GetYaxis()->CenterTitle();
-        h->GetYaxis()->SetTitleOffset(1.90);
-        h->GetYaxis()->SetLabelOffset(0.007);
+        h->GetYaxis()->SetTitleSize(tSz);
+        h->GetYaxis()->SetLabelSize(lSz);
+        h->GetYaxis()->SetTitleOffset(2.00);
 
-        // Z axis
+        // energy axis
         h->GetZaxis()->SetTitle("Cluster E  [GeV]");
         h->GetZaxis()->CenterTitle();
-        h->GetZaxis()->SetTitleOffset(1.35);
-        h->GetZaxis()->SetLabelOffset(0.007);
+        h->GetZaxis()->SetTitleSize(tSz);
+        h->GetZaxis()->SetLabelSize(lSz);
+        h->GetZaxis()->SetTitleOffset(1.40);
       };
 
-        auto drawWithEntries = [&beautify]               // <-- add &
-                (TH3F* h,
-                 const char* canvName,
-                 const char* pngPath)
-        {
-          if (!h) return;
+      /* draw helper ------------------------------------------------------- */
+      auto drawWithEntries = [&](TH3F* h,
+                                 const char* canvName,
+                                 const char* pngPath,
+                                 const char* header)           // “UNCORRECTED” / “CORRECTED”
+      {
+        if (!h) return;
 
-          TCanvas c(canvName, canvName, 1200, 900);
-          beautify(h);                                   // now allowed
-          h->Draw("LEGO2Z");
+        TCanvas c(canvName, canvName, 1200, 900);
+        beautify(h);
+        h->Draw("LEGO2Z");
 
-          TLatex txt;
-          txt.SetNDC(kTRUE);
-          txt.SetTextFont(42);
-          txt.SetTextSize(0.035);
-          txt.SetTextAlign(13);
-          txt.DrawLatex(0.12, 0.92,
-                        Form("#bf{Entries: %.0f}", h->GetEntries()));
+        TLatex txt;  txt.SetNDC(true); txt.SetTextFont(42);
 
-          c.SaveAs(pngPath);
-          std::cout << "[INFO] wrote 3-D plot → " << pngPath << '\n';
-        };
+        // header
+        txt.SetTextSize(0.042); txt.SetTextAlign(13);
+        txt.DrawLatex(0.12,0.96,Form("#bf{%s}",header));
 
+        // entries
+        txt.SetTextSize(0.036);
+        txt.DrawLatex(0.12,0.91,Form("Entries: %.0f", h->GetEntries()));
 
-      // --------------------------- un-corrected ------------------------------
+        c.SaveAs(pngPath);
+        std::cout << "[INFO] wrote 3-D plot → " << pngPath << '\n';
+      };
+
+      /* --------------------------- un-corrected ------------------------ */
       drawWithEntries(hUnc3D,
                       "c3D_unc",
-                      Form("%s/2DPlots/h2_cluster_block_cord_E.png", outDir));
+                      Form("%s/2DPlots/h2_cluster_block_cord_E.png", outDir),
+                      "UNCORRECTED");
 
-      // ----------------------------- corrected -------------------------------
+      /* ----------------------------- corrected -------------------------- */
       drawWithEntries(hCor3D,
                       "c3D_cor",
-                      Form("%s/2DPlots/h2_cluster_block_cord_E_corrected.png", outDir));
-  } // end LEGO block
+                      Form("%s/2DPlots/h2_cluster_block_cord_E_corrected.png", outDir),
+                      "CORRECTED");
+    }
+
 
   // after opening the file …
   TH1F* h_truth_vz = static_cast<TH1F*>( fIn->Get("h_truth_vz") );
@@ -2271,7 +2584,15 @@ void PDCanalysis()
   }
 
     
-  plotAshLogRMS_sideBySide(inFile);
+    // Retrieve the two maps
+    auto bRMSMap  = plotAshLogRMS_sideBySide(inFile);                // RMS-optimised Ash-b
+    auto bPhiMap  = PlotBvaluesVsEnergy(hUnc3D, eEdges,
+                        "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+
+    // Overlay & export
+    PlotBcompare(bRMSMap, bPhiMap,
+                 "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput");
+
     
   std::string chi2Dir = std::string(outDir) + "/QA/Chi2_QA";
   PlotChi2QA(inFile, chi2Dir.c_str());
