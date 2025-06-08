@@ -1757,109 +1757,219 @@ PlotBvaluesVsEnergy(TH3F* hUnc3D,
 }
 
 
-/***************************************************************************
- * PlotChi2QA
- * ----------
- *  • inFile : full path to a ROOT file that contains
- *      h2_chi2_tot_etaPhi      (TH2F)   – all clusters, before χ² cut
- *      h2_chi2_rej_etaPhi      (TH2F)   – clusters rejected by χ² cut
- *      p_chi2_pass_etaPhi      (TProfile2D) – ⟨pass flag⟩ per tower
- *  • outDir : directory where the PNGs will be written (created if absent)
+/***********************************************************************
+ * PlotChi2QA ‑‑ *v2.0* (2025‑06‑08)
  *
- *  The function produces:
- *    (1) Chi2_Total.png        – total-occupancy heat-map
- *    (2) Chi2_Rejected.png     – rejected-occupancy heat-map
- *    (3) Chi2_PassFraction.png – ⟨pass⟩   (profile)   0 … 1
- *    (4) Chi2_RejectFraction.png – 1−⟨pass⟩  for convenience
+ *  Added features
+ *  --------------
+ *   ✓ 2‑D *ratio* map  (rejected / total)  with proper errors
+ *   ✓ 1‑D reject‑fraction vs **η‑tower index**
+ *   ✓ 1‑D reject‑fraction vs **φ‑tower index**
+ *   ✓ Text dump of the   N   worst towers (highest reject frac)
+ *   ✓ Automatic ROOT file with all derived histograms   (<inFile>_Chi2QA.root)
+ *   ✓ Consistent Viridis palette + per‑plot z‑axis ranges
+ *   ✓ Robustness: every arithmetic check guards against 0‑division / NaN
  *
- *  Author: <you>, 2025-06-03
- ***************************************************************************/
+ *  Usage – unchanged
+ *  -----------------
+ *     PlotChi2QA("myJob.root");                  
+ *     PlotChi2QA("myJob.root","/tmp/QA_plots");    // custom directory
+ *
+ **********************************************************************/
 void PlotChi2QA(const char* inFile,
-                const char* outDir = "./Chi2_QA")
+                const char* outDir = "./Chi2_QA",
+                int nWorstToPrint  = 12)        // number of “bad” towers to list
 {
+  /* -- cosmetics ---------------------------------------------------- */
   gStyle->SetOptStat(0);
+  gStyle->SetPalette(kViridis);
+  gStyle->SetNumberContours(255);
+
+  /* create output dir if necessary                                   */
   gSystem->mkdir(outDir, /*recursive=*/true);
 
-  /* ------------------------------------------------------------------ */
-  /* 1) open file & fetch histograms                                    */
-  /* ------------------------------------------------------------------ */
-  std::unique_ptr<TFile> fin( TFile::Open(inFile,"READ") );
+  /* -----------------------------------------------------------------
+   * 1)  open input file and grab the three QA objects
+   * ----------------------------------------------------------------*/
+  std::unique_ptr<TFile> fin(TFile::Open(inFile,"READ"));
   if(!fin || fin->IsZombie()){
       std::cerr << "[Chi2QA]  ERROR – cannot open " << inFile << '\n';
       return;
   }
-  auto* hTot = dynamic_cast<TH2F*>     ( fin->Get("h2_chi2_tot_etaPhi") );
-  auto* hRej = dynamic_cast<TH2F*>     ( fin->Get("h2_chi2_rej_etaPhi") );
-  auto* pPass= dynamic_cast<TProfile2D*>( fin->Get("p_chi2_pass_etaPhi") );
+  auto* hTot  = dynamic_cast<TH2F*    >(fin->Get("h2_chi2_tot_etaPhi"));
+  auto* hRej  = dynamic_cast<TH2F*    >(fin->Get("h2_chi2_rej_etaPhi"));
+  auto* pPass = dynamic_cast<TProfile2D*>(fin->Get("p_chi2_pass_etaPhi"));
 
   if(!hTot || !hRej || !pPass){
-      std::cerr << "[Chi2QA]  ERROR – one or more χ² QA histograms "
-                   "missing in file:\n"
-                << "          " << inFile << '\n';
+      std::cerr << "[Chi2QA]  ERROR – missing χ² histograms in "
+                << inFile << '\n';
       return;
   }
 
-  /* detach from the file so we can close it right away */
+  /* detach so we can close input immediately                         */
   hTot ->SetDirectory(nullptr);
   hRej ->SetDirectory(nullptr);
   pPass->SetDirectory(nullptr);
   fin->Close();
 
-  /* ------------------------------------------------------------------ */
-  /* 2) build reject-fraction TH2F  =  (1 – pass)                       */
-  /* ------------------------------------------------------------------ */
-    // construct an empty TH2D that has exactly the same axes as pPass
+  /* -----------------------------------------------------------------
+   * 2)  build the *ratio* map  (reject / total)
+   *     – TH2D with bin‑per‑bin Clopper–Pearson errors
+   * ----------------------------------------------------------------*/
   TH2D hRejFrac("h_chi2_rejFrac_etaPhi",
-                  "Reject fraction after #chi^{2} cut;"
-                  "Tower #eta index;Tower #varphi index;Reject fraction",
-                  pPass->GetNbinsX(), pPass->GetXaxis()->GetXmin(), pPass->GetXaxis()->GetXmax(),
-                  pPass->GetNbinsY(), pPass->GetYaxis()->GetXmin(), pPass->GetYaxis()->GetXmax());
+                "Reject fraction after #chi^{2} cut;"
+                "Tower #eta index;Tower #varphi index;Reject fraction",
+                hTot->GetNbinsX(), hTot->GetXaxis()->GetXmin(), hTot->GetXaxis()->GetXmax(),
+                hTot->GetNbinsY(), hTot->GetYaxis()->GetXmin(), hTot->GetYaxis()->GetXmax());
 
+  const int nX = hTot->GetNbinsX();
+  const int nY = hTot->GetNbinsY();
 
-  hRejFrac.SetName ("h_chi2_rejFrac_etaPhi");
-  hRejFrac.SetTitle("Reject fraction after #chi^{2} cut;"
-                    "Tower #eta index;Tower #varphi index;Reject fraction");
+  for(int ix=1; ix<=nX; ++ix){
+    for(int iy=1; iy<=nY; ++iy){
+        const double tot = hTot->GetBinContent(ix,iy);
+        const double rej = hRej->GetBinContent(ix,iy);
 
-  const int nX = hRejFrac.GetNbinsX();
-  const int nY = hRejFrac.GetNbinsY();
-  for(int ix=1; ix<=nX; ++ix)
-     for(int iy=1; iy<=nY; ++iy){
-         double pass = pPass->GetBinContent(ix,iy);
-         if(pass<0) pass = 0;          // profile may be empty
-         hRejFrac.SetBinContent(ix,iy, 1.0 - pass);
-     }
+        double frac = (tot>0) ? rej/tot : 0.0;
+        double err  = (tot>0)
+                     ? TEfficiency::ClopperPearson(static_cast<int>(tot),
+                                                   static_cast<int>(rej),
+                                                   0.683,false)  /* upper */
+                       - frac                                /* symmetric ≈ ok */
+                     : 0.0;
 
-  /* colour palette nicer than default */
-  gStyle->SetPalette(kViridis);
+        hRejFrac.SetBinContent(ix,iy, frac);
+        hRejFrac.SetBinError  (ix,iy, err );
+    }
+  }
 
-  /* helper lambda – draw & save one heat-map ------------------------- */
-  auto drawSave = [&](TH2* h,
-                      const char* cname,
-                      const char* png)
+  /* save everything (derived histos, projections…) to a helper ROOT */
+  const std::string qaRoot = std::string(inFile)+"_Chi2QA.root";
+  std::unique_ptr<TFile> fqa(TFile::Open(qaRoot.c_str(),"RECREATE"));
+
+  /* -----------------------------------------------------------------
+   * 3)  1‑D projections  (reject fraction vs η  and  vs φ)
+   * ----------------------------------------------------------------*/
+  auto projFrac = [&](bool alongEta)->TH1D*
   {
-      TCanvas c(cname,cname,1000,760);
-      c.SetRightMargin(0.14);
-      h->Draw("COLZ");
-      c.SaveAs(Form("%s/%s",outDir,png));
-      std::cout << "[Chi2QA] wrote  " << outDir << '/' << png << '\n';
+      const char* name  = alongEta ? "hChi2_RejFrac_vsEta" : "hChi2_RejFrac_vsPhi";
+      const char* title = alongEta ? "Reject fraction vs tower #eta index"
+                                   : "Reject fraction vs tower #varphi index";
+      const int   nBins = alongEta ? nX : nY;
+      TH1D* h = new TH1D(name,title,nBins,0,nBins);
+
+      for(int i=1;i<=nBins;++i){
+          double tot = 0, rej = 0;
+          for(int j=1;j<=(alongEta?nY:nX);++j){
+              int ix = alongEta? i : j;
+              int iy = alongEta? j : i;
+              tot += hTot->GetBinContent(ix,iy);
+              rej += hRej->GetBinContent(ix,iy);
+          }
+          double frac = (tot>0)? rej/tot : 0.;
+          h->SetBinContent(i,frac);
+          /* binomial error */
+          double err = (tot>0)? std::sqrt(frac*(1-frac)/tot) : 0.;
+          h->SetBinError  (i,err);
+      }
+      return h;
   };
 
-  drawSave(hTot , "cChi2Tot" , "Chi2_Total.png");
-  drawSave(hRej , "cChi2Rej" , "Chi2_Rejected.png");
-  drawSave(pPass, "cChi2Pass", "Chi2_PassFraction.png");
-  drawSave(&hRejFrac,"cChi2Frac","Chi2_RejectFraction.png");
+  TH1D* hFracVsEta = projFrac(true );
+  TH1D* hFracVsPhi = projFrac(false);
 
-  /* ------------------------------------------------------------------ */
-  /* 3) global numbers                                                  */
-  /* ------------------------------------------------------------------ */
+  /* -----------------------------------------------------------------
+   * 4)  top‑N worst towers (highest reject‑fraction)
+   * ----------------------------------------------------------------*/
+  struct TowerStat { int iEta, iPhi; double frac, tot; };
+  std::vector<TowerStat> vStat;
+  vStat.reserve(nX*nY);
+  for(int ix=1;ix<=nX;++ix)
+    for(int iy=1;iy<=nY;++iy){
+        const double tot = hTot->GetBinContent(ix,iy);
+        if(tot<1) continue;                 // skip empty towers
+        const double frac = hRejFrac.GetBinContent(ix,iy);
+        vStat.push_back({ix-1, iy-1, frac, tot});
+    }
+  std::sort(vStat.begin(), vStat.end(),
+            [](auto& a, auto& b){ return a.frac>b.frac; });
+
+  std::cout << "\n[Chi2QA]  Worst " << nWorstToPrint
+            << " towers by reject fraction:\n"
+            << "  η  φ   frac   (total clusters)\n"
+            << "  -- --- ------ ----------------\n";
+  for(int i=0;i<std::min(nWorstToPrint,(int)vStat.size());++i){
+      const auto& t = vStat[i];
+      std::cout << std::setw(3) << t.iEta
+                << std::setw(4) << t.iPhi
+                << std::setw(8) << std::fixed << std::setprecision(3) << t.frac
+                << "   (" << t.tot << ")\n";
+  }
+  std::cout << '\n';
+
+  /* -----------------------------------------------------------------
+   * 5)  drawing helpers
+   * ----------------------------------------------------------------*/
+  auto drawSave2D = [&](TH2* h,const char* cname,const char* png,
+                        double zMin=0,double zMax=0)
+  {
+      if(zMin<zMax){ h->SetMinimum(zMin); h->SetMaximum(zMax); }
+      TCanvas c(cname,cname,1000,760);
+      c.SetRightMargin(0.15);
+      h->Draw("COLZ");
+      c.SaveAs(Form("%s/%s",outDir,png));
+      if(fqa) { c.Write(); }               // save canvas into QA root
+  };
+  auto drawSave1D = [&](TH1* h,const char* cname,const char* png,
+                        const char* yTitle)
+  {
+      h->SetYTitle(yTitle);
+      h->SetMarkerStyle(kFullCircle);
+      h->SetMarkerSize(0.8);
+      TCanvas c(cname,cname,1000,600);
+      h->Draw("E1");
+      c.SaveAs(Form("%s/%s",outDir,png));
+      if(fqa) { c.Write(); }
+  };
+
+  /* -----------------------------------------------------------------
+   * 6)  make & store plots
+   * ----------------------------------------------------------------*/
+  drawSave2D(hTot ,  "cChi2Tot" ,  "Chi2_Total.png"        );
+  drawSave2D(hRej ,  "cChi2Rej" ,  "Chi2_Rejected.png"     );
+  drawSave2D(pPass,  "cChi2Pass",  "Chi2_PassFraction.png", 0,1);
+  drawSave2D(&hRejFrac,"cChi2Frac","Chi2_RejectFraction.png",0,1);
+
+  drawSave1D(hFracVsEta,"cFracVsEta","Chi2_RejFrac_vsEta.png",
+              "Reject fraction");
+  drawSave1D(hFracVsPhi,"cFracVsPhi","Chi2_RejFrac_vsPhi.png",
+              "Reject fraction");
+
+  /* -----------------------------------------------------------------
+   * 7)  global numbers
+   * ----------------------------------------------------------------*/
   const double totEntries = hTot->GetEntries();
   const double rejEntries = hRej->GetEntries();
-  std::cout << "\n[Chi2QA]  GLOBAL SUMMARY\n"
-            << "          clusters before χ²  : " << totEntries << '\n'
-            << "          clusters rejected   : " << rejEntries << '\n'
+  std::cout << "[Chi2QA]  GLOBAL SUMMARY  (all towers)\n"
+            << "          clusters before χ²  : " << totEntries  << '\n'
+            << "          clusters rejected   : " << rejEntries  << '\n'
             << "          overall reject frac : "
             << (totEntries>0 ? rejEntries/totEntries : 0) << "\n\n";
+
+  /* write derived histograms to QA ROOT file ------------------------ */
+  if(fqa){
+      hTot      ->Write();
+      hRej      ->Write();
+      pPass     ->Write();
+      hRejFrac  .Write();
+      hFracVsEta->Write();
+      hFracVsPhi->Write();
+      fqa->Close();
+      std::cout << "[Chi2QA]  all QA histograms saved to "
+                << qaRoot << '\n';
+  }
 }
+
 
 // ---------------------------------------------------------------------------
 //  Truth-vertex-Z spectrum  *with verbose QA*
@@ -2200,107 +2310,190 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
     for(auto* obj:keep) delete obj;
 }
 
-/* ===================================================================== *
- *  PlotBcompare … overlay bopt(RMS) with bφ-fit for every E slice
- *
- *  INPUT:
- *      bRMS   – map< Ecentre , bopt >  from  plotAshLogRMS_sideBySide  (RMS)
- *      bPhi   – map< Ecentre , bφ   >  from  PlotBvaluesVsEnergy       (fit)
- *      outDir – directory that will receive  b_compare_RMS_vs_fit.png
- *
- *  OUTPUT:   <outDir>/b_compare_RMS_vs_fit.png
- *            (red ▢ = RMS optimum, slightly left-jittered;
- *             blue ○ = φ-fit,       slightly right-jittered)
- * ===================================================================== */
+
 void PlotBcompare(const std::map<double,double>& bRMS,
                   const std::map<double,double>& bPhi,
-                  const char*                    outDir)
+                  const char*                    outDir = "./Bcompare",
+                  /* optional – same keys as bRMS/bPhi, 0 ⇒ ignore */
+                  const std::map<double,double>& eRMS  = {},
+                  const std::map<double,double>& ePhi  = {})
 {
-  /* ---------- basic sanity ------------------------------------------ */
+  /* 0) house‑keeping -------------------------------------------------- */
+  gStyle->SetOptStat(0);
+  gStyle->SetPalette(kViridis);
+  gSystem->mkdir(outDir, /*recursive=*/true);
+
   if (bRMS.empty() || bPhi.empty())
-  {
-    std::cerr << "[PlotBcompare] one (or both) maps are empty – skip.\n";
-    return;
-  }
+  { std::cerr << "[PlotBcompare] : one (or both) maps are empty – skip\n"; return; }
 
-  /* ---------- collect common energy slices -------------------------- */
-  std::vector<double>   eCtr;   // common E-centres
-  std::vector<double>   vRMS;   // bopt (RMS)
-  std::vector<double>   vPhi;   // bφ  (fit)
-
+  /* 1) collect COMMON energy centres --------------------------------- */
+  std::vector<double> eCtr, vRMS, vPhi, sRMS, sPhi;   // values & (optional) σ
   for (const auto& kv : bRMS)
   {
-    auto it = bPhi.find(kv.first);
-    if (it == bPhi.end())                              continue; // not common
-    if (!std::isfinite(kv.second) || !std::isfinite(it->second)) continue;
+    auto itP = bPhi.find(kv.first);
+    if (itP == bPhi.end()) continue;                        // not common
+    if (!std::isfinite(kv.second) || !std::isfinite(itP->second)) continue;
 
     eCtr.push_back(kv.first);
     vRMS.push_back(kv.second);
-    vPhi.push_back(it->second);
-  }
+    vPhi.push_back(itP->second);
 
-  if (eCtr.empty())
+    /* uncertainties – if absent store 0 */
+    auto itRe = eRMS.find(kv.first);
+    auto itPe = ePhi.find(kv.first);
+    sRMS.push_back( (itRe!=eRMS.end()) ? itRe->second : 0.0 );
+    sPhi.push_back( (itPe!=ePhi.end()) ? itPe->second : 0.0 );
+  }
+  if (eCtr.size() < 2)
+  { std::cerr << "[PlotBcompare] : <2 common points – nothing to plot\n"; return; }
+
+  /* 2) build point graphs (+ jitter) --------------------------------- */
+  const double dE  = (eCtr.back() - eCtr.front()) /
+                     std::max<std::size_t>(1, eCtr.size()-1);
+  const double dx  = 0.07*dE;          // 7 % of mean spacing → separates markers
+
+  auto gRMS = std::make_unique<TGraphErrors>(eCtr.size());
+  auto gPhi = std::make_unique<TGraphErrors>(eCtr.size());
+
+  for (std::size_t i=0;i<eCtr.size();++i)
   {
-    std::cerr << "[PlotBcompare] no common energy bins found – skip.\n";
-    return;
+    gRMS->SetPoint     (i, eCtr[i]-dx, vRMS[i]);
+    gPhi->SetPoint     (i, eCtr[i]+dx, vPhi[i]);
+    gRMS->SetPointError(i, 0., sRMS[i]);
+    gPhi->SetPointError(i, 0., sPhi[i]);
   }
+  gRMS->SetMarkerStyle(24); gRMS->SetMarkerSize(1.2);
+  gRMS->SetMarkerColor(kRed+1);  gRMS->SetLineColor(kRed+1);
+  gPhi->SetMarkerStyle(20); gPhi->SetMarkerSize(1.2);
+  gPhi->SetMarkerColor(kBlue+1); gPhi->SetLineColor(kBlue+1);
 
-  /* ---------- compute a gentle horizontal jitter -------------------- *
-   * We shift RMS left and φ-fit right by ~7 % of the median bin width. */
-  double dE     = 0.0;
-  for (std::size_t i = 1; i < eCtr.size(); ++i) dE += (eCtr[i] - eCtr[i-1]);
-  dE           /= std::max<std::size_t>(1, eCtr.size() - 1);        // median≈mean
-  const double dx = 0.07 * dE;                                      // ±7 %
+  /* cubic‑spline curves ---------------------------------------------- */
+  auto sR = std::make_unique<TSpline3>("sRMS", gRMS.get());
+  auto sP = std::make_unique<TSpline3>("sPhi", gPhi.get());
+  sR->SetLineColor(kRed+1);   sR->SetLineWidth(2);
+  sP->SetLineColor(kBlue+1);  sP->SetLineWidth(2);
 
-  /* ---------- fill the two graphs ----------------------------------- */
-  auto* gRMS = new TGraph(static_cast<int>(eCtr.size()));
-  auto* gPhi = new TGraph(static_cast<int>(eCtr.size()));
-
-  for (std::size_t i = 0; i < eCtr.size(); ++i)
+  /* 3) sample splines for ratio graph -------------------------------- */
+  const int nFine = 300;
+  auto gDiff = std::make_unique<TGraph>(nFine);
+  for (int i=0;i<nFine;++i)
   {
-    gRMS->SetPoint(static_cast<int>(i), eCtr[i] - dx, vRMS[i]);     // ← left
-    gPhi->SetPoint(static_cast<int>(i), eCtr[i] + dx, vPhi[i]);     // → right
+    const double x   = eCtr.front() + (eCtr.back()-eCtr.front())*i/(nFine-1);
+    const double yR  = sR->Eval(x);
+    const double yP  = sP->Eval(x);
+    gDiff->SetPoint(i, x, (yP-yR)/yR);                  // relative diff
+  }
+  gDiff->SetLineColor(kBlack); gDiff->SetLineWidth(2);
+
+  /* 3b) global statistics ------------------------------------------- */
+  double sum=0., sum2=0., maxAbs=0.;
+  for (int i=0;i<gDiff->GetN();++i)
+  {
+    double x,d; gDiff->GetPoint(i,x,d);
+    sum+=d; sum2+=d*d; if (std::fabs(d)>maxAbs) maxAbs=std::fabs(d);
+  }
+  const double mean = sum/gDiff->GetN();
+  const double rms  = std::sqrt(sum2/gDiff->GetN() - mean*mean);
+
+  /* chi² using per‑point variances if supplied */
+  double chi2=0.; std::size_t ndf=0;
+  for (std::size_t i=0;i<eCtr.size();++i)
+  {
+    const double sigma = (sRMS[i]>0? sRMS[i] : vRMS[i]*0.02);   // 2 % default
+    const double diff  = vPhi[i]-vRMS[i];
+    chi2   += diff*diff / (sigma*sigma);
+    ++ndf;
   }
 
-  gRMS->SetMarkerStyle(24); gRMS->SetMarkerColor(kRed+1);   gRMS->SetLineColor(kRed+1);
-  gPhi->SetMarkerStyle(20); gPhi->SetMarkerColor(kBlue+1);  gPhi->SetLineColor(kBlue+1);
+  /* 3c) print a per‑slice table to stdout ---------------------------- */
+  std::cout << "\n┌──────────────────────────────────────────────────────────┐\n"
+            << "│  b‑comparison per energy slice                           │\n"
+            << "├──────┬──────────┬──────────┬──────────┬────────┬────────┤\n"
+            << "│  E   │  b_opt   │  b_phi   │  Δb/b [%]│  σ_R  │  σ_Φ  │\n"
+            << "├──────┼──────────┼──────────┼──────────┼────────┼────────┤\n";
+  for (std::size_t i=0;i<eCtr.size();++i)
+  {
+    printf("│%6.1f│%10.4f│%10.4f│%9.2f │%7.3f│%7.3f│\n",
+           eCtr[i], vRMS[i], vPhi[i], 100.*(vPhi[i]-vRMS[i])/vRMS[i],
+           sRMS[i], sPhi[i]);
+  }
+  std::cout << "└──────┴──────────┴──────────┴──────────┴────────┴────────┘\n\n";
 
-    /* ---------- axis frame & ranges ----------------------------------- */
-    const double yMin = std::min( *std::min_element(vRMS.begin(),vRMS.end()),
-                                  *std::min_element(vPhi.begin(),vPhi.end()) );
-    const double yMax = std::max( *std::max_element(vRMS.begin(),vRMS.end()),
-                                  *std::max_element(vPhi.begin(),vPhi.end()) );
+  /* 4) canvas & pads -------------------------------------------------- */
+  TCanvas c("cBcompare","b comparison",900,950);
+  c.SetTicks();
 
-    // ---------------------------------  ONLY THIS LINE CHANGED  -------------------
-    TH2F* frame = new TH2F("frameB",
-        ";E_{slice centre}  [GeV];  b  (local tower units)",
-        100, eCtr.front() - dE,  30.0,          //   ←  upper x-limit fixed at 30
-        100, 0.90*yMin,          1.10*yMax);
-  frame->SetStats(0);
+  /* ----------- y‑range via median ±4×MAD to ignore one crazy point -- */
+  std::vector<double> all=vRMS; all.insert(all.end(),vPhi.begin(),vPhi.end());
+  std::nth_element(all.begin(), all.begin()+all.size()/2, all.end());
+  const double med  = all[all.size()/2];
+  std::vector<double> dev; dev.reserve(all.size());
+  for (double v:all) dev.push_back(std::fabs(v-med));
+  std::nth_element(dev.begin(), dev.begin()+dev.size()/2, dev.end());
+  const double MAD  = dev[dev.size()/2];
+  const double yLo  = med-4*MAD, yHi=med+4*MAD;
 
-  /* ---------- drawing canvas ---------------------------------------- */
-  TCanvas c("cCompareB","b_{opt} (RMS)  vs  b_{#varphi} (fit)", 900, 650);
-  c.SetLeftMargin(0.13);
-  c.SetBottomMargin(0.18);          // ↑ extra room for x-axis label
-  c.SetRightMargin(0.04);
+  /* top pad ----------------------------------------------------------- */
+  TPad pTop("pTop","",0,0.32,1,1);
+  pTop.SetLeftMargin(0.14); pTop.SetBottomMargin(0.02);
+  pTop.SetGridy(); pTop.Draw(); pTop.cd();
 
-  frame->GetXaxis()->SetTitleOffset(1.25);  // ↑ pull the title upward
-  frame->Draw();
-  gRMS->Draw("P SAME");
-  gPhi->Draw("P SAME");
+  TH2F frame("frame",";E_{slice centre}  [GeV];b  (tower units)",
+             100, eCtr.front()-dE, eCtr.back()+dE,
+             100, yLo, yHi);
+  frame.GetXaxis()->SetLabelSize(0);
+  frame.Draw();
 
-  TLegend leg(0.7,0.78,0.9,0.90);
-  leg.SetBorderSize(0);  leg.SetFillStyle(0);  leg.SetTextSize(0.035);
-  leg.AddEntry(gRMS,"Ash  b_{opt}  (RMS)","lp");
-  leg.AddEntry(gPhi,"b_{#varphi}  from asinh fit","lp");
+  sR ->Draw("CSAME");  sP ->Draw("CSAME");
+  gRMS->Draw("P SAME"); gPhi->Draw("P SAME");
+
+  /* statistics box ---------------------------------------------------- */
+  TLatex tl; tl.SetNDC(); tl.SetTextSize(0.035);
+  tl.DrawLatex(0.16,0.85,Form("#LT#delta#GT = %+5.2f %%",100.*mean));
+  tl.DrawLatex(0.16,0.80,Form("RMS(#delta) = %.2f %%",100.*rms));
+  tl.DrawLatex(0.16,0.75,Form("#chi^{2}/ndf = %.2f / %zu = %.2f",
+                               chi2, ndf, chi2/ndf));
+  tl.DrawLatex(0.16,0.70,Form("max |#delta| = %.2f %%",100.*maxAbs));
+
+  TLegend leg(0.58,0.78,0.88,0.92);
+  leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.032);
+  leg.AddEntry(gRMS.get(),"b_{opt} from RMS","lp");
+  leg.AddEntry(gPhi.get(),"b_{#varphi} from asinh fit","lp");
+  if (sRMS.front()>0 || sPhi.front()>0)
+      leg.AddEntry((TObject*)nullptr,"error bars = 1#sigma","");
   leg.Draw();
 
-  /* ---------- export ------------------------------------------------- */
-  TString outPNG = TString(outDir) + "/b_compare_RMS_vs_fit.png";
-  c.SaveAs(outPNG);
-  std::cout << "[PlotBcompare] wrote " << outPNG << '\n';
+  /* bottom pad -------------------------------------------------------- */
+  c.cd();
+  TPad pBot("pBot","",0,0,1,0.32);
+  pBot.SetLeftMargin(0.14); pBot.SetTopMargin(0.02);
+  pBot.SetBottomMargin(0.30); pBot.Draw(); pBot.cd();
+  pBot.SetGridy();
 
-  delete frame;  delete gRMS;  delete gPhi;
+  TH2F f2("f2",";E_{slice centre}  [GeV];(b_{#varphi}-b_{opt}) / b_{opt}",
+          100, eCtr.front()-dE, eCtr.back()+dE,
+          100, -0.25, 0.25);
+  f2.Draw();
+
+  /* ±5 % guide band */
+  TBox band(eCtr.front()-dE, -0.05, eCtr.back()+dE, 0.05);
+  band.SetFillStyle(3004); band.SetFillColor(kGray+1); band.Draw("same");
+
+  gDiff->Draw("L SAME");
+
+  /* 5) export --------------------------------------------------------- */
+  const TString png = TString::Format("%s/b_compare_RMS_vs_fit.png",outDir);
+  c.SaveAs(png);
+  std::cout << "[PlotBcompare]  wrote  " << png << '\n';
+
+  /* 6) save ROOT objects --------------------------------------------- */
+  TFile fout(Form("%s/b_compare.root",outDir),"RECREATE");
+  gRMS ->Write("gRMS");
+  gPhi ->Write("gPhi");
+  gDiff->Write("gRelDiff");
+  sR   ->Write("sRMS");
+  sP   ->Write("sPhi");
+  fout.Close();
 }
 
 

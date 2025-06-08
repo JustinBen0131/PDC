@@ -401,11 +401,13 @@ void Fun4All_PDC(int nevents = 0,
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
   pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
-  pdc->UseSurveyGeometry(true);
+  pdc->UseSurveyGeometry(false);
   // optionally specify a different tag / timestamp
   // pdc->SetCDBTag("MDC3");
   // pdc->SetTimeStamp(runNumber);
     
+  //pdc->setBinningMode( EBinningMode::kRange    );   // Eedges uses as bin RANGES
+  pdc->setBinningMode( EBinningMode::kDiscrete );   // Eedges used DISCRETLEY
   pdc->Verbosity(3);
   se->registerSubsystem(pdc);
 

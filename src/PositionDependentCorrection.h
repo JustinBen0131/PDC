@@ -219,7 +219,11 @@ class PositionDependentCorrection : public SubsysReco
   //------------------------------------------------------------------
   EBinningMode m_binningMode { EBinningMode::kRange };  ///< current mode
   static constexpr float kDiscreteTol = 0.25f;          ///< |E‑Ecentre| max (GeV)
-    
+  // ------------------------------------------------------------------
+  //  Discrete‑mode tolerance  (window ≃ Nσ · σE , but never < kTolMin)
+  // ------------------------------------------------------------------
+  static constexpr double kTolFactor = 1.5;   ///< Nσ  (1–2 is common)
+  static constexpr double kTolMinGeV = 0.20;  ///< lower bound [GeV]
     
   // ------------------------------------------------------------------
   // Human‑readable histogram tag for slice i

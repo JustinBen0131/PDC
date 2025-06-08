@@ -117,30 +117,60 @@ PositionDependentCorrection::~PositionDependentCorrection()
 }
 
 
+// ===================================================================
+// Barrel EMCal energy resolution  (≈10%/√E ⊕ 2%)
+// Returned value has the same units as E.
+// ===================================================================
+static inline double sigmaE(double E)
+{
+  const double stoch    = 0.10 / std::sqrt(E);   // 10%/√E
+  const double constant = 0.02;                  // 2 %
+  return E * std::hypot(stoch, constant);        // quadrature
+}
+
 // ------------------------------------------------------------------
 // (helper) translate a photon/cluster energy into a slice index
 // ------------------------------------------------------------------
 int PositionDependentCorrection::getEnergySlice(float E) const
 {
-  constexpr int nBins = N_Ebins + 1;              // 9 edges = 8 slices
+  const int nSlices = N_Ebins;          // 8 slices
 
+  /* -------------------------------------------------------------
+   * 1)  Regular RANGE mode  (unchanged)
+   * ----------------------------------------------------------- */
   if (m_binningMode == EBinningMode::kRange)
   {
-    for (int i = 0; i < nBins - 1; ++i)
-      if (E >= eEdge[i] && E < eEdge[i+1]) return i;
-    return -1;                                    // outside table
+    for (int i = 0; i < nSlices; ++i)
+      if (E >= eEdge[i] && E < eEdge[i + 1]) return i;
+    return -1;                               // outside table
   }
-  else                                            // DISCRETE
+
+  /* -------------------------------------------------------------
+   * 2)  DISCRETE mode  (resolution‑scaled window)
+   * ----------------------------------------------------------- */
+  int    bestIdx  = -1;
+  double bestDiff = 1e9;
+
+  for (int i = 0; i < nSlices; ++i)
   {
-    int    bestIdx  = -1;
-    double bestDiff = 1e99;
-    for (int i = 0; i < nBins - 1; ++i)
-    {
-      double diff = std::fabs(E - eEdge[i]);      // distance to centre
-      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-    }
-    return (bestDiff < kDiscreteTol) ? bestIdx : -1;
+    const double diff = std::fabs(E - eEdge[i]);   // centre distance
+    if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
   }
+
+  /* dynamic tolerance:  max( Nσ·σ_E , floor ) */
+  const double dynTol =
+      std::max(kTolFactor * sigmaE(eEdge[bestIdx]), kTolMinGeV);
+
+  /* optional runtime printout to check efficiency */
+  if (Verbosity() > 2 && m_binningMode == EBinningMode::kDiscrete)
+    std::cout << "[getEnergySlice]  E=" << E
+              << "  centre=" << eEdge[bestIdx]
+              << "  diff="   << bestDiff
+              << "  tol="    << dynTol
+              << "  -> "     << (bestDiff < dynTol ? "ACCEPT" : "REJECT")
+              << '\n';
+
+  return (bestDiff < dynTol) ? bestIdx : -1;
 }
 
 
