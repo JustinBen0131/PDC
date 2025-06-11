@@ -24,6 +24,7 @@
 #include <fstream>
 #include <vector>
 #include <utility>
+#include <cmath>
 
 /**
  * \brief Toggle: If isFirstPass=false, we overlay corrected histograms.
@@ -1037,9 +1038,13 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
             TFitResultPtr r = vPhiUnc.back()->Fit(&trial,"RQL0S","",-0.5,0.5);
             if(!r.Get() || !r->IsValid()) continue;
             if(r->Chi2() < bestChi2){
-                bestChi2=r->Chi2(); bestB=trial.GetParameter(1); bestNdf=r->Ndf();
+                bestChi2 = r->Chi2();
+                bestNdf  = r->Ndf();
+                best.val = trial.GetParameter(1);
+                best.err = trial.GetParError(1);
+                
                 bestFit = std::make_unique<TF1>(trial);
-                bestFit->SetName(Form("bestF_phi_E%d",i));
+                bestFit->SetName(Form("bestF_phi_E%d", i));
             }
         }
 
@@ -1089,8 +1094,8 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         tl.DrawLatex(0.88,0.85,Form("Uncorr: %.0f",nUnc));
         if(hCorRaw) tl.DrawLatex(0.88,0.82,Form("Corr: %.0f",nCor));
 
-        if(bOut.is_open() && bestB>0)
-            bOut << Form("PHI [%.1f,%.1f)  %.6f\n",eLo,eHi,bestB);
+        if (bOut.is_open() && best.val>0)
+            bOut << Form("PHI [%.1f,%.1f) %.6f\n",eLo,eHi,best.val);
     } // end φ loop
 
     cFitsPhi.SaveAs(Form("%s/LocalPhiFits_4by2.png",outDir));
@@ -1134,7 +1139,8 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         trial.SetParLimits(0,1e-9,1e9);
         trial.SetParLimits(1,1e-5,2.0);
 
-        double bestChi2=1e50,bestB=0.; int bestNdf=0;
+        double bestChi2 = 1e50;   int bestNdf = 0;
+        BRes   best;                    // <-- declare THE SAME STRUCT here
         std::unique_ptr<TF1> bestFit;
 
         for(auto g : {std::pair{0.1,0.10}, {0.2,0.14},
@@ -1144,9 +1150,13 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
             TFitResultPtr r = vEtaUnc.back()->Fit(&trial,"RQL0S","",-0.5,0.5);
             if(!r.Get() || !r->IsValid()) continue;
             if(r->Chi2()<bestChi2){
-                bestChi2=r->Chi2(); bestB=trial.GetParameter(1); bestNdf=r->Ndf();
-                bestFit=std::make_unique<TF1>(trial);
-                bestFit->SetName(Form("bestF_eta_E%d",i));
+                bestChi2 = r->Chi2();
+                bestNdf  = r->Ndf();
+                best.val = trial.GetParameter(1);
+                best.err = trial.GetParError(1);
+                
+                bestFit = std::make_unique<TF1>(trial);
+                bestFit->SetName(Form("bestF_eta_E%d", i));
             }
         }
 
@@ -1183,19 +1193,19 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         lg.AddEntry(vEtaUnc.back().get(),"Uncorrected","lp");
         if(hCorRaw) lg.AddEntry(hCorRaw,"Corrected","lp");
         if(bestFit) lg.AddEntry(bestFit.get(),
-                                Form("asinh fit (b=%.3g)",bestB),"l");
+                                Form("asinh fit (b=%.3g)",best.val),"l");
         lg.Draw();
 
         TLatex tl; tl.SetNDC(); tl.SetTextSize(0.042);
-        tl.DrawLatex(0.14,0.84,Form("b = %.3g",bestB));
+        tl.DrawLatex(0.14,0.84,Form("b = %.3g #pm %.3g",best.val,best.err));
         tl.DrawLatex(0.14,0.76,Form("#chi^{2}_{LL}/NDF = %.2f",
                         bestNdf>0? bestChi2/bestNdf : 0.));
         tl.SetTextAlign(32);
         tl.DrawLatex(0.88,0.85,Form("Uncorr: %.0f",nUnc));
         if(hCorRaw) tl.DrawLatex(0.88,0.82,Form("Corr: %.0f",nCor));
 
-        if(bOut.is_open() && bestB>0)
-            bOut << Form("ETA [%.1f,%.1f)  %.6f\n",eLo,eHi,bestB);
+        if(bOut.is_open() && best.val>0)
+            bOut << Form("ETA [%.1f,%.1f)  %.6f\n", eLo, eHi, best.val);
     } // end η loop
 
     cFitsEta.SaveAs(Form("%s/LocalEtaFits_4by2.png",outDir));
@@ -1513,29 +1523,31 @@ void OverlayUncorrPhiEta(TH3F*  hUnc3D,
         trial.SetParNames("Norm", "b");
         trial.SetParLimits(0, 1e-9, 1e9);
         trial.SetParLimits(1, 1e-5, 2.0);
+        double bestChi2 = 1e50;
+        BRes   best;                 // <-- declare a local result holder
+        TF1*   bestFit = nullptr;
 
-        double bestChi2 = 1e50, bestB = 0.0;
-        TF1*   bestFit  = nullptr;
-
-        for(auto seed : { std::pair{0.1,0.10}, {0.2,0.14},
-                          std::pair{0.3,0.20}, {0.5,0.08}})
+        for (const auto& seed : std::initializer_list<std::pair<double,double>>
+                                {{0.1,0.10},{0.2,0.14},{0.3,0.20},{0.5,0.08}})
         {
             trial.SetParameters(seed.first, seed.second);
-            TFitResultPtr r = h->Fit(&trial, "RQL0S", "", -0.5, 0.5);
+            TFitResultPtr r = h->Fit(&trial,"RQL0S","",-0.5,0.5);
             if(!r.Get() || !r->IsValid()) continue;
+
             if(r->Chi2() < bestChi2){
                 bestChi2 = r->Chi2();
                 best.val = trial.GetParameter(1);
                 best.err = trial.GetParError(1);
+
                 if(bestFit) delete bestFit;
-                bestFit   = new TF1(trial);
+                bestFit = new TF1(trial);
             }
         }
         if(bestFit){
             bestFit->SetLineColor(col);
             bestFit->SetLineWidth(2);
         }
-        return {bestB, bestFit};
+        return {best.val, bestFit};
     };
 
     //----------------------------------------------------------------------
@@ -1660,8 +1672,6 @@ PlotBvaluesVsEnergy(TH3F* hUnc3D,
                     const std::vector<std::pair<double,double>>& eEdges,
                     const char* outDir)
 {
-    std::map<double,double> bMap;
-    std::vector<double> vX, vBphi, vBeta, vBphiErr, vBetaErr;
     
     if(!hUnc3D){
         std::cerr << "[bPlot] null hUnc3D – abort\n";
@@ -1672,33 +1682,35 @@ PlotBvaluesVsEnergy(TH3F* hUnc3D,
 
     const int N_E = static_cast<int>(eEdges.size());
 
-    std::vector<double> vX, vBphi, vBeta;    // store results
+    std::vector<double> vX, vBphi, vBeta, vBphiErr, vBetaErr;
     vX.reserve(N_E);  vBphi.reserve(N_E);  vBeta.reserve(N_E);
+    vBphiErr.reserve(N_E);  vBetaErr.reserve(N_E);
 
     // ───────────────────────────────────────────────────────────────────
     // helper: identical to the fitter used elsewhere
-    // ───────────────────────────────────────────────────────────────────
-    auto fitAsinh = [&](TH1D* h)->double
+    auto fitAsinh = [&](TH1D* h)->BRes
     {
         TF1 trial("trial", asinhModel, -0.5, 0.5, 2);
-        trial.SetParNames("Norm", "b");
-        trial.SetParLimits(0, 1e-9, 1e9);
-        trial.SetParLimits(1, 1e-5, 2.0);
+        trial.SetParNames("Norm","b");
+        trial.SetParLimits(0,1e-9,1e9);
+        trial.SetParLimits(1,1e-5,2.0);
 
-        double bestChi2 = 1e50, bestB = 0.0;
+        double bestChi2 = 1e50;
+        BRes   best;                   // {val = NaN, err = 0}
 
-        for(auto seed : { std::pair{0.1,0.10}, {0.2,0.14},
-                          std::pair{0.3,0.20}, {0.5,0.08}})
+        for(const auto& seed : std::initializer_list<std::pair<double,double>>
+                               {{0.1,0.10},{0.2,0.14},{0.3,0.20},{0.5,0.08}})
         {
             trial.SetParameters(seed.first, seed.second);
-            TFitResultPtr r = h->Fit(&trial, "RQL0S", "", -0.5, 0.5);
+            TFitResultPtr r = h->Fit(&trial,"RQL0S","",-0.5,0.5);
             if(!r.Get() || !r->IsValid()) continue;
             if(r->Chi2() < bestChi2){
                 bestChi2 = r->Chi2();
-                bestB    = trial.GetParameter(1);
+                best.val = trial.GetParameter(1);
+                best.err = trial.GetParError(1);
             }
         }
-        return bestB;
+        return best;
     };
 
     std::vector<TObject*> keepAlive;        // stop auto-deletion
@@ -2581,7 +2593,7 @@ void PDCanalysis()
     
   gStyle->SetOptStat(0);
     
-  //PositionDep_sim_ALL_withDeltaPhiOffset_normalNrgBins.root
+  //PositionDep_sim_ALL_discretizedEnergyBins_withDeltaOffset_truthNOTatShowerDepth
   const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_withDeltaPhiOffset_normalNrgBins_truthNOTatShowerDepth.root";
 
   // 2) Open input
