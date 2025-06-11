@@ -9,6 +9,9 @@
 #include <calobase/RawCluster.h>
 #include <cmath>
 #include <TString.h>
+// CLHEP types appear in inline code inside the header
+#include <CLHEP/Vector/ThreeVector.h>   // Hep3Vector
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRec.h"
 
 class Fun4AllHistoManager;
 class PHCompositeNode;
@@ -30,6 +33,7 @@ class TLorentzVector;
 class TRandom3;
 class RawCluster;
 class PositionDependentCorrection : public SubsysReco
+
 {
  public:
   // --------------------------------------------------------------------
@@ -72,13 +76,10 @@ class PositionDependentCorrection : public SubsysReco
     
   void UseSurveyGeometry(bool v = true) { m_useSurveyGeometry = v; }
     
-  /** Two interpretations of the eEdge[] table */
-  enum class EBinningMode { kRange,   ///< current  [Elo,Ehi)   slices
-        kDiscrete ///< new      E ≃ Elo     points
+  enum class EBinningMode { kRange,
+        kDiscrete
   };
     
-    /** Select at run time (defaults to kRange).
-     Call from the Fun4All macro before the first event. */
   void setBinningMode(EBinningMode mode) { m_binningMode = mode; }
   EBinningMode getBinningMode() const    { return m_binningMode; }
     
@@ -159,6 +160,16 @@ class PositionDependentCorrection : public SubsysReco
         const std::vector<int>& tower_phis,
         const std::vector<float>& tower_energies
     );
+    
+    void fillAshLogDy( RawCluster*                     cluster,
+                       const TLorentzVector&           recoPhoton,
+                       const TLorentzVector&           truthPhoton,
+                       const std::pair<float,float>&   blockCord,
+                       int                             blockEtaBin,
+                       const std::vector<int>&         tower_etas,
+                       const std::vector<float>&       tower_energies );
+
+    
     void fillDPhiRawAndCorrected( RawCluster*            cluster,
                                   const TLorentzVector&  recoPhoton,
                                   const TLorentzVector&  truthPhoton,
@@ -166,15 +177,23 @@ class PositionDependentCorrection : public SubsysReco
                                   int   blockPhiBin,
                                   float rawDelPhi /* unused – kept for call-site compatibility */ );
 
-  void fillDEtaRawAndCorrected(
-        const TLorentzVector& recoPhoton,
-        const TLorentzVector& truthPhoton,
-        const std::pair<float,float>& blockCord, // local block coords in [0,1]
-        int blockEtaBin,
-        float delEta
-  );
+    void fillDEtaRawAndCorrected( RawCluster* cluster,
+                                  const TLorentzVector& recoPhoton,
+                                  const TLorentzVector& truthPhoton,
+                                  const std::pair<float,float>& blockCord,
+                                  int  blockEtaBin,
+                                  float vtx_z );
   int  getEnergySlice(float E) const;
     
+  float getAvgEta(const std::vector<int> &toweretas,
+                    const std::vector<float> &towerenergies);
+  float getAvgPhi(const std::vector<int> &towerphis,
+                    const std::vector<float> &towerenergies);
+
+  std::pair<float,float> getBlockCord(const std::vector<int>&   towerEtas,
+                                          const std::vector<int>&   towerPhis,
+                                          const std::vector<float>& towerEs,
+                                          int&                      blkPhiOut);
   // --------------------------------------------------------------------
   // 3) Data members
   // --------------------------------------------------------------------
@@ -222,6 +241,18 @@ class PositionDependentCorrection : public SubsysReco
       for (int i = 0; i < N_Ebins; ++i) hi[i] = static_cast<float>(eEdge[i+1]);
       return hi;
   }();
+    
+  void fillDPhiClusterizerCP( RawCluster*            cluster,
+                              const TLorentzVector&  truthPhoton,
+                              float                  vtx_z,
+                              TH1F*                  h_phi_diff_cpRaw_E[N_Ebins],
+                              TH1F*                  h_phi_diff_cpCorr_E[N_Ebins] );
+
+  void fillDEtaClusterizerCP( RawCluster*            cluster,
+                              const TLorentzVector&  truthPhoton,
+                              float                  vtx_z,
+                              TH1F*                  h_eta_diff_cpRaw_E[N_Ebins],
+                              TH1F*                  h_eta_diff_cpCorr_E[N_Ebins] );
   float m_bValsPhi[N_Ebins]{};
   float m_bValsEta[N_Ebins]{};
   std::vector<double> m_bScan;
@@ -229,8 +260,8 @@ class PositionDependentCorrection : public SubsysReco
   TriggerAnalyzer* trigAna{nullptr};
   TH1F* h_localPhi_corrected[N_Ebins];
   TH1F* h_localEta_corrected[N_Ebins];
-  TH1F* h_phi_diff_raw_E[N_Ebins];         // raw Δφ for each bin
-  TH1F* h_phi_diff_corrected_E[N_Ebins];   // corrected Δφ for each bin
+  TH1F* h_phi_diff_raw_E[N_Ebins];
+  TH1F* h_phi_diff_corrected_E[N_Ebins];
   TH1F* h_eta_diff_raw_E[N_Ebins];
   TH1F* h_eta_diff_corrected_E[N_Ebins];
   TProfile* pr_phi_vs_blockcoord = nullptr;
@@ -359,16 +390,8 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_clus_E_size;
   TH1* h_block_bin;
   bool isSimulation = false;
-
-  float getAvgEta(const std::vector<int> &toweretas,
-                  const std::vector<float> &towerenergies);
-  float getAvgPhi(const std::vector<int> &towerphis,
-                  const std::vector<float> &towerenergies);
-
-  std::pair<float,float> getBlockCord(const std::vector<int>&   towerEtas,
-                                        const std::vector<int>&   towerPhis,
-                                        const std::vector<float>& towerEs,
-                                        int&                      blkPhiOut);
+    
+    
   std::map<std::string, std::string> triggerNameMap = {
     {"MBD N&S >= 1", "MBD_NandS_geq_1"}
   };
