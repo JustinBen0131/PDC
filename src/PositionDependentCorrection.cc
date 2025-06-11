@@ -1389,53 +1389,6 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
   return globalPhi;
 }
 
-
-//============================================================================
-//  φ at shower depth
-//----------------------------------------------------------------------------
-float PositionDependentCorrection::phiAtShowerDepth( float  energy,
-                                                     double rFront,
-                                                     double zFront,
-                                                     float  phiFront,
-                                                     int    ix,        // NEW
-                                                     int    iy         // NEW
-                                                   ) const
-{
-  const double xA = rFront * std::cos(phiFront);
-  const double yA = rFront * std::sin(phiFront);
-
-  float xSD, ySD, zSD;
-  m_bemcRec->CorrectShowerDepth(ix, iy,          // <─ NEW
-                                energy,
-                                xA, yA, zFront,
-                                xSD, ySD, zSD);
-
-  return std::atan2(ySD, xSD);                   // (−π … +π]
-}
-
-//============================================================================
-//  x at shower depth (cm)
-//----------------------------------------------------------------------------
-double PositionDependentCorrection::xAtShowerDepth( float  energy,
-                                                    double rFront,
-                                                    double zFront,
-                                                    float  phiFront,
-                                                    int    ix,         // NEW
-                                                    int    iy          // NEW
-                                                  ) const
-{
-  const double xA = rFront * std::cos(phiFront);
-  const double yA = rFront * std::sin(phiFront);
-
-  float xSD, ySD, zSD;
-  m_bemcRec->CorrectShowerDepth(ix, iy,          // <─ NEW
-                                energy,
-                                xA, yA, zFront,
-                                xSD, ySD, zSD);
-
-  return static_cast<double>(xSD);
-}
-
 // ----------------------------------------------------------------------------
 float PositionDependentCorrection::convertBlockToGlobalEta(int block_eta_bin,
                                                            float localEta)
@@ -1461,6 +1414,82 @@ float PositionDependentCorrection::convertBlockToGlobalEta(int block_eta_bin,
   return globalEta;
 }
 
+
+//============================================================================
+//  φ at shower depth
+//----------------------------------------------------------------------------
+float PositionDependentCorrection::phiAtShowerDepth( float  energy,
+                                                     double rFront,
+                                                     double zFront,
+                                                     float  phiFront,
+                                                     int    ix,        // NEW
+                                                     int    iy         // NEW
+                                                   ) const
+{
+  const double xA = rFront * std::cos(phiFront);
+  const double yA = rFront * std::sin(phiFront);
+
+  float xSD, ySD, zSD;
+  m_bemcRec->CorrectShowerDepth(ix, iy,          // <─ NEW
+                                energy,
+                                xA, yA, zFront,
+                                xSD, ySD, zSD);
+
+  return std::atan2(ySD, xSD);                   // (−π … +π]
+}
+
+//============================================================================
+//  η at shower depth  (vertex‑aware)
+//----------------------------------------------------------------------------
+float PositionDependentCorrection::etaAtShowerDepth( float   energy,
+                                                     double  rFront,
+                                                     double  zFront,
+                                                     float   phiFront,
+                                                     int     ix,          // fine‑φ
+                                                     int     iy,          // fine‑η
+                                                     float   vtx_z )const
+{
+  /* front‑face Cartesian */
+  const double xA = rFront * std::cos(phiFront);
+  const double yA = rFront * std::sin(phiFront);
+
+  /* propagate to shower depth */
+  float xSD,ySD,zSD;
+  m_bemcRec->CorrectShowerDepth(ix,iy,
+                                energy,
+                                xA,yA,zFront,
+                                xSD,ySD,zSD);
+
+  /* shift to event vertex and convert to η */
+  const double zRel = zSD - static_cast<double>(vtx_z);
+  const double R    = std::hypot(xSD,ySD);
+  const double theta= std::atan2(R, zRel);                  // 0 … π
+  return -std::log( std::tan( 0.5*theta ) );                // pseudorapidity
+}
+
+
+//============================================================================
+//  x at shower depth (cm)
+//----------------------------------------------------------------------------
+double PositionDependentCorrection::xAtShowerDepth( float  energy,
+                                                    double rFront,
+                                                    double zFront,
+                                                    float  phiFront,
+                                                    int    ix,         // NEW
+                                                    int    iy          // NEW
+                                                  ) const
+{
+  const double xA = rFront * std::cos(phiFront);
+  const double yA = rFront * std::sin(phiFront);
+
+  float xSD, ySD, zSD;
+  m_bemcRec->CorrectShowerDepth(ix, iy,          // <─ NEW
+                                energy,
+                                xA, yA, zFront,
+                                xSD, ySD, zSD);
+
+  return static_cast<double>(xSD);
+}
 
 
 //////////////////////////////////////////////////////////////////////
@@ -1516,9 +1545,6 @@ PositionDependentCorrection::doLogWeightCoord( const std::vector<int>&   towerPh
                                                const std::vector<float>& towerE,
                                                float                    w0 )
 {
-  /*──────────────────────────────
-   * 0) Sanity & early exits
-   *──────────────────────────────*/
   if (towerPhi.empty() || towerE.empty())
   {
     if (Verbosity() > 0)
@@ -1730,9 +1756,8 @@ void PositionDependentCorrection::fillAshLogDx(
 
 
 /************************************************************************
- *  fillAshLogDy – η‑direction (cm‑accurate)                            *
- *                                                                      *
- *  • Re‑uses the same Ash‑b / Log‑w0 trial grids (m_bScan, m_w0Scan).   *
+ *  fillAshLogDy – η‑direction
+ *  • Re‑uses the same Ash‑b / Log‑w0 trial grids (m_bScan, m_w0Scan).
  *  • Uses  Δy = yReco − yTrue  at shower depth.                        *
  ************************************************************************/
 void PositionDependentCorrection::fillAshLogDy(
@@ -1744,7 +1769,6 @@ void PositionDependentCorrection::fillAshLogDy(
         const std::vector<int>&         tower_etas,
         const std::vector<float>&       tower_energies )
 {
-  /* 0) energy slice --------------------------------------------------- */
   const float eReco = recoPhoton.E();
   const int   iSlice = getEnergySlice(eReco);
   if (iSlice < 0) return;
@@ -1807,7 +1831,7 @@ void PositionDependentCorrection::fillAshLogDy(
       const float  etaLoc = doEtaBlockCorr(blockCord.first,bVal);
       tryFill(etaLoc,Form("h_dy_ash_b%.4f_%s",bVal,lab.Data()),
               okAsh,missAsh);
-    }
+  }
 
   /* 4) Log‑weight scan ------------------------------------------------ */
   int okLog=0, missLog=0;
@@ -1818,8 +1842,7 @@ void PositionDependentCorrection::fillAshLogDy(
       const float  etaLoc = doLogWeightCoord(tower_etas,tower_energies,w0Val);
       tryFill(etaLoc,Form("h_dy_log_w0%.2f_%s",w0Val,lab.Data()),
               okLog,missLog);
-    }
-
+  }
   if (Verbosity() > 0)
     std::cout << "  ➜ Ash(dy) ok/miss " << okAsh  << '/' << missAsh
               << "  | Log(dy) ok/miss " << okLog  << '/' << missLog << '\n';
@@ -1837,8 +1860,6 @@ void PositionDependentCorrection::fillAshLogDy(
  *              centre‑of‑gravity (no CorrectPosition).               *
  *  • “cp”    – Same, but after BEmcRecCEMC::CorrectPosition.          *
  *                                                                    *
- *  All φ are propagated to shower depth with CorrectShowerDepth,     *
- *  because that part is not user‑tunable in the clusteriser.         *
  **********************************************************************/
 void PositionDependentCorrection::fillDPhiClusterizerCP(
         RawCluster                     *cluster,
@@ -1933,7 +1954,6 @@ void PositionDependentCorrection::fillDPhiClusterizerCP(
   /* 5)  φ with clusteriser’s CorrectPosition (already stored)          */
   /* ------------------------------------------------------------------ */
   const float phiFrontCorr = cluster->get_phi();          // already at front
-  /* but we need SD – propagate one more time (trivial, same tower) */
   float x2 = rFront * std::cos(phiFrontCorr);
   float y2 = rFront * std::sin(phiFrontCorr);
   m_bemcRec->CorrectShowerDepth(ixCG,iyCG,eReco,
@@ -1961,13 +1981,6 @@ void PositionDependentCorrection::fillDPhiClusterizerCP(
 //
 //  ► All φ’s are propagated to **shower depth** so they can be compared
 //    1-to-1 with the Δx study.
-//
-//  Verbosity levels
-//  ----------------
-//    0 : completely silent (fast production)
-//    1 : one-line banner, per-cluster RAW / CORR print
-//    2 : geometry details, tower radii, truth φ, warnings
-//    3 : everything above  +  individual diagnostic lines
 // ==========================================================================
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
         RawCluster*                  cluster,
@@ -2122,6 +2135,190 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
 }
 
 
+/**********************************************************************
+ *  fillDEtaClusterizerCP                                             *
+ *  ------------------------------------------------------------------*
+ *  Δη(reco,truth) from the *template clusteriser* only.              *
+ *  • “raw”  – centre‑of‑gravity *without* CorrectPosition            *
+ *  • “cp”   – after BEmcRecCEMC::CorrectPosition                     *
+ **********************************************************************/
+void PositionDependentCorrection::fillDEtaClusterizerCP(
+        RawCluster                     *cluster,
+        const TLorentzVector           &truthPhoton,
+        float                           vtx_z,
+        TH1F                           *h_eta_diff_cpRaw_E[N_Ebins],
+        TH1F                           *h_eta_diff_cpCorr_E[N_Ebins] )
+{
+  if (!cluster || !m_geometry || !m_bemcRec) return;
+
+  /* 0) energy slice -------------------------------------------------- */
+  const float eReco  = cluster->get_energy();
+  const int   iSlice = getEnergySlice(eReco);
+  if (iSlice < 0) return;
+
+  /* 1) truth reference (already at production vertex) ---------------- */
+  const float etaTruthSD = truthPhoton.Eta();
+
+  /* 2) raw centre‑of‑gravity (identical hit list build) -------------- */
+  std::vector<EmcModule> tmpHit;
+  tmpHit.reserve(cluster->getNTowers());
+  for (auto it = cluster->get_towers().first;
+            it != cluster->get_towers().second; ++it)
+  {
+    const RawTowerGeom *tg = m_geometry->get_tower_geometry(it->first);
+    if (!tg) continue;
+    EmcModule m;
+    m.ich = tg->get_binphi()
+          + tg->get_bineta() * m_geometry->get_phibins();
+    m.amp = it->second;
+    m.tof = 0;
+    tmpHit.push_back(std::move(m));
+  }
+
+  float e,xcg,ycg,xx,yy,xy;
+  m_bemcRec->Momenta(&tmpHit,e,xcg,ycg,xx,yy,xy);
+
+  const int ixCG   = int(xcg + 0.5f);
+  const int iyCG   = int(ycg + 0.5f);
+  const RawTowerGeom *cgGeom =
+        m_geometry->get_tower_geometry(
+          RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,iyCG,ixCG));
+  if (!cgGeom) return;
+
+  const double rFront = cgGeom->get_center_radius();
+  const double zFront = cgGeom->get_center_z();
+
+  /* 3a)  η with **no** CorrectPosition ------------------------------- */
+  /* front‑face vector */
+  float xF = cgGeom->get_center_x();
+  float yF = cgGeom->get_center_y();
+
+  const float dX = m_bemcRec->fTowerDist(float(ixCG), xcg);
+  const float dY = ycg - iyCG;
+
+  BEmcRec::TowerGeom g;  m_bemcRec->GetTowerGeometry(ixCG,iyCG,g);
+  xF += dX*g.dX[0] + dY*g.dX[1];
+  yF += dX*g.dY[0] + dY*g.dY[1];
+
+  const float phiFrontRaw = std::atan2(yF,xF);
+
+  /* propagate to SD */
+  float xSD,ySD,zSD;
+  m_bemcRec->CorrectShowerDepth(ixCG,iyCG,eReco,
+                                xF,yF,zFront,xSD,ySD,zSD);
+
+  const float etaSDraw =
+        etaAtShowerDepth(eReco,rFront,zFront,phiFrontRaw,
+                         ixCG,iyCG,vtx_z);
+
+  /* 3b)  η with CorrectPosition already stored in cluster ------------ */
+  const float etaFrontCorr = cluster->get_eta();     // at front
+  const float phiFrontCorr = cluster->get_phi();
+
+  /* convert ηFront → zFront′ to build x,y for SD propagation */
+  const double thetaF      = 2.*std::atan(std::exp(-etaFrontCorr));
+  const double zFrontCorr  = rFront / std::tan(thetaF);
+  float  xF2 = rFront * std::cos(phiFrontCorr);
+  float  yF2 = rFront * std::sin(phiFrontCorr);
+
+  m_bemcRec->CorrectShowerDepth(ixCG,iyCG,eReco,
+                                xF2,yF2,zFrontCorr,
+                                xSD,ySD,zSD);
+
+  const float etaSDcorr =
+        etaAtShowerDepth(eReco,rFront,zFrontCorr,phiFrontCorr,
+                         ixCG,iyCG,vtx_z);
+
+  /* 4)  Δη and histogramming ----------------------------------------- */
+  const float dEtaRaw  = etaSDraw  - etaTruthSD;
+  const float dEtaCorr = etaSDcorr - etaTruthSD;
+
+  if (h_eta_diff_cpRaw_E [iSlice]) h_eta_diff_cpRaw_E [iSlice]->Fill(dEtaRaw);
+  if (h_eta_diff_cpCorr_E[iSlice]) h_eta_diff_cpCorr_E[iSlice]->Fill(dEtaCorr);
+}
+
+
+/**********************************************************************
+ *  fillDEtaRawAndCorrected                                           *
+ *  ------------------------------------------------------------------*
+ *  Δη(reco,truth) using local‑block coordinates, before/after Ash‑b   *
+ **********************************************************************/
+void PositionDependentCorrection::fillDEtaRawAndCorrected(
+        RawCluster                     *cluster,
+        const TLorentzVector           &recoPhoton,
+        const TLorentzVector           &truthPhoton,
+        const std::pair<float,float>   &blkCoord,     // (ηloc , φloc)
+        int                             blockEtaBin,  // 0 … 47
+        float                           vtx_z )
+{
+  if (!cluster || !m_geometry || !m_bemcRec) return;
+
+  /* energy slice ----------------------------------------------------- */
+  const float eReco  = recoPhoton.E();
+  const int   iSlice = getEnergySlice(eReco);
+  if (iSlice < 0) return;
+
+  /* lead‑tower geometry --------------------------------------------- */
+  RawCluster::TowerConstIterator tLead{};
+  float eLead=-1.f;
+  for (auto it=cluster->get_towers().first; it!=cluster->get_towers().second; ++it)
+    if (it->second>eLead){ eLead=it->second; tLead=it; }
+  if (eLead<1e-6) return;
+
+  const RawTowerGeom *tgLead = m_geometry->get_tower_geometry(tLead->first);
+  if (!tgLead) return;
+  const double rFront = tgLead->get_center_radius();
+  const double zFront = tgLead->get_center_z();
+  const int    ixLead = tgLead->get_binphi();
+  const int    iyLead = tgLead->get_bineta();
+
+  /* truth reference -------------------------------------------------- */
+  const float etaTruth = truthPhoton.Eta();
+
+  /* ---------- RAW variant ------------------------------------------ */
+  const float rawEtaFront =
+        convertBlockToGlobalEta(blockEtaBin, blkCoord.first);
+
+  /* use current φ (already corrected) for x/y build */
+  const float phiUse = recoPhoton.Phi();
+
+  const float etaSDraw =
+        etaAtShowerDepth(eReco,rFront,zFront,phiUse,
+                         ixLead,iyLead,vtx_z);
+
+  /* ---------- CORRECTED variant (if fit) --------------------------- */
+  float dEtaCorr=0.f, dEtaRaw=etaSDraw-etaTruth;
+
+  if (isFitDoneForEta && m_bValsEta[iSlice]>0.f)
+  {
+    const float etaLocCorr =
+          doEtaBlockCorr(blkCoord.first,m_bValsEta[iSlice]);
+
+    const float etaFrontCorr =
+          convertBlockToGlobalEta(blockEtaBin, etaLocCorr);
+
+    const float thetaFC  = 2.*std::atan(std::exp(-etaFrontCorr));
+    const double zFrontC = rFront / std::tan(thetaFC);
+
+    const float etaSDcorr =
+          etaAtShowerDepth(eReco,rFront,zFrontC,phiUse,
+                           ixLead,iyLead,vtx_z);
+
+    dEtaCorr = etaSDcorr - etaTruth;
+
+    /* fill corrected histo */
+    if (h_eta_diff_corrected_E[iSlice])
+        h_eta_diff_corrected_E[iSlice]->Fill(dEtaCorr);
+    if (h_localEta_corrected[iSlice])
+        h_localEta_corrected[iSlice]->Fill(etaLocCorr);
+  }
+
+  /* fill raw histo */
+  if (h_eta_diff_raw_E[iSlice])
+      h_eta_diff_raw_E[iSlice]->Fill(dEtaRaw);
+}
+
+
 void PositionDependentCorrection::finalClusterLoop(
     PHCompositeNode* /*topNode*/,
     RawClusterContainer* clusterContainer,
@@ -2153,7 +2350,6 @@ void PositionDependentCorrection::finalClusterLoop(
               << "    vtx_z        = " << vtx_z << std::endl;
   }
 
-  // Fill #clusters in event
   h_nclusters->Fill(nClusCount);
 
   // If the number of clusters is too large => skip
@@ -2224,7 +2420,6 @@ void PositionDependentCorrection::finalClusterLoop(
         // Potentially skip or keep going
         continue;
     }
-
     float clusE   = E_vec_1.mag();
     float clusEta = E_vec_1.pseudoRapidity();
     float clusPhi = E_vec_1.phi();
@@ -2338,15 +2533,11 @@ void PositionDependentCorrection::finalClusterLoop(
       const float avgEta = getAvgEta (towerEtas, towerEs);      // 0 … 95.999
       const float avgPhi = getAvgPhi (towerPhis, towerEs);      // 0 … 255.999
 
-      /* 2) coarse 2×2-block indices – now truly 0 … 47 / 0 … 127 */
-      const int   block_eta_bin = int(std::floor(avgEta)) / 2;
-      const int   block_phi_bin = int(std::floor(avgPhi)) / 2;
-
       int   blkPhiCoarse = -1;             // will be filled by getBlockCord
-      auto  blkCoord     = getBlockCord(towerEtas,
-                                        towerPhis,
-                                        towerEs,
-                                        blkPhiCoarse);   // ← new 4-th argument
+      int blkEtaCoarse = -1;
+      auto blkCoord =
+            getBlockCord(towerEtas, towerPhis, towerEs,
+                         blkPhiCoarse, blkEtaCoarse);
 
       /* 4) find energy slice ........................................... */
       const int iEbin = getEnergySlice( clusE );
@@ -2512,6 +2703,13 @@ void PositionDependentCorrection::finalClusterLoop(
                                 vtx_z,           // same vertex used elsewhere
                                 h_phi_diff_cpRaw_E,
                                 h_phi_diff_cpCorr_E);
+        
+          fillDEtaClusterizerCP( cluster, trPhoton, vtx_z,
+                               h_eta_diff_cpRaw_E, h_eta_diff_cpCorr_E );
+    
+          fillDEtaRawAndCorrected( cluster, photon1, trPhoton,
+                                  blkCoord, block_eta_bin, vtx_z );
+
 
 
           if (block_eta_bin >= 0 && block_eta_bin < NBinsBlock &&
@@ -2751,7 +2949,6 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
               << std::endl;
   }
 
-  // If vertex out of range => skip
   if (std::fabs(vtx_z) > _vz)
   {
     if (Verbosity() > 0)
@@ -2948,48 +3145,40 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
       std::cout << "[DEBUG] Closing output file..." << std::endl;
     }
       
-      if (Verbosity() > 0)
-      {
-        std::cout << "\n[INFO] Listing all histograms in the output file:\n";
-        std::cout << std::left
+    if (Verbosity() > 0)
+    {
+      std::cout << "\n[INFO] Listing all histograms in the output file:\n";
+      std::cout << std::left
                   << std::setw(30) << "Histogram Name"
                   << std::setw(10) << "Class"
                   << std::setw(12) << "#Entries"
                   << std::endl;
-        std::cout << "--------------------------------------------------------------\n";
+      std::cout << "--------------------------------------------------------------\n";
 
-        // Change directory to outfile if not already
-        outfile->cd();
+      outfile->cd();
 
-        // Grab the list of all objects in this directory
-        TList* listKeys = gDirectory->GetListOfKeys();
-        if (listKeys)
-        {
-          // Iterate over each key
+      // Grab the list of all objects in this directory
+      TList* listKeys = gDirectory->GetListOfKeys();
+      if (listKeys)
+      {
           TIter nextKey(listKeys);
           TKey* key = nullptr;
           while ((key = (TKey*)nextKey()))
           {
-            // Get the class name and the object name
             const char* className = key->GetClassName();
             const char* objName   = key->GetName();
-
-            // Read the object from file
             TObject* obj = key->ReadObj();
             if (!obj) continue;
 
-            // If it’s a histogram (TH1‐derived), print out entries
             TH1* h1 = dynamic_cast<TH1*>(obj);
             if (h1)
             {
-              // Print name, class, and entries
               std::cout << std::left
                         << std::setw(30) << objName
                         << std::setw(10) << className
                         << std::setw(12) << (Long64_t)h1->GetEntries()
                         << std::endl;
             }
-            // optional else: if you want to handle TH2, TH3, etc. separately
           }
         }
         std::cout << "[INFO] Finished listing histograms.\n" << std::endl;
@@ -3073,10 +3262,12 @@ std::pair<float, float>
 PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
                                           const std::vector<int>   &towerPhis,
                                           const std::vector<float> &towerEs,
-                                          int                      &blockPhiBinOut)
+                                          int                      &blockPhiBinOut,
+                                          int                      &blockEtaBinOut)
 {
   [[maybe_unused]] constexpr int kNEtaFine        =  96;   // mapping only
   [[maybe_unused]] constexpr int kNPhiFine        = 256;
+  constexpr int      kFinePerBlock   = 2;                 // 2×2 super-cell
   constexpr int      kFinePerBlock   = 2;                 // 2×2 super-cell
   constexpr int      kNCoarseBlocks  = kNPhiFine / 2;     // 128
 
@@ -3086,7 +3277,6 @@ PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
     std::cout << ANSI_CYAN << "[getBlockCord] ENTER  nTowers = "
               << nT << ANSI_RESET << '\n';
 
-  /* ─── sanity ─────────────────────────────────────────────────────────── */
   if (nT == 0 ||
       towerEtas.size() != nT ||
       towerPhis.size() != nT)
@@ -3135,12 +3325,13 @@ PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
     }
   };
 
-  foldOnce(locEta, blkEta, "η");   // kept for completeness
+  foldOnce(locEta, blkEta, "η");
   foldOnce(locPhi, blkPhi, "φ");
 
   /* ─── 5) propagate the *updated* block index and return ─────────────── */
   blockPhiBinOut = blkPhi;
-
+  blockEtaBinOut = blkEta;
+              
   if (Verbosity() > 0)
     std::cout << ANSI_CYAN << "[getBlockCord] EXIT\n" << ANSI_RESET << '\n';
 
@@ -3160,9 +3351,6 @@ float PositionDependentCorrection::getAvgEta(const std::vector<int>   &towerEtas
 {
   const int nTowers = towerEtas.size();
 
-  // -------------------------------------------------------------------------
-  // 0) Sanity checks
-  // -------------------------------------------------------------------------
   if (Verbosity() > 0)
     std::cout << ANSI_CYAN << "[getAvgEta] called with nTowers = "
               << nTowers << ANSI_RESET << '\n';
@@ -3217,11 +3405,6 @@ float PositionDependentCorrection::getAvgEta(const std::vector<int>   &towerEtas
 // ============================================================================
 //  getAvgPhi – energy-weighted φ–centroid  (0 ≤ ⟨φ⟩ < 256)
 // ----------------------------------------------------------------------------
-//  • Each tower is specified by its *fine* φ-bin (0 … 255) and energy (GeV).
-//  • If the caller supplies ill-formed input (size mismatch, ΣE≈0, …) the
-//    function degrades gracefully and returns 0
-// ============================================================================
-
 float
 PositionDependentCorrection::getAvgPhi(const std::vector<int>   &towerPhis,
                                        const std::vector<float> &towerEs)
@@ -3230,7 +3413,6 @@ PositionDependentCorrection::getAvgPhi(const std::vector<int>   &towerPhis,
   constexpr float kHalfSpan  = kNPhiFine / 2.0f;   // 128.0
   const std::size_t nT       = towerPhis.size();
 
-  /* ─── sanity ─────────────────────────────────────────────────────────── */
   if (Verbosity() > 0)
     std::cout << ANSI_CYAN << "[getAvgPhi] ENTER | nTowers = "
               << nT << ANSI_RESET << '\n';
@@ -3290,7 +3472,6 @@ PositionDependentCorrection::getAvgPhi(const std::vector<int>   &towerPhis,
   double phiAvg = sumEphi / sumE;                  // may be negative/large
   phiAvg = std::fmod(phiAvg + kNPhiFine, kNPhiFine); // 0 … <256
 
-  /* ─── 4) diagnostics ─────────────────────────────────────────────────── */
   if ((nWrapLow + nWrapHigh) && Verbosity() > 0)
     std::cout << ANSI_YELLOW
               << "    • wrap corrections: " << nWrapLow
