@@ -60,6 +60,7 @@
 // Possibly your custom code
 ////////////////////////////////////////////////////////////
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src/PositionDependentCorrection.h"
+
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
 #if defined(__GNUC__) && !defined(__clang__)
   #pragma GCC diagnostic pop
@@ -206,7 +207,8 @@ void Fun4All_PDC(int nevents = 0,
   // pdc->SetTimeStamp(runNumber);
     
   //pdc->setBinningMode( EBinningMode::kRange || kDiscrete    );   // Eedges uses as bin RANGES
-  pdc->setBinningMode( EBinningMode::kRange );
+  pdc->setBinningMode( PositionDependentCorrection::EBinningMode::kRange );
+
   pdc->Verbosity(3);
   se->registerSubsystem(pdc);
 

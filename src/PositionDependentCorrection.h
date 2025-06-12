@@ -111,7 +111,7 @@ class PositionDependentCorrection : public SubsysReco
                     int &nClusContainer);
     
   float doPhiBlockCorr(float localPhi, float bphi);
-  float doEtaBlockCorr(float localEta, float bEta);
+  float doEtaBlockCorr(float localEta, float bEta,  float dEtaTower = 1.f);
     
   float convertBlockToGlobalPhi(int block_phi_bin, float localPhi);
   float convertBlockToGlobalEta(int block_eta_bin, float localEta);
@@ -129,6 +129,14 @@ class PositionDependentCorrection : public SubsysReco
                              float  phiFront,
                              int    ix,
                              int    iy ) const;
+    
+  float  etaAtShowerDepth( float  energy,
+                             double rFront,
+                             double zFront,
+                             float  phiFront,
+                             int    ix,
+                             int    iy,
+                             float  vtx_z ) const;   // 7-parameter, const
     
 
   float doAshShift(float localPhi, float bVal);
@@ -151,7 +159,7 @@ class PositionDependentCorrection : public SubsysReco
                         float pi0ptcut,
                         float weight);
 
-    void fillAshLogDx(
+  void fillAshLogDx(
         RawCluster* cluster,
         const TLorentzVector& recoPhoton,
         const TLorentzVector& truthPhoton,
@@ -159,9 +167,9 @@ class PositionDependentCorrection : public SubsysReco
         int blockPhiBin,
         const std::vector<int>& tower_phis,
         const std::vector<float>& tower_energies
-    );
+  );
     
-    void fillAshLogDy( RawCluster*                     cluster,
+  void fillAshLogDy( RawCluster*                     cluster,
                        const TLorentzVector&           recoPhoton,
                        const TLorentzVector&           truthPhoton,
                        const std::pair<float,float>&   blockCord,
@@ -170,14 +178,14 @@ class PositionDependentCorrection : public SubsysReco
                        const std::vector<float>&       tower_energies );
 
     
-    void fillDPhiRawAndCorrected( RawCluster*            cluster,
+  void fillDPhiRawAndCorrected( RawCluster*            cluster,
                                   const TLorentzVector&  recoPhoton,
                                   const TLorentzVector&  truthPhoton,
                                   const std::pair<float,float>& blkCoord,
                                   int   blockPhiBin,
                                   float rawDelPhi /* unused – kept for call-site compatibility */ );
 
-    void fillDEtaRawAndCorrected( RawCluster* cluster,
+  void fillDEtaRawAndCorrected( RawCluster* cluster,
                                   const TLorentzVector& recoPhoton,
                                   const TLorentzVector& truthPhoton,
                                   const std::pair<float,float>& blockCord,
@@ -193,7 +201,8 @@ class PositionDependentCorrection : public SubsysReco
   std::pair<float,float> getBlockCord(const std::vector<int>&   towerEtas,
                                           const std::vector<int>&   towerPhis,
                                           const std::vector<float>& towerEs,
-                                          int&                      blkPhiOut);
+                                          int&                      blkPhiOut,
+                                          int&                      blkEtaOut);
   // --------------------------------------------------------------------
   // 3) Data members
   // --------------------------------------------------------------------
@@ -212,7 +221,7 @@ class PositionDependentCorrection : public SubsysReco
   EBinningMode m_binningMode { EBinningMode::kRange };
   static constexpr float kDiscreteTol = 0.25f;
 
-  static constexpr double kTolFactor = 1.5;   ///< Nσ  (1–2 is common)
+  static constexpr double kTolFactor = 1.5;   ///< Nσ
   static constexpr double kTolMinGeV = 0.20;  ///< lower bound [GeV]
     
   inline std::string sliceTag(int i) const             // extra scope removed
@@ -243,16 +252,16 @@ class PositionDependentCorrection : public SubsysReco
   }();
     
   void fillDPhiClusterizerCP( RawCluster*            cluster,
-                              const TLorentzVector&  truthPhoton,
-                              float                  vtx_z,
-                              TH1F*                  h_phi_diff_cpRaw_E[N_Ebins],
-                              TH1F*                  h_phi_diff_cpCorr_E[N_Ebins] );
+                                const TLorentzVector&  truthPhoton,
+                                TH1F*                  cpRawHistArr  [N_Ebins], // renamed
+                                TH1F*                  cpCorrHistArr [N_Ebins]  // renamed
+                              );
 
   void fillDEtaClusterizerCP( RawCluster*            cluster,
-                              const TLorentzVector&  truthPhoton,
-                              float                  vtx_z,
-                              TH1F*                  h_eta_diff_cpRaw_E[N_Ebins],
-                              TH1F*                  h_eta_diff_cpCorr_E[N_Ebins] );
+                                const TLorentzVector&  truthPhoton,
+                                TH1F*                  cpRawHistArr  [N_Ebins],
+                                TH1F*                  cpCorrHistArr [N_Ebins],
+                                float                  vtx_z );
   float m_bValsPhi[N_Ebins]{};
   float m_bValsEta[N_Ebins]{};
   std::vector<double> m_bScan;
@@ -264,6 +273,12 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_corrected_E[N_Ebins];
   TH1F* h_eta_diff_raw_E[N_Ebins];
   TH1F* h_eta_diff_corrected_E[N_Ebins];
+    
+  TH1F* h_phi_diff_cpRaw_E     [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorr_E    [N_Ebins]{};
+  TH1F* h_eta_diff_cpRaw_E     [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorr_E    [N_Ebins]{};
+    
   TProfile* pr_phi_vs_blockcoord = nullptr;
   TH2* h_emcal_mbd_correlation = nullptr;
   TH2* h_ohcal_mbd_correlation = nullptr;
@@ -337,7 +352,6 @@ class PositionDependentCorrection : public SubsysReco
   bool m_vtxCut = true;
   bool dynMaskClus = false;
   float _vz = 0;
-  bool getVtx = true;
   bool debug = false;
     
   float m_phi0Offset  = 0.f;   ///< measured once at run time (radians)
@@ -352,7 +366,6 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_emcal_e_eta;
   TH1* h_truth_eta;
   TH1* h_truth_e;
-  TH1* h_truth_pt;
   TH1F* h_truth_vz       {nullptr};   // truth vz   distribution
   TH1F* h_reco_vz        {nullptr};   // reconstructed vz distribution
   TH2F* h2_truthReco_vz  {nullptr};   // 2-D truth vs reco correlation
