@@ -350,155 +350,158 @@ EOL
 
 
 ###############################################################################
-# submit_sim_condor => Submits Condor jobs for simulation.
+# submit_sim_condor  –  simulation driver (Condor / local)
 #
-#        firstRound   : full cleaning, purge SimOut,   submit first 30k pairs
-#        secondRound  : partial cleaning,              submit next 30k pairs
-#        testSubmit   : no cleaning,                   submit first 5  pairs
-#        sample <N>   : full cleaning, purge SimOut,   submit first  N  pairs
-#        (anything else defaults to “firstRound”)
+# Flexible CLI parsing ─ supports **three independent knobs**
+# ─────────────────────────────────────────────────────────────────────────────
+#   • slice keyword  : firstRound | secondRound | … | sample | testSubmit
+#   • sample size    : positive integer (only meaningful with  sample)
+#   • execution mode : condor | local
+#
+# The three tokens may be supplied **in any order**.  Un-specified knobs
+# assume their defaults:  slice = firstRound ,  execMode = condor .
+#
+#  EXAMPLES
+#  ────────────────────────────────────────────────────────────────────────────
+#   submit_sim_condor                       # firstRound → Condor (15 k)
+#   submit_sim_condor  secondRound local    # 15 k slice #2  → local
+#   submit_sim_condor  local 30000          # firstRound, 30 k pairs → local
+#   submit_sim_condor  sample 250 local     # first 250 pairs         local
 ###############################################################################
 submit_sim_condor() {
 
   set -Eeuo pipefail
-  trap 'echo "[FATAL] An unexpected error occurred near line $LINENO. Exiting." >&2' ERR
+  trap 'echo "[FATAL] Unexpected error near line $LINENO" >&2' ERR
+
+  # ─────────────────────── 0) CONSTANT PATHS ────────────────────────────────
+  local LOG_BASE="/sphenix/u/patsfan753/scratch/PDCrun24pp"
+  local LOG_DIR_LOG="${LOG_BASE}/log"
+  local LOG_DIR_OUT="${LOG_BASE}/stdout"
+  local LOG_DIR_ERR="${LOG_BASE}/error"
+  local OUTDIR_SIM="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut"
+  local CONDOR_LISTFILES_DIR="${LOG_BASE}/condorListFiles"
+  mkdir -p "${LOG_DIR_LOG}" "${LOG_DIR_OUT}" "${LOG_DIR_ERR}" "${CONDOR_LISTFILES_DIR}"
 
   clean_logs_stdout_error() {
-    echo "[DEBUG] Cleaning up old logs/stdout/error ..."
-    rm -vf "/sphenix/user/$USER/PDCrun24pp/log/job."*.log    2>/dev/null || true
-    rm -vf "/sphenix/user/$USER/PDCrun24pp/stdout/job."*.out 2>/dev/null || true
-    rm -vf "/sphenix/user/$USER/PDCrun24pp/error/job."*.err  2>/dev/null || true
+      rm -vf "${LOG_DIR_LOG}"/job.* \
+             "${LOG_DIR_OUT}"/job.* \
+             "${LOG_DIR_ERR}"/job.* 2>/dev/null || true
   }
 
-  # --------------------------------------------------------------------------
-  # Positional arguments coming from the caller
-  #   $1 : keyword  (firstRound | secondRound | testSubmit | sample)
-  #   $2 : OPTIONAL numeric limit if keyword == sample
-  # --------------------------------------------------------------------------
-  local roundArg="${1:-}"
-  local sampleN="${2:-}"          # may be empty
-  local chunkSize=30000           # default
+  # ─────────────────────── 1) FLEXIBLE ARG-PARSE ────────────────────────────
+  local roundArg="firstRound"   # default slice keyword
+  local execMode="condor"       # default execution mode
+  local sampleN=""              # empty unless user supplies a number
+
+  for tok in "$@"; do
+      case "$tok" in
+          local|condor) execMode="$tok" ;;
+          firstRound|secondRound|thirdRound|fourthRound|testSubmit|sample)
+                       roundArg="$tok"  ;;
+          ''|*[!0-9]*) ;;                    # ignore non-numeric, non-keywords
+          *)           sampleN="$tok"        ;;   # pure integer → sample size
+      esac
+  done
+
+  # If a numeric size was given **without** the explicit keyword “sample”
+  # treat it as  ‘sample <N>’
+  if [[ -n "$sampleN" && "$roundArg" != "sample" ]]; then
+      roundArg="sample"
+  fi
+
+  # ─────────────────────── 2) SLICE GEOMETRY ────────────────────────────────
+  local chunkSize=15000
   local offset=0
+  local do_full_clean=false
 
-  ###########################################################################
-  # Choose the submission window & cleaning strategy
-  ###########################################################################
   case "$roundArg" in
-      secondRound)
-        offset=30000
-        echo "######################################################################"
-        echo "[INFO] Submitting Condor jobs => simulation (SECOND 30 k chunk)."
-        echo "[STEP 0] Partial cleaning (logs/stdout/error only)."
-        clean_logs_stdout_error
-        ;;
-
-      testSubmit)
-        chunkSize=5
-        echo "######################################################################"
-        echo "[INFO] Submitting Condor jobs => simulation TEST (first 5 pairs)."
-        ;;
-
+      firstRound)  offset=0                 ; do_full_clean=true  ;;
+      secondRound) offset=15000                                 ;;
+      thirdRound)  offset=30000                                 ;;
+      fourthRound) offset=45000                                 ;;
+      testSubmit)  chunkSize=5                                  ;;
       sample)
-        # ------------------------------------------------------------------
-        # 'sample <N>'  →  submit first <N> DST/HIT pairs
-        # ------------------------------------------------------------------
-        if [[ -z "$sampleN" || ! "$sampleN" =~ ^[0-9]+$ || "$sampleN" -le 0 ]]; then
-          echo "[ERROR] Usage for sampling:  simOnly sample <positive-integer>"
-          return 1
-        fi
-        chunkSize="$sampleN"
-        echo "######################################################################"
-        echo "[INFO] Submitting Condor jobs => simulation SAMPLE ($chunkSize pairs)."
-        # fall through to the *firstRound* cleaning actions
-        ;&     # bash 4+: continue matching with the next pattern
-
-      *)
-        # ---------------- firstRound branch -----------------------------
-        echo "######################################################################"
-        echo "[INFO] Submitting Condor jobs => simulation (FIRST 30 k chunk / sample)."
-
-        #  purge previous simulation output exactly once
-        if [[ -d "$OUTDIR_SIM" ]]; then
-          echo "[STEP 0-pre] Removing previous simulation output in $OUTDIR_SIM"
-          find "$OUTDIR_SIM" -mindepth 1 -delete
-        else
-          echo "[WARNING] Expected sim-output directory $OUTDIR_SIM not found."
-        fi
-
-        echo "[STEP 0] Full cleaning (old chunks, ROOTs, logs …)."
-        rm -vf "${CONDOR_LISTFILES_DIR}"/sim_{dst,hits}_chunk*.list 2>/dev/null || true
-        rm -vf "${CONDOR_LISTFILES_DIR}/sim_chunks.txt"            2>/dev/null || true
-        rm -vf "${OUTDIR_SIM}/PositionDep_sim_chunk"*.root         2>/dev/null || true
-        clean_logs_stdout_error
-        ;;
+          [[ "$sampleN" =~ ^[1-9][0-9]*$ ]] \
+            || { echo "[ERROR] sample requires a positive integer"; return 1; }
+          chunkSize="$sampleN" ; do_full_clean=true ;;
+      *)  echo "[ERROR] Unknown round keyword '$roundArg'"; return 1 ;;
   esac
 
-  ###########################################################################
-  # 1) Directory sanity
-  ###########################################################################
-  echo "[STEP 1] Ensuring required directories exist..."
-  mkdir -p "$LOG_DIR"/{stdout,error} "$CONDOR_LISTFILES_DIR"
+  echo "######################################################################"
+  echo "[INFO] execMode='$execMode'   round='$roundArg'"
+  echo "[INFO] offset=$offset   chunkSize=$chunkSize"
+  echo "######################################################################"
 
-  ###########################################################################
-  # 2) Input-list checks
-  ###########################################################################
-  echo "[STEP 2] Verifying input lists exist …"
-  [[ -f "$SIM_DST_LIST"  ]] || { echo "[ERROR] Missing DST list  $SIM_DST_LIST";  return 1; }
-  [[ -f "$SIM_HITS_LIST" ]] || { echo "[ERROR] Missing G4 list   $SIM_HITS_LIST"; return 1; }
+  # ─────────────────────── 3) CLEAN-UP  (shared) ────────────────────────────
+  if [[ "$execMode" == "condor" && $do_full_clean == true ]]; then
+      echo "[STEP 0] FULL clean of $OUTDIR_SIM and Condor logs"
+      [[ -d "$OUTDIR_SIM" ]] && find "$OUTDIR_SIM" -mindepth 1 -delete
+      clean_logs_stdout_error
+  fi
 
-  ###########################################################################
-  # 3) Build sorted pair list
-  ###########################################################################
-  echo "[STEP 3] Building numerically sorted DST/HITS pairs …"
+  # ─────────────────────── 4) BUILD LIST OF PAIRS ───────────────────────────
+  [[ -f "$SIM_DST_LIST"  ]] || { echo "[ERROR] Missing DST list $SIM_DST_LIST";  return 1; }
+  [[ -f "$SIM_HITS_LIST" ]] || { echo "[ERROR] Missing G4 list  $SIM_HITS_LIST"; return 1; }
+
   mapfile -t simPairs < <(paste -d' ' "$SIM_DST_LIST" "$SIM_HITS_LIST" | sort -k1,1V)
   local maxN=${#simPairs[@]}
-  echo "     Found $maxN complete DST/HITS pairs."
-
-  (( offset <  maxN )) || { echo "[WARNING] Nothing to submit."; return 0; }
+  (( offset < maxN )) || { echo "[WARN] Offset beyond list size – nothing to do."; return 0; }
 
   local endIndex=$(( offset + chunkSize ))
   (( endIndex > maxN )) && endIndex=$maxN
   local linesToProcess=$(( endIndex - offset ))
-  (( linesToProcess > 0 )) || { echo "[ERROR] Nothing to submit!"; return 1; }
+  (( linesToProcess > 0 )) || { echo "[ERROR] Selected zero pairs"; return 1; }
 
-  echo "[INFO] Will submit indices [$offset … $((endIndex-1))]  →  $linesToProcess jobs."
+  # ─────────────────────── 5) LOCAL SEQUENTIAL  ─────────────────────────────
+  if [[ "$execMode" == "local" ]]; then
+      echo "[STEP] LOCAL mode – processing $linesToProcess pair(s)"
+      local idx=0
+      for (( i=offset; i<endIndex; i++ )); do
+          idx=$(( idx+1 ))
+          IFS=' ' read -r dstFile hitFile <<< "${simPairs[$i]}"
 
-  ###########################################################################
-  # 4) Build submission file
-  ###########################################################################
+          [[ -f "$dstFile" ]] || { echo "[WARN] Missing DST  $dstFile – skip"; continue; }
+          [[ -f "$hitFile" ]] || { echo "[WARN] Missing HITS $hitFile – skip"; continue; }
+
+          local outRoot="${OUTDIR_SIM}/PositionDep_sim_pair$(printf "%06d" "$i").root"
+          echo "------------------------------------------------------------------"
+          echo "[RUN]  $idx / $linesToProcess"
+          echo "   DST : $(basename "$dstFile")"
+          echo "   HITS: $(basename "$hitFile")"
+          echo "   OUT : $(basename "$outRoot")"
+          echo "------------------------------------------------------------------"
+
+          root -b -q -l "${MACRO_PATH}(0, \"${dstFile}\", \"${hitFile}\", \"${outRoot}\")"
+      done
+      echo "[INFO] LOCAL slice complete.  Outputs → $OUTDIR_SIM"
+      return 0
+  fi
+
+  # ─────────────────────── 6) CONDOR SUBMISSION  ────────────────────────────
+  [[ "$execMode" == "condor" ]] || { echo "[ERROR] execMode must be 'condor' or 'local'"; return 1; }
+
   local submitFile="PositionDependentCorrect_sim.sub"
-  echo "[STEP 4] Creating $submitFile ..."
   cat > "$submitFile" <<EOL
 universe   = vanilla
 executable = PositionDependentCorrect_Condor.sh
-# Args: <runNum=9999> <listFileData> <sim> <Cluster> <nEvents=0> <processID> [<listFileHits>]
-log        = /sphenix/user/$USER/PDCrun24pp/log/job.\$(Cluster).\$(Process).log
-output     = /sphenix/user/$USER/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
-error      = /sphenix/user/$USER/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
+log        = ${LOG_DIR_LOG}/job.\$(Cluster).\$(Process).log
+output     = ${LOG_DIR_OUT}/job.\$(Cluster).\$(Process).out
+error      = ${LOG_DIR_ERR}/job.\$(Cluster).\$(Process).err
 request_memory = 1500MB
-
+# Args: <runNum=9999> <listFileData> <sim> <Cluster> <nEvents=0> <processID> [<listFileHits>]
 EOL
 
-  for (( i = offset; i < endIndex; i++ )); do
-      local pair="${simPairs[$i]}"
-      local dstFile="${pair%% *}"
-      local hitFile="${pair#* }"
-      echo "arguments = 9999 $dstFile sim \$(Cluster) 0 $i $hitFile" >> "$submitFile"
-      echo "queue" >> "$submitFile"
-      echo      >> "$submitFile"
+  for (( i=offset; i<endIndex; i++ )); do
+      IFS=' ' read -r dstFile hitFile <<< "${simPairs[$i]}"
+      printf 'arguments = 9999 %s sim $(Cluster) 0 %d %s\nqueue\n\n' \
+             "$dstFile" "$i" "$hitFile" >> "$submitFile"
   done
 
-  ###########################################################################
-  # 5) Submit to Condor
-  ###########################################################################
-  echo "[STEP 5] condor_submit $submitFile  (jobs=$linesToProcess) ..."
-  condor_submit "$submitFile" \
-    && echo "[INFO] condor_submit succeeded — $linesToProcess simulation job(s) queued." \
-    || { echo "[ERROR] condor_submit failed"; return 1; }
-
-  echo "[INFO] submit_sim_condor() finished OK  (mode='$roundArg' size=$chunkSize)."
+  echo "[STEP] condor_submit → $submitFile  (jobs=$linesToProcess)"
+  condor_submit "$submitFile" &&
+      echo "[INFO] condor_submit succeeded." ||
+      { echo "[ERROR] condor_submit failed"; return 1; }
 }
-
 
 
 

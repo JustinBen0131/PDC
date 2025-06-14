@@ -30,6 +30,7 @@
 #include <phool/PHRandomSeed.h>
 #include <phool/getClass.h>
 #include <caloreco/RawClusterDeadHotMask.h>
+#include <caloreco/CaloGeomMapping.h>
 
 #include <caloreco/RawClusterBuilderTemplate.h>   // Use the built-in template
 #include <caloreco/RawTowerCalibration.h>
@@ -156,9 +157,53 @@ void Fun4All_PDC(int nevents = 0,
   gvertex->Verbosity(0);
   se->registerSubsystem(gvertex);
     
-  BEmcRecCEMC *bemcPtr = new BEmcRecCEMC();
-  bemcPtr->SetCylindricalGeometry();
+    BEmcRecCEMC* bemcPtr = new BEmcRecCEMC();
+    bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
 
+    /* 4a) Let CaloGeomMapping put "TOWERGEOM_CEMC_DETAILED" on the node-tree */
+    CaloGeomMapping* geomMap = new CaloGeomMapping("CEMC_GeomFiller");
+    geomMap->set_detector_name("CEMC");
+    geomMap->set_UseDetailedGeometry(true);   // we want the 8-vertex blocks
+    geomMap->Verbosity(0);
+    se->registerSubsystem(geomMap);           // register *before* anything that uses it
+
+    /* 4b) AFTER CaloGeomMapping is in place, copy the geometry into BEmcRec */
+    {
+      PHCompositeNode* topNode = Fun4AllServer::instance()->topNode();
+
+      // --- 1) fetch the container written by CaloGeomMapping
+      auto* geo = findNode::getClass<RawTowerGeomContainer>(topNode,
+                                                            "TOWERGEOM_CEMC_DETAILED");
+      if (!geo)
+          geo = findNode::getClass<RawTowerGeomContainer>(topNode,
+                                                          "TOWERGEOM_CEMC");   // fallback
+      if (!geo)
+      {
+        std::cerr << "### FATAL: CEMC geometry not found on the node tree – abort\n";
+        gSystem->Exit(1);
+      }
+
+      // --- 2) configure BEmcRec for detailed geometry
+      bemcPtr->set_UseDetailedGeometry(true);
+      bemcPtr->SetDim(geo->get_phibins(),      // Nx  (φ-bins)
+                      geo->get_etabins());     // Ny  (η-bins)
+
+      // --- 3) feed every tower once (ix = φ, iy = η !)
+      for (int ieta = 0; ieta < geo->get_etabins(); ++ieta)
+      {
+        for (int iphi = 0; iphi < geo->get_phibins(); ++iphi)
+        {
+          const RawTowerDefs::keytype key =
+            RawTowerDefs::encode_towerid( geo->get_calorimeter_id(), ieta, iphi );
+          if (auto* tg = geo->get_tower_geometry(key))
+          {
+            bemcPtr->SetTowerGeometry(iphi, ieta, *tg);
+          }
+        }
+      }
+      bemcPtr->CompleteTowerGeometry();   // derive dX/dY/dZ once
+    }
+    
   ////////////////////////////////////////////////////////////
   // 6) Our PositionDependentCorrection code
   ////////////////////////////////////////////////////////////
@@ -201,7 +246,7 @@ void Fun4All_PDC(int nevents = 0,
     = new PositionDependentCorrection("PositionDepCorr", finalOut);
   pdc->setBEmcRec(bemcPtr);
   pdc->setIsSimulation(isSimulation);
-  pdc->UseSurveyGeometry(false);
+  pdc->UseSurveyGeometry(true);
   // optionally specify a different tag / timestamp
   // pdc->SetCDBTag("MDC3");
   // pdc->SetTimeStamp(runNumber);
