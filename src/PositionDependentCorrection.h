@@ -276,6 +276,8 @@ class PositionDependentCorrection : public SubsysReco
     
   TH1F* h_phi_diff_cpRaw_E     [N_Ebins]{};
   TH1F* h_phi_diff_cpCorr_E    [N_Ebins]{};
+  TH1F* h_phi_diff_cpBcorr_E [N_Ebins] {};
+    
   TH1F* h_eta_diff_cpRaw_E     [N_Ebins]{};
   TH1F* h_eta_diff_cpCorr_E    [N_Ebins]{};
     

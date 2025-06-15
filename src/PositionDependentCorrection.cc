@@ -446,8 +446,17 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
       h_phi_diff_cpCorr_E[i] = new TH1F(Form("h_phi_diff_cpCorr_%s",tag.c_str()),
                                         "#Delta#phi CP‑corr;#Delta#phi (rad);Counts",
                                         200,-0.1,0.1);
+        
+        
+      h_phi_diff_cpBcorr_E[i] = new TH1F(
+            Form("h_phi_diff_cpBcorr_%s",tag.c_str()),
+            "#Delta#phi b‑corr;#Delta#phi (rad);Counts",    200,-0.1,0.1);
+        
+        
       hm->registerHisto( h_phi_diff_cpRaw_E [i] );
       hm->registerHisto( h_phi_diff_cpCorr_E[i] );
+      hm->registerHisto( h_phi_diff_cpBcorr_E[i] );
+        
     }
   pr_phi_vs_blockcoord = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5, -0.2,0.2);
     
@@ -2021,7 +2030,7 @@ void PositionDependentCorrection::fillAshLogDx(
 
 
 // ---------------------------------------------------------------------------
-//  Δφ test with / without CorrectPosition from the clusteriser
+//  Δφ test:  raw  vs  CorrectPosition  vs  analytic‑b correction
 // ---------------------------------------------------------------------------
 void PositionDependentCorrection::fillDPhiClusterizerCP(
         RawCluster*            cluster,
@@ -2034,119 +2043,119 @@ try
   if (vb) std::cout << "\n" << ANSI_BOLD << ANSI_CYAN
                     << "[fillDPhiClusterizerCP] ENTER" << ANSI_RESET << '\n';
 
-  /* ------------------------------------------------------------------ */
-  /* 0) Sanity checks                                                   */
-  /* ------------------------------------------------------------------ */
+  /* ───────────────────────── 0) Sanity checks ─────────────────────────── */
   if (!cluster || !m_geometry || !m_bemcRec)
   { if (vb) std::cerr << "  ✘ nullptr passed in – abort\n"; return; }
 
-  /* geometry dimensions (used only for diagnostics) ------------------ */
-  const int nPhiGeom = m_geometry->get_phibins();
-  const int nEtaGeom = m_geometry->get_etabins();
-  const int nPhiRec  = m_bemcRec->GetNx();
-  const int nEtaRec  = m_bemcRec->GetNy();
-
-  if (vb)
-    std::cout << "  · nPhi  (container / rec) = "
-              << nPhiGeom << " / " << nPhiRec << '\n'
-              << "  · nEta  (container / rec) = "
-              << nEtaGeom << " / " << nEtaRec << '\n';
-
-  /* ------------------------------------------------------------------ */
-  /* 1) Cluster meta data                                               */
-  /* ------------------------------------------------------------------ */
+  /* ───────────────────────── 1) slice id, meta data ───────────────────── */
   const float eReco  = cluster->get_energy();
   const int   iSlice = getEnergySlice(eReco);
   if (iSlice < 0 || iSlice >= N_Ebins) return;
 
-  if (vb) std::cout << "  · E_reco = " << eReco
-                    << " GeV  |  slice #" << iSlice
-                    << "  |  nTowers = " << cluster->getNTowers() << '\n';
-
-  /* ------------------------------------------------------------------ */
-  /* 2) Towers → hit list for BEmcRec                                   */
-  /* ------------------------------------------------------------------ */
+  /* ───────────────────────── 2) cluster → hit list ────────────────────── */
   std::vector<EmcModule> hits;
   hits.reserve(cluster->getNTowers());
+  const int nPhiRec = m_bemcRec->GetNx();
 
-  for (auto it = cluster->get_towers().first;
-            it != cluster->get_towers().second; ++it)
+  for (auto it = cluster->get_towers().first; it != cluster->get_towers().second; ++it)
   {
     const auto* tg = m_geometry->get_tower_geometry(it->first);
-    if (!tg) continue;                             // skip unknown towers
+    if (!tg) continue;
 
     EmcModule m{};
     m.ich = tg->get_binphi() + tg->get_bineta() * nPhiRec;
     m.amp = it->second;
-    m.tof = 0;
     hits.emplace_back(std::move(m));
-
-    if (vb > 2)
-      std::cout << "    tower (η=" << tg->get_bineta()
-                << ", φ=" << tg->get_binphi()
-                << ")  amp=" << m.amp << '\n';
   }
   if (hits.empty()) return;
 
-  /* ------------------------------------------------------------------ */
-  /* 3) Centre of gravity in tower units                                */
-  /* ------------------------------------------------------------------ */
-  float Ecl , xCG , yCG , xx , yy , xy;
-  m_bemcRec->Momenta(&hits, Ecl, xCG, yCG, xx, yy, xy);
+  /* ───────────────────────── 3) centre of gravity ─────────────────────── */
+  float Ecl,xCG,yCG,xx,yy,xy;
+  m_bemcRec->Momenta(&hits,Ecl,xCG,yCG,xx,yy,xy);
 
-  if (vb > 1)
-    std::cout << "  · CG (tower units) = (" << xCG << ", " << yCG
-              << ")  ΣE = " << Ecl << '\n';
+  /* ───────────────────────── 4) three φ variants ──────────────────────── */
 
-  /* ------------------------------------------------------------------ */
-  /* 4) φ without / with CorrectPosition                                */
-  /* ------------------------------------------------------------------ */
+  /* 4a) RAW -------------------------------------------------------------- */
+  float xA,yA,zA;
+  m_bemcRec->Tower2Global(eReco,xCG,yCG,xA,yA,zA);
+  const float phiRawSD = std::atan2(yA,xA);
 
-  /* --- 4a. RAW: convert CG → (x,y,z) in cm (includes depth corr.) ---- */
-  float xA, yA, zA;
-  m_bemcRec->Tower2Global(eReco, xCG, yCG, xA, yA, zA);
-  const float phiRawSD = std::atan2(yA, xA);
-  if (vb > 1) std::cout << "    RAW  : φ_SD = " << phiRawSD << '\n';
+  /* 4b) BEmcRec::CorrectPosition ---------------------------------------- */
+  float xCP=xCG , yCP=yCG , xB,yB,zB;
+  m_bemcRec->CorrectPosition(eReco,xCG,yCG,xCP,yCP);
+  m_bemcRec->Tower2Global(eReco,xCP,yCP,xB,yB,zB);
+  const float phiCorrSD = std::atan2(yB,xB);
 
-  /* --- 4b. CORR: apply CorrectPosition first, then convert ----------- */
-  float xCP = xCG, yCP = yCG;
-  m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
+  /* 4c) analytic  b(E)  correction  ------------------------------------- */
+  float xBC = xCG , yBC = yCG;                // start from raw CG
 
-  float xB, yB, zB;
-  m_bemcRec->Tower2Global(eReco, xCP, yCP, xB, yB, zB);
-  const float phiCorrSD = std::atan2(yB, xB);
-  if (vb > 1) std::cout << "    CORR : φ_SD = " << phiCorrSD << '\n';
+  if (m_bValsPhi[iSlice] > 0.f)               // skip if b≤0
+  {
+      /* (i) local offset inside THIS tower  (‑0.5 … +0.5] -------------- */
+      const int   ix0       = int(xCG + 0.5f);   // seed‑tower index
+      const float localPhi  = xCG - ix0;         // identical to CP code
 
-  /* ------------------------------------------------------------------ */
-  /* 5) Δφ wrt truth & histogramming                                    */
-  /* ------------------------------------------------------------------ */
-  const float phiTruth = TVector2::Phi_mpi_pi(truthPhoton.Phi());
-  const float dPhiRaw  = TVector2::Phi_mpi_pi(phiRawSD  - phiTruth);
-  const float dPhiCorr = TVector2::Phi_mpi_pi(phiCorrSD - phiTruth);
+      /* (ii) energy‑dependent inverse distortion ----------------------- */
+      const float localPhiCorr = doPhiBlockCorr(localPhi, m_bValsPhi[iSlice]);
 
-  if (vb) std::cout << ANSI_BOLD
-                    << "    Δφ_raw  = " << dPhiRaw
-                    << "  |  Δφ_corr = " << dPhiCorr
-                    << ANSI_RESET << '\n';
+      /* (iii) back to tower units -------------------------------------- */
+      xBC = ix0 + localPhiCorr;
+
+      /* (iv) reproduce 8‑tower module bias so that we compare apples‑to‑apples */
+#if defined(BEMCREC_HAS_GETMODULEBIAS) || (__has_include("BEmcRecCEMC.h"))
+      if (m_bemcRec->get_UseDetailedGeometry())
+      {
+         const int   ix8  = int(xBC + 0.5f) / 8;
+         const float x8   = xBC + 0.5f - ix8*8 - 4.f;          // −4 … +4
+         const int   local_ix8 = int(xBC + 0.5f) - ix8*8;      // 0 … 7
+         const float dx = m_bemcRec->GetModuleBias(local_ix8) * x8 / 4.f;
+         xBC -= dx;
+      }
+#else
+      /* legacy fallback ------------------------------------------------ */
+      const int   ix8  = int(xBC + 0.5f) / 8;
+      const float x8   = xBC + 0.5f - ix8*8 - 4.f;           // −4 … +4
+      float dx = 0.10f * x8 / 4.f;
+      if (std::fabs(x8) > 3.3f) dx = 0.f;                    // edge guard
+      xBC -= dx;
+#endif
+  }
+
+  float xC,yC,zC;
+  m_bemcRec->Tower2Global(eReco,xBC,yBC,xC,yC,zC);
+  const float phiBcorrSD = std::atan2(yC,xC);
+
+  /* ───────────────────────── 5) Δφ & histogramming ───────────────────── */
+  const float phiTruth   = TVector2::Phi_mpi_pi(truthPhoton.Phi());
+  const float dPhiRaw    = TVector2::Phi_mpi_pi(phiRawSD   - phiTruth);
+  const float dPhiCorr   = TVector2::Phi_mpi_pi(phiCorrSD  - phiTruth);
+  const float dPhiBcorr  = TVector2::Phi_mpi_pi(phiBcorrSD - phiTruth);
 
   if (cpRawHistArr [iSlice])  cpRawHistArr [iSlice]->Fill(dPhiRaw);
   if (cpCorrHistArr[iSlice])  cpCorrHistArr[iSlice]->Fill(dPhiCorr);
+  if (h_phi_diff_cpBcorr_E[iSlice])  h_phi_diff_cpBcorr_E[iSlice]->Fill(dPhiBcorr);
 
-  if (vb) std::cout << ANSI_GREEN
-                    << "[fillDPhiClusterizerCP] EXIT – OK"
-                    << ANSI_RESET << '\n';
+  if (vb)
+    std::cout << ANSI_BOLD
+              << "    Δφ_raw   = " << dPhiRaw   << " rad\n"
+              << "    Δφ_corr  = " << dPhiCorr  << " rad\n"
+              << "    Δφ_bcorr = " << dPhiBcorr << " rad"
+              << ANSI_RESET << '\n';
+
+  if (vb) std::cout << ANSI_GREEN << "[fillDPhiClusterizerCP] EXIT – OK"
+                    << ANSI_RESET  << '\n';
 }
 /* ----------------------------- error guards ----------------------------- */
-catch (const std::exception& ex) {
+catch (const std::exception& ex)
+{
   std::cerr << ANSI_RED << "[fillDPhiClusterizerCP] EXCEPTION: "
             << ex.what() << ANSI_RESET << '\n';
 }
-catch (...) {
+catch (...)
+{
   std::cerr << ANSI_RED << "[fillDPhiClusterizerCP] UNKNOWN EXCEPTION!"
             << ANSI_RESET << '\n';
 }
-
-
 
 
 // ==========================================================================
