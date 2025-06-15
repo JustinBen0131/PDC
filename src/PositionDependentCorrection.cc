@@ -457,7 +457,7 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
       hm->registerHisto( h_phi_diff_cpCorr_E[i] );
       hm->registerHisto( h_phi_diff_cpBcorr_E[i] );
         
-    }
+  }
   pr_phi_vs_blockcoord = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5, -0.2,0.2);
     
   for (int i = 0; i < N_Ebins; i++)

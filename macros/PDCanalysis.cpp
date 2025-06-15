@@ -2429,297 +2429,250 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
   for (auto* o: keep) delete o;
 }
 
-/******************************************************************************
- * OverlayDeltaPhiClusterizerCP  (v1 – twin of OverlayDeltaPhiSlices)
- *
- *  – works on the RAW / CORR histograms filled by fillDPhiClusterizerCP()
- *  – file names, canvas sizes, colours, diagnostics identical to
- *    OverlayDeltaPhiSlices() so that the two outputs are directly comparable
- *
- * 2025‑06‑14  –  first release
- ******************************************************************************/
 void OverlayDeltaPhiClusterizerCP(const std::vector<std::pair<double,double>>& eEdges,
                                   EBinningMode  binMode,
                                   bool          isFirstPass,
                                   const char*   outDir)
 {
-  /* ------------------------------------------------------------------ *
-   * 0)   boiler‑plate & helpers
-   * ------------------------------------------------------------------ */
-  gSystem->mkdir(outDir, /*recursive=*/true);
+  /* ---------- 0. boiler‑plate ---------- */
+  gSystem->mkdir(outDir, /*recurse=*/true);
   gStyle->SetOptStat(0);
 
   const int N_E = static_cast<int>(eEdges.size());
   if (!N_E) { std::cerr << "[Δφ‑CP] eEdges empty – abort\n"; return; }
 
-  auto makeLabel = [&](int i)->std::string
+  auto tagOf = [&](int i)->std::string
   {
-      if (binMode == EBinningMode::kRange)
-          return Form("%.0f_%.0f", eEdges[i].first, eEdges[i].second);
-      return Form("E%.0f", eEdges[i].first);
+    return (binMode==EBinningMode::kRange)
+         ? Form("%.0f_%.0f",eEdges[i].first,eEdges[i].second)
+         : Form("E%.0f",     eEdges[i].first);
   };
 
-  /* --------------------  bullet‑proof Gaussian fitter  ------------------- */
-  struct GRes { double N, mu, muErr, sg, sgErr; };
-
-  auto robustGauss = [](TH1* h)->GRes
+  /* ---------- helper: robust Gaussian fit ---------- */
+  struct GRes { double mu,muErr,sg,sgErr; };
+  auto robust = [](TH1* h)->GRes
   {
-      if (!h || h->Integral()==0) return {0,0,0,0,0};
-
-      const double q[3] = {0.25,0.50,0.75};
-      double quart[3]; h->GetQuantiles(3,quart,const_cast<double*>(q));
-      double med=quart[1], iqr=quart[2]-quart[0];
-      double winLo=med-2.5*iqr, winHi=med+2.5*iqr;
-      if (winLo>=winHi){ winLo=h->GetMean()-2*h->GetRMS();
-                         winHi=h->GetMean()+2*h->GetRMS(); }
-
-      TF1 fG("fG","gaus",winLo,winHi);
-      const double A=h->GetMaximum();
-      const double S=std::max(1e-4,0.5*h->GetRMS());
-      std::vector<std::tuple<double,double,double>> seeds={
-          { A     , med        , S   },
-          {1.5*A  , med        ,1.5*S},
-          {0.5*A  , med+0.3*S  ,0.7*S},
-          {1.2*A  , med-0.3*S  ,1.2*S}
-      };
-
-      int nIter=0; double bestChi2=1e99; GRes best{h->GetEntries(),0,0,0,0};
-      const char* opt="QNR0S";
-      while(++nIter<=3)
-      {
-          for(auto s:seeds){
-              fG.SetParameters(std::get<0>(s),std::get<1>(s),std::get<2>(s));
-              TFitResultPtr r=h->Fit(&fG,opt);
-              if(!r.Get()||!r->IsValid()) continue;
-              if(r->Chi2()<bestChi2 && std::fabs(fG.GetParameter(2))>1e-6){
-                  bestChi2=r->Chi2();
-                  best.mu=fG.GetParameter(1);     best.muErr=fG.GetParError(1);
-                  best.sg=std::fabs(fG.GetParameter(2)); best.sgErr=fG.GetParError(2);
-              }
-          }
-          if(bestChi2<1e98) break;
-          winLo+=0.5*fG.GetParameter(2); winHi-=0.5*fG.GetParameter(2);
-          if(winLo>=winHi || h->Integral()<50) break;
-          fG.SetRange(winLo,winHi);
-      }
-      if(bestChi2>=1e98){           // robust RMS fallback
-          double rms=h->GetRMS();
-          double rmsErr=rms/std::sqrt(2.*(h->GetEntries()-1));
-          best.mu=h->GetMean(); best.muErr=rmsErr;
-          best.sg=rms;         best.sgErr=rmsErr;
-      }
-      return best;
+    if(!h||h->Integral()==0) return {0,0,0,0};
+    double q[3]={0.25,0.50,0.75}, quart[3]; h->GetQuantiles(3,quart,q);
+    double med=quart[1],iqr=quart[2]-quart[0];
+    double lo=med-2.5*iqr,hi=med+2.5*iqr;
+    if(lo>=hi){ lo=h->GetMean()-2*h->GetRMS(); hi=h->GetMean()+2*h->GetRMS(); }
+    TF1 f("g","gaus",lo,hi);  f.SetParameters(h->GetMaximum(),med,0.5*h->GetRMS());
+    TFitResultPtr r=h->Fit(&f,"QNR0S");
+    if(!r.Get()||!r->IsValid()) {            // fallback – RMS
+       double rms=h->GetRMS(),err=rms/std::sqrt(2.*(h->GetEntries()-1));
+       return {h->GetMean(),err,rms,err};
+    }
+    return {f.GetParameter(1),f.GetParError(1),
+            std::fabs(f.GetParameter(2)),f.GetParError(2)};
   };
 
-  /* ------------------------------------------------------------------ *
-   * 1)  master canvas (per‑slice overlays)
-   * ------------------------------------------------------------------ */
-  const int nCols=4, nRows=(binMode==EBinningMode::kDiscrete ? 4 : 2);
-  TCanvas cMain(Form("DeltaPhiCPOverlay_%dx%d",nCols,nRows),
-                "#Delta#phi^{clusterizer} raw vs corrected",
-                1600,600*nRows);
+  /* ---------- 1. master canvas ---------- */
+  const int nCols=4 , nRows=(binMode==EBinningMode::kDiscrete?4:2);
+  TCanvas cMain("cΔφCP","Δφ comparison – clusteriser",1600,600*nRows);
   cMain.Divide(nCols,nRows);
 
+  /* containers for summary graphs */
   std::vector<double> eCtr,
-                      muRaw,muRawErr,sgRaw,sgRawErr,
-                      muCor,muCorErr,sgCor,sgCorErr;
+    muRaw,muCorr,muB , muRE,muCE,muBE,
+    sgRaw,sgCorr,sgB , sgRE,sgCE,sgBE;
 
-  std::vector<TObject*> keep;   // make sure ROOT does not delete early
+  std::vector<TObject*> guard;   // keep clones alive
 
-  /* ------------------------------------------------------------------ *
-   * 2)  loop over slices
-   * ------------------------------------------------------------------ */
-  for(int iE=0;iE<N_E;++iE)
+  /* ---------- 2. per‑slice loop ---------- */
+  for(int i=0;i<N_E;++i)
   {
-      const double eLo=eEdges[iE].first, eHi=eEdges[iE].second;
-      const std::string tag=makeLabel(iE);
+    const double eLo=eEdges[i].first, eHi=eEdges[i].second;
+    const std::string tag=tagOf(i);
 
-      TH1F* hRaw = dynamic_cast<TH1F*>( gROOT->FindObject(
-                         Form("h_phi_diff_cpRaw_%s", tag.c_str())) );
-      TH1F* hCor = (!isFirstPass)
-                   ? dynamic_cast<TH1F*>( gROOT->FindObject(
-                         Form("h_phi_diff_cpCorr_%s", tag.c_str())) )
-                   : nullptr;
+    TH1F* hR = (TH1F*)gROOT->FindObject(Form("h_phi_diff_cpRaw_%s"  ,tag.c_str()));
+    TH1F* hC = (!isFirstPass)
+               ? (TH1F*)gROOT->FindObject(Form("h_phi_diff_cpCorr_%s",tag.c_str()))
+               : nullptr;
+    TH1F* hB = (!isFirstPass)
+               ? (TH1F*)gROOT->FindObject(Form("h_phi_diff_cpBcorr_%s",tag.c_str()))
+               : nullptr;
 
-      if(!hRaw){ std::cerr<<"[Δφ‑CP] missing RAW hist "<<tag<<'\n'; continue; }
+    if(!hR) { std::cerr<<"[Δφ‑CP] missing RAW hist "<<tag<<"\n"; continue; }
 
-      hRaw = static_cast<TH1F*>(hRaw->Clone(Form("hRawCP_%d",iE)));
-      hRaw->SetDirectory(nullptr); keep.push_back(hRaw);
+    /* clone & normalise */
+    auto clone = [&](TH1F* src,const char* nm,Color_t col,int mStyle)->TH1F*
+    {
+      if(!src) return nullptr;
+      TH1F* c=(TH1F*)src->Clone(nm); c->SetDirectory(nullptr);
+      if(c->Integral()>0) c->Scale(1./c->Integral());
+      c->SetMarkerColor(col); c->SetLineColor(col);
+      c->SetMarkerStyle(mStyle); c->SetMarkerSize(0.9);
+      guard.push_back(c); return c;
+    };
 
-      if(hCor){
-          hCor = static_cast<TH1F*>(hCor->Clone(Form("hCorCP_%d",iE)));
-          hCor->SetDirectory(nullptr); keep.push_back(hCor);
-      }
+    TH1F* r = clone(hR,Form("r%d",i),kBlack,20);
+    TH1F* c = clone(hC,Form("c%d",i),kRed  ,21);
+    TH1F* b = clone(hB,Form("b%d",i),kBlue+1,22);
 
-      if(hRaw->Integral()>0)  hRaw->Scale(1./hRaw->Integral());
-      if(hCor && hCor->Integral()>0) hCor->Scale(1./hCor->Integral());
+    /* robust fits */
+    GRes R=robust(r), C=robust(c), B=robust(b);
 
-      GRes R=robustGauss(hRaw);
-      GRes C=hCor?robustGauss(hCor):GRes{0,0,0,0,0};
+    eCtr.push_back(0.5*(eLo+eHi));
+    muRaw.push_back(R.mu); muRE.push_back(R.muErr);
+    sgRaw.push_back(R.sg); sgRE.push_back(R.sgErr);
 
-      eCtr.push_back(0.5*(eLo+eHi));
-      muRaw.push_back(R.mu);   muRawErr.push_back(R.muErr);
-      sgRaw.push_back(R.sg);   sgRawErr.push_back(R.sgErr);
-      if(hCor){
-          muCor.push_back(C.mu);   muCorErr.push_back(C.muErr);
-          sgCor.push_back(C.sg);   sgCorErr.push_back(C.sgErr);
-      }else{
-          muCor.push_back(0); muCorErr.push_back(0);
-          sgCor.push_back(0); sgCorErr.push_back(0);
-      }
+    muCorr.push_back(C.mu); muCE.push_back(C.muErr);
+    sgCorr.push_back(C.sg); sgCE.push_back(C.sgErr);
 
-      /* ------ draw on pad -------------------------------------------- */
-      TPad* pad = static_cast<TPad*>(cMain.cd(iE+1));
-      pad->SetLeftMargin(0.22); pad->SetBottomMargin(0.18);
-      pad->SetRightMargin(0.06); pad->SetTopMargin(0.10);
+    muB.push_back(B.mu);   muBE.push_back(B.muErr);
+    sgB.push_back(B.sg);   sgBE.push_back(B.sgErr);
 
-      hRaw->SetMarkerStyle(20); hRaw->SetMarkerColor(kBlack);
-      hRaw->SetLineColor(kBlack);
-      if(hCor){
-          hCor->SetMarkerStyle(21); hCor->SetMarkerColor(kRed);
-          hCor->SetLineColor(kRed);
-      }
+    /* draw overlay */
+    TPad* pad=(TPad*)cMain.cd(i+1);
+    pad->SetLeftMargin(0.22); pad->SetBottomMargin(0.18);
 
-      double yMax=hRaw->GetMaximum();
-      if(hCor) yMax=std::max(yMax,hCor->GetMaximum());
-      hRaw->GetYaxis()->SetRangeUser(0,1.25*yMax);
+    double yMax=r->GetMaximum();
+    if(c) yMax=std::max(yMax,c->GetMaximum());
+    if(b) yMax=std::max(yMax,b->GetMaximum());
 
-      hRaw->SetTitle(Form("#Delta#phi^{CP}  [%.1f, %.1f) GeV",eLo,eHi));
-      hRaw->GetXaxis()->SetTitle("#Delta#phi  (reco - truth)  [rad]");
-      hRaw->GetYaxis()->SetTitle("Normalised counts");
+    r->SetTitle(Form("#Delta#phi  [%.1f, %.1f) GeV",eLo,eHi));
+    r->GetXaxis()->SetTitle("#Delta#phi = #phi_{reco} - #phi_{truth}  [rad]");
+    r->GetYaxis()->SetTitle("Probability density");
+    r->GetYaxis()->SetRangeUser(0,1.25*yMax);
 
-      hRaw->Draw("E");
-      if(hCor) hCor->Draw("E SAME");
+    r->Draw("E");
+    if(c) c->Draw("E SAME");
+    if(b) b->Draw("E SAME");
 
-      TLegend* leg=new TLegend(0.24,0.70,0.48,0.86);
-      leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.032);
-      leg->AddEntry(hRaw ,"RAW‑CP"      ,"lp");
-      if(hCor) leg->AddEntry(hCor,"CP‑corr","lp");
-      leg->Draw(); keep.push_back(leg);
-
-      TLatex tx; tx.SetNDC(); tx.SetTextFont(42); tx.SetTextSize(0.030);
-      tx.SetTextAlign(33);
-      tx.DrawLatex(0.92,0.88,
-          Form("RAW  #mu=%.4f  #sigma=%.4f",R.mu,R.sg));
-      if(hCor)
-          tx.DrawLatex(0.92,0.82,
-              Form("CORR #mu=%.4f  #sigma=%.4f",C.mu,C.sg));
+    TLegend* leg=new TLegend(0.24,0.70,0.57,0.90);
+    leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.030);
+    leg->AddEntry(r,"base, no CorrectPosition","lp");
+    if(c) leg->AddEntry(c,"+ CorrectPosition"    ,"lp");
+    if(b) leg->AddEntry(b,"+ updated b‑corr"     ,"lp");
+    leg->Draw(); guard.push_back(leg);
   } /* slice loop */
 
-  /* ------------------------------------------------------------------ *
-   * 3)  summary graphs (mean & sigma vs E) – identical style
-   * ------------------------------------------------------------------ */
-  const int nPts=static_cast<int>(eCtr.size());
-  if(!nPts){ std::cerr<<"[Δφ‑CP] nothing to plot\n"; return; }
-
-  auto makeG=[&](const std::vector<double>& y,
-                 const std::vector<double>& yE,
-                 double dx, Color_t col, int m)->TGraphErrors*
+  /* ---------- helper: make TGraphErrors ---------- */
+  auto makeG=[&](const std::vector<double>& y,const std::vector<double>& ye,
+                 double dx,Color_t col,int m)->TGraphErrors*
   {
-      std::vector<double> x(nPts), ex(nPts,0.);
-      for(int i=0;i<nPts;++i) x[i]=eCtr[i]+dx;
-      auto g=new TGraphErrors(nPts,x.data(),y.data(),ex.data(),yE.data());
-      g->SetMarkerColor(col); g->SetLineColor(col);
-      g->SetMarkerStyle(m);   g->SetMarkerSize(1.1);
-      return g;
+    const int N=(int)eCtr.size();
+    std::vector<double> x(N), ex(N,0.);
+    for(int i=0;i<N;++i) x[i]=eCtr[i]+dx;
+    auto g=new TGraphErrors(N,x.data(),y.data(),ex.data(),ye.data());
+    g->SetMarkerColor(col); g->SetLineColor(col);
+    g->SetMarkerStyle(m); g->SetMarkerSize(1.);
+    guard.push_back(g); return g;
   };
 
-  const double dx=0.08;
-  auto gMuR=makeG(muRaw,muRawErr,-dx,kBlack,20);
-  auto gMuC=makeG(muCor,muCorErr,+dx,kRed  ,21);
-  auto gSiR=makeG(sgRaw,sgRawErr,-dx,kBlack,20);
-  auto gSiC=makeG(sgCor,sgCorErr,+dx,kRed  ,21);
-  keep.insert(keep.end(),{gMuR,gMuC,gSiR,gSiC});
+  const double dx=0.10;
+  auto gMuR = makeG(muRaw ,muRE,-dx,kBlack  ,20);
+  auto gMuC = makeG(muCorr,muCE, 0,kRed    ,21);
+  auto gMuB = makeG(muB   ,muBE,+dx,kBlue+1,22);
 
+  auto gSiR = makeG(sgRaw ,sgRE,-dx,kBlack  ,20);
+  auto gSiC = makeG(sgCorr,sgCE, 0,kRed    ,21);
+  auto gSiB = makeG(sgB   ,sgBE,+dx,kBlue+1,22);
+
+  /* ---------- 3. summary canvas (μ & σ) ---------- */
   {
-    const double xMin=eCtr.front()-1.0, xMax=eCtr.back()+1.0;
-    TCanvas cSum("cMuSiCP","#Delta#phi^{CP} mean / sigma vs E",860,760);
-    TPad pT("pT","",0,0.34,1,1); pT.Draw();
-    TPad pB("pB","",0,0  ,1,0.34); pB.Draw();
+    const double xMin=eCtr.front()-1, xMax=eCtr.back()+1;
+    TCanvas cSum("cMuSigma","#Delta#phi mean / sigma vs E",860,780);
+    TPad pT("pT","",0,0.37,1,1); pT.Draw();
+    TPad pB("pB","",0,0  ,1,0.37); pB.Draw();
 
+    /* μ(E) ------------------------------------------------ */
     pT.cd(); pT.SetLeftMargin(0.15); pT.SetBottomMargin(0.03);
-    TH1F fMu("fMu","; ;#mu_{Gauss} [rad]",1,xMin,xMax);
-    fMu.SetMinimum(*std::min_element(muRaw.begin(),muRaw.end())*1.2);
-    fMu.SetMaximum(*std::max_element(muRaw.begin(),muRaw.end())*1.2);
-    fMu.Draw("AXIS"); gMuR->Draw("P SAME"); gMuC->Draw("P SAME");
-    TLegend l1(0.18,0.80,0.40,0.90); l1.SetBorderSize(0);
-    l1.AddEntry(gMuR,"RAW‑CP","lp"); l1.AddEntry(gMuC,"CP‑corr","lp"); l1.Draw();
+    TH1F fMu("fMu","; ;Gaussian mean  #mu  [rad]",1,xMin,xMax);
+    fMu.SetMinimum(*std::min_element(muRaw.begin(),muRaw.end())*1.4);
+    fMu.SetMaximum(*std::max_element(muRaw.begin(),muRaw.end())*1.4);
+    fMu.Draw("AXIS");
+    gMuR->Draw("P SAME"); gMuC->Draw("P SAME"); gMuB->Draw("P SAME");
 
-    pB.cd(); pB.SetLeftMargin(0.15); pB.SetTopMargin(0.06);
-    pB.SetBottomMargin(0.38);
-    TH1F fSi("fSi",";E_{slice} [GeV];#sigma_{Gauss} [rad]",1,xMin,xMax);
+    TLegend lg(0.17,0.78,0.55,0.92);
+    lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.034);
+    lg.AddEntry(gMuR,"base, no CP","lp");
+    lg.AddEntry(gMuC,"+ CorrectPosition","lp");
+    lg.AddEntry(gMuB,"+ updated b‑corr","lp"); lg.Draw();
+
+    /* σ(E) ------------------------------------------------ */
+    pB.cd(); pB.SetLeftMargin(0.15); pB.SetTopMargin(0.07);
+    pB.SetBottomMargin(0.35);
+    TH1F fSi("fSi",";Energy slice centre  [GeV];Gaussian width  #sigma  [rad]",
+             1,xMin,xMax);
     fSi.SetMinimum(0);
     fSi.SetMaximum(1.3* *std::max_element(sgRaw.begin(),sgRaw.end()));
-    fSi.Draw("AXIS"); gSiR->Draw("P SAME"); gSiC->Draw("P SAME");
+    fSi.Draw("AXIS");
+    gSiR->Draw("P SAME"); gSiC->Draw("P SAME"); gSiB->Draw("P SAME");
 
     cSum.SaveAs(TString(outDir)+"/DeltaPhiCP_MeanSigmaVsE.png");
   }
 
-  /* ------------------------------------------------------------------ *
-   * 4)  extra diagnostics (RMSE & fractional resolution)
-   * ------------------------------------------------------------------ */
-  auto makeDiag=[&](const char* cname,const char* yTit,
-                    const std::vector<double>& yR,const std::vector<double>& yRE,
-                    const std::vector<double>& yC,const std::vector<double>& yCE,
-                    const char* png)
+  /* ---------- 4. diagnostics: RMSE & σ/|μ| ---------- */
+  auto diag=[&](const char* cname,const char* yTit,
+                const std::vector<double>& yr,const std::vector<double>& yre,
+                const std::vector<double>& yc,const std::vector<double>& yce,
+                const std::vector<double>& yb,const std::vector<double>& ybe,
+                const char* file)
   {
-      auto gR=makeG(yR,yRE,-dx,kBlack,20);
-      auto gC=makeG(yC,yCE,+dx,kRed,21);
-      keep.insert(keep.end(),{gR,gC});
+    auto gR=makeG(yr,yre,-dx,kBlack  ,20);
+    auto gC=makeG(yc,yce, 0 ,kRed    ,21);
+    auto gB=makeG(yb,ybe,+dx,kBlue+1,22);
 
-      double yMax=1.2*std::max( *std::max_element(yR.begin(),yR.end()),
-                                *std::max_element(yC.begin(),yC.end()) );
-      TCanvas c(cname,cname,820,600);
-      c.SetLeftMargin(0.15); c.SetRightMargin(0.06);
-      TH1F f("f",Form(";E_{slice} [GeV];%s",yTit),1,
-             eCtr.front()-1.0,eCtr.back()+1.0);
-      f.SetMinimum(0); f.SetMaximum(yMax); f.Draw("AXIS");
-      gR->Draw("P SAME"); gC->Draw("P SAME");
-      TLegend l(0.18,0.80,0.45,0.90); l.SetBorderSize(0);
-      l.AddEntry(gR,"RAW‑CP","lp"); l.AddEntry(gC,"CP‑corr","lp"); l.Draw();
-      c.SaveAs(TString(outDir)+"/"+png);
+    double yMax=1.2*std::max({*std::max_element(yr.begin(),yr.end()),
+                              *std::max_element(yc.begin(),yc.end()),
+                              *std::max_element(yb.begin(),yb.end())});
+    TCanvas c(cname,cname,860,620);
+    c.SetLeftMargin(0.15); c.SetRightMargin(0.06);
+    TH1F frame("f",";Energy slice centre  [GeV];"+std::string(yTit),1,
+               eCtr.front()-1,eCtr.back()+1);
+    frame.SetMinimum(0); frame.SetMaximum(yMax); frame.Draw("AXIS");
+    gR->Draw("P SAME"); gC->Draw("P SAME"); gB->Draw("P SAME");
+
+    TLegend lg(0.17,0.78,0.55,0.92);
+    lg.SetBorderSize(0); lg.SetFillStyle(0);
+    lg.AddEntry(gR,"base, no CP"      ,"lp");
+    lg.AddEntry(gC,"+ CorrectPosition","lp");
+    lg.AddEntry(gB,"+ updated b‑corr" ,"lp"); lg.Draw();
+
+    c.SaveAs(TString(outDir)+"/"+file);
   };
 
-  std::vector<double> rmseR(nPts),rmseRE(nPts),rmseC(nPts),rmseCE(nPts);
-  for(int i=0;i<nPts;++i){
-      rmseR[i]=std::hypot(muRaw[i],sgRaw[i]);
-      rmseRE[i]=rmseR[i]*std::sqrt(
-          std::pow(muRawErr[i]/muRaw[i],2)+std::pow(sgRawErr[i]/sgRaw[i],2));
-      rmseC[i]=std::hypot(muCor[i],sgCor[i]);
-      rmseCE[i]=(rmseC[i]>0?
-          rmseC[i]*std::sqrt(
-              std::pow(muCorErr[i]/muCor[i],2)+std::pow(sgCorErr[i]/sgCor[i],2))
-          :0);
+  /* RMSE */
+  std::vector<double> rmR,rmRE, rmC,rmCE, rmB,rmBE;
+  for(size_t i=0;i<eCtr.size();++i){
+    auto rm=[&](double mu,double sg,double dmu,double dsg,
+                double& err){
+        double r=std::hypot(mu,sg);
+        err=r*std::sqrt(std::pow(dmu/mu,2)+std::pow(dsg/sg,2));
+        return r;
+    };
+    double e;
+    rmR.push_back(rm(muRaw[i],sgRaw[i],muRE[i],sgRE[i],e)); rmRE.push_back(e);
+    rmC.push_back(rm(muCorr[i],sgCorr[i],muCE[i],sgCE[i],e)); rmCE.push_back(e);
+    rmB.push_back(rm(muB   [i],sgB   [i],muBE[i],sgBE[i],e)); rmBE.push_back(e);
   }
-  makeDiag("cRMSECP","#sqrt{#mu^{2}+#sigma^{2}}  [rad]",
-           rmseR,rmseRE, rmseC,rmseCE,
-           "DeltaPhiCP_RMSErrorVsE.png");
+  diag("cRMSE","#sqrt{#mu^{2}+#sigma^{2}}  [rad]",
+       rmR,rmRE, rmC,rmCE, rmB,rmBE,
+       "DeltaPhiCP_RMSErrorVsE.png");
 
-  std::vector<double> fracR(nPts),fracRE(nPts),fracC(nPts),fracCE(nPts);
-  for(int i=0;i<nPts;++i){
-      if(std::fabs(muRaw[i])>1e-6){
-          fracR[i]=sgRaw[i]/std::fabs(muRaw[i]);
-          fracRE[i]=fracR[i]*std::sqrt(
-              std::pow(sgRawErr[i]/sgRaw[i],2)+std::pow(muRawErr[i]/muRaw[i],2));
-      }
-      if(std::fabs(muCor[i])>1e-6){
-          fracC[i]=sgCor[i]/std::fabs(muCor[i]);
-          fracCE[i]=fracC[i]*std::sqrt(
-              std::pow(sgCorErr[i]/sgCor[i],2)+std::pow(muCorErr[i]/muCor[i],2));
-      }
+  /* σ/|μ| */
+  std::vector<double> frR,frRE, frC,frCE, frB,frBE;
+  for(size_t i=0;i<eCtr.size();++i){
+    auto frac=[&](double mu,double sg,double dmu,double dsg,double& err){
+        double f=sg/std::fabs(mu);
+        err=f*std::sqrt(std::pow(dsg/sg,2)+std::pow(dmu/mu,2)); return f; };
+    double e;
+    frR.push_back(frac(muRaw[i],sgRaw[i],muRE[i],sgRE[i],e)); frRE.push_back(e);
+    frC.push_back(frac(muCorr[i],sgCorr[i],muCE[i],sgCE[i],e)); frCE.push_back(e);
+    frB.push_back(frac(muB   [i],sgB   [i],muBE[i],sgBE[i],e)); frBE.push_back(e);
   }
-  makeDiag("cFracCP","#sigma / |#mu|",
-           fracR,fracRE, fracC,fracCE,
-           "DeltaPhiCP_FracResVsE.png");
+  diag("cFrac","#sigma / |#mu|",
+       frR,frRE, frC,frCE, frB,frBE,
+       "DeltaPhiCP_FracResVsE.png");
 
-  /* ------------------------------------------------------------------ */
-  TString outAll=TString(outDir)+"/DeltaPhiCPCompare_AllOutput.png";
-  cMain.SaveAs(outAll);
-  std::cout<<"[Δφ‑CP] wrote summary → "<<outAll<<'\n';
+  /* ---------- 5. save overlay sheet ---------- */
+  cMain.SaveAs(TString(outDir)+"/DeltaPhiCPCompare_AllOutput.png");
+  std::cout<<"[Δφ‑CP] wrote overlays & summaries to "<<outDir<<'\n';
 
-  for(auto* o:keep) delete o;
+  for(auto* o:guard) delete o;
 }
-
 
 
 /* ===================================================================== *
