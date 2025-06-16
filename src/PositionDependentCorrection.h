@@ -281,6 +281,11 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_eta_diff_cpRaw_E     [N_Ebins]{};
   TH1F* h_eta_diff_cpCorr_E    [N_Ebins]{};
     
+  // –– NEW –– global tallies (initialised to zero in ctor)
+  mutable std::atomic<std::uint64_t> m_nWinRAW   {0};
+  mutable std::atomic<std::uint64_t> m_nWinCP    {0};
+  mutable std::atomic<std::uint64_t> m_nWinBCorr {0};
+    
   TProfile* pr_phi_vs_blockcoord = nullptr;
   TH2* h_emcal_mbd_correlation = nullptr;
   TH2* h_ohcal_mbd_correlation = nullptr;
