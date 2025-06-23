@@ -1053,15 +1053,36 @@ float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float b)
 
   /* (4) shift back to (-0.5 … +1.5] */
   float corrected = (localPhi < 0.5f) ? Xtrue : Xtrue + 1.f;
+
+    /* ---------- edge‑squash projectivity fix (b‑dependent) -------------- */
+    {
+        /* reference point:  b ≈ 0.18  →  A ≈ 1.2 %                        */
+        constexpr float Aref = 0.012f;          // 1.2 %
+        constexpr float bref = 0.18f;           // mid‑range b
+
+        /* scale with (b / bref)^2 and clamp into 0.8–1.6 %                 */
+        float A = Aref * (b / bref) * (b / bref);
+        if (A < 0.008f) A = 0.008f;
+        if (A > 0.016f) A = 0.016f;
+
+        /* u ∈ [‑0.5 … +1.5]  →  s ∈ [‑π … +π]                              */
+        const float s     = static_cast<float>(M_PI) * (corrected - 0.5f);
+
+        /* odd cubic‑sin variant: Δ = A·sin(s)·(1 – 0.25·cos s)             */
+        const float delta = A * std::sin(s) * (1.f - 0.25f * std::cos(s));
+
+        corrected -= delta;                       // apply
+    }
+    /* -------------------------------------------------------------------- */
+
+
   if (Verbosity() > 1)
-    std::cout << "  corrected (pre-wrap) = " << corrected << '\n';
+      std::cout << "  corrected (+edge‑fix) = " << corrected << '\n';
 
   /* (5) safety fold */
   if (corrected <= -0.5f || corrected > 1.5f) {
-    corrected = std::fmod(corrected + 2.f, 2.f);
-    if (corrected > 1.5f) corrected -= 2.f;
-    if (Verbosity() > 1)
-      std::cout << "  corrected (post-wrap) = " << corrected << '\n';
+        corrected = std::fmod(corrected + 2.f, 2.f);
+        if (corrected > 1.5f) corrected -= 2.f;
   }
 
   if (Verbosity() > 0)
