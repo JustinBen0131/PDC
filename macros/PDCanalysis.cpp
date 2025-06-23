@@ -3792,10 +3792,13 @@ void drawLego3D(TH3F* h,const char* tag,const char* hdr,
       const double scale = std::pow(10.,e);
       TH1* hh = pal->GetHistogram();          // helper 1‑D palette histogram
       int  nb = hh->GetNbinsX();
-      for(int i=1;i<=nb;++i)
-          double low = hh->GetBinLowEdge(i)/scale;    // label content
-          pal->GetAxis()->ChangeLabel(i,-1,-1,-1,-1,-1,
-                                      Form("%.0f",low));
+      for (int i = 1; i <= nb; ++i) {
+          double low = hh->GetBinLowEdge(i) / scale;       // label content
+          pal->GetAxis()->ChangeLabel(i, -1, -1, -1, -1, -1,
+                                      Form("%.0f", low));
+      }
+      
+      
   }
 
   /* header text */
@@ -3837,14 +3840,29 @@ void auditResidual(TH3F* h,const char* tag,
   res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
   res->GetZaxis()->SetTitle("#Delta / mean  [%]");
   res->Draw("COLZ");
+  /* shrink Z-axis text so it fits */
+  const double zScale = 0.75;                    // 75 % of the other axes
+  res->GetZaxis()->SetTitleSize( (fLbl+0.005)*zScale );
+  res->GetZaxis()->SetLabelSize( (fLbl-0.002)*zScale );
+  res->GetZaxis()->SetTitleOffset( 1.25 );       // nudge title leftward
+
   c.Update();
 
-  if(auto* pal = dynamic_cast<TPaletteAxis*>
-        (res->GetListOfFunctions()->FindObject("palette")))
-  {
-      pal->SetX1NDC(0.94);  pal->SetX2NDC(0.96);
-      pal->SetLabelSize(fLbl+0.005);
-      pal->SetBorderSize(0); pal->SetFillStyle(0);
+  if (auto* pal =
+            dynamic_cast<TPaletteAxis*>( res->GetListOfFunctions()
+                                             ->FindObject("palette")) )
+    {
+        /* put the colour bar a bit farther inside & make it slimmer */
+        pal->SetX1NDC( 0.92 );           // ← was 0.94
+        pal->SetX2NDC( 0.945 );          // ← was 0.96
+
+        /* keep fonts in sync with the 0.75 “zScale” you already used */
+        const double zScale = 0.75;
+        pal->SetLabelSize( (fLbl - 0.002) * zScale );   // numbers
+        pal->GetAxis()->SetTitleSize( (fLbl + 0.005) * zScale ); // “Δ / mean [%]”
+        pal->GetAxis()->SetTitleOffset( 0.8 );          // nudge title left
+        pal->SetBorderSize(0);
+        pal->SetFillStyle(0);
   }
   TLatex l; l.SetNDC(); l.SetTextFont(42); l.SetTextAlign(23);
   l.SetTextSize(fLbl+0.010);
@@ -4072,12 +4090,16 @@ void PDCanalysis()
     
   const char* out2DDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots";
   gSystem->mkdir(out2DDir, true);
-  drawLego3D(hUnc3D,"unc","UNCORRECTED",out2DDir);
-  drawLego3D(hCor3D,"cor","CORRECTED" ,out2DDir);
+  drawLego3D(hUnc3D, "unc", "UNCORRECTED",
+               out2DDir, 0.045, 0.035);
+  drawLego3D(hCor3D, "cor", "CORRECTED",
+               out2DDir, 0.045, 0.035);
 
   // residual QA
-  auditResidual(hUnc3D,"UNCORRECTED",out2DDir);
-  auditResidual(hCor3D,"CORRECTED" ,out2DDir);
+  auditResidual(hUnc3D, "UNCORRECTED", out2DDir,
+                  0.045, 0.035);
+  auditResidual(hCor3D, "CORRECTED",  out2DDir,
+                  0.045, 0.035);
 
 
 
