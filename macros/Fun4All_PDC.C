@@ -254,7 +254,7 @@ void Fun4All_PDC(int nevents = 0,
   //pdc->setBinningMode( EBinningMode::kRange || kDiscrete    );   // Eedges uses as bin RANGES
   pdc->setBinningMode( PositionDependentCorrection::EBinningMode::kRange );
 
-  pdc->Verbosity(3);
+  pdc->Verbosity(0);
   se->registerSubsystem(pdc);
 
   std::cout << "[INFO] Running Fun4All with nevents = " << nevents << std::endl;

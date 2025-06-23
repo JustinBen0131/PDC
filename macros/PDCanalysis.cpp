@@ -3749,31 +3749,133 @@ void PlotBcompare(const std::map<double,double>& bRMS,
   sR->Write("sRMS"); sP->Write("sPhi");  fout.Close();
 }
 
+/* ========================================================================== */
+/*  implementation (put in .cpp or before you call them)                      */
+/* ========================================================================== */
+void drawLego3D(TH3F* h,const char* tag,const char* hdr,
+                const char* outDir,double fTtl,double fLbl)
+{
+  if(!h) return;
+
+  /* axis titles + label sizes */
+  h->SetMinimum(h->GetMinimum());
+  h->SetMaximum(h->GetMaximum());
+  h->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+  h->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
+  h->GetZaxis()->SetTitle("Cluster E  [GeV]");
+  h->GetXaxis()->SetLabelSize(fLbl-0.002);
+  h->GetYaxis()->SetLabelSize(fLbl-0.002);
+  h->GetZaxis()->SetLabelSize(fLbl-0.002);
+
+  /* canvas */
+  TCanvas c(Form("c_%s",tag),"",1400,1080);
+  c.SetRightMargin(0.15);
+  c.SetBottomMargin(0.14);
+
+  h->Draw("LEGO2Z0");
+  c.Update();                                // palette created
+
+  /* reshape palette axis */
+  if(auto* pal = dynamic_cast<TPaletteAxis*>
+        (h->GetListOfFunctions()->FindObject("palette")))
+  {
+      pal->SetX1NDC(0.905); pal->SetX2NDC(0.925);
+      pal->SetLabelSize(fLbl+0.005);
+      pal->SetBorderSize(0); pal->SetFillStyle(0);
+
+      int e = static_cast<int>(std::floor(std::log10(h->GetMaximum())));
+      pal->GetAxis()->SetTitle(Form("counts ×10^{%d}",e));
+      pal->GetAxis()->CenterTitle(true);
+      pal->GetAxis()->SetTitleSize(fTtl-0.005);
+      pal->GetAxis()->SetTitleOffset(0.60);
+
+      const double scale = std::pow(10.,e);
+      TH1* hh = pal->GetHistogram();          // helper 1‑D palette histogram
+      int  nb = hh->GetNbinsX();
+      for(int i=1;i<=nb;++i)
+          double low = hh->GetBinLowEdge(i)/scale;    // label content
+          pal->GetAxis()->ChangeLabel(i,-1,-1,-1,-1,-1,
+                                      Form("%.0f",low));
+  }
+
+  /* header text */
+  TLatex t; t.SetNDC(); t.SetTextFont(42);
+  t.SetTextSize(fTtl);   t.SetTextAlign(13);
+  t.DrawLatex(0.12,0.94,Form("#bf{%s}",hdr));
+  t.SetTextSize(fTtl-0.010);
+  t.DrawLatex(0.12,0.90,Form("entries: %.0f",h->GetEntries()));
+
+  c.Print(Form("%s/lego_%s.png",outDir,tag),"png 600");
+}
+
+/* -------------------------------------------------------------------------- */
+void auditResidual(TH3F* h,const char* tag,
+                   const char* outDir,double fTtl,double fLbl)
+{
+  if(!h) return;
+
+  TH2D* meanMap = h->Project3DProfile("yx");  meanMap->SetDirectory(nullptr);
+  const double mu = meanMap->GetMean();
+
+  TH2D* res = (TH2D*)meanMap->Clone(Form("res_%s",tag));
+  const int nx = res->GetXaxis()->GetNbins();
+  const int ny = res->GetYaxis()->GetNbins();
+  for(int ix=1; ix<=nx; ++ix)
+    for(int iy=1; iy<=ny; ++iy)
+      res->SetBinContent(ix,iy,100.*(meanMap->GetBinContent(ix,iy)-mu)/mu);
+
+  const double A = std::max(std::abs(res->GetMinimum()),std::abs(res->GetMaximum()));
+  res->SetMinimum(-A); res->SetMaximum(+A);
+
+  /* 2‑D canvas ------------------------------------------------------ */
+  TCanvas c(Form("c_res_%s",tag),"",1000,850);
+  c.SetRightMargin(0.12);
+  c.SetLeftMargin(0.18);
+  c.SetBottomMargin(0.16);
+
+  res->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+  res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
+  res->GetZaxis()->SetTitle("#Delta / mean  [%]");
+  res->Draw("COLZ");
+  c.Update();
+
+  if(auto* pal = dynamic_cast<TPaletteAxis*>
+        (res->GetListOfFunctions()->FindObject("palette")))
+  {
+      pal->SetX1NDC(0.94);  pal->SetX2NDC(0.96);
+      pal->SetLabelSize(fLbl+0.005);
+      pal->SetBorderSize(0); pal->SetFillStyle(0);
+  }
+  TLatex l; l.SetNDC(); l.SetTextFont(42); l.SetTextAlign(23);
+  l.SetTextSize(fLbl+0.010);
+  l.DrawLatex(0.95,0.97,"counts");
+
+  TLine g; g.SetLineStyle(2); g.SetLineColor(kGray+1);
+  g.DrawLine(-0.5,0,1.5,0); g.DrawLine(0,-0.5,0,1.5);
+
+  c.Print(Form("%s/residual2_%s.png",outDir,tag),"png 600");
+
+  /* profiles -------------------------------------------------------- */
+  auto saveProfile=[&](TProfile* p,const char* ax)
+  {
+    TCanvas cp(Form("cp_%s_%s",ax,tag),"",900,600);
+    cp.SetGridy(); cp.SetLeftMargin(0.18); cp.SetBottomMargin(0.15);
+    p->SetLineWidth(2); p->SetMarkerStyle(20);
+    p->GetYaxis()->SetTitle("#Delta / mean  [%]");
+    p->Draw();
+
+    TLine l; l.SetLineStyle(2); l.SetLineColor(kGray+1);
+    for(double v:{-2,-1,1,2})
+        l.DrawLine(p->GetXaxis()->GetXmin(),v,p->GetXaxis()->GetXmax(),v);
+
+    cp.Print(Form("%s/residual_%s_%s.png",outDir,ax,tag),"png 600");
+  };
+  saveProfile(res->ProfileX("_phi"),"phi");
+  saveProfile(res->ProfileY("_eta"),"eta");
+}
+/* ========================================================================== */
 
 
-/**
- * \brief LocalPhiOnly2by2
- * Reads two TH3Fs:
- *   "h2_cluster_block_cord_E"           (UNCORRECTED)
- *   "h2_cluster_block_cord_E_corrected" (CORRECTED, if isFirstPass==false)
- *
- * Each has axes:
- *   X => blockEta  [-0.5 .. +1.5], 14 bins
- *   Y => blockPhi  [-0.5 .. +1.5], 14 bins
- *   Z => cluster E, 8 bins with edges {2,4,6,8,10,12,15,20,30}
- *
- * Produces:
- * (A) 2D block‐eta vs block‐phi plots (4×2)
- * (B) 1D local‐φ distributions => asinh fits
- * (C) 1D local‐η distributions => asinh fits
- *
- * Then writes best-fit b-values to a text file (“bValues.txt”).
- *
- * Additional note:
- *   To properly overlay corrected local‐φ or local‐η, remember to
- *   set the Z axis to your E slice and reset the *unused* local axis
- *   to its full range.
- */
 void PDCanalysis()
 {
   // 1) Style / stat
@@ -3781,7 +3883,7 @@ void PDCanalysis()
   SetsPhenixStyle();
     
   gStyle->SetOptStat(0);
-    
+    //_withVirgilesChange
   const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
 
   // 2) Open input
@@ -3968,81 +4070,16 @@ void PDCanalysis()
        "/Users/patsfan753/Desktop/PositionDependentCorrection/"
        "SimOutput/1DplotsAndFits/deltaEtaFromScratch" );
     
-  {
-      /* ------------------------------------------------------------------
-       *  3-D LEGO plots of block-centroid occupancy
-       *  – slimmer axis labels
-       *  – TLatex header “UNCORRECTED / CORRECTED” + Entries counter
-       * ------------------------------------------------------------------ */
+  const char* out2DDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots";
+  gSystem->mkdir(out2DDir, true);
+  drawLego3D(hUnc3D,"unc","UNCORRECTED",out2DDir);
+  drawLego3D(hCor3D,"cor","CORRECTED" ,out2DDir);
 
-      gStyle->SetNumberContours(50);
+  // residual QA
+  auditResidual(hUnc3D,"UNCORRECTED",out2DDir);
+  auditResidual(hCor3D,"CORRECTED" ,out2DDir);
 
-      /* common cosmetics for both histograms ----------------------------- */
-      auto beautify = [](TH3F* h)
-      {
-        const double tSz = 0.045;   // title‐size
-        const double lSz = 0.025;   // label‐size (smaller → avoids crowding)
 
-        // η-axis
-        h->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
-        h->GetXaxis()->CenterTitle();
-        h->GetXaxis()->SetTitleSize(tSz);
-        h->GetXaxis()->SetLabelSize(lSz);
-        h->GetXaxis()->SetTitleOffset(1.50);
-
-        // φ-axis
-        h->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
-        h->GetYaxis()->CenterTitle();
-        h->GetYaxis()->SetTitleSize(tSz);
-        h->GetYaxis()->SetLabelSize(lSz);
-        h->GetYaxis()->SetTitleOffset(2.00);
-
-        // energy axis
-        h->GetZaxis()->SetTitle("Cluster E  [GeV]");
-        h->GetZaxis()->CenterTitle();
-        h->GetZaxis()->SetTitleSize(tSz);
-        h->GetZaxis()->SetLabelSize(lSz);
-        h->GetZaxis()->SetTitleOffset(1.40);
-      };
-
-      /* draw helper ------------------------------------------------------- */
-      auto drawWithEntries = [&](TH3F* h,
-                                 const char* canvName,
-                                 const char* pngPath,
-                                 const char* header)           // “UNCORRECTED” / “CORRECTED”
-      {
-        if (!h) return;
-
-        TCanvas c(canvName, canvName, 1200, 900);
-        beautify(h);
-        h->Draw("LEGO2Z");
-
-        TLatex txt;  txt.SetNDC(true); txt.SetTextFont(42);
-
-        // header
-        txt.SetTextSize(0.042); txt.SetTextAlign(13);
-        txt.DrawLatex(0.12,0.96,Form("#bf{%s}",header));
-
-        // entries
-        txt.SetTextSize(0.036);
-        txt.DrawLatex(0.12,0.91,Form("Entries: %.0f", h->GetEntries()));
-
-        c.SaveAs(pngPath);
-        std::cout << "[INFO] wrote 3-D plot → " << pngPath << '\n';
-      };
-
-      /* --------------------------- un-corrected ------------------------ */
-      drawWithEntries(hUnc3D,
-                      "c3D_unc",
-                      Form("%s/2DPlots/h2_cluster_block_cord_E.png", outDir),
-                      "UNCORRECTED");
-
-      /* ----------------------------- corrected -------------------------- */
-      drawWithEntries(hCor3D,
-                      "c3D_cor",
-                      Form("%s/2DPlots/h2_cluster_block_cord_E_corrected.png", outDir),
-                      "CORRECTED");
-    }
 
 
   // after opening the file …
