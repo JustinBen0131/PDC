@@ -265,16 +265,18 @@ ScanResults doAshScan(
     double cellSize,                        // 5.55 cm
     const std::function<double(TH1*,const TString&)>& sigmaFunc,
     const TString& suffix,
-    const TString& histOutDir
+    const TString& histOutDir,
+    bool  skipLowest3 = false
 )
 {
+  const int iE_start = skipLowest3 ? 3 : 0;
   ScanResults results;
   results.tgVec.resize(N_E);
 
   std::cout << "\n[DEBUG] doAshScan => ENTER. suffix='"<<suffix<<"', #Ebins="<<N_E
             <<", #bScan="<<bScan_cm.size()<<", cellSize="<<cellSize<<"\n";
 
-  for(int iE=0; iE<N_E; iE++)
+  for (int iE = iE_start; iE < N_E; ++iE)
   {
     double eLo = E_edges[iE];
     double eHi = E_edges[iE+1];
@@ -395,18 +397,21 @@ ScanResults doLogScan(
     const std::vector<double>& w0Scan,
     const std::function<double(TH1*,const TString&)>& sigmaFunc,
     const TString& suffix,
-    const TString& histOutDir
+    const TString& histOutDir,
+    bool  skipLowest3 = false
 )
 {
+  const int iE_start = skipLowest3 ? 3 : 0;
   ScanResults results;
   results.tgVec.resize(N_E);
   results.minY=DBL_MAX;
   results.maxY=-DBL_MAX;
 
-  std::cout<<"\n[DEBUG] doLogScan => ENTER. suffix='"<<suffix<<"', #Ebins="<<N_E
-           <<" w0Scan.size="<<w0Scan.size()<<"\n";
+  std::cout << "\n[DEBUG] doAshScan => ENTER. suffix='"<<suffix<<"', #Ebins="
+              <<N_E<<", skipping lowest 3: "<<std::boolalpha<<skipLowest3<<"\n";
 
-  for(int iE=0; iE<N_E; iE++)
+
+  for (int iE = iE_start; iE < N_E; ++iE)
   {
     double eLo = E_edges[iE];
     double eHi = E_edges[iE+1];
@@ -491,349 +496,208 @@ ScanResults doLogScan(
 }
 
 
-/**
- * \brief drawAshLogSideBySide
- *   Draws two sets of TGraphs:
- *    - left = asinh scan
- *    - right= log scan
- *   Each TGraph is for a different E-slice
- *   Also prints debug info about minY, maxY, best param
- */
+/* ==================================================================== */
+/*  Side‑by‑side Ash‑vs‑Log overlay                                     */
+/* ==================================================================== */
 void drawAshLogSideBySide(
     const ScanResults& ashRes,
     const ScanResults& logRes,
-    const char* methodName,
-    const double* E_edges,
-    int N_E,
-    const TString& baseDir
+    const char*        methodName,
+    const double*      E_edges,
+    int                N_E,
+    const TString&     baseDir,
+    bool               skipLowest3 /* = false */
 )
 {
-  std::cout << "\n[DEBUG] drawAshLogSideBySide => method='"<<methodName<<"', N_E="
-            <<N_E<<", baseDir='"<<baseDir<<"'\n";
+  /* --------------------------------------------------------------- */
+  const int iE_start = skipLowest3 ? 3 : 0;          // << core switch
+  std::cout << "\n[DEBUG] drawAshLogSideBySide => method='" << methodName
+            << "', skipLowest3=" << std::boolalpha << skipLowest3 << '\n';
 
-  // 1) Canvas with 2 pads
+  /* --------------------------------------------------------------- */
   TString cName = Form("cSideBySide_%s", methodName);
-  TCanvas cSide(cName, cName, 1600,600);
-  cSide.Divide(2,1);
+  TCanvas cSide(cName, cName, 1600, 600);
+  cSide.Divide(2, 1);
 
-  // 2) LEFT pad => Ash
+  /* ============= LEFT PAD : ASH ============= */
   cSide.cd(1);
-  gPad->SetLeftMargin(0.12);
+  gPad->SetLeftMargin  (0.12);
   gPad->SetBottomMargin(0.12);
   gPad->SetGrid();
 
-  double asMin = ashRes.minY;
-  double asMax = ashRes.maxY;
-  std::cout<<"[DEBUG] => Ash => global minY="<<asMin<<", maxY="<<asMax<<"\n";
+  std::cout << "[DEBUG]  Ash  => minY=" << ashRes.minY
+            << "  maxY=" << ashRes.maxY << '\n';
 
-  if(!ashRes.tgVec.empty() && ashRes.tgVec[0])
+  /* ---- pick first kept slice as reference frame ---- */
+  TGraph* gAshRef = nullptr;
+  for (int iE = iE_start; iE < N_E && !gAshRef; ++iE)
+    if (ashRes.tgVec[iE] && ashRes.tgVec[iE]->GetN())
+      gAshRef = ashRes.tgVec[iE];
+
+  if (gAshRef)
   {
-    TGraph* firstGr = ashRes.tgVec[0];
-    std::cout<<"   => first Ash TGraph has N="<<firstGr->GetN()<<" points.\n";
+    gAshRef->Draw("ALP");
+    gAshRef->GetXaxis()->SetTitle("b  (local tower units)");
+    gAshRef->GetYaxis()->SetTitle("#sigma_{x}  (local tower units)");
 
-    firstGr->Draw("ALP");
-    firstGr->GetXaxis()->SetTitle("b (local tower units)");
-    firstGr->GetYaxis()->SetTitle("#sigma_{x} (local tower units)");
+    const double yLo = std::max(0.0, ashRes.minY * 0.90);
+    const double yHi =               ashRes.maxY * 1.10;
+    gAshRef->GetYaxis()->SetRangeUser(yLo, yHi);
 
-    double yLo = asMin - 0.1*fabs(asMin);
-    double yHi = asMax + 0.1*fabs(asMax);
-    if(yLo<0) yLo=0.;
-    firstGr->GetYaxis()->SetRangeUser(yLo, yHi);
-
-    // overlay the other E-bins
-    for(size_t i=1; i<ashRes.tgVec.size(); i++)
+    for (int iE = iE_start; iE < N_E; ++iE)
     {
-      TGraph* gA = ashRes.tgVec[i];
-      if(gA && gA->GetN()>0) gA->Draw("LP SAME");
-      else std::cout<<"   [WARN] => Ash i="<<i<<" => TGraph missing or empty!\n";
+      TGraph* g = ashRes.tgVec[iE];
+      if (g && g->GetN()) g->Draw("LP SAME");
     }
   }
   else
   {
-    std::cout<<"[WARN] => No Ash TGraph to draw => skipping.\n";
+    std::cout << "[WARN]  no Ash graphs to draw – left pad left blank.\n";
   }
 
-  // build a legend for left pad
-  TLegend legA(0.13,0.65,0.48,0.88);
+  /* ---- legend (Ash) ---- */
+  TLegend legA(0.13, 0.65, 0.48, 0.88);
   legA.SetBorderSize(0);
   legA.SetFillStyle(0);
-  for(int iE=0; iE<N_E; iE++)
-  {
-    double bBest=(iE<(int)ashRes.bestParam.size()? ashRes.bestParam[iE]: 0.);
-    double sBest=(iE<(int)ashRes.bestSigma.size()? ashRes.bestSigma[iE]: 0.);
-    TGraph* gr= (iE<(int)ashRes.tgVec.size()? ashRes.tgVec[iE]: nullptr);
 
-    if(!gr || gr->GetN()==0)
+  for (int iE = iE_start; iE < N_E; ++iE)
+  {
+    TGraph* g = ashRes.tgVec[iE];
+    const double bBest = (iE < (int)ashRes.bestParam .size()) ? ashRes.bestParam [iE] : 0.;
+    const double sBest = (iE < (int)ashRes.bestSigma.size()) ? ashRes.bestSigma[iE] : 0.;
+
+    if (!g || g->GetN() == 0)
     {
       legA.AddEntry((TObject*)nullptr,
-        Form("%.1f< E<%.1f => NO data", E_edges[iE], E_edges[iE+1]), "");
+        Form("%.1f–%.1f GeV  — no data", E_edges[iE], E_edges[iE+1]), "");
       continue;
     }
-    legA.AddEntry(gr,
-       Form("%.1f< E<%.1f (b=%.3g, #sigma=%.3f)", E_edges[iE], E_edges[iE+1],
-            bBest, sBest),
-       "lp");
+    legA.AddEntry(g,
+      Form("%.1f–%.1f GeV  (b=%.2f, σ=%.3f)",
+           E_edges[iE], E_edges[iE+1], bBest, sBest),
+      "lp");
   }
   legA.Draw();
 
-  TLatex latA; latA.SetNDC(true);
-  latA.SetTextSize(0.035);
-  latA.DrawLatex(0.12,0.93, Form("Ash scan [%s]", methodName));
+  TLatex tA;  tA.SetNDC();  tA.SetTextSize(0.035);
+  tA.DrawLatex(0.12, 0.93, Form("Ash scan [%s]", methodName));
 
-  // 3) RIGHT pad => Log
+  /* ============= RIGHT PAD : LOG ============= */
   cSide.cd(2);
-  gPad->SetLeftMargin(0.12);
+  gPad->SetLeftMargin  (0.12);
   gPad->SetBottomMargin(0.12);
   gPad->SetGrid();
 
-  double lgMin = logRes.minY;
-  double lgMax = logRes.maxY;
-  std::cout<<"[DEBUG] => Log => global minY="<<lgMin<<", maxY="<<lgMax<<"\n";
+  std::cout << "[DEBUG]  Log  => minY=" << logRes.minY
+            << "  maxY=" << logRes.maxY << '\n';
 
-  if(!logRes.tgVec.empty() && logRes.tgVec[0])
+  TGraph* gLogRef = nullptr;
+  for (int iE = iE_start; iE < N_E && !gLogRef; ++iE)
+    if (logRes.tgVec[iE] && logRes.tgVec[iE]->GetN())
+      gLogRef = logRes.tgVec[iE];
+
+  if (gLogRef)
   {
-    TGraph* firstGr= logRes.tgVec[0];
-    std::cout<<"   => first Log TGraph => N="<<firstGr->GetN()<<" points.\n";
+    gLogRef->Draw("ALP");
+    gLogRef->GetXaxis()->SetRangeUser( gLogRef->GetXaxis()->GetXmin(), 4.5 );
+    gLogRef->GetXaxis()->SetTitle("w_{0}");
+    gLogRef->GetYaxis()->SetTitle("#sigma_{x}  (local tower units)");
 
-    firstGr->Draw("ALP");
-    firstGr->GetXaxis()->SetTitle("w_{0}");
-    firstGr->GetYaxis()->SetTitle("#sigma_{x} (local tower units)");
+    const double yLo = std::max(0.0, logRes.minY * 0.90);
+    const double yHi =               logRes.maxY * 1.10;
+    gLogRef->GetYaxis()->SetRangeUser(yLo, yHi);
 
-    double yLo = lgMin - 0.1*fabs(lgMin);
-    double yHi = lgMax + 0.1*fabs(lgMax);
-    if(yLo<0) yLo=0.;
-    firstGr->GetYaxis()->SetRangeUser(yLo, yHi);
-
-    // overlay for other E
-    for(size_t i=1; i<logRes.tgVec.size(); i++)
+    for (int iE = iE_start; iE < N_E; ++iE)
     {
-      TGraph* gL=logRes.tgVec[i];
-      if(gL && gL->GetN()>0) gL->Draw("LP SAME");
-      else std::cout<<"   [WARN] => Log i="<<i<<" => TGraph missing or empty!\n";
+      TGraph* g = logRes.tgVec[iE];
+      if (g && g->GetN()) g->Draw("LP SAME");
     }
   }
   else
   {
-    std::cout<<"[WARN] => No Log TGraph to draw => skipping.\n";
+    std::cout << "[WARN]  no Log graphs to draw – right pad left blank.\n";
   }
 
-  // legend right
-  TLegend legB(0.6,0.65,0.85,0.88);
+  /* ---- legend (Log) ---- */
+  TLegend legB(0.60, 0.65, 0.85, 0.88);
   legB.SetBorderSize(0);
   legB.SetFillStyle(0);
-  for(int iE=0; iE<N_E; iE++)
-  {
-    double wBest=(iE<(int)logRes.bestParam.size()? logRes.bestParam[iE]: 0.);
-    double sBest=(iE<(int)logRes.bestSigma.size()? logRes.bestSigma[iE]: 0.);
-    TGraph* gr= (iE<(int)logRes.tgVec.size()? logRes.tgVec[iE]: nullptr);
 
-    if(!gr || gr->GetN()==0)
+  for (int iE = iE_start; iE < N_E; ++iE)
+  {
+    TGraph* g = logRes.tgVec[iE];
+    const double wBest = (iE < (int)logRes.bestParam .size()) ? logRes.bestParam [iE] : 0.;
+    const double sBest = (iE < (int)logRes.bestSigma.size()) ? logRes.bestSigma[iE] : 0.;
+
+    if (!g || g->GetN() == 0)
     {
       legB.AddEntry((TObject*)nullptr,
-        Form("%.1f< E<%.1f => NO data", E_edges[iE], E_edges[iE+1]), "");
+        Form("%.1f–%.1f GeV  — no data", E_edges[iE], E_edges[iE+1]), "");
       continue;
     }
-    legB.AddEntry(gr,
-      Form("%.1f< E<%.1f (w0=%.2f, #sigma=%.3f)", E_edges[iE], E_edges[iE+1],
-           wBest, sBest),
+    legB.AddEntry(g,
+      Form("%.1f–%.1f GeV  (w_{0}=%.2f, σ=%.3f)",
+           E_edges[iE], E_edges[iE+1], wBest, sBest),
       "lp");
   }
   legB.Draw();
 
-  TLatex latB; latB.SetNDC(true);
-  latB.SetTextSize(0.04);
-  latB.DrawLatex(0.15,0.93, Form("Log scan [%s]", methodName));
-    
-    
-    /* ---------------------------------------------------------------------------
-     *  Single-panel Ash-only and Log-only plots   (publication style)
-     *  – vivid, mutually-distinct colours
-     *  – thick lines, large markers
-     *  – legend moved to **upper-right** corner
-     *  – saved as  AshScan_<TAG>.png  and  LogScan_<TAG>.png
-     * ------------------------------------------------------------------------- */
-    {
-      /* common prettiness ---------------------------------------------------- */
-      gStyle->SetOptStat(0);
-      gStyle->SetTitleFont      (42,"XYZ");
-      gStyle->SetTitleSize      (0.050,"XYZ");
-      gStyle->SetLabelFont      (42,"XYZ");
-      gStyle->SetLabelSize      (0.042,"XYZ");
-      gStyle->SetPadTickX       (1);
-      gStyle->SetPadTickY       (1);
+  TLatex tB;  tB.SetNDC();  tB.SetTextSize(0.040);
+  tB.DrawLatex(0.15, 0.93, Form("Log scan [%s]", methodName));
 
-      /* quick helper: assign eye-friendly colours/markers ------------------- */
-      const int kCols[] = {kBlack , kRed+1 , kAzure+2 , kGreen+2 ,
-                           kMagenta+1 , kOrange+1 , kTeal+3 , kBlue+1 };
-      const int nCols = sizeof(kCols)/sizeof(int);
+  /* --------------------------------------------------------------- */
+  TString out = Form("%s/SideBySide_%s.png", baseDir.Data(), methodName);
+  cSide.SaveAs(out);
+  std::cout << "[INFO]  wrote side‑by‑side figure → " << out << '\n';
 
-      auto styleGraph = [&](TGraph* g, int idx)
-      {
-        if(!g) return;
-        int col = kCols[idx % nCols];
-        g->SetLineColor (col);
-        g->SetMarkerColor(col);
-        g->SetLineWidth (2);
-        g->SetMarkerStyle(20 + idx%10);
-        g->SetMarkerSize (1.35);
-      };
+  /* ----------------------------------------------------------------
+   *  ---  Publication‑style single‑panel plots  -------------------
+   *  (exactly as before, but start loop from iE_start)
+   * ---------------------------------------------------------------- */
+  auto makeSinglePanel =
+      [&](const ScanResults& R, const char* tag,
+          const char* xTit, const char* yTit)
+  {
+    /* pick reference */
+    TGraph* gRef = nullptr;
+    for (int iE = iE_start; iE < N_E && !gRef; ++iE)
+      if (R.tgVec[iE] && R.tgVec[iE]->GetN()) gRef = R.tgVec[iE];
 
-        /* ===================================================================== *
-         *                            ASH  –  σx(b)                              *
-         * ===================================================================== */
-        {
-          TString cAshName = Form("cAshScan_%s", methodName);
-          TCanvas cAsh(cAshName, cAshName, 900, 650);
-          cAsh.SetLeftMargin(0.13);
-          cAsh.SetBottomMargin(0.18);
-          cAsh.SetRightMargin(0.04);
-//          cAsh.SetGrid();
+    if (!gRef) return;                     // nothing to draw
 
-          /* --- colour / marker for every energy slice ---------------------- */
-          for (size_t i = 0; i < ashRes.tgVec.size(); ++i)
-            styleGraph(ashRes.tgVec[i], i);          // your helper
+    TString cname = Form("c%sScan_%s", tag, methodName);
+    TCanvas c(cname, cname, 900, 650);
+    c.SetLeftMargin(0.13);
+    c.SetBottomMargin(0.18);
 
-          /* --- find first valid graph to set the frame --------------------- */
-          TGraph* gAsh0 = nullptr;
-          for (auto* g : ashRes.tgVec) { if (g && g->GetN()) { gAsh0 = g; break; } }
+    gRef->Draw("ALP");
+    gRef->GetXaxis()->SetTitle(xTit);
+    gRef->GetYaxis()->SetTitle(yTit);
+    gRef->GetYaxis()->SetRangeUser(std::max(0.0, R.minY*0.90), R.maxY*1.10);
 
-          double yLo = 0, yHi = 1;                   // will be overwritten
-          if (gAsh0)
-          {
-            yLo = std::max(0.0, ashRes.minY * 0.90);
-            yHi =               ashRes.maxY * 1.10;
+    for (int iE = iE_start; iE < N_E; ++iE)
+      if (R.tgVec[iE] && R.tgVec[iE]->GetN())
+        R.tgVec[iE]->Draw("LP SAME");
 
-            gAsh0->Draw("ALP");
-            gAsh0->GetXaxis()->SetTitle("b  (local tower units)");
-            gAsh0->GetYaxis()->SetTitle("#sigma_{x}  (local tower units)");
-            gAsh0->GetYaxis()->SetRangeUser(yLo, yHi);
+    /* legend */
+    TLegend L(0.63, 0.70, 0.90, 0.92);
+    L.SetBorderSize(0);  L.SetFillStyle(0);
+    for (int iE = iE_start; iE < N_E; ++iE)
+      if (R.tgVec[iE] && R.tgVec[iE]->GetN())
+        L.AddEntry(R.tgVec[iE],
+          Form("%.0f–%.0f GeV", E_edges[iE], E_edges[iE+1]), "lp");
+    L.Draw();
 
-            /* overlay the other curves */
-            for (size_t i = 0; i < ashRes.tgVec.size(); ++i)
-              if (ashRes.tgVec[i] && ashRes.tgVec[i]->GetN())
-                ashRes.tgVec[i]->Draw("LP SAME");
-          }
+    TString outSingle = Form("%s/%sScan_%s.png",
+                             baseDir.Data(), tag, methodName);
+    c.SaveAs(outSingle);
+    std::cout << "        wrote " << outSingle << '\n';
+  };
 
-          /* --- vertical lines at b-min ------------------------------------- */
-          std::vector<TObject*> keepLines;            // keep alive until SaveAs
-          for (int iE = 0; iE < N_E; ++iE)
-          {
-            const double bBest = (iE < (int)ashRes.bestParam.size()) ? ashRes.bestParam[iE] : -1.;
-            if (bBest <= 0) continue;                 // skip if not filled
-
-            TGraph* g = (iE < (int)ashRes.tgVec.size()) ? ashRes.tgVec[iE] : nullptr;
-            if (!g || !g->GetN()) continue;           // safety
-
-            int col = g->GetLineColor();
-            TLine* v = new TLine(bBest, yLo, bBest, yHi);
-            v->SetLineColor(col);
-            v->SetLineStyle(2);                       // dashed
-            v->SetLineWidth(2);
-            v->Draw("SAME");
-
-            keepLines.push_back(v);
-          }
-
-          /* ------------------------ legend ---------------------------------- */
-          TLegend legAsh(0.64, 0.70, 0.89, 0.91);     // (x1,y1,x2,y2) NDC
-          legAsh.SetBorderSize(0);
-          legAsh.SetFillStyle(0);
-          legAsh.SetTextFont(42);
-          legAsh.SetTextSize(0.025);
-
-          for (int iE = 0; iE < N_E; ++iE)
-          {
-            TGraph* g = (iE < (int)ashRes.tgVec.size()) ? ashRes.tgVec[iE] : nullptr;
-            if (!g || g->GetN() == 0) continue;
-
-            const double bBest = (iE < (int)ashRes.bestParam .size()) ? ashRes.bestParam [iE] : 0.;
-            const double sBest = (iE < (int)ashRes.bestSigma.size()) ? ashRes.bestSigma[iE] : 0.;
-
-            legAsh.AddEntry(g,
-              Form("[%.0f, %.0f] GeV  (b=%.2f,  #sigma_{x}=%.3f)",
-                   E_edges[iE], E_edges[iE+1], bBest, sBest),
-              "lp");
-          }
-          legAsh.Draw();
-
-          /* ------------------------ title ----------------------------------- */
-          TLatex label; label.SetNDC(); label.SetTextFont(42); label.SetTextSize(0.04);
-          label.DrawLatex(0.20, 0.87, Form("Ash scan  [%s]", methodName));
-
-          /* ------------------------ output ---------------------------------- */
-          const TString outAsh = Form("%s/AshScan_%s.png", baseDir.Data(), methodName);
-          cAsh.SaveAs(outAsh);
-          std::cout << "[INFO]  wrote " << outAsh << '\n';
-
-          /* clean up lines (after canvas saved) */
-          for (auto* o : keepLines) delete o;
-        }
-
-
-      /* ===================================================================== *
-       *                           LOG  –  σx(w0)                              *
-       * ===================================================================== */
-      {
-        TString cLogName = Form("cLogScan_%s", methodName);
-        TCanvas cLog(cLogName, cLogName, 900, 650);
-        cLog.SetLeftMargin(0.13);
-        cLog.SetBottomMargin(0.12);
-        cLog.SetRightMargin(0.04);
-        cLog.SetGrid();
-
-        for(size_t i=0;i<logRes.tgVec.size();++i) styleGraph(logRes.tgVec[i],i);
-
-        TGraph* gLog0 = nullptr;
-        for(auto* g: logRes.tgVec){ if(g && g->GetN()){ gLog0=g; break; } }
-        if(gLog0)
-        {
-          double yLo = std::max(0.0 , logRes.minY*0.90);
-          double yHi =                logRes.maxY*1.10;
-
-          gLog0->Draw("ALP");
-          gLog0->GetXaxis()->SetTitle("w_{0}");
-          gLog0->GetYaxis()->SetTitle("#sigma_{x}  (cm)");
-          gLog0->GetYaxis()->SetRangeUser(yLo, yHi);
-
-          for(size_t i=0;i<logRes.tgVec.size();++i)
-            if(logRes.tgVec[i] && logRes.tgVec[i]->GetN())
-              logRes.tgVec[i]->Draw("LP SAME");
-        }
-
-        TLegend legLog(0.60,0.60,0.92,0.90);
-        legLog.SetBorderSize(0);
-        legLog.SetFillStyle(0);
-        legLog.SetTextFont(42);
-        legLog.SetTextSize(0.032);
-
-        for(int iE=0;iE<N_E;++iE)
-        {
-          TGraph* g = (iE<(int)logRes.tgVec.size()) ? logRes.tgVec[iE] : nullptr;
-          if(!g || g->GetN()==0) continue;
-
-          const double wBest = (iE<(int)logRes.bestParam .size()) ? logRes.bestParam [iE] : 0.;
-          const double sBest = (iE<(int)logRes.bestSigma.size()) ? logRes.bestSigma[iE] : 0.;
-
-          legLog.AddEntry(g,
-            Form("%.1f–%.1f GeV  (w_{0}=%.2f, #sigma=%.3f)",
-                 E_edges[iE], E_edges[iE+1], wBest, sBest),
-            "lp");
-        }
-        legLog.Draw();
-
-        TLatex label; label.SetNDC(); label.SetTextFont(42); label.SetTextSize(0.047);
-        label.DrawLatex(0.14,0.93, Form("Log scan  [%s]", methodName));
-
-        const TString outLog = Form("%s/LogScan_%s.png", baseDir.Data(), methodName);
-        cLog.SaveAs(outLog);
-        std::cout << "[INFO]  wrote " << outLog << '\n';
-      }
-    }   // end block
-
-  // 4) Save
-  TString outName = Form("%s/SideBySide_%s.png", baseDir.Data(), methodName);
-  cSide.SaveAs(outName);
-  std::cout<<"\n[INFO] => wrote side-by-side Ash/Log => "<<outName<<"\n";
+  makeSinglePanel(ashRes, "Ash", "b  (local tower units)",
+                                "#sigma_{x}  (local tower units)");
+  makeSinglePanel(logRes, "Log", "w_{0}",
+                                "#sigma_{x}  (local tower units)");
 }
 
 
@@ -888,26 +752,20 @@ plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
 
   // 5A) "FIT"
   std::cout<<"\n=== [STEP] Doing *FIT* approach with coreGaussianSigma ===\n";
-  auto ashFit = doAshScan(fIn.get(),
-                          N_E,
-                          E_edges,
-                          binMode,
-                          bScan_cm,
-                          5.55, // cellSize
-                          coreGaussianSigma, // function pointer
-                          "fit",
-                          histOutDir
-                          );
-  auto logFit = doLogScan(fIn.get(),
-                          N_E,
-                          E_edges,
-                          binMode,
-                          w0Scan,
-                          coreGaussianSigma,
-                          "fit",
-                          histOutDir
-                          );
-  drawAshLogSideBySide(ashFit, logFit, "FIT", E_edges, N_E, baseDir);
+  auto ashFit = doAshScan(fIn.get(), N_E, E_edges, binMode,
+                            bScan_cm, 5.55,
+                            coreGaussianSigma,
+                            "fit", histOutDir,
+                            /*skipLowest3=*/true);   // << add
+
+  auto logFit = doLogScan(fIn.get(), N_E, E_edges, binMode,
+                            w0Scan, coreGaussianSigma,
+                            "fit", histOutDir,
+                            /*skipLowest3=*/true);   // << add
+
+  drawAshLogSideBySide(ashFit, logFit, "FIT",
+                         E_edges, N_E, baseDir,
+                         /*skipLowest3=*/true);      // << add
 
   // 5B) "RMS"
   std::cout<<"\n=== [STEP] Doing *RMS* approach with rawRMS ===\n";
@@ -1350,8 +1208,8 @@ void PlotPhiShiftAndWidth(TH3F*  hUnc3D,
   TPaveText leg(0.70,0.78,0.93,0.90,"NDC");
   leg.SetFillStyle(0); leg.SetBorderSize(0);
   leg.SetTextAlign(12); leg.SetTextFont(42); leg.SetTextSize(0.036);
-  leg.AddText("#color[kRed+1]{#square}  #Delta#LT#varphi#GT");
-  leg.AddText("#color[kAzure+2]{#square}  RMS ratio");
+  leg.AddText( Form("#color[%d]{#square}  #Delta#LT#varphi#GT", kRed+1) );
+  leg.AddText( Form("#color[%d]{#square}  RMS ratio",          kAzure+2) );
   p1->cd();      // place it in the upper pad
   leg.Draw();
 
@@ -2185,113 +2043,139 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
       return best;
   };
 
-  /* ------------------------------------------------------------------ *
-   * 2)   Master canvas for per‑slice overlays
-   * ------------------------------------------------------------------ */
-  const int nCols = 4, nRows = (binMode == EBinningMode::kDiscrete ? 4 : 2);
-  TCanvas c4x2(Form("DeltaPhiOverlay_%dx%d", nCols, nRows),
-               "#Delta#phi raw vs corrected (normalised)",
-               1600, 600*nRows);
-  c4x2.Divide(nCols, nRows);
+    /* ------------------------------------------------------------------ *
+     * 2)   Master canvas for per‑slice overlays
+     *       – wider pads (2000 px total)
+     *       – Y‑axis title pushed further left
+     *       – smaller X‑axis tick labels
+     *       – bold, colour‑coded “RAW / CORR” text, shifted right
+     * ------------------------------------------------------------------ */
+    const int nCols = 4;
+    const int nRows = (binMode == EBinningMode::kDiscrete ? 4 : 2);
 
-  /* containers for summary graphs ----------------------------------- */
-  std::vector<double> eCtr,
-                      muRaw,  muRawErr,  sgRaw,  sgRawErr,
-                      muCor,  muCorErr,  sgCor,  sgCorErr;
+    /* • make the canvas wider (2000 px instead of 1600 px) */
+    TCanvas c4x2(Form("DeltaPhiOverlay_%dx%d", nCols, nRows),
+                 "#Delta#phi raw vs corrected (normalised)",
+                 2000,                       /*  ⇦  width  */
+                 600 * nRows);               /*      height */
+    c4x2.Divide(nCols, nRows);
 
-  std::vector<TObject*> keep;   // prevent premature deletion
+    /* containers for the later summary plots ---------------------------------- */
+    std::vector<double> eCtr,
+                        muRaw,  muRawErr,  sgRaw,  sgRawErr,
+                        muCor,  muCorErr,  sgCor,  sgCorErr;
 
-  /* ------------------------------------------------------------------ *
-   * 3)   loop over energy slices
-   * ------------------------------------------------------------------ */
-  for (int iE = 0; iE < N_E; ++iE)
-  {
-      const double eLo = eEdges[iE].first;
-      const double eHi = eEdges[iE].second;
-      const std::string tag = makeLabel(iE);
+    /* keep objects alive until the very end ----------------------------------- */
+    std::vector<TObject*> keep;
 
-      /* fetch the histograms ------------------------------------------ */
-      TH1F *hRaw  = dynamic_cast<TH1F*>( gROOT->FindObject(
-                         Form("h_phi_diff_raw_%s", tag.c_str()) ));
-      TH1F *hCorr = (!isFirstPass)
-                    ? dynamic_cast<TH1F*>( gROOT->FindObject(
-                         Form("h_phi_diff_corr_%s", tag.c_str()) ))
-                    : nullptr;
+    /* ------------------------------------------------------------------ *
+     * 3)   loop over energy slices
+     * ------------------------------------------------------------------ */
+    for (int iE = 0; iE < N_E; ++iE)
+    {
+        const double  eLo  = eEdges[iE].first;
+        const double  eHi  = eEdges[iE].second;
+        const TString tag  = (binMode==EBinningMode::kRange)
+                           ? Form("%.0f_%.0f", eLo, eHi)
+                           : Form("E%.0f",     eLo);
 
-      if (!hRaw) { std::cerr << "[Δφ] missing RAW hist for tag " << tag << '\n'; continue; }
+        /* ------------- fetch histograms ---------------------------------- */
+        TH1F *hRaw  = static_cast<TH1F*>( gROOT->FindObject(
+                            Form("h_phi_diff_raw_%s",  tag.Data()) ));
+        TH1F *hCorr = (!isFirstPass)
+                      ? static_cast<TH1F*>( gROOT->FindObject(
+                            Form("h_phi_diff_corr_%s", tag.Data()) ))
+                      : nullptr;
 
-      /* work with clones (safe) --------------------------------------- */
-      hRaw  = static_cast<TH1F*>( hRaw->Clone(Form("hRaw_%d", iE)) );
-      hRaw ->SetDirectory(nullptr);
-      keep.push_back(hRaw);
+        if (!hRaw) {
+            std::cerr << "[Δφ] missing RAW hist for tag " << tag << '\n';
+            continue;
+        }
 
-      if (hCorr) {
-          hCorr = static_cast<TH1F*>( hCorr->Clone(Form("hCor_%d", iE)) );
-          hCorr->SetDirectory(nullptr);
-          keep.push_back(hCorr);
-      }
+        /* ------------- clone & re‑normalise ------------------------------ */
+        hRaw  = static_cast<TH1F*>( hRaw ->Clone(Form("hRaw_%d", iE)) );
+        hRaw ->SetDirectory(nullptr);   keep.push_back(hRaw);
 
-      /* area‑normalise ------------------------------------------------- */
-      if (hRaw->Integral()>0)   hRaw ->Scale(1./hRaw->Integral());
-      if (hCorr && hCorr->Integral()>0) hCorr->Scale(1./hCorr->Integral());
+        if (hCorr) {
+            hCorr = static_cast<TH1F*>( hCorr->Clone(Form("hCor_%d", iE)) );
+            hCorr->SetDirectory(nullptr); keep.push_back(hCorr);
+        }
 
-      /* robust fits ---------------------------------------------------- */
-      GRes R = robustGauss(hRaw);
-      GRes C = hCorr ? robustGauss(hCorr) : GRes{0,0,0,0,0};
+        if (hRaw ->Integral()>0) hRaw ->Scale(1./hRaw ->Integral());
+        if (hCorr && hCorr->Integral()>0) hCorr->Scale(1./hCorr->Integral());
 
-      /* store for summary --------------------------------------------- */
-      eCtr     .push_back(0.5*(eLo+eHi));
-      muRaw    .push_back(R.mu);   muRawErr.push_back(R.muErr);
-      sgRaw    .push_back(R.sg);   sgRawErr.push_back(R.sgErr);
+        /* ------------- robust Gaussian fits ------------------------------ */
+        GRes R = robustGauss(hRaw);
+        GRes C = (hCorr ? robustGauss(hCorr) : GRes{0,0,0,0,0});
 
-      if (hCorr) {
-          muCor  .push_back(C.mu);   muCorErr.push_back(C.muErr);
-          sgCor  .push_back(C.sg);   sgCorErr.push_back(C.sgErr);
-      } else {
-          muCor  .push_back(0);      muCorErr.push_back(0);
-          sgCor  .push_back(0);      sgCorErr.push_back(0);
-      }
+        /* ------------- book‑keeping for the summary plots ---------------- */
+        eCtr    .push_back( 0.5*(eLo+eHi) );
+        muRaw   .push_back( R.mu );   muRawErr.push_back( R.muErr );
+        sgRaw   .push_back( R.sg );   sgRawErr.push_back( R.sgErr );
+        muCor   .push_back( C.mu );   muCorErr.push_back( C.muErr );
+        sgCor   .push_back( C.sg );   sgCorErr.push_back( C.sgErr );
 
-      /* --------------------------------------------------------------- *
-       * 3a)   draw overlay in the master canvas
-       * --------------------------------------------------------------- */
-      TPad* pad = static_cast<TPad*>( c4x2.cd(iE+1) );
-      pad->SetLeftMargin(0.22); pad->SetBottomMargin(0.18);
-      pad->SetRightMargin(0.06); pad->SetTopMargin(0.10);
+        /* ------------- draw on the pad ---------------------------------- */
+        TPad* pad = static_cast<TPad*>( c4x2.cd(iE+1) );
+        pad->SetLeftMargin  (0.25);        // ⇦ more space for Y‑title
+        pad->SetBottomMargin(0.19);
+        pad->SetTopMargin   (0.10);
+        pad->SetRightMargin (0.06);
 
-      hRaw->SetMarkerStyle(20);  hRaw->SetMarkerColor(kBlack);
-      hRaw->SetLineColor  (kBlack);
-      if (hCorr) {
-          hCorr->SetMarkerStyle(20); hCorr->SetMarkerColor(kRed);
-          hCorr->SetLineColor  (kRed);
-      }
+        /* raw = black ● ,  corr = red ● */
+        hRaw ->SetMarkerStyle(20); hRaw ->SetMarkerColor(kBlack); hRaw ->SetLineColor(kBlack);
+        if (hCorr) {
+            hCorr->SetMarkerStyle(20); hCorr->SetMarkerColor(kRed); hCorr->SetLineColor(kRed);
+        }
 
-      double yMax = hRaw->GetMaximum();
-      if (hCorr) yMax = std::max(yMax, hCorr->GetMaximum());
-      hRaw->GetYaxis()->SetRangeUser(0, 1.25*yMax);
+        /* axis cosmetics --------------------------------------------------- */
+        const double yMax = std::max( hRaw->GetMaximum(),
+                                      hCorr ? hCorr->GetMaximum() : 0.0 );
+        hRaw->SetTitle   ( Form("#Delta#phi  [%.1f, %.1f)  GeV", eLo, eHi) );
+        hRaw->GetXaxis()->SetTitle("#Delta#phi  (reco - truth)  [rad]");
+        hRaw->GetYaxis()->SetTitle("Normalised counts");
 
-      hRaw->SetTitle(Form("#Delta#phi  [%.1f, %.1f) GeV", eLo, eHi));
-      hRaw->GetXaxis()->SetTitle("#Delta#phi  (reco - truth)  [rad]");
-      hRaw->GetYaxis()->SetTitle("Normalised counts");
+        hRaw->GetYaxis()->SetTitleOffset( 2.15 );   // ⇦ shift Y‑title further left
+        hRaw->GetXaxis()->SetLabelSize ( 0.028 );   // ⇦ smaller tick labels
+        hRaw->GetYaxis()->SetRangeUser( 0, 1.30*yMax );
 
-      hRaw->Draw("E");
-      if (hCorr) hCorr->Draw("E SAME");
+        /* draw ------------------------------------------------------------- */
+        hRaw->Draw("E");
+        if (hCorr) hCorr->Draw("E SAME");
 
-      /* legend & stats ------------------------------------------------ */
-      TLegend* leg = new TLegend(0.24,0.70,0.48,0.86);
-      leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.032);
-      leg->AddEntry(hRaw ,"RAW"      ,"lp");
-      if (hCorr) leg->AddEntry(hCorr,"CORRECTED","lp");
-      leg->Draw(); keep.push_back(leg);
+        /* legend ----------------------------------------------------------- */
+        TLegend* leg = new TLegend(0.28,0.72,0.54,0.88);   // (x1,y1,x2,y2) NDC
+        leg->SetBorderSize(0); leg->SetFillStyle(0);
+        leg->SetTextFont(42);  leg->SetTextSize(0.038);
+        leg->AddEntry(hRaw ,  "RAW"       , "lp");
+        if (hCorr) leg->AddEntry(hCorr,  "CORRECTED", "lp");
+        leg->Draw();  keep.push_back(leg);
 
-      TLatex tx; tx.SetNDC(); tx.SetTextFont(42); tx.SetTextSize(0.030);
-      tx.SetTextAlign(33);
-      tx.DrawLatex(0.92,0.88,
-          Form("RAW  #mu=%.4f  #sigma=%.4f", R.mu, R.sg));
-      if (hCorr)
-          tx.DrawLatex(0.92,0.82,
-              Form("CORR #mu=%.4f  #sigma=%.4f", C.mu, C.sg));
-  } /* ---- end slice loop ---------------------------------------------- */
+        /* bold, colour‑coded stats block ---------------------------------- */
+        {
+            /* RAW line – black, lower */
+            TLatex txR;  txR.SetNDC();
+            txR.SetTextFont(42);              // base font
+            txR.SetTextSize(0.042);
+            txR.SetTextColor(kBlack);
+            txR.SetTextAlign(33);             // right‑aligned
+            txR.DrawLatex(0.93, 0.84,
+                Form("#bf{RAW:  #mu = %.4f,  #sigma = %.4f}", R.mu, R.sg));
+
+            /* CORR line – red, above RAW */
+            if (hCorr)
+            {
+                TLatex txC;  txC.SetNDC();
+                txC.SetTextFont(42);
+                txC.SetTextSize(0.042);
+                txC.SetTextColor(kRed);
+                txC.SetTextAlign(33);
+                txC.DrawLatex(0.93, 0.90,
+                    Form("#bf{CORR: #mu = %.4f, #sigma = %.4f}", C.mu, C.sg));
+            }
+        }
+    } /* -------- end slice loop ---------------------------------------------- */
+
 
   /* ------------------------------------------------------------------ *
    * 4)   summary graphs (µ vs E, σ vs E) – unchanged appearance
@@ -2311,7 +2195,7 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
       return g;
   };
 
-  const double dx = 0.08;
+  const double dx = 0.00;
   auto gMuRaw = makeG(muRaw, muRawErr, -dx, kBlack, 20);
   auto gMuCor = makeG(muCor, muCorErr, +dx, kRed  , 20);
   auto gSiRaw = makeG(sgRaw, sgRawErr, -dx, kBlack, 20);
@@ -2679,7 +2563,7 @@ void OverlayDeltaPhiClusterizerCP(const std::vector<std::pair<double,double>>& e
     guard.push_back(g); return g;
   };
 
-  const double dx=0.20;
+  const double dx=0.0;
   auto gMuR = makeG(muRaw ,muRE,-dx,kBlack  ,20);
   auto gMuC = makeG(muCorr,muCE, 0,kRed    ,20);
   auto gMuB = makeG(muB   ,muBE,+dx,kBlue+1,20);
@@ -3010,7 +2894,7 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
     /* ---------- 3. summary canvas μ & σ ---------- */
     {
         /* offset between the 5 curves (-2 … +2) */
-        const double dx = 0.18;
+        const double dx = 0.0;
 
         /* ------------------------------------------------------------------ *
          *  Helper → return {min,max} over *all* curves, including ±σErr,
@@ -3750,148 +3634,487 @@ void PlotBcompare(const std::map<double,double>& bRMS,
 }
 
 /* ========================================================================== */
-/*  implementation (put in .cpp or before you call them)                      */
+/*  drawLego3D – single view  + clean 2×2 multi‑view                          */
+/*     • ORIGINAL png     :  lego_<tag>.png                                   */
+/*     • NEW four‑view png:  lego_<tag>_views.png                              */
 /* ========================================================================== */
-void drawLego3D(TH3F* h,const char* tag,const char* hdr,
-                const char* outDir,double fTtl,double fLbl)
+void drawLego3D(TH3F*        h,
+                const char*  tag,          // “unc”, “cor”, …
+                const char*  hdr,          // header text
+                const char*  outDir,       // directory for PNGs
+                double       fTtl,         // title‑font size
+                double       fLbl)         // axis‑label font size
 {
-  if(!h) return;
+    if (!h) return;
 
-  /* axis titles + label sizes */
-  h->SetMinimum(h->GetMinimum());
-  h->SetMaximum(h->GetMaximum());
-  h->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
-  h->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
-  h->GetZaxis()->SetTitle("Cluster E  [GeV]");
-  h->GetXaxis()->SetLabelSize(fLbl-0.002);
-  h->GetYaxis()->SetLabelSize(fLbl-0.002);
-  h->GetZaxis()->SetLabelSize(fLbl-0.002);
+    /* ------------------------------------------------------------------ *
+     * 0. Cosmetics common to ALL drawings
+     * ------------------------------------------------------------------ */
+    h->SetMinimum(h->GetMinimum());
+    h->SetMaximum(h->GetMaximum());
 
-  /* canvas */
-  TCanvas c(Form("c_%s",tag),"",1400,1080);
-  c.SetRightMargin(0.15);
-  c.SetBottomMargin(0.14);
+    h->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+    h->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
+    h->GetZaxis()->SetTitle("Cluster E  [GeV]");
 
-  h->Draw("LEGO2Z0");
-  c.Update();                                // palette created
+    h->GetXaxis()->SetLabelSize(fLbl - 0.002);
+    h->GetYaxis()->SetLabelSize(fLbl - 0.002);
+    h->GetZaxis()->SetLabelSize(fLbl - 0.002);
 
-  /* reshape palette axis */
-  if(auto* pal = dynamic_cast<TPaletteAxis*>
-        (h->GetListOfFunctions()->FindObject("palette")))
-  {
-      pal->SetX1NDC(0.905); pal->SetX2NDC(0.925);
-      pal->SetLabelSize(fLbl+0.005);
-      pal->SetBorderSize(0); pal->SetFillStyle(0);
+    /* ****************************************************************** *
+     * 1.  ORIGINAL single‑view canvas (unchanged)
+     * ****************************************************************** */
+    TCanvas cMain(Form("c_%s", tag), "", 1400, 1080);
+    cMain.SetRightMargin(0.15);
+    cMain.SetBottomMargin(0.14);
 
-      int e = static_cast<int>(std::floor(std::log10(h->GetMaximum())));
-      pal->GetAxis()->SetTitle(Form("counts ×10^{%d}",e));
-      pal->GetAxis()->CenterTitle(true);
-      pal->GetAxis()->SetTitleSize(fTtl-0.005);
-      pal->GetAxis()->SetTitleOffset(0.60);
+    h->Draw("LEGO2Z0");
+    cMain.Update();                                                // palette
 
-      const double scale = std::pow(10.,e);
-      TH1* hh = pal->GetHistogram();          // helper 1‑D palette histogram
-      int  nb = hh->GetNbinsX();
-      for (int i = 1; i <= nb; ++i) {
-          double low = hh->GetBinLowEdge(i) / scale;       // label content
-          pal->GetAxis()->ChangeLabel(i, -1, -1, -1, -1, -1,
-                                      Form("%.0f", low));
-      }
-      
-      
-  }
+    /* ------------------------------------------------------------------ *
+     * helper: format palette labels as ×10^e  (robust against ROOT 6.30+)
+     * ------------------------------------------------------------------ */
+    auto prettifyPalette = [&](TPaletteAxis* pal)
+    {
+        if (!pal) return;
 
-  /* header text */
-  TLatex t; t.SetNDC(); t.SetTextFont(42);
-  t.SetTextSize(fTtl);   t.SetTextAlign(13);
-  t.DrawLatex(0.12,0.94,Form("#bf{%s}",hdr));
-  t.SetTextSize(fTtl-0.010);
-  t.DrawLatex(0.12,0.90,Form("entries: %.0f",h->GetEntries()));
+        /* tight bar ----------------------------------------------------- */
+        pal->SetX1NDC(0.905);  pal->SetX2NDC(0.925);
+        pal->SetBorderSize(0);  pal->SetFillStyle(0);
 
-  c.Print(Form("%s/lego_%s.png",outDir,tag),"png 600");
+        /* scientific‑notation header ------------------------------------ */
+        double zMax = h->GetMaximum();        // ROOT‑version‑proof
+        int    e    = static_cast<int>(std::floor(std::log10(zMax)));
+        double scale = std::pow(10., e);
+
+        pal->GetAxis()->SetTitle( Form("counts ×10^{%d}", e) );
+        pal->GetAxis()->CenterTitle();
+        pal->GetAxis()->SetTitleOffset(0.60);
+
+        /* relabel individual ticks -------------------------------------- *
+         * Works with both TAxis (≤6.28) and TGaxis (≥6.30).               */
+        if (auto* axTA = dynamic_cast<TAxis*>(pal->GetAxis()))
+        {
+            int nb = axTA->GetNbins();
+            for (int i = 1; i <= nb; ++i)
+            {
+                double val = axTA->GetBinLowEdge(i) / scale;
+                axTA->ChangeLabel(i, -1, -1, -1, -1, -1, Form("%.0f", val));
+            }
+        }
+        else if (auto* axTG = dynamic_cast<TGaxis*>(pal->GetAxis()))
+        {
+            /* TGaxis no longer exposes bin‑edge helpers; rebuild labels   *
+             * from axis world limits.                                     */
+            double wmin = axTG->GetWmin();
+            double wmax = axTG->GetWmax();
+            int    nDiv = axTG->GetNdiv()%100;       // major divisions
+            double step = (wmax - wmin) / nDiv;
+
+            for (int i = 0; i <= nDiv; ++i)
+            {
+                double valLab = (wmin + i*step) / scale;
+                axTG->ChangeLabel(i+1, -1, -1, -1, -1, -1,
+                                  Form("%.0f", valLab));
+            }
+        }
+    };
+
+    if (auto* pal = dynamic_cast<TPaletteAxis*>
+          (h->GetListOfFunctions()->FindObject("palette")))
+    {
+        pal->SetLabelSize(fLbl + 0.005);
+        prettifyPalette(pal);     // <-- new, version‑proof helper
+    }
+
+    TLatex tit; tit.SetNDC(); tit.SetTextFont(42); tit.SetTextAlign(13);
+    tit.SetTextSize(fTtl);
+    tit.DrawLatex(0.12, 0.94, Form("#bf{%s}", hdr));
+    tit.SetTextSize(fTtl - 0.010);
+    tit.DrawLatex(0.12, 0.90, Form("entries: %.0f", h->GetEntries()));
+
+    cMain.Print(Form("%s/lego_%s.png", outDir, tag), "png 600");
+
+    /* ********************************************************************** *
+     * 2.  E I G H T – V I E W   S H E E T   (4 × 2 pads)
+     *
+     *    ┌────────────────┬────────────────┬────────────────┬────────────────┐
+     *    │  φ =   0°      │  φ =  90°      │  φ = 180°      │  φ = 270°      │ ← row 1
+     *    │  (tilted)      │  (tilted)      │  (tilted)      │  (tilted)      │
+     *    ├────────────────┼────────────────┼────────────────┼────────────────┤
+     *    │  Front face    │  Right face    │  Back face     │  Left face     │ ← row 2
+     *    │  θ = 12°       │  θ = 12°       │  θ = 12°       │  θ = 12°       │
+     *    └────────────────┴────────────────┴────────────────┴────────────────┘
+     * ********************************************************************** */
+
+    /* ---- reference camera from the single‑view canvas (for row 1) ---- */
+    cMain.cd();
+    const double thetaTilt = gPad->GetTheta();   // usually ≈ 30°
+    const double phiTilt   = gPad->GetPhi();     // usually ≈ 45°
+
+    /* ---- camera angles for the grid ---------------------------------- */
+    const double phiAbs[4]  = {   0.0,   90.0,  180.0,  270.0 };
+    const char*  faceTxt[4] = { "Front", "Right", "Back", "Left" };
+    const double thetaFace  = 12.0;              // gentle “bow‑down”
+
+    /* ---- canvas ------------------------------------------------------- */
+    TCanvas c8(Form("c_%s_views", tag),
+               Form("%s – tilted & side‑on views", hdr),
+               2100, 1150);
+    c8.Divide(4, 2, 0.004, 0.010);               // almost invisible gutters
+
+    /* permanent clone – avoids touching the original histogram ---------- */
+    std::unique_ptr<TH3F> hMaster( static_cast<TH3F*>(h->Clone()) );
+    hMaster->SetDirectory(nullptr);
+
+    for (int row = 0; row < 2; ++row)
+    for (int col = 0; col < 4; ++col)
+    {
+        const int ip = 1 + row*4 + col;          // pad index (1‑based)
+        c8.cd(ip);
+
+        gPad->SetRightMargin (0.13);
+        gPad->SetBottomMargin(0.12);
+        gPad->SetBorderMode  (0);
+
+        /* ---------------- draw ---------------------------------------- */
+        auto* hDraw = static_cast<TH3F*>(hMaster->Clone());
+        hDraw->SetDirectory(nullptr);
+        hDraw->Draw("LEGO2Z0");
+
+        /* ---------------- camera -------------------------------------- */
+        const double th = (row == 0) ? thetaTilt : thetaFace;
+        const double ph = (row == 0)
+                          ? phiTilt + phiAbs[col]   // keep ROOT’s default skew
+                          : phiAbs[col];            // strict front / side / back
+        gPad->SetTheta(th);
+        gPad->SetPhi  (std::fmod(ph + 360.0, 360.0));
+        gPad->Modified(); gPad->Update();
+
+        /* keep colour bar only in pad 1 -------------------------------- */
+        if (ip != 1)
+            for (auto* obj : *gPad->GetListOfPrimitives())
+                if (obj->InheritsFrom(TPaletteAxis::Class()))
+                { obj->Delete(); break; }
+    }
+
+    /* ---------------- save -------------------------------------------- */
+    c8.Print(Form("%s/lego_%s_views.png", outDir, tag), "png 600");
 }
 
-/* -------------------------------------------------------------------------- */
-void auditResidual(TH3F* h,const char* tag,
-                   const char* outDir,double fTtl,double fLbl)
+
+
+/* ======================================================================= */
+/*  auditResidual – residual |ΔE|/⟨E⟩ map + η / φ profiles                 */
+/*                                                                          *
+ *  Z‑value plotted: |ΔE| / ⟨E⟩ • 100 %                                    *
+ *  – ΔE  =  mean cluster‑energy in block − global mean                     *
+ *  – ⟨E⟩ =  global mean cluster‑energy                                     */
+/* ======================================================================= */
+void auditResidual(TH3F*  h,
+                   const char* tag,
+                   const char* outDir,
+                   double fTtl,
+                   double fLbl)
 {
-  if(!h) return;
+    if (!h) return;
 
-  TH2D* meanMap = h->Project3DProfile("yx");  meanMap->SetDirectory(nullptr);
-  const double mu = meanMap->GetMean();
+    /* ------------------------------------------------------------------ */
+    /* 1. build residual map  |ΔE|/⟨E⟩ [%]                                */
+    /* ------------------------------------------------------------------ */
+    TH2D* meanMap = h->Project3DProfile("yx");   meanMap->SetDirectory(nullptr);
+    const double mu = meanMap->GetMean();
 
-  TH2D* res = (TH2D*)meanMap->Clone(Form("res_%s",tag));
-  const int nx = res->GetXaxis()->GetNbins();
-  const int ny = res->GetYaxis()->GetNbins();
-  for(int ix=1; ix<=nx; ++ix)
-    for(int iy=1; iy<=ny; ++iy)
-      res->SetBinContent(ix,iy,100.*(meanMap->GetBinContent(ix,iy)-mu)/mu);
+    TH2D* res = static_cast<TH2D*>( meanMap->Clone(Form("res_%s",tag)) );
 
-  const double A = std::max(std::abs(res->GetMinimum()),std::abs(res->GetMaximum()));
-  res->SetMinimum(-A); res->SetMaximum(+A);
+    const int nx = res->GetXaxis()->GetNbins();
+    const int ny = res->GetYaxis()->GetNbins();
+    for (int ix = 1; ix <= nx; ++ix)
+        for (int iy = 1; iy <= ny; ++iy)
+            res->SetBinContent( ix, iy,
+              100.* std::fabs( meanMap->GetBinContent(ix,iy) - mu ) / mu );
 
-  /* 2‑D canvas ------------------------------------------------------ */
-  TCanvas c(Form("c_res_%s",tag),"",1000,850);
-  c.SetRightMargin(0.12);
-  c.SetLeftMargin(0.18);
-  c.SetBottomMargin(0.16);
+    const double maxAbs = res->GetMaximum();     // now ≥ 0 always
+    res->SetMinimum(0);  res->SetMaximum(maxAbs);
 
-  res->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
-  res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
-  res->GetZaxis()->SetTitle("#Delta / mean  [%]");
-  res->Draw("COLZ");
-  /* shrink Z-axis text so it fits */
-  const double zScale = 0.75;                    // 75 % of the other axes
-  res->GetZaxis()->SetTitleSize( (fLbl+0.005)*zScale );
-  res->GetZaxis()->SetLabelSize( (fLbl-0.002)*zScale );
-  res->GetZaxis()->SetTitleOffset( 1.25 );       // nudge title leftward
+    /* ------------------------------------------------------------------ */
+    /* 2. 2‑D colour map                                                  */
+    /* ------------------------------------------------------------------ */
+    TCanvas c(Form("c_res_%s",tag),"",1000,850);
+    c.SetRightMargin(0.12);
+    c.SetLeftMargin (0.18);
+    c.SetBottomMargin(0.16);
 
-  c.Update();
+    /* CHG: use diverging kBird palette (blue → yellow) and many contours */
+    gStyle->SetPalette(kBird);             // NEW – ROOT palette #57 (blue‑green‑yellow)
+    gStyle->SetNumberContours(255);        // NEW – smooth gradation
 
-  if (auto* pal =
-            dynamic_cast<TPaletteAxis*>( res->GetListOfFunctions()
-                                             ->FindObject("palette")) )
+    res->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+    res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
+    res->GetZaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
+    res->Draw("COLZ");
+    c.Update();                            // palette now exists
+    /* palette cosmetics + external TLatex header ----------------------- */
+    if (auto* pal = dynamic_cast<TPaletteAxis*>
+                   (res->GetListOfFunctions()->FindObject("palette")) )
     {
-        /* put the colour bar a bit farther inside & make it slimmer */
-        pal->SetX1NDC( 0.92 );           // ← was 0.94
-        pal->SetX2NDC( 0.945 );          // ← was 0.96
+        pal->SetX1NDC(0.92);  pal->SetX2NDC(0.945);          // slim bar
+        pal->GetAxis()->SetTitle("");                        // hide internal title
 
-        /* keep fonts in sync with the 0.75 “zScale” you already used */
+        /* nice numeric ticks every 0.5 % (5 major ×10 minor = 510) */
+        pal->GetAxis()->SetNdivisions(510);                  // <- 1‑argument form
+
         const double zScale = 0.75;
-        pal->SetLabelSize( (fLbl - 0.002) * zScale );   // numbers
-        pal->GetAxis()->SetTitleSize( (fLbl + 0.005) * zScale ); // “Δ / mean [%]”
-        pal->GetAxis()->SetTitleOffset( 0.8 );          // nudge title left
+        pal->SetLabelSize( (fLbl-0.002) * zScale );
+        pal->SetBorderSize(0);  pal->SetFillStyle(0);
+
+        /* external title above bar */
+        const double xMid = 0.5 * (pal->GetX1NDC() + pal->GetX2NDC());
+        const double yTop = pal->GetY2NDC();
+        TLatex t;  t.SetNDC();  t.SetTextFont(42);
+        t.SetTextAlign(21);
+        t.SetTextSize(0.022);
+        t.DrawLatex(xMid, yTop + 0.018, "|#DeltaE| / #LT E #GT  [%]");
+    }
+
+
+    c.Print( Form("%s/residual2_%s.png", outDir, tag), "png 600" );
+
+    /* ------------------------------------------------------------------ */
+    /* Helper: save a 1‑D η‑ or φ‑profile                                 */
+    /* ------------------------------------------------------------------ */
+    auto saveProfile = [&](TProfile* p, const char* ax)
+    {
+        if (!p) return;
+
+        /* -- canvas ------------------------------------------------------ */
+        TCanvas cp(Form("cp_%s_%s", ax, tag), "", 900, 600);
+        cp.SetLeftMargin  (0.18);
+        cp.SetBottomMargin(0.15);
+        cp.SetTicky();                       // y‑axis ticks on both sides
+        cp.SetGridy(false);                  // no ROOT grid – we draw our own line
+
+        p->SetLineWidth(2);
+        p->SetMarkerStyle(kFullCircle);
+        p->SetMarkerSize(1.2);            // a touch bigger for print
+        p->SetMarkerColor(kBlack);
+        p->SetLineColor  (kBlack);
+
+        /* NEW: proper axis titles */
+        if (ax[0]=='p')   // “phi” profile  (ProfileX → φ–strips)
+            p->GetXaxis()->SetTitle("block #phi_{local, 2#times 2}");
+        else              // “eta” profile  (ProfileY → η–strips)
+            p->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+
+        p->GetYaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
+        p->Draw();
+
+        /* -- one horizontal line at the arithmetic mean ----------------- */
+        const double yMean = p->GetMean(2);  // 2 = along Y
+        TLine meanLine(p->GetXaxis()->GetXmin(), yMean,
+                       p->GetXaxis()->GetXmax(), yMean);
+        meanLine.SetLineWidth(2);
+        meanLine.SetLineStyle(1);            // solid
+        meanLine.SetLineColor(kGray+2);      // neutral grey
+        meanLine.Draw();
+
+        cp.Print(Form("%s/residual_%s_%s.png", outDir, ax, tag), "png 600");
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* 4.  build & save unique profiles – no name clashes, no leaks       */
+    /* ------------------------------------------------------------------ */
+    TProfile *pPhi = res->ProfileX(Form("prof_phi_%s", tag));
+    pPhi->SetDirectory(nullptr);           // ← keep out of gROOT
+    saveProfile(pPhi, "phi");
+    delete pPhi;                           // ← no leak
+
+    TProfile *pEta = res->ProfileY(Form("prof_eta_%s", tag));
+    pEta->SetDirectory(nullptr);
+    saveProfile(pEta, "eta");
+    delete pEta;
+
+    /* optional: tidy up big intermediates */
+    delete meanMap;
+    delete res;
+}
+/* ======================================================================= */
+
+void makeLegoGifHD(TH3 *h,
+                   const char *tag,
+                   const char *hdr,
+                   const char *outDir,
+                   int   nFrames = 180,       // 2°/frame → one full orbit in 7.2 s @ 25 fps
+                   double theta0  = 28.0,     // inclination at φ = φ0
+                   double theta1  = 38.0,     // inclination at φ = φ0 + φArc
+                   double phi0    =   0.0,    // start azimuth (deg)
+                   double phiArc  = 360.0,    // azimuth sweep (deg)
+                   int   SS       = 2,        // supersampling factor (×2 = good AA, small IO)
+                   int   W0       = 1280,     // output width  (px)
+                   int   H0       = 720,      // output height (px)
+                   int   FPS      = 25)       // frame‑rate (Google Slides default)
+{
+    /*----------------------------------------------------------------------*/
+    /* 0. sanity checks                                                     */
+    /*----------------------------------------------------------------------*/
+    if (!h)       { Error("makeLegoGifHD", "null histogram pointer"); return; }
+    if (nFrames<2){ Error("makeLegoGifHD", "nFrames must be ≥ 2");     return; }
+
+    /*----------------------------------------------------------------------*/
+    /* 1. ensure batch mode and thread safety                               */
+    /*----------------------------------------------------------------------*/
+#if ROOT_VERSION_CODE >= ROOT_VERSION(6,30,0)
+    // Avoid the implicit multi‑threading ROOT enables since 6.30
+    ROOT::EnableImplicitMT(0);
+#endif
+    gROOT->SetBatch(kTRUE);
+
+    /*----------------------------------------------------------------------*/
+    /* 2. one‑off ROOT style                                                */
+    /*----------------------------------------------------------------------*/
+    gStyle->SetOptStat(0);
+    gStyle->SetNumberContours(140);
+    gStyle->SetCanvasPreferGL(true);      // use OpenGL → MSAA
+    gErrorIgnoreLevel = kWarning;         // suppress harmless colour warnings
+
+    /*----------------------------------------------------------------------*/
+    /* 3. supersampled canvas                                               */
+    /*----------------------------------------------------------------------*/
+    const int W = W0 * SS,  H = H0 * SS;
+    TString canvName = Form("c_%s_gif", tag);
+    std::unique_ptr<TCanvas> c(new TCanvas(canvName, "", W, H));
+    c->SetRightMargin (0.15);
+    c->SetBottomMargin(0.13);
+    c->SetFillColorAlpha(kWhite, 0.0);
+
+    /*----------------------------------------------------------------------*/
+    /* 4. static scene (draw only once)                                     */
+    /*----------------------------------------------------------------------*/
+    h->GetXaxis()->SetTitleOffset(1.25);
+    h->GetYaxis()->SetTitleOffset(1.55);
+    h->GetZaxis()->SetTitleOffset(0.90);
+    h->Draw("LEGO2Z0");
+    gPad->Modified(); gPad->Update();
+
+    if (auto *pal =
+        dynamic_cast<TPaletteAxis*>(h->GetListOfFunctions()->FindObject("palette")))
+    {
+        pal->SetX1NDC(0.86); pal->SetX2NDC(0.89);
         pal->SetBorderSize(0);
         pal->SetFillStyle(0);
-  }
-  TLatex l; l.SetNDC(); l.SetTextFont(42); l.SetTextAlign(23);
-  l.SetTextSize(fLbl+0.010);
-  l.DrawLatex(0.95,0.97,"counts");
+        pal->SetLabelSize(0.022 * SS / 2.0);
+    }
 
-  TLine g; g.SetLineStyle(2); g.SetLineColor(kGray+1);
-  g.DrawLine(-0.5,0,1.5,0); g.DrawLine(0,-0.5,0,1.5);
+    TLatex head; head.SetNDC(); head.SetTextFont(42);
+    head.SetTextAlign(13);
+    head.SetTextSize(0.05 * SS / 2.0);
+    head.DrawLatex(0.04, 0.965, Form("#bf{%s}", hdr));
+    gPad->Modified(); gPad->Update();
 
-  c.Print(Form("%s/residual2_%s.png",outDir,tag),"png 600");
+    /*----------------------------------------------------------------------*/
+    /* 5. filenames & directories                                           */
+    /*----------------------------------------------------------------------*/
+    TString base   = Form("%s/lego_%s_spin", outDir, tag);
+    TString pngDir = base + "_png";
+    TString gifOut = base + ".gif";
+    gSystem->mkdir(pngDir, kTRUE);
 
-  /* profiles -------------------------------------------------------- */
-  auto saveProfile=[&](TProfile* p,const char* ax)
-  {
-    TCanvas cp(Form("cp_%s_%s",ax,tag),"",900,600);
-    cp.SetGridy(); cp.SetLeftMargin(0.18); cp.SetBottomMargin(0.15);
-    p->SetLineWidth(2); p->SetMarkerStyle(20);
-    p->GetYaxis()->SetTitle("#Delta / mean  [%]");
-    p->Draw();
+    /*----------------------------------------------------------------------*/
+    /* 6. render PNG frames (8‑bit palette)                                 */
+    /*----------------------------------------------------------------------*/
+    Printf("\n[makeLegoGifHD]  %s", hdr);
+    Printf("  output dir  : %s", outDir);
+    Printf("  resolution  : %d × %d  (supersampled ×%d)", W0, H0, SS);
+    Printf("  frames/fps  : %d @ %d fps\n------------------------------", nFrames, FPS);
 
-    TLine l; l.SetLineStyle(2); l.SetLineColor(kGray+1);
-    for(double v:{-2,-1,1,2})
-        l.DrawLine(p->GetXaxis()->GetXmin(),v,p->GetXaxis()->GetXmax(),v);
+    const char spin[4] = {'|','/','-','\\'};
+    const TDatime tStart;
 
-    cp.Print(Form("%s/residual_%s_%s.png",outDir,ax,tag),"png 600");
-  };
-  saveProfile(res->ProfileX("_phi"),"phi");
-  saveProfile(res->ProfileY("_eta"),"eta");
+    for (int i=0;i<nFrames;++i)
+    {
+        double u   = double(i)/(nFrames-1);
+        double phi = phi0 + phiArc*u;
+        double th  = theta0 + (theta1-theta0)*
+                     0.5*(1-std::cos(u*TMath::Pi()));   // cosine‑ease
+
+        gPad->SetPhi(phi); gPad->SetTheta(th);
+        gPad->Modified();  gPad->Update();
+
+        TString fn = Form("%s/f%04d.png", pngDir.Data(), i);
+        c->Print(fn, "png");  // 8‑bit, ~1 MB at 1280×720
+
+        if (i%(nFrames/100<1?1:nFrames/100)==0||i==nFrames-1)
+        {
+            int elapsed = TDatime().Convert()-tStart.Convert();
+            int eta     = elapsed*(nFrames-i-1)/(i+1);
+            printf("\r  %c %3d %%  %4d s ETA", spin[i%4], int(100.*(i+1)/nFrames), eta);
+            fflush(stdout);
+        }
+    }
+    printf("\r  ✔ frame rendering done.                    \n");
+
+    /*----------------------------------------------------------------------*/
+    /* 7. encode GIF via ffmpeg > ImageMagick; abort if neither present     */
+    /*----------------------------------------------------------------------*/
+    TString ffmpeg  = gSystem->Which(nullptr,"ffmpeg");
+    TString convert = gSystem->Which(nullptr,"convert");
+
+    /* Fallback #1 – common Home-brew prefix (Apple/Intel) */
+    if (ffmpeg .IsNull() && !gSystem->AccessPathName("/opt/homebrew/bin/ffmpeg", kExecutePermission))
+        ffmpeg  = "/opt/homebrew/bin/ffmpeg";
+
+    if (convert.IsNull() && !gSystem->AccessPathName("/opt/homebrew/bin/convert", kExecutePermission))
+        convert = "/opt/homebrew/bin/convert";
+
+    /* Fallback #2 – classic /usr/local for older Intel Macs */
+    if (ffmpeg .IsNull() && !gSystem->AccessPathName("/usr/local/bin/ffmpeg", kExecutePermission))
+        ffmpeg  = "/usr/local/bin/ffmpeg";
+
+    if (convert.IsNull() && !gSystem->AccessPathName("/usr/local/bin/convert", kExecutePermission))
+        convert = "/usr/local/bin/convert";
+
+    if (!ffmpeg.IsNull())   /*------------ ffmpeg ––––––––––––––––––*/
+    {
+        TString pal = pngDir+"/palette.png";
+        TString cmd  = Form("%s -loglevel error -y -i %s/f%%04d.png "
+                            "-vf palettegen=max_colors=256 %s",
+                            ffmpeg.Data(), pngDir.Data(), pal.Data());
+        if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","ffmpeg palettegen failed"); return; }
+
+        cmd = Form("%s -loglevel error -y -framerate %d -i %s/f%%04d.png -i %s "
+                   "-lavfi paletteuse -gifflags +transdiff -r %d %s",
+                   ffmpeg.Data(), FPS, pngDir.Data(), pal.Data(), FPS, gifOut.Data());
+        if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","ffmpeg paletteuse failed"); return; }
+
+        gSystem->Unlink(pal);
+        Printf("  ✔ encoded with ffmpeg (%s)", ffmpeg.Data());
+    }
+    else if (!convert.IsNull())   /*------- ImageMagick convert ––––*/
+    {
+        int delay = lround(100.0/FPS);  // centiseconds
+        TString cmd = Form("%s -delay %d -loop 0 %s/f*.png "
+                           "-layers Optimize %s",
+                           convert.Data(), delay, pngDir.Data(), gifOut.Data());
+        if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","convert failed"); return; }
+        Printf("  ✔ encoded with ImageMagick (%s)", convert.Data());
+    }
+    else
+    {
+        Error("makeLegoGifHD",
+              "neither ffmpeg nor ImageMagick found – install one to produce GIFs");
+        return;
+    }
+
+    /*----------------------------------------------------------------------*/
+    /* 8. cleanup                                                           */
+    /*----------------------------------------------------------------------*/
+    gSystem->Exec(Form("rm -rf %s", pngDir.Data()));
+    Printf("  ↪  %s\n  ▸ ready for Google Slides / Keynote (loops ∞)\n", gifOut.Data());
 }
-/* ========================================================================== */
+
+
+
+
 
 
 void PDCanalysis()
@@ -4102,6 +4325,8 @@ void PDCanalysis()
                   0.045, 0.035);
 
 
+// makeLegoGifHD(hCor3D, "cor", "CORRECTED",   out2DDir);
+// makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED", out2DDir);
 
 
   // after opening the file …
