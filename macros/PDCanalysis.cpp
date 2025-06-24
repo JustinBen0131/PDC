@@ -45,6 +45,19 @@ struct BRes {
 constexpr double E_edges[] = {2,4,6,8,10,12,15,20,30};
 constexpr int    N_E = (sizeof(E_edges)/sizeof(E_edges[0])) - 1;
 
+/* ────────────────────────────────────────────────────────────────── */
+/*  Global, compact palette – order matches the five energy slices   */
+/*  ( BLUE , GREEN ,  RED ,  PURPLE , BLACK )                        */
+/* ────────────────────────────────────────────────────────────────── */
+static const int kAshPalette[5] =
+{
+    kBlue  + 1,      // deep blue
+    kGreen + 2,      // vivid green
+    kRed   + 1,      // bright red
+    kMagenta + 2,    // purple
+    kBlack           // black
+};
+
 //--------------------------------------------------------------------
 //  Global enum + label helper
 //--------------------------------------------------------------------
@@ -355,8 +368,10 @@ ScanResults doAshScan(
     } // end bScan
 
     // style
-    int col = 1 + (iE % 10);
-    g->SetMarkerStyle(20 + (iE % 10));
+    int idx = (iE - iE_start) % 5;          // wrap every 5 slices
+    int col = kAshPalette[idx];
+
+    g->SetMarkerStyle(20 + idx);            // circles, squares, triangles, …
     g->SetMarkerColor(col);
     g->SetLineColor  (col);
     g->SetMarkerSize(1.2);
@@ -478,12 +493,13 @@ ScanResults doLogScan(
     } // end w0Scan
 
     // style
-    int col = 2 + (iE % 10);
-    g->SetMarkerStyle(21 + (iE % 10));
+    int idx = (iE - iE_start) % 5;          // wrap every 5 slices
+    int col = kAshPalette[idx];
+
+    g->SetMarkerStyle(20 + idx);            // circles, squares, triangles, …
     g->SetMarkerColor(col);
     g->SetLineColor  (col);
     g->SetMarkerSize(1.2);
-
     results.tgVec[iE] = g;
   }
 
@@ -568,14 +584,17 @@ void drawAshLogSideBySide(
 
     if (!g || g->GetN() == 0)
     {
-      legA.AddEntry((TObject*)nullptr,
-        Form("%.1f–%.1f GeV  — no data", E_edges[iE], E_edges[iE+1]), "");
+        legA.AddEntry((TObject*)nullptr,
+          Form("%.0f #leq E < %.0f GeV  — no data",
+               E_edges[iE], E_edges[iE+1]),
+          "");
       continue;
     }
-    legA.AddEntry(g,
-      Form("%.1f–%.1f GeV  (b=%.2f, σ=%.3f)",
-           E_edges[iE], E_edges[iE+1], bBest, sBest),
-      "lp");
+      legA.AddEntry(g,
+        Form("%.0f #leq E < %.0f GeV  (b=%.2f,  #sigma=%.3f)",
+             E_edges[iE], E_edges[iE+1], bBest, sBest),
+        "lp");
+
   }
   legA.Draw();
 
@@ -599,7 +618,7 @@ void drawAshLogSideBySide(
   if (gLogRef)
   {
     gLogRef->Draw("ALP");
-    gLogRef->GetXaxis()->SetRangeUser( gLogRef->GetXaxis()->GetXmin(), 4.5 );
+    gLogRef->GetXaxis()->SetRangeUser( 3.5, 5.5 );
     gLogRef->GetXaxis()->SetTitle("w_{0}");
     gLogRef->GetYaxis()->SetTitle("#sigma_{x}  (local tower units)");
 
@@ -631,14 +650,16 @@ void drawAshLogSideBySide(
 
     if (!g || g->GetN() == 0)
     {
-      legB.AddEntry((TObject*)nullptr,
-        Form("%.1f–%.1f GeV  — no data", E_edges[iE], E_edges[iE+1]), "");
+        legB.AddEntry((TObject*)nullptr,
+          Form("%.0f #leq E < %.0f GeV  — no data",
+               E_edges[iE], E_edges[iE+1]),
+          "");
       continue;
     }
-    legB.AddEntry(g,
-      Form("%.1f–%.1f GeV  (w_{0}=%.2f, σ=%.3f)",
-           E_edges[iE], E_edges[iE+1], wBest, sBest),
-      "lp");
+      legB.AddEntry(g,
+        Form("%.0f #leq E < %.0f GeV  (w_{0}=%.2f,  #sigma=%.3f)",
+             E_edges[iE], E_edges[iE+1], wBest, sBest),
+        "lp");
   }
   legB.Draw();
 
@@ -673,7 +694,14 @@ void drawAshLogSideBySide(
     gRef->Draw("ALP");
     gRef->GetXaxis()->SetTitle(xTit);
     gRef->GetYaxis()->SetTitle(yTit);
-    gRef->GetYaxis()->SetRangeUser(std::max(0.0, R.minY*0.90), R.maxY*1.10);
+    /* --- dynamic Y‑range from visible points only -------------------- */
+    const bool isLog = (std::strcmp(tag,"Log")==0);
+    double yMin = 1e30 , yMax = -1e30 , xCut = (isLog ? 5.5 : 1e99);
+    for (int i=iE_start;i<N_E;++i) if (R.tgVec[i]&&R.tgVec[i]->GetN())
+    for (int j=0;j<R.tgVec[i]->GetN();++j){ double x,y; R.tgVec[i]->GetPoint(j,x,y);
+        if (x<=xCut){ yMin = std::min(yMin,y); yMax = std::max(yMax,y);} }
+    const double pad = 0.05*(yMax-yMin);          // ±5 % padding
+    gRef->GetYaxis()->SetRangeUser(std::max(0.0,yMin-pad), yMax+pad);
 
     for (int iE = iE_start; iE < N_E; ++iE)
       if (R.tgVec[iE] && R.tgVec[iE]->GetN())
@@ -681,11 +709,12 @@ void drawAshLogSideBySide(
 
     /* legend */
     TLegend L(0.63, 0.70, 0.90, 0.92);
-    L.SetBorderSize(0);  L.SetFillStyle(0);
+    L.SetBorderSize(0);  L.SetFillStyle(0);  L.SetTextSize(0.022);
     for (int iE = iE_start; iE < N_E; ++iE)
       if (R.tgVec[iE] && R.tgVec[iE]->GetN())
-        L.AddEntry(R.tgVec[iE],
-          Form("%.0f–%.0f GeV", E_edges[iE], E_edges[iE+1]), "lp");
+          L.AddEntry(R.tgVec[iE],
+            Form("%.0f #leq E < %.0f GeV", E_edges[iE], E_edges[iE+1]),
+            "lp");
     L.Draw();
 
     TString outSingle = Form("%s/%sScan_%s.png",
@@ -698,6 +727,126 @@ void drawAshLogSideBySide(
                                 "#sigma_{x}  (local tower units)");
   makeSinglePanel(logRes, "Log", "w_{0}",
                                 "#sigma_{x}  (local tower units)");
+}
+
+
+/* ==================================================================== */
+/*  PHENIX‑style σₓ(E) summary – ASH‑only version                       */
+/* ==================================================================== */
+void makePhenixLikeSummary( const ScanResults& ashRes,
+                            [[maybe_unused]] const ScanResults& logRes,
+                            const double*      E_edges,
+                            int                N_E,
+                            double             cellSize_cm,   // 5.55
+                            const TString&     outDir,
+                            bool               skipLowest3 = false )
+{
+  std::cout << "\n[PHX‑Σ] ENTER  (cell=" << cellSize_cm
+            << " cm;  skipLowest3=" << std::boolalpha << skipLowest3 << ")\n";
+
+  const int iE_start = skipLowest3 ? 3 : 0;
+
+  /* ------------------------------------------------------------------ */
+  /* 1) Fill TGraph with Ash minima – convert ⇒ mm                      */
+  /* ------------------------------------------------------------------ */
+  TGraph gAsh;  gAsh.SetName("gAshBest");
+
+  int    nGood = 0;
+  double xMin  =  1e30, xMax = -1e30;
+
+  for (int iE = iE_start; iE < N_E; ++iE)
+  {
+      const double eCtr = 0.5*(E_edges[iE] + E_edges[iE+1]);      // GeV
+
+      const bool   has = (iE < (int)ashRes.bestSigma.size() &&
+                          std::isfinite(ashRes.bestSigma[iE]));
+      const double sig_mm = has ? ashRes.bestSigma[iE]*cellSize_cm*10.0 : NAN;
+
+      std::cout << "  slice " << std::setw(2) << iE
+                << "  centre=" << std::setw(6) << eCtr << " GeV"
+                << "   σ=" << (has?std::to_string(sig_mm):"n/a") << "  (mm)\n";
+
+      if (!has) continue;
+
+      gAsh.SetPoint(gAsh.GetN(), eCtr, sig_mm);
+      ++nGood;  xMin = std::min(xMin,eCtr);  xMax = std::max(xMax,eCtr);
+  }
+
+  if (nGood < 3)
+  {
+      std::cerr << "[PHX‑Σ][FATAL] need ≥3 Ash points, have "
+                << nGood << " – abort.\n";
+      return;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 2) Aesthetics                                                      */
+  /* ------------------------------------------------------------------ */
+  gAsh.SetMarkerStyle(24);  gAsh.SetMarkerSize(1.4);
+  gAsh.SetMarkerColor(kBlack);  gAsh.SetLineColor(kBlack);
+
+  /* ------------------------------------------------------------------ */
+  /* 3)  Fit  p0 + p1 / √E                                              */
+  /* ------------------------------------------------------------------ */
+  TF1 fFit("fFit","[0]+[1]/TMath::Sqrt(x)", xMin*0.9 , xMax*1.1);
+  fFit.SetParameters(1.0, 6.0);
+
+  std::cout << "[PHX‑Σ] fit range  "
+            << fFit.GetXmin() << " – " << fFit.GetXmax() << " GeV\n";
+  TFitResultPtr fr = gAsh.Fit(&fFit,"QRNS");
+  const bool fitOK = (fr && fr->IsValid());
+
+  if (!fitOK)
+      std::cerr << "[PHX‑Σ][WARN] fit failed – curve will still be drawn.\n";
+
+  /* ------------------------------------------------------------------ */
+  /* 4) Canvas & axes                                                   */
+  /* ------------------------------------------------------------------ */
+  TCanvas c("cPhenixAshOnly","PHENIX σx(E) – Ash only",600,600);
+  c.SetLeftMargin(0.17);  c.SetBottomMargin(0.15);
+
+  gAsh.Draw("AP");
+  gAsh.GetXaxis()->SetTitle("E  (GeV)");
+  gAsh.GetYaxis()->SetTitle("#sigma_{x}  (mm)");
+  gAsh.GetXaxis()->SetLimits(xMin*0.9 , xMax*1.1);
+
+  /* Y–range with padding                                               */
+  double yMin=1e30,yMax=-1e30, x, y;
+  for (int i=0;i<gAsh.GetN();++i){ gAsh.GetPoint(i,x,y);
+                                   yMin=std::min(yMin,y);
+                                   yMax=std::max(yMax,y);}
+  const double pad = 0.15*(yMax-yMin);
+  gAsh.GetYaxis()->SetRangeUser(std::max(0.0,yMin-pad), yMax+pad);
+
+  if (fitOK) { fFit.SetLineStyle(2);  fFit.Draw("SAME"); }
+
+  /* ------------------------------------------------------------------ */
+  /* 5) Legend & fit text                                               */
+  /* ------------------------------------------------------------------ */
+  {
+      TLegend L(0.55,0.75,0.88,0.88);
+      L.SetBorderSize(0);  L.SetFillStyle(0);
+      L.AddEntry(&gAsh,"Ash","p");
+      if (fitOK) L.AddEntry(&fFit,"p_{0}+p_{1}E^{-1/2}","l");
+      L.Draw();
+  }
+  TLatex tl;  tl.SetNDC();  tl.SetTextSize(0.037);
+  if (fitOK)
+      tl.DrawLatex(0.18,0.25,
+               Form("#sigma_{x}=%.2f + %.2f E^{-1/2}  (mm)",
+                    fFit.GetParameter(0), fFit.GetParameter(1)));
+  else
+      tl.DrawLatex(0.18,0.25,"fit failed");
+
+  /* ------------------------------------------------------------------ */
+  /* 6) Output                                                          */
+  /* ------------------------------------------------------------------ */
+  if ( gSystem->AccessPathName(outDir,kWritePermission)!=kFALSE )
+      gSystem->mkdir(outDir,kTRUE);
+
+  TString outPng = Form("%s/PhenixSummary_AshOnly.png", outDir.Data());
+  c.SaveAs(outPng);
+  std::cout << "[PHX‑Σ] wrote  " << outPng << "\n[PHX‑Σ] DONE\n";
 }
 
 
@@ -790,7 +939,13 @@ plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
                           histOutDir,
                           true);
   drawAshLogSideBySide(ashRMS, logRMS, "RMS", E_edges, N_E, baseDir, true);
-
+    
+  makePhenixLikeSummary(ashRMS, logRMS,
+                          E_edges, N_E,
+                          5.55,              // cell size (cm)
+                          baseDir,           // output directory
+                          /*skipLowest3=*/true);   // or false
+    
   std::cout<<"\n[INFO] => plotAshLogRMS_sideBySide completed all tasks.\n\n";
     
   // ---------- NEW: build the look-up table for later use ---------- //
@@ -1517,7 +1672,7 @@ void OverlayUncorrPhiEta(TH3F*  hUnc3D,
     cOv.SaveAs(outName);
     std::cout << "[Overlay] wrote " << outName << '\n';
 
-    for(auto obj : keepAlive) delete obj;
+//    for(auto obj : keepAlive) delete obj;
 }
 
 // ---------------------------------------------------------------------------
@@ -1662,7 +1817,7 @@ PlotBvaluesVsEnergy(TH3F* hUnc3D,
     cB.SaveAs(outName);
     std::cout << "[bPlot] wrote " << outName << '\n';
 
-    for(auto obj : keepAlive) delete obj;
+//    for(auto obj : keepAlive) delete obj;
     
     // ---------- NEW single line ---------- //
     for(size_t i=0;i<vX.size();++i) bMap[vX[i]] = vBphi[i];
@@ -3809,136 +3964,227 @@ void drawLego3D(TH3F*        h,
 /*                                                                          *
  *  Z‑value plotted: |ΔE| / ⟨E⟩ • 100 %                                    *
  *  – ΔE  =  mean cluster‑energy in block − global mean                     *
- *  – ⟨E⟩ =  global mean cluster‑energy                                     */
+ *  – ⟨E⟩ =  global mean cluster‑energy                                     *
+ *                                                                          *
+ *  NEW (24‑Jun‑2025)                                                       *
+ *  ─────────────────                                                       *
+ *  ‣ Stores the three finished objects (2‑D, φ‑profile, η‑profile)         *
+ *    in a static cache keyed by tag.                                       *
+ *  ‣ As soon as BOTH “UNCORRECTED” and “CORRECTED” are present, it          *
+ *    automatically writes three two‑pad comparison canvases.               */
 /* ======================================================================= */
 void auditResidual(TH3F*  h,
-                   const char* tag,
+                   const char* tag,          // "UNCORRECTED" | "CORRECTED"
                    const char* outDir,
                    double fTtl,
                    double fLbl)
 {
-    if (!h) return;
+  if (!h) return;
+
+/* ---------------------------------------------------------------------- */
+/* 0.  small helper to put a tag in the top‑right of the *current pad*    */
+/* ---------------------------------------------------------------------- */
+  auto drawTag = [&](const char* txt)
+  {
+    TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextSize(fTtl);
+    t.SetTextAlign(33);         // top‑right
+    t.DrawLatex(0.97,0.96,txt);
+  };
+
+/* ---------------------------------------------------------------------- */
+/* 1. build residual map                                                  */
+/* ---------------------------------------------------------------------- */
+  std::unique_ptr<TH2D> meanMap( h->Project3DProfile("yx") );
+  const double mu = meanMap->GetMean();
+
+  std::unique_ptr<TH2D> res(
+      static_cast<TH2D*>( meanMap->Clone(Form("res_%s",tag)) ) );
+
+  const int nx = res->GetXaxis()->GetNbins();
+  const int ny = res->GetYaxis()->GetNbins();
+  for (int ix=1; ix<=nx; ++ix)
+    for (int iy=1; iy<=ny; ++iy)
+      res->SetBinContent(ix,iy,
+        100.*std::fabs(meanMap->GetBinContent(ix,iy)-mu)/mu);
+
+  res->SetMinimum(0.0);
+  res->SetMaximum(res->GetMaximum());      // just to freeze the range
+
+/* ---------------------------------------------------------------------- */
+/* 2. 2‑D colour map (single histogram)                                   */
+/* ---------------------------------------------------------------------- */
+  TCanvas c2(Form("c_res_%s",tag),"",1000,850);
+  c2.SetLeftMargin(0.18); c2.SetBottomMargin(0.16); c2.SetRightMargin(0.12);
+
+  gStyle->SetPalette(kBird);     gStyle->SetNumberContours(255);
+
+  res->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+  res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
+  res->GetZaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
+  res->Draw("COLZ");  c2.Update();
+
+  /* palette cosmetics */
+  if (auto* pal = dynamic_cast<TPaletteAxis*>(
+        res->GetListOfFunctions()->FindObject("palette")))
+  {
+    pal->SetX1NDC(0.92); pal->SetX2NDC(0.945);
+    pal->GetAxis()->SetTitle("");  pal->SetLabelSize((fLbl-0.002)*0.75);
+    pal->SetBorderSize(0); pal->SetFillStyle(0);
+
+    const double xMid=0.5*(pal->GetX1NDC()+pal->GetX2NDC());
+    TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.022);
+    t.SetTextAlign(21);
+    t.DrawLatex(xMid,pal->GetY2NDC()+0.018,"|#DeltaE| / #LT E #GT  [%]");
+  }
+  drawTag(tag);
+  c2.Print(Form("%s/residual2_%s.png",outDir,tag),"png 600");
+
+/* ---------------------------------------------------------------------- */
+/* 3. build φ and η profiles                                              */
+/* ---------------------------------------------------------------------- */
+  std::unique_ptr<TProfile> pPhi( res->ProfileX(Form("pPhi_%s",tag)) );
+  std::unique_ptr<TProfile> pEta( res->ProfileY(Form("pEta_%s",tag)) );
+
+  auto drawProfile = [&](TProfile* p,const char* ax)
+  {
+    TCanvas cp(Form("c_%s_%s",ax,tag),"",900,600);
+    cp.SetLeftMargin(0.18); cp.SetBottomMargin(0.15);
+    p->SetLineWidth(2); p->SetMarkerStyle(kFullCircle); p->SetMarkerSize(1.1);
+    p->GetYaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
+    if (ax[0]=='p')
+      p->GetXaxis()->SetTitle("block #phi_{local, 2#times 2}");
+    else
+      p->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+    p->Draw("P");
+    /* mean line */
+    TLine L(p->GetXaxis()->GetXmin(),p->GetMean(2),
+            p->GetXaxis()->GetXmax(),p->GetMean(2));
+    L.SetLineColor(kGray+2); L.Draw();
+    drawTag(tag);
+    cp.Print(Form("%s/residual_%s_%s.png",outDir,ax,tag),"png 600");
+  };
+
+  drawProfile(pPhi.get(),"phi");
+  drawProfile(pEta.get(),"eta");
 
     /* ------------------------------------------------------------------ */
-    /* 1. build residual map  |ΔE|/⟨E⟩ [%]                                */
+    /* 4.  STATIC cache + on‑the‑fly comparisons                           */
     /* ------------------------------------------------------------------ */
-    TH2D* meanMap = h->Project3DProfile("yx");   meanMap->SetDirectory(nullptr);
-    const double mu = meanMap->GetMean();
-
-    TH2D* res = static_cast<TH2D*>( meanMap->Clone(Form("res_%s",tag)) );
-
-    const int nx = res->GetXaxis()->GetNbins();
-    const int ny = res->GetYaxis()->GetNbins();
-    for (int ix = 1; ix <= nx; ++ix)
-        for (int iy = 1; iy <= ny; ++iy)
-            res->SetBinContent( ix, iy,
-              100.* std::fabs( meanMap->GetBinContent(ix,iy) - mu ) / mu );
-
-    const double maxAbs = res->GetMaximum();     // now ≥ 0 always
-    res->SetMinimum(0);  res->SetMaximum(maxAbs);
-
-    /* ------------------------------------------------------------------ */
-    /* 2. 2‑D colour map                                                  */
-    /* ------------------------------------------------------------------ */
-    TCanvas c(Form("c_res_%s",tag),"",1000,850);
-    c.SetRightMargin(0.12);
-    c.SetLeftMargin (0.18);
-    c.SetBottomMargin(0.16);
-
-    /* CHG: use diverging kBird palette (blue → yellow) and many contours */
-    gStyle->SetPalette(kBird);             // NEW – ROOT palette #57 (blue‑green‑yellow)
-    gStyle->SetNumberContours(255);        // NEW – smooth gradation
-
-    res->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
-    res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
-    res->GetZaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
-    res->Draw("COLZ");
-    c.Update();                            // palette now exists
-    /* palette cosmetics + external TLatex header ----------------------- */
-    if (auto* pal = dynamic_cast<TPaletteAxis*>
-                   (res->GetListOfFunctions()->FindObject("palette")) )
+    struct CacheEntry
     {
-        pal->SetX1NDC(0.92);  pal->SetX2NDC(0.945);          // slim bar
-        pal->GetAxis()->SetTitle("");                        // hide internal title
+      std::unique_ptr<TH2D>     res2D;
+      std::unique_ptr<TProfile> pPhi, pEta;
+    };
+    static std::map<std::string,CacheEntry> cache;
 
-        /* nice numeric ticks every 0.5 % (5 major ×10 minor = 510) */
-        pal->GetAxis()->SetNdivisions(510);                  // <- 1‑argument form
+    /* --- move the freshly‑built histograms into the cache -------------- */
+    CacheEntry ce;
+    ce.res2D.swap(res);
+    ce.pPhi .swap(pPhi);
+    ce.pEta .swap(pEta);
+    cache[tag] = std::move(ce);
 
-        const double zScale = 0.75;
-        pal->SetLabelSize( (fLbl-0.002) * zScale );
-        pal->SetBorderSize(0);  pal->SetFillStyle(0);
+    /* need both tags before we can draw any comparison ------------------ */
+    if (cache.count("UNCORRECTED")==0 || cache.count("CORRECTED")==0) return;
 
-        /* external title above bar */
-        const double xMid = 0.5 * (pal->GetX1NDC() + pal->GetX2NDC());
-        const double yTop = pal->GetY2NDC();
-        TLatex t;  t.SetNDC();  t.SetTextFont(42);
-        t.SetTextAlign(21);
-        t.SetTextSize(0.022);
-        t.DrawLatex(xMid, yTop + 0.018, "|#DeltaE| / #LT E #GT  [%]");
-    }
-
-
-    c.Print( Form("%s/residual2_%s.png", outDir, tag), "png 600" );
-
-    /* ------------------------------------------------------------------ */
-    /* Helper: save a 1‑D η‑ or φ‑profile                                 */
-    /* ------------------------------------------------------------------ */
-    auto saveProfile = [&](TProfile* p, const char* ax)
+    /* ================================================================== */
+    /*  helper #1 – two‑pad 2‑D comparison (single palette)               */
+    /* ================================================================== */
+    auto makeSide2D = [&](TH2* unc, TH2* cor, const char* outPng)
     {
-        if (!p) return;
+      /* ---------- canvas skeleton ------------------------------------ */
+      TCanvas c("cSide2D","",1800,850);
+      c.Divide(2,1,0,0);                // equal‑sized pads
 
-        /* -- canvas ------------------------------------------------------ */
-        TCanvas cp(Form("cp_%s_%s", ax, tag), "", 900, 600);
-        cp.SetLeftMargin  (0.18);
-        cp.SetBottomMargin(0.15);
-        cp.SetTicky();                       // y‑axis ticks on both sides
-        cp.SetGridy(false);                  // no ROOT grid – we draw our own line
+      /* identical Z‑range --------------------------------------------- */
+      const double zMax = std::max(unc->GetMaximum(),cor->GetMaximum());
+      unc->SetMaximum(zMax);  cor->SetMaximum(zMax);
 
-        p->SetLineWidth(2);
-        p->SetMarkerStyle(kFullCircle);
-        p->SetMarkerSize(1.2);            // a touch bigger for print
-        p->SetMarkerColor(kBlack);
-        p->SetLineColor  (kBlack);
+      /* ---------- left pad – UNCORRECTED ----------------------------- */
+      c.cd(1);
+      gPad->SetLeftMargin(0.18);
+      gPad->SetRightMargin(0.06);       // slim, but equal to right pad
+      gPad->SetBottomMargin(0.16);
 
-        /* NEW: proper axis titles */
-        if (ax[0]=='p')   // “phi” profile  (ProfileX → φ–strips)
-            p->GetXaxis()->SetTitle("block #phi_{local, 2#times 2}");
-        else              // “eta” profile  (ProfileY → η–strips)
-            p->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+      unc->Draw("COL");                 // no palette in this pad
+      drawTag("UNCORRECTED");
 
-        p->GetYaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
-        p->Draw();
+      /* ---------- right pad – CORRECTED (+ palette) ------------------ */
+      c.cd(2);
+      gPad->SetLeftMargin(0.18);
+      gPad->SetRightMargin(0.06);       // same absolute size as pad 1
+      gPad->SetBottomMargin(0.16);
 
-        /* -- one horizontal line at the arithmetic mean ----------------- */
-        const double yMean = p->GetMean(2);  // 2 = along Y
-        TLine meanLine(p->GetXaxis()->GetXmin(), yMean,
-                       p->GetXaxis()->GetXmax(), yMean);
-        meanLine.SetLineWidth(2);
-        meanLine.SetLineStyle(1);            // solid
-        meanLine.SetLineColor(kGray+2);      // neutral grey
-        meanLine.Draw();
+      cor->Draw("COLZ");
+      drawTag("CORRECTED");
 
-        cp.Print(Form("%s/residual_%s_%s.png", outDir, ax, tag), "png 600");
+      /* shift palette so its ticks are fully visible ------------------ */
+      gPad->Update();
+      if (auto* pal = dynamic_cast<TPaletteAxis*>(
+            cor->GetListOfFunctions()->FindObject("palette")))
+      {
+        pal->SetX1NDC(0.93);            // snug to the pad’s right edge
+        pal->SetX2NDC(0.97);
+      }
+
+      c.Print(outPng,"png 600");
     };
 
-    /* ------------------------------------------------------------------ */
-    /* 4.  build & save unique profiles – no name clashes, no leaks       */
-    /* ------------------------------------------------------------------ */
-    TProfile *pPhi = res->ProfileX(Form("prof_phi_%s", tag));
-    pPhi->SetDirectory(nullptr);           // ← keep out of gROOT
-    saveProfile(pPhi, "phi");
-    delete pPhi;                           // ← no leak
+    /* ================================================================== */
+    /*  helper #2 – overlay of 1‑D profiles                               */
+    /* ================================================================== */
+    auto overlay1D = [&](TProfile* unc, TProfile* cor,
+                         const char* xTit, const char* outPng)
+    {
+      TCanvas c("cOver1D","",900,700);
+      c.SetLeftMargin(0.18);  c.SetBottomMargin(0.16);
 
-    TProfile *pEta = res->ProfileY(Form("prof_eta_%s", tag));
-    pEta->SetDirectory(nullptr);
-    saveProfile(pEta, "eta");
-    delete pEta;
+      /* aesthetics ----------------------------------------------------- */
+      unc->SetLineWidth(2);   unc->SetMarkerStyle(kFullCircle);
+      unc->SetMarkerColor(kBlue+1);     unc->SetLineColor(kBlue+1);
 
-    /* optional: tidy up big intermediates */
-    delete meanMap;
-    delete res;
+      cor->SetLineWidth(2);   cor->SetMarkerStyle(kFullSquare);
+      cor->SetMarkerColor(kRed+1);      cor->SetLineColor(kRed+1);
+
+      unc->GetXaxis()->SetTitle(xTit);
+      unc->GetYaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
+
+      /* dynamic Y‑range to fit both graphs ----------------------------- */
+      const double yMin = std::min(unc->GetMinimum(),cor->GetMinimum())*0.95;
+      const double yMax = std::max(unc->GetMaximum(),cor->GetMaximum())*1.05;
+      unc->GetYaxis()->SetRangeUser(std::max(0.,yMin),yMax);
+
+      unc->Draw("P");     cor->Draw("P SAME");
+
+      TLegend L(0.65,0.80,0.90,0.92);
+      L.SetBorderSize(0);  L.SetFillStyle(0);
+      L.AddEntry(unc,"UNCORRECTED","lp");
+      L.AddEntry(cor,"CORRECTED"  ,"lp");
+      L.Draw();
+
+      c.Print(outPng,"png 600");
+    };
+
+    /* ================================================================== */
+    /* 5.  produce comparison files                                       */
+    /* ================================================================== */
+    makeSide2D(cache["UNCORRECTED"].res2D.get(),
+               cache["CORRECTED" ].res2D.get(),
+               Form("%s/residual2_SIDE.png",outDir));
+
+    overlay1D(cache["UNCORRECTED"].pPhi.get(),
+              cache["CORRECTED" ].pPhi.get(),
+              "block #phi_{local, 2#times 2}",
+              Form("%s/residual_phi_OVER.png",outDir));
+
+    overlay1D(cache["UNCORRECTED"].pEta.get(),
+              cache["CORRECTED" ].pEta.get(),
+              "block #eta_{local, 2#times 2}",
+              Form("%s/residual_eta_OVER.png",outDir));
+
 }
 /* ======================================================================= */
+
 
 void makeLegoGifHD(TH3 *h,
                    const char *tag,
@@ -4125,7 +4371,7 @@ void PDCanalysis()
     
   gStyle->SetOptStat(0);
     //_withVirgilesChange
-  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
+  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_withoutPhiTiltCorr.root";
 
   // 2) Open input
   std::cout << "[INFO] Opening file: " << inFile << "\n";
