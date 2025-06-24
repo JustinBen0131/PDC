@@ -4088,47 +4088,100 @@ void auditResidual(TH3F*  h,
     if (cache.count("UNCORRECTED")==0 || cache.count("CORRECTED")==0) return;
 
     /* ================================================================== */
-    /*  helper #1 – two‑pad 2‑D comparison (single palette)               */
+    /*  helper – side-by-side 2-D residual maps + stand-alone palette     */
+    /*         (verbose / defensive version)                              */
     /* ================================================================== */
     auto makeSide2D = [&](TH2* unc, TH2* cor, const char* outPng)
     {
-      /* ---------- canvas skeleton ------------------------------------ */
-      TCanvas c("cSide2D","",1800,850);
-      c.Divide(2,1,0,0);                // equal‑sized pads
+      std::cout << "[makeSide2D] >>> start, writing " << outPng << '\n';
 
-      /* identical Z‑range --------------------------------------------- */
-      const double zMax = std::max(unc->GetMaximum(),cor->GetMaximum());
-      unc->SetMaximum(zMax);  cor->SetMaximum(zMax);
+      /* 0. fast sanity checks ------------------------------------------- */
+      if (!unc || !cor)
+      { std::cerr << "[ERROR] nullptr histogram → abort\n"; return; }
+      if (unc->GetNbinsX()==0 || cor->GetNbinsX()==0)
+      { std::cerr << "[ERROR] empty histogram → abort\n";  return; }
 
-      /* ---------- left pad – UNCORRECTED ----------------------------- */
-      c.cd(1);
-      gPad->SetLeftMargin(0.18);
-      gPad->SetRightMargin(0.06);       // slim, but equal to right pad
-      gPad->SetBottomMargin(0.16);
+      /* 1. common Z-range ---------------------------------------------- */
+      const double zMax = std::max(unc->GetMaximum(), cor->GetMaximum());
+      if (!std::isfinite(zMax))
+      { std::cerr << "[ERROR] non-finite zMax → abort\n";  return; }
 
-      unc->Draw("COL");                 // no palette in this pad
-      drawTag("UNCORRECTED");
+      for (TH2* h : {unc, cor})
+      { h->SetMinimum(0.0); h->SetMaximum(zMax); }
+      std::cout << "           Z-range 0 … " << zMax << '\n';
 
-      /* ---------- right pad – CORRECTED (+ palette) ------------------ */
-      c.cd(2);
-      gPad->SetLeftMargin(0.18);
-      gPad->SetRightMargin(0.06);       // same absolute size as pad 1
-      gPad->SetBottomMargin(0.16);
+      /* 2. canvas & three pads ----------------------------------------- */
+      const int W=1900, H=850;
+      TCanvas c("cSide2D","side-by-side residual maps",W,H);
 
-      cor->Draw("COLZ");
-      drawTag("CORRECTED");
+      TPad pUnc("pUnc","UNC",0.00,0.00,0.46,1.00);
+      TPad pCor("pCor","COR",0.46,0.00,0.92,1.00);
+      TPad pPal("pPal","PAL",0.92,0.00,1.00,1.00);
+      pUnc.Draw(); pCor.Draw(); pPal.Draw();
+      std::cout << "           pads ready\n";
 
-      /* shift palette so its ticks are fully visible ------------------ */
-      gPad->Update();
-      if (auto* pal = dynamic_cast<TPaletteAxis*>(
-            cor->GetListOfFunctions()->FindObject("palette")))
-      {
-        pal->SetX1NDC(0.93);            // snug to the pad’s right edge
-        pal->SetX2NDC(0.97);
-      }
+      /* 3. UNCORRECTED map --------------------------------------------- */
+      pUnc.cd();  pUnc.SetLeftMargin(.18); pUnc.SetRightMargin(.02);
+      pUnc.SetBottomMargin(.16);
+      unc->Draw("COL");  drawTag("UNCORRECTED");
+      std::cout << "           drew UNCORRECTED\n";
 
-      c.Print(outPng,"png 600");
+      /* 4. CORRECTED map ----------------------------------------------- */
+      pCor.cd();  pCor.SetLeftMargin(.18); pCor.SetRightMargin(.02);
+      pCor.SetBottomMargin(.16);
+      cor->Draw("COL");  drawTag("CORRECTED");
+      std::cout << "           drew CORRECTED (palette to be detached)\n";
+
+        /* ------------------------------------------------------------------ */
+        /* 5. palette pad (right-most)                                        */
+        /* ------------------------------------------------------------------ */
+        pPal.cd();
+        pPal.SetLeftMargin (0.00);
+        pPal.SetRightMargin(0.40);
+        pPal.SetTopMargin  (0.15);
+        pPal.SetBottomMargin(0.20);
+
+        /* we still need a dummy to create the palette … */
+        TH2* palH = static_cast<TH2*>(cor->Clone("palH"));
+        palH->SetDirectory(nullptr);            // keep it out of any file
+        palH->SetTitle("");                     // no frame
+        palH->GetXaxis()->SetLabelSize(0);
+        palH->GetYaxis()->SetLabelSize(0);
+        palH->Draw("COLZ");                     // => palette object appears
+        gPad->Update();
+
+        TPaletteAxis* pal = dynamic_cast<TPaletteAxis*>(
+              palH->GetListOfFunctions()->FindObject("palette"));
+
+        if (!pal) {
+          std::cerr << "[ERROR] palette axis not found – abort\n";
+          return;
+        }
+
+        /* cosmetic tweaks */
+        pal->GetAxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
+        pal->GetAxis()->CenterTitle(true);
+        pal->GetAxis()->SetTitleSize(0.060);
+        pal->GetAxis()->SetTitleOffset(0.8);
+        pal->SetLabelSize(0.055);
+        pal->SetBorderSize(0);
+        pal->SetX1NDC(0.25);
+        pal->SetX2NDC(0.75);
+
+        /* instead of deleting palH we just hide its coloured box  */
+        palH->SetFillStyle(0);                  // invisible
+        palH->SetLineWidth(0);
+
+        gPad->Modified();  gPad->Update();
+        std::cout << "           palette pad done (dummy kept hidden)\n";
+
+        /* 6. save & verify -------------------------------------------------- */
+        c.SaveAs(outPng);                       // SaveAs returns void in ROOT 6
+        if (gSystem->AccessPathName(outPng)==0)
+             std::cout << "[makeSide2D] <<< finished OK – file written\n";
+        else std::cerr << "[ERROR] SaveAs produced no file!\n";
     };
+
 
     /* ================================================================== */
     /*  helper #2 – overlay of 1‑D profiles                               */
@@ -4156,8 +4209,8 @@ void auditResidual(TH3F*  h,
 
       unc->Draw("P");     cor->Draw("P SAME");
 
-      TLegend L(0.65,0.80,0.90,0.92);
-      L.SetBorderSize(0);  L.SetFillStyle(0);
+      TLegend L(0.8,0.85,0.9,0.92);
+      L.SetBorderSize(0);  L.SetFillStyle(0); L.SetTextSize(0.022);
       L.AddEntry(unc,"UNCORRECTED","lp");
       L.AddEntry(cor,"CORRECTED"  ,"lp");
       L.Draw();
