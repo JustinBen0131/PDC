@@ -778,8 +778,8 @@ plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
                           5.55,
                           rawRMS,
                           "rms",
-                          histOutDir
-                          );
+                          histOutDir,
+                          true);
   auto logRMS = doLogScan(fIn.get(),
                           N_E,
                           E_edges,
@@ -787,9 +787,9 @@ plotAshLogRMS_sideBySide(const char* infile = "PositionDep_sim_ALL.root")
                           w0Scan,
                           rawRMS,
                           "rms",
-                          histOutDir
-                          );
-  drawAshLogSideBySide(ashRMS, logRMS, "RMS", E_edges, N_E, baseDir);
+                          histOutDir,
+                          true);
+  drawAshLogSideBySide(ashRMS, logRMS, "RMS", E_edges, N_E, baseDir, true);
 
   std::cout<<"\n[INFO] => plotAshLogRMS_sideBySide completed all tasks.\n\n";
     
