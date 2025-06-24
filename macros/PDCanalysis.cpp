@@ -25,6 +25,7 @@
 #include <vector>
 #include <utility>
 #include <cmath>
+#include <iomanip>
 #include <map>
 
 /**
@@ -2089,6 +2090,53 @@ void PlotVertexZTruthOnly(TH1F* h_truth_vz,
 }
 
 
+constexpr double kMaxAbsMu   =  0.05;   // [rad]  forbid |μ| above this
+constexpr double kMinSigma   =  1e-4;   // [rad]  floor for σ
+constexpr int    kMaxRetries =     6;   // extra passes if initial fit fails
+
+/* --------------------------------------------------------------- *
+ *  doFit  – one Gaussian fit with parameter limits + smart seeds  *
+ * --------------------------------------------------------------- */
+static bool
+doFit(TH1* h, TF1& f, double winLo, double winHi,
+      double& outMu, double& outMuErr,
+      double& outSi, double& outSiErr, double& outChi2)
+{
+    /* enforce physical ranges on μ and σ ------------------------- */
+    f.SetParLimits(1, -kMaxAbsMu,  kMaxAbsMu);
+    f.SetParLimits(2,  kMinSigma,  1.0);
+
+    /* four diverse seeds around the IQR centre ------------------- */
+    const double A = h->GetMaximum();
+    const double S = std::max(kMinSigma, 0.5*h->GetRMS());
+    const double M = 0.5*(winLo + winHi);
+
+    const double s[4][3] = { {A,     M      , S   },
+                             {1.5*A, M      , 1.5*S},
+                             {0.7*A, M+0.3*S, 0.8*S},
+                             {1.2*A, M-0.3*S, 1.2*S} };
+
+    double bestChi2 = 1e99;
+
+    for (auto& p : s)
+    {
+        f.SetParameters(p[0], p[1], p[2]);
+        TFitResultPtr r = h->Fit(&f, "QNR0S");
+        if (!r.Get() || !r->IsValid()) continue;
+
+        if (r->Chi2() < bestChi2) {
+            bestChi2   = r->Chi2();
+            outMu      = f.GetParameter(1);
+            outMuErr   = f.GetParError (1);
+            outSi      = f.GetParameter(2);
+            outSiErr   = f.GetParError (2);
+            outChi2 = r->Chi2() /
+                      std::max<double>(1.0, static_cast<double>(r->Ndf()));
+        }
+    }
+    return bestChi2 < 1e98;      // success flag
+}
+
 /******************************************************************************
  * OverlayDeltaPhiSlices  (v4 – rock‑solid fitter + extra diagnostics)
  *
@@ -2129,74 +2177,48 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
    * ------------------------------------------------------------------ */
   struct GRes { double N, mu, muErr, sg, sgErr; };
 
-  auto robustGauss = [](TH1* h)->GRes
-  {
-      if (!h || h->Integral() == 0) return {0,0,0,0,0};
+    /* --------------------------------------------------------------- *
+     *  robustGauss – iterative, window‑shrinking Gaussian fit         *
+     * --------------------------------------------------------------- */
+    auto robustGauss = [](TH1* h) -> GRes
+    {
+        if (!h || h->Integral() == 0) return {0,0,0,0,0};
 
-      /* -------- initial robust estimates -------------------------------- */
-      const double q[3] = {0.25, 0.50, 0.75};
-      double quart[3]; h->GetQuantiles(3, quart, const_cast<double*>(q));
-      const double med = quart[1];
-      const double iqr = quart[2] - quart[0];
+        /* IQR‑based start window ------------------------------------ */
+        const double q[3] = {0.25, 0.50, 0.75};
+        double quart[3];  h->GetQuantiles(3, quart, const_cast<double*>(q));
+        double winLo = quart[0] - 2.5*(quart[2]-quart[0]);
+        double winHi = quart[2] + 2.5*(quart[2]-quart[0]);
 
-      double winLo = med - 2.5 * iqr;
-      double winHi = med + 2.5 * iqr;
-      if (winLo >= winHi) {          // fall‑back to ±2×RMS
-          winLo = h->GetMean() - 2.0*h->GetRMS();
-          winHi = h->GetMean() + 2.0*h->GetRMS();
-      }
+        TF1 fG("fG", "gaus", winLo, winHi);
 
-      TF1 fG("fG","gaus", winLo, winHi);
+        GRes g     {h->GetEntries(),0,0,0,0};
+        double chi2 = 1e99;
 
-      /* -------- multi‑start seeds --------------------------------------- */
-      const double A = h->GetMaximum();
-      const double S = std::max(1e-4, 0.5 * h->GetRMS());
-      std::vector<std::tuple<double,double,double>> seeds = {
-          { A       , med         , S       },
-          { 1.5*A   , med         , 1.5*S   },
-          { 0.5*A   , med + 0.3*S , 0.7*S   },
-          { 1.2*A   , med - 0.3*S , 1.2*S   }
-      };
+        for (int pass = 0; pass <= kMaxRetries; ++pass)
+        {
+            if (doFit(h,fG,winLo,winHi,
+                      g.mu,g.muErr,g.sg,g.sgErr,chi2))
+                break;                          // good fit
 
-      int    nIter   = 0;
-      double bestχ2  = 1e99;
-      GRes   best    {h->GetEntries(), 0,0, 0,0};
+            /* shrink window by 30 % on each side and retry ------------ */
+            const double span = winHi-winLo;
+            winLo += 0.30*span;
+            winHi -= 0.30*span;
+            if (winHi - winLo < 6.*kMinSigma) break;   // window too tight
+            fG.SetRange(winLo, winHi);
+        }
 
-      const char* fitOpt = "QNR0S";        // Q‑quiet, N‑no draw, R‑range, 0‑do not store in hist, S‑store
-      while (++nIter <= 3)                 // ≤3 σ‑clipping cycles
-      {
-          for (auto s : seeds) {
-              fG.SetParameters(std::get<0>(s), std::get<1>(s), std::get<2>(s));
-              TFitResultPtr r = h->Fit(&fG, fitOpt);
-              if (!r.Get() || !r->IsValid()) continue;
-              if (r->Chi2() < bestχ2 && std::fabs(fG.GetParameter(2))>1e-6) {
-                  bestχ2   = r->Chi2();
-                  best.mu  = fG.GetParameter(1);
-                  best.muErr = fG.GetParError(1);
-                  best.sg  = std::fabs(fG.GetParameter(2));
-                  best.sgErr= fG.GetParError(2);
-              }
-          }
-          if (bestχ2 < 1e98) break;       // success
+        /* ultimate fall‑back: robust RMS ----------------------------- */
+        if (!std::isfinite(g.sg) || g.sg < kMinSigma) {
+            g.mu     = h->GetMean();
+            g.sg     = h->GetRMS();
+            g.muErr  = g.sg / std::sqrt(2.*std::max(1., g.N-1.));
+            g.sgErr  = g.muErr;
+        }
+        return g;
+    };
 
-          /* tighten window and repeat ------------------------------------ */
-          winLo +=  0.5 * fG.GetParameter(2);
-          winHi -=  0.5 * fG.GetParameter(2);
-          if (winLo >= winHi || h->Integral() < 50) break;
-          fG.SetRange(winLo, winHi);
-      }
-
-      /* fall‑back: robust RMS ------------------------------------------- */
-      if (bestχ2 >= 1e98) {
-          const double rms = h->GetRMS();
-          const double rmsErr = rms / std::sqrt(2. * (h->GetEntries()-1));
-          best.mu = h->GetMean();
-          best.muErr = rmsErr;
-          best.sg = rms;
-          best.sgErr = rmsErr;
-      }
-      return best;
-  };
 
     /* ------------------------------------------------------------------ *
      * 2)   Master canvas for per‑slice overlays
@@ -2262,6 +2284,78 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
         /* ------------- robust Gaussian fits ------------------------------ */
         GRes R = robustGauss(hRaw);
         GRes C = (hCorr ? robustGauss(hCorr) : GRes{0,0,0,0,0});
+        
+        /* ---------------------------------------------------------- *
+         *  Diagnostic & safety net for the corrected fit             *
+         * ---------------------------------------------------------- */
+        {
+            /* -------- ANSI helpers ---------------------------------- */
+            const char *BOLD = "\033[1m", *RED  = "\033[1;31m",
+                       *YEL  = "\033[1;33m", *GRN  = "\033[1;32m",
+                       *RST  = "\033[0m";
+
+            auto printRes = [&](const char* lbl, const GRes& g,
+                                Color_t termCol = kBlack)
+            {
+                const char* clr = (termCol==kRed  ? RED :
+                                   termCol==kGreen? GRN : "");
+                std::cout << Form("    %s%-4s%s  N=%6.0f  μ=%+9.6f ±%8.6f"
+                                  "   σ=%8.6f ±%8.6f\n",
+                                  clr,lbl,RST,
+                                  g.N, g.mu, g.muErr, g.sg, g.sgErr);
+            };
+
+            /* always print RAW result */
+            printRes("RAW", R, kBlack);
+
+            if (hCorr) {            /* only if corrected histogram exists */
+                /* -------- sanity indicators -------------------------- */
+                const double relMuErr = (std::fabs(C.mu)>0)
+                                          ? C.muErr/std::fabs(C.mu) : 1e9;
+                const double relSgErr = (C.sg>0) ? C.sgErr/C.sg : 1e9;
+                const bool muNearZero   = (std::fabs(C.mu) < 1e-4) ||
+                                           (std::fabs(C.mu) < 0.20*C.sg);
+                const bool tinySigma    = (C.sg  < 1e-5);
+                const bool hugeMuErr    = (relMuErr > 0.50);   // >50 %
+                const bool hugeSgErr    = (relSgErr > 0.50);
+                const bool fewEntries   = (C.N < 50);
+
+                /* -------- print original CORR result ----------------- */
+                printRes("CORR", C, kRed);
+
+                /* -------- diagnose / decide replacement -------------- */
+                std::vector<std::string> causes;
+                if (muNearZero)  causes.emplace_back("μ≈0 → σ/|μ| explodes");
+                if (tinySigma)   causes.emplace_back("σ ≈ 0");
+                if (hugeMuErr)   causes.emplace_back("μ‑err >50 %");
+                if (hugeSgErr)   causes.emplace_back("σ‑err >50 %");
+                if (fewEntries)  causes.emplace_back("N<50");
+
+                if (!causes.empty())
+                {
+                    /* colourised warning banner ---------------------- */
+                    std::cerr << RED << BOLD
+                              << "[Δφ] ► slice " << tag
+                              << " flagged: " << RST
+                              << YEL;
+                    for (size_t i=0;i<causes.size();++i) {
+                        if (i) std::cerr << ", ";
+                        std::cerr << causes[i];
+                    }
+                    std::cerr << RST << '\n';
+
+                    /* robust fallback -------------------------------- */
+                    C.mu     = hCorr->GetMean();
+                    C.sg     = hCorr->GetRMS();
+                    C.muErr  = C.sg / std::sqrt(2.*std::max(1.0,C.N-1.0));
+                    C.sgErr  = C.muErr;        // same formula
+
+                    /* print substituted numbers ---------------------- */
+                    printRes("CORR*", C, kGreen);
+                }
+            }
+        }
+
 
         /* ------------- book‑keeping for the summary plots ---------------- */
         eCtr    .push_back( 0.5*(eLo+eHi) );
@@ -2277,10 +2371,9 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
         pad->SetTopMargin   (0.10);
         pad->SetRightMargin (0.06);
 
-        /* raw = black ● ,  corr = red ● */
-        hRaw ->SetMarkerStyle(20); hRaw ->SetMarkerColor(kBlack); hRaw ->SetLineColor(kBlack);
+        hRaw ->SetMarkerStyle(20); hRaw ->SetMarkerColor(kGreen + 2); hRaw ->SetLineColor(kGreen + 1);
         if (hCorr) {
-            hCorr->SetMarkerStyle(20); hCorr->SetMarkerColor(kRed); hCorr->SetLineColor(kRed);
+            hCorr->SetMarkerStyle(20); hCorr->SetMarkerColor(kMagenta + 1); hCorr->SetLineColor(kMagenta + 2);
         }
 
         /* axis cosmetics --------------------------------------------------- */
@@ -2306,29 +2399,51 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
         if (hCorr) leg->AddEntry(hCorr,  "CORRECTED", "lp");
         leg->Draw();  keep.push_back(leg);
 
-        /* bold, colour‑coded stats block ---------------------------------- */
-        {
-            /* RAW line – black, lower */
-            TLatex txR;  txR.SetNDC();
-            txR.SetTextFont(42);              // base font
-            txR.SetTextSize(0.042);
-            txR.SetTextColor(kBlack);
-            txR.SetTextAlign(33);             // right‑aligned
-            txR.DrawLatex(0.93, 0.84,
-                Form("#bf{RAW:  #mu = %.4f,  #sigma = %.4f}", R.mu, R.sg));
+        double x  = 0.91;
+        double dy = 0.04;          // vertical offset between lines
 
-            /* CORR line – red, above RAW */
-            if (hCorr)
-            {
-                TLatex txC;  txC.SetNDC();
-                txC.SetTextFont(42);
-                txC.SetTextSize(0.042);
-                txC.SetTextColor(kRed);
-                txC.SetTextAlign(33);
-                txC.DrawLatex(0.93, 0.90,
-                    Form("#bf{CORR: #mu = %.4f, #sigma = %.4f}", C.mu, C.sg));
-            }
+        // ---------- RAW (green) -------------------------------------------
+        {
+           TLatex tx; tx.SetNDC();
+           tx.SetTextFont(42);
+           tx.SetTextSize(0.036);
+           tx.SetTextColor(kGreen+2);
+           tx.SetTextAlign(33);
+
+           double y0 = 0.88;       // shift block down to avoid overlap
+           tx.DrawLatex(x, y0,        Form("#bf{#mu_{RAW} = %.4f}",   R.mu));
+           tx.DrawLatex(x, y0 - dy,   Form("#bf{#sigma_{RAW} = %.4f}",R.sg));
         }
+
+        
+        // ---------- CORR (magenta) ----------------------------------------
+        if (hCorr) {
+           TLatex tx; tx.SetNDC();
+           tx.SetTextFont(42);
+           tx.SetTextSize(0.036);
+           tx.SetTextColor(kMagenta+1);
+           tx.SetTextAlign(33);
+
+           double y0 = 0.8;       // first line (µ)
+           tx.DrawLatex(x, y0,        Form("#bf{#mu_{CORR} = %.4f}",  C.mu));
+           tx.DrawLatex(x, y0 - dy,   Form("#bf{#sigma_{CORR} = %.4f}",C.sg));
+        }
+        
+        {
+            /* e.g.  outDir/DeltaPhiSlice_8_12.png  or  .../DeltaPhiSlice_E9.png */
+            TString slicePNG = TString(outDir) +
+                               Form("/DeltaPhiSlice_%s.png", tag.Data());
+
+            /* make sure everything is painted before printing           */
+            pad->Modified();
+            pad->Update();
+
+            /* ROOT 5/6‑safe: write exactly this pad to file             */
+            pad->Print(slicePNG, "png");
+
+            std::cout << "           wrote slice → " << slicePNG << '\n';
+        }
+
     } /* -------- end slice loop ---------------------------------------------- */
 
 
@@ -2351,71 +2466,65 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
   };
 
   const double dx = 0.00;
-  auto gMuRaw = makeG(muRaw, muRawErr, -dx, kBlack, 20);
-  auto gMuCor = makeG(muCor, muCorErr, +dx, kRed  , 20);
-  auto gSiRaw = makeG(sgRaw, sgRawErr, -dx, kBlack, 20);
-  auto gSiCor = makeG(sgCor, sgCorErr, +dx, kRed  , 20);
+  auto gMuRaw = makeG(muRaw, muRawErr, -dx, kGreen + 2, 20);
+  auto gMuCor = makeG(muCor, muCorErr, +dx, kMagenta + 1  , 20);
+  auto gSiRaw = makeG(sgRaw, sgRawErr, -dx, kGreen + 2, 20);
+  auto gSiCor = makeG(sgCor, sgCorErr, +dx, kMagenta + 1, 20);
 
   keep.insert(keep.end(),{gMuRaw,gMuCor,gSiRaw,gSiCor});
 
     /* -- summary canvas (µ top, σ bottom) --------------------------------- */
     {
-        /* ----- axis range: pad one GeV on the left, go to the true upper edge ---- */
-        const double xMin = eEdges.front().first  - 1.0;   // lower edge of first slice – 1 GeV
-        const double xMax = eEdges.back ().second;         // upper edge of last slice  (30 GeV)
+        /* ----- X‑range : pad 1 GeV on the left, go to upper edge of last slice --- */
+        const double xMin = eEdges.front().first  - 1.0;
+        const double xMax = eEdges.back ().second;
 
         TCanvas cSum("cMuSi","#Delta#phi mean / sigma vs E",860,760);
         TPad pT("pT","",0,0.34,1,1);  pT.Draw();
         TPad pB("pB","",0,0   ,1,0.34); pB.Draw();
 
-        /* ---------- helper lambdas -------------------------------------- */
-        auto fullMin = [](const std::vector<double>& v1,const std::vector<double>& e1,
-                          const std::vector<double>& v2,const std::vector<double>& e2)->double
+        /* handy helpers to get global min / max including error bars ------------- */
+        auto fullMin = [](const std::vector<double>& v,const std::vector<double>& e,
+                          const std::vector<double>& w,const std::vector<double>& f)
         {
             double m =  1e30;
-            for (std::size_t i=0;i<v1.size();++i) m = std::min(m,v1[i]-(i<e1.size()?e1[i]:0.));
-            for (std::size_t i=0;i<v2.size();++i) m = std::min(m,v2[i]-(i<e2.size()?e2[i]:0.));
+            for (size_t i=0;i<v.size();++i) m = std::min(m, v[i]-(i<e.size()?e[i]:0.));
+            for (size_t i=0;i<w.size();++i) m = std::min(m, w[i]-(i<f.size()?f[i]:0.));
             return m;
         };
-        auto fullMax = [](const std::vector<double>& v1,const std::vector<double>& e1,
-                          const std::vector<double>& v2,const std::vector<double>& e2)->double
+        auto fullMax = [](const std::vector<double>& v,const std::vector<double>& e,
+                          const std::vector<double>& w,const std::vector<double>& f)
         {
             double M = -1e30;
-            for (std::size_t i=0;i<v1.size();++i) M = std::max(M,v1[i]+(i<e1.size()?e1[i]:0.));
-            for (std::size_t i=0;i<v2.size();++i) M = std::max(M,v2[i]+(i<e2.size()?e2[i]:0.));
+            for (size_t i=0;i<v.size();++i) M = std::max(M, v[i]+(i<e.size()?e[i]:0.));
+            for (size_t i=0;i<w.size();++i) M = std::max(M, w[i]+(i<f.size()?f[i]:0.));
             return M;
         };
 
-        /* ---------------- μ(E) panel ------------------------------------ */
+        /* ---------------- μ(E) panel ------------------------------------------ */
         const double muMin = fullMin(muRaw,muRawErr,muCor,muCorErr);
         const double muMax = fullMax(muRaw,muRawErr,muCor,muCorErr);
 
         pT.cd();
         pT.SetLeftMargin(0.15);
-        pT.SetBottomMargin(0.03);                       // hairline gap
+        pT.SetBottomMargin(0.03);          // hairline gap
 
         TH1F fMu("fMu","; ;#mu_{Gauss}  [rad]",1,xMin,xMax);
         fMu.SetMinimum(muMin - 0.10*std::fabs(muMin));
         fMu.SetMaximum(muMax + 0.10*std::fabs(muMax));
 
-        /* hide the x-axis on the upper pad */
-        TAxis* axT = fMu.GetXaxis();
-        axT->SetLabelSize(0);
-        axT->SetTickLength(0);
-        axT->SetTitleSize(0);
+        /* hide x–axis on upper pad -------------------------------------------- */
+        fMu.GetXaxis()->SetLabelSize(0);
+        fMu.GetXaxis()->SetTickLength(0);
+        fMu.GetXaxis()->SetTitleSize(0);
 
         fMu.Draw("AXIS");
         gMuRaw->Draw("P SAME");
         gMuCor->Draw("P SAME");
-        
-        TLine* l0 = new TLine(xMin, 0.0, xMax, 0.0);
-        l0->SetLineStyle(2);          // dashed
-        l0->SetLineWidth(2);
-        l0->SetLineColor(kGray+2);
-        l0->Draw();
 
-        /* keep the object until the function exits */
-        keep.push_back(l0);           // <- change ‘guard’ to ‘keep’
+        TLine *l0 = new TLine(xMin,0.0,xMax,0.0);
+        l0->SetLineStyle(2); l0->SetLineWidth(2); l0->SetLineColor(kGray+2);
+        l0->Draw();   keep.push_back(l0);
 
         TLegend legMu(0.18,0.79,0.43,0.91);
         legMu.SetBorderSize(0); legMu.SetFillStyle(0); legMu.SetTextSize(0.035);
@@ -2423,29 +2532,27 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
         legMu.AddEntry(gMuCor,"CORRECTED","lp");
         legMu.Draw();
 
-        /* ---------------- σ(E) panel ------------------------------------ */
+        /* ---------------- σ(E) panel ----------------------------------------- */
         const double siMin = fullMin(sgRaw,sgRawErr,sgCor,sgCorErr);
         const double siMax = fullMax(sgRaw,sgRawErr,sgCor,sgCorErr);
 
         pB.cd();
         pB.SetLeftMargin(0.15);
         pB.SetTopMargin(0.06);
-        pB.SetBottomMargin(0.38);                      // room for labels
+        pB.SetBottomMargin(0.38);
 
         TH1F fSi("fSi",";E_{slice centre}  [GeV];#sigma_{Gauss}  [rad]",1,xMin,xMax);
         fSi.SetMinimum(std::max(0.0, siMin - 0.10*std::fabs(siMin)));
         fSi.SetMaximum(siMax + 0.10*std::fabs(siMax));
 
-        TAxis* axB = fSi.GetXaxis();
-        axB->SetNdivisions(505);          // 5 major, 5 minor
-        axB->SetTickLength(0.05);
-        axB->SetTitleOffset(1.1);
+        fSi.GetXaxis()->SetNdivisions(505);
+        fSi.GetXaxis()->SetTickLength(0.05);
+        fSi.GetXaxis()->SetTitleOffset(1.1);
 
         fSi.Draw("AXIS");
         gSiRaw->Draw("P SAME");
         gSiCor->Draw("P SAME");
 
-        /* ---------------------------------------------------------------- */
         cSum.SaveAs(TString(outDir)+"/DeltaPhi_MeanSigmaVsE.png");
     }
 
@@ -2453,132 +2560,121 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
      * 5)   EXTRA diagnostics  (quadrature RMSE and fractional resolution)
      * ------------------------------------------------------------------ */
     {
-        /* helper: returns a TGraphErrors with a horizontal offset “dxOff”   */
+        /* helper: graph builder with horizontal offset ---------------------- */
         auto gShift = [&](const std::vector<double>& y,
                           const std::vector<double>& yErr,
                           double dxOff, Color_t col) -> TGraphErrors*
         {
             const int N = static_cast<int>(eCtr.size());
-            std::vector<double> x(N), ex(N, 0.);
-            for (int i = 0; i < N; ++i) x[i] = eCtr[i] + dxOff;
+            std::vector<double> x(N), ex(N,0.);
+            for (int i=0;i<N;++i) x[i] = eCtr[i] + dxOff;
 
             auto *g = new TGraphErrors(N,
                                        x.data(),  y.data(),
                                        ex.data(), yErr.data());
-            g->SetMarkerStyle(20);       // solid circle  ●
-            g->SetMarkerSize (0.9);      // slightly smaller
+            g->SetMarkerStyle(20);
+            g->SetMarkerSize (0.9);
             g->SetMarkerColor(col);
             g->SetLineColor  (col);
             keep.push_back(g);
             return g;
         };
 
-        /* generic drawer used twice (RMSE & frac-res) -------------------- */
-        auto makeDiag = [&](const char* cname,       // ROOT canvas / frame name
-                            const char* yTit,        // y-axis label
-                            const std::vector<double>& yR,
-                            const std::vector<double>& yRE,
-                            const std::vector<double>& yC,
-                            const std::vector<double>& yCE,
-                            const char* png)
+        /* generic drawer (used twice) --------------------------------------- */
+        auto makeDiag =
+            [&](const char* cname, const char* yTit,
+                const std::vector<double>& yR,const std::vector<double>& yRE,
+                const std::vector<double>& yC,const std::vector<double>& yCE,
+                const char* png)
         {
-            const double dxOff = 0.12;               // RAW left, CORR right
+            const double dxOff = 0.12;
 
-            /* ---------- dynamic y-range : include ±error bars ------------------ */
-            double yMin =  1e30,  yMax = -1e30;
-            for (size_t i = 0; i < yR.size(); ++i){
-                yMin = std::min({yMin, yR[i] - yRE[i], yC[i] - yCE[i]});
-                yMax = std::max({yMax, yR[i] + yRE[i], yC[i] + yCE[i]});
+            double yMin =  1e30, yMax = -1e30;
+            for (size_t i=0;i<yR.size();++i){
+                yMin = std::min({yMin,yR[i]-yRE[i],yC[i]-yCE[i]});
+                yMax = std::max({yMax,yR[i]+yRE[i],yC[i]+yCE[i]});
             }
-            /* make the bottom margin tighter – only 2 % below min, 5 % above max */
-            const double span = yMax - yMin;
-            yMin -= 0.02 * span;
-            yMax += 0.05 * span;
+            const double span = yMax-yMin;
+            yMin -= 0.02*span;   yMax += 0.05*span;
 
-            /* ---------- canvas & axis frame ----------------------------------- */
-            TCanvas c(cname, cname, 860, 620);
-            c.SetLeftMargin(0.15);  c.SetRightMargin(0.06);
+            TCanvas c(cname,cname,860,620);
+            c.SetLeftMargin(0.15); c.SetRightMargin(0.06);
 
             TH1F frame("f",
-                       Form(";E_{slice}  [GeV];%s", yTit),
-                       1, eCtr.front() - 1.0, eEdges.back().second);   // x-axis out to 30 GeV
-            frame.SetMinimum(yMin);
-            frame.SetMaximum(yMax);
+                       Form(";E_{slice}  [GeV];%s",yTit),
+                       1, eCtr.front()-1.0, eEdges.back().second);
+            frame.SetMinimum(yMin); frame.SetMaximum(yMax);
             frame.Draw("AXIS");
 
-            /* ---------- graphs ------------------------------------------------- */
-            auto gRaw = gShift(yR, yRE, -dxOff, kBlack);
-            auto gCor = gShift(yC, yCE, +dxOff, kRed  );
-            gRaw->Draw("P SAME");  gCor->Draw("P SAME");
+            auto gRaw = gShift(yR,yRE,-dxOff,kGreen+1);
+            auto gCor = gShift(yC,yCE,+dxOff,kMagenta+2);
+            gRaw->Draw("P SAME"); gCor->Draw("P SAME");
 
-            /* ---------- legend placement & styling -------------------------------- */
-            const bool isFracPlot = (std::strstr(png, "FracRes") != nullptr);
+            const bool isFrac = std::strstr(png,"FracRes")!=nullptr;
+            double lx1=isFrac?0.70:0.15, ly1=isFrac?0.72:0.12,
+                   lx2=isFrac?0.90:0.45, ly2=isFrac?0.92:0.32;
 
-            /*  ── coordinates in NDC ───────────────────────────────────────────────
-             *     RMSE  → bottom-left   : (0.15,0.12) – (0.45,0.32)
-             *     Frac  → top-right     : (0.70,0.72) – (0.90,0.92)
-             */
-            double lx1 = isFracPlot ? 0.70 : 0.7;
-            double ly1 = isFracPlot ? 0.72 : 0.4;
-            double lx2 = isFracPlot ? 0.90 : 0.8;
-            double ly2 = isFracPlot ? 0.92 : 0.52;
-
-            TLegend leg(lx1, ly1, lx2, ly2);
-            leg.SetBorderSize(0);
-            leg.SetFillStyle(0);
-            leg.SetTextSize(0.026);
-            leg.AddEntry(gRaw, "RAW",        "lp");
-            leg.AddEntry(gCor, "CORRECTED",  "lp");
+            TLegend leg(lx1,ly1,lx2,ly2);
+            leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.026);
+            leg.AddEntry(gRaw,"RAW","lp");
+            leg.AddEntry(gCor,"CORRECTED","lp");
             leg.Draw();
 
-
-            c.SaveAs(TString(outDir) + "/" + png);
+            c.SaveAs(TString(outDir)+"/"+png);
         };
 
-        /* (i) RMSE = √(μ²+σ²) ------------------------------------------- */
+        /* (i) RMSE = sqrt(mu²+sigma²) --------------------------------------- */
         std::vector<double> rmseR(nPts), rmseRE(nPts),
                             rmseC(nPts), rmseCE(nPts);
-        for (int i = 0; i < nPts; ++i) {
-            rmseR[i]  = std::hypot(muRaw[i], sgRaw[i]);
-            rmseRE[i] = rmseR[i] * std::sqrt(
-                           std::pow(muRawErr[i]/muRaw[i],2) +
-                           std::pow(sgRawErr[i]/sgRaw[i],2));
 
-            rmseC[i]  = std::hypot(muCor[i], sgCor[i]);
-            rmseCE[i] = (rmseC[i] > 0.0)
-                        ? rmseC[i] * std::sqrt(
-                              std::pow(muCorErr[i]/muCor[i],2) +
-                              std::pow(sgCorErr[i]/sgCor[i],2))
+        for (int i=0;i<nPts;++i) {
+            rmseR[i]  = std::hypot(muRaw[i],sgRaw[i]);
+            rmseRE[i] = rmseR[i]*std::sqrt( std::pow(muRawErr[i]/muRaw[i],2) +
+                                            std::pow(sgRawErr[i]/sgRaw[i],2) );
+
+            rmseC[i]  = std::hypot(muCor[i],sgCor[i]);
+            rmseCE[i] = (rmseC[i]>0)
+                        ? rmseC[i]*std::sqrt( std::pow(muCorErr[i]/muCor[i],2) +
+                                               std::pow(sgCorErr[i]/sgCor[i],2) )
                         : 0.0;
         }
         makeDiag("cRMSE",
                  "#sqrt{#mu^{2} + #sigma^{2}}  [rad]",
-                 rmseR, rmseRE, rmseC, rmseCE,
+                 rmseR,rmseRE, rmseC,rmseCE,
                  "DeltaPhi_RMSErrorVsE.png");
 
-        /* (ii)  σ / |μ| --------------------------------------------------- */
-        std::vector<double> fracR(nPts), fracRE(nPts),
-                            fracC(nPts), fracCE(nPts);
-        for (int i = 0; i < nPts; ++i) {
-            if (std::fabs(muRaw[i]) > 1e-6) {
+        /* ================================================================== *
+         *  Fractional resolution  σ / |μ|                                    *
+         *  – only plot slices with |μ| > 3·σ_μ (otherwise μ ≈ 0)             *
+         * ================================================================== */
+        std::vector<double> fracR(nPts,0), fracRE(nPts,0),
+                            fracC(nPts,0), fracCE(nPts,0);
+
+        for (int i=0;i<nPts;++i)
+        {
+            /* RAW ----------------------------------------------------------- */
+            if (std::fabs(muRaw[i]) > 3*muRawErr[i]) {
                 fracR[i]  = sgRaw[i] / std::fabs(muRaw[i]);
-                fracRE[i] = fracR[i] * std::sqrt(
-                               std::pow(sgRawErr[i]/sgRaw[i],2) +
-                               std::pow(muRawErr[i]/muRaw[i],2));
+                fracRE[i] = fracR[i] *
+                            std::sqrt( std::pow(sgRawErr[i]/sgRaw[i],2) +
+                                       std::pow(muRawErr[i]/muRaw[i],2) );
             }
-            if (std::fabs(muCor[i]) > 1e-6) {
+            /* CORRECTED ----------------------------------------------------- */
+            if (std::fabs(muCor[i]) > 3*muCorErr[i]) {
                 fracC[i]  = sgCor[i] / std::fabs(muCor[i]);
-                fracCE[i] = fracC[i] * std::sqrt(
-                               std::pow(sgCorErr[i]/sgCor[i],2) +
-                               std::pow(muCorErr[i]/muCor[i],2));
+                fracCE[i] = fracC[i] *
+                            std::sqrt( std::pow(sgCorErr[i]/sgCor[i],2) +
+                                       std::pow(muCorErr[i]/muCor[i],2) );
             }
         }
+
         makeDiag("cFrac",
-                 "#sigma / |#mu|",
-                 fracR, fracRE, fracC, fracCE,
+                 "#sigma / |#mu|   (only if |#mu|>3#sigma_{#mu})",
+                 fracR,fracRE, fracC,fracCE,
                  "DeltaPhi_FracResVsE.png");
     }
     /* ------------------------------------------------------------------ */
+
   TString outAll = TString(outDir)+"/DeltaPhiCompare_AllOutput.png";
   c4x2.SaveAs(outAll);
   std::cout << "[Δφ] wrote summary → " << outAll << '\n';
@@ -2921,7 +3017,7 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
   gSystem->mkdir(outDir, /*recurse=*/true);
   gStyle->SetOptStat(0);
 
-  static const Color_t  colArr[5]   = {kBlack, kRed, kBlue+1, kOrange+7, kMagenta+1};
+  static const Color_t  colArr[5]   = {kGreen + 2, kMagenta + 1, kBlack, kRed, kBlue};
   static const Style_t  mksArr[5]   = {20,     21,   22,      33,        29};
   static const char*    legTxtArr[5]= {
         "no correction, from scratch coord transforms",
@@ -3988,7 +4084,7 @@ void auditResidual(TH3F*  h,
   {
     TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextSize(fTtl);
     t.SetTextAlign(33);         // top‑right
-    t.DrawLatex(0.97,0.96,txt);
+    t.DrawLatex(0.85,0.92,txt);
   };
 
 /* ---------------------------------------------------------------------- */
@@ -4088,98 +4184,96 @@ void auditResidual(TH3F*  h,
     if (cache.count("UNCORRECTED")==0 || cache.count("CORRECTED")==0) return;
 
     /* ================================================================== */
-    /*  helper – side-by-side 2-D residual maps + stand-alone palette     */
-    /*         (verbose / defensive version)                              */
+    /*  helper – side‑by‑side 2‑D residual maps + stand‑alone palette     */
+    /*  (identical look to the single‑histogram “COLZ” palette)           */
     /* ================================================================== */
-    auto makeSide2D = [&](TH2* unc, TH2* cor, const char* outPng)
+    auto makeSide2D = [&](TH2 *unc, TH2 *cor, const char *outPng)
     {
-      std::cout << "[makeSide2D] >>> start, writing " << outPng << '\n';
+       std::cout << "[makeSide2D] >>> start, writing " << outPng << '\n';
 
-      /* 0. fast sanity checks ------------------------------------------- */
-      if (!unc || !cor)
-      { std::cerr << "[ERROR] nullptr histogram → abort\n"; return; }
-      if (unc->GetNbinsX()==0 || cor->GetNbinsX()==0)
-      { std::cerr << "[ERROR] empty histogram → abort\n";  return; }
+       /* ---------- 0. sanity -------------------------------------------- */
+       if (!unc || !cor)                   { std::cerr << "[ERROR] null hist\n"; return; }
+       if (unc->GetNbinsX()==0||cor->GetNbinsX()==0){ std::cerr<<"[ERROR] empty\n";return;}
 
-      /* 1. common Z-range ---------------------------------------------- */
-      const double zMax = std::max(unc->GetMaximum(), cor->GetMaximum());
-      if (!std::isfinite(zMax))
-      { std::cerr << "[ERROR] non-finite zMax → abort\n";  return; }
+       const double zMax = std::max(unc->GetMaximum(), cor->GetMaximum());
+       if (!std::isfinite(zMax))           { std::cerr << "[ERROR] bad zMax\n"; return; }
+       for (TH2 *h : {unc,cor}) { h->SetMinimum(0.0); h->SetMaximum(zMax); }
 
-      for (TH2* h : {unc, cor})
-      { h->SetMinimum(0.0); h->SetMaximum(zMax); }
-      std::cout << "           Z-range 0 … " << zMax << '\n';
+       /* ---------- 1. canvas & pads ------------------------------------- */
+       const int W = 1900 , H = 850 ;
+       TCanvas c("cSide2D","side‑by‑side residual maps",W,H);
 
-      /* 2. canvas & three pads ----------------------------------------- */
-      const int W=1900, H=850;
-      TCanvas c("cSide2D","side-by-side residual maps",W,H);
+       TPad pUnc("pUnc","UNC",0.00,0.00,0.46,1.00);
+       TPad pCor("pCor","COR",0.46,0.00,0.92,1.00);
+       TPad pPal("pPal","PAL",0.92,0.00,1.00,1.00);
+       pUnc.Draw(); pCor.Draw(); pPal.Draw();
 
-      TPad pUnc("pUnc","UNC",0.00,0.00,0.46,1.00);
-      TPad pCor("pCor","COR",0.46,0.00,0.92,1.00);
-      TPad pPal("pPal","PAL",0.92,0.00,1.00,1.00);
-      pUnc.Draw(); pCor.Draw(); pPal.Draw();
-      std::cout << "           pads ready\n";
+       gStyle->SetPalette(kBird);
+       gStyle->SetNumberContours(255);
 
-      /* 3. UNCORRECTED map --------------------------------------------- */
-      pUnc.cd();  pUnc.SetLeftMargin(.18); pUnc.SetRightMargin(.02);
-      pUnc.SetBottomMargin(.16);
-      unc->Draw("COL");  drawTag("UNCORRECTED");
-      std::cout << "           drew UNCORRECTED\n";
+       /* ---------- 2. UNCORRECTED map ----------------------------------- */
+       pUnc.cd();  pUnc.SetLeftMargin(.18); pUnc.SetRightMargin(.02); pUnc.SetBottomMargin(.16);
+       unc->Draw("COL");  drawTag("UNCORRECTED");
 
-      /* 4. CORRECTED map ----------------------------------------------- */
-      pCor.cd();  pCor.SetLeftMargin(.18); pCor.SetRightMargin(.02);
-      pCor.SetBottomMargin(.16);
-      cor->Draw("COL");  drawTag("CORRECTED");
-      std::cout << "           drew CORRECTED (palette to be detached)\n";
+       /* ---------- 3. CORRECTED map ------------------------------------- */
+       pCor.cd();  pCor.SetLeftMargin(.18); pCor.SetRightMargin(.02); pCor.SetBottomMargin(.16);
+       cor->Draw("COL");  drawTag("CORRECTED");
 
-        /* ------------------------------------------------------------------ */
-        /* 5. palette pad (right-most)                                        */
-        /* ------------------------------------------------------------------ */
-        pPal.cd();
-        pPal.SetLeftMargin (0.00);
-        pPal.SetRightMargin(0.40);
-        pPal.SetTopMargin  (0.15);
-        pPal.SetBottomMargin(0.20);
+       /* ----------------------------------------------------------------- */
+       /* 4. palette pad – manufacture palette with one invisible pixel     */
+       /* ----------------------------------------------------------------- */
+       pPal.cd();
+       pPal.SetLeftMargin  (0.00);
+       pPal.SetRightMargin (0.00);
+       pPal.SetTopMargin   (0.12);
+       pPal.SetBottomMargin(0.18);
+       pPal.SetFrameLineWidth(0);          // no frame at all
+       pPal.SetTickx(0); pPal.SetTicky(0); // no pad ticks
 
-        /* we still need a dummy to create the palette … */
-        TH2* palH = static_cast<TH2*>(cor->Clone("palH"));
-        palH->SetDirectory(nullptr);            // keep it out of any file
-        palH->SetTitle("");                     // no frame
-        palH->GetXaxis()->SetLabelSize(0);
-        palH->GetYaxis()->SetLabelSize(0);
-        palH->Draw("COLZ");                     // => palette object appears
-        gPad->Update();
+       /* --- helper histogram: 1×1 bin, same z‑range, fully transparent --- */
+       TH2D hDummy("hDummy","",1,0,1,1,0,1);
+       hDummy.SetMinimum(0.0); hDummy.SetMaximum(zMax);
+       hDummy.SetStats(0);
+       hDummy.SetLineWidth(0); hDummy.SetFillStyle(0);
+       hDummy.GetXaxis()->SetTickLength(0);
+       hDummy.GetYaxis()->SetTickLength(0);
+       hDummy.GetXaxis()->SetLabelSize(0);
+       hDummy.GetYaxis()->SetLabelSize(0);
 
-        TPaletteAxis* pal = dynamic_cast<TPaletteAxis*>(
-              palH->GetListOfFunctions()->FindObject("palette"));
+       hDummy.Draw("COLZ0");              // palette generated, no frame/axes
+       gPad->Update();
 
-        if (!pal) {
-          std::cerr << "[ERROR] palette axis not found – abort\n";
-          return;
-        }
+       /* retrieve palette ------------------------------------------------- */
+       auto *pal = dynamic_cast<TPaletteAxis*>(
+                     hDummy.GetListOfFunctions()->FindObject("palette"));
+       if (!pal) { std::cerr << "[ERROR] palette axis not found\n"; return; }
 
-        /* cosmetic tweaks */
-        pal->GetAxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
-        pal->GetAxis()->CenterTitle(true);
-        pal->GetAxis()->SetTitleSize(0.060);
-        pal->GetAxis()->SetTitleOffset(0.8);
-        pal->SetLabelSize(0.055);
-        pal->SetBorderSize(0);
-        pal->SetX1NDC(0.25);
-        pal->SetX2NDC(0.75);
+       /* --- 4.a resize palette to exactly 0.92–0.945 canvas X ---------- */
+       const double xAbs1 = 0.92 , xAbs2 = 0.945;      // absolute canvas NDC
+       const double padX1 = pPal.GetXlowNDC();
+       const double padW  = pPal.GetWNDC();
+       const double x1    = (xAbs1 - padX1)/padW;       // → pPal’s local NDC
+       const double x2    = (xAbs2 - padX1)/padW;
+       pal->SetX1NDC(x1);  pal->SetX2NDC(x2);
 
-        /* instead of deleting palH we just hide its coloured box  */
-        palH->SetFillStyle(0);                  // invisible
-        palH->SetLineWidth(0);
+       /* cosmetic clone from single‑plot palette ------------------------- */
+       pal->GetAxis()->SetTitle("");
+       pal->SetLabelSize((fLbl-0.002)*0.75);
+       pal->SetBorderSize(0);
+       pal->SetFillStyle(0);
 
-        gPad->Modified();  gPad->Update();
-        std::cout << "           palette pad done (dummy kept hidden)\n";
+       /* --- 4.b external title (same size/offset) ----------------------- */
+       const double xMid = 0.5*(pal->GetX1NDC()+pal->GetX2NDC());
+       TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextSize(0.022); t.SetTextAlign(21);
+       t.DrawLatex(xMid, pal->GetY2NDC() + 0.018, "|#DeltaE| / #LT E #GT  [%]");
 
-        /* 6. save & verify -------------------------------------------------- */
-        c.SaveAs(outPng);                       // SaveAs returns void in ROOT 6
-        if (gSystem->AccessPathName(outPng)==0)
+       gPad->Modified(); gPad->Update();
+
+       /* ---------- 5. export -------------------------------------------- */
+       c.SaveAs(outPng);
+       if (!gSystem->AccessPathName(outPng))
              std::cout << "[makeSide2D] <<< finished OK – file written\n";
-        else std::cerr << "[ERROR] SaveAs produced no file!\n";
+       else std::cerr << "[ERROR] SaveAs produced no file!\n";
     };
 
 
@@ -4239,56 +4333,47 @@ void auditResidual(TH3F*  h,
 /* ======================================================================= */
 
 
-void makeLegoGifHD(TH3 *h,
+/* ════════════════════════════════════════════════════════════════════ *
+ *  High‑quality LEGO3D spin‑gif generator  –  lightweight output      *
+ * ════════════════════════════════════════════════════════════════════ */
+void makeLegoGifHD(TH3        *h,
                    const char *tag,
                    const char *hdr,
                    const char *outDir,
-                   int   nFrames = 180,       // 2°/frame → one full orbit in 7.2 s @ 25 fps
-                   double theta0  = 28.0,     // inclination at φ = φ0
-                   double theta1  = 38.0,     // inclination at φ = φ0 + φArc
-                   double phi0    =   0.0,    // start azimuth (deg)
-                   double phiArc  = 360.0,    // azimuth sweep (deg)
-                   int   SS       = 2,        // supersampling factor (×2 = good AA, small IO)
-                   int   W0       = 1280,     // output width  (px)
-                   int   H0       = 720,      // output height (px)
-                   int   FPS      = 25)       // frame‑rate (Google Slides default)
+                   int   nFrames = 180,   /* 2°/frame → 360° in 7.2 s @ 25 fps        */
+                   double theta0  = 28.0, /* inclination at φ = φ0                   */
+                   double theta1  = 38.0, /* inclination at φ = φ0 + φArc            */
+                   double phi0    =   0.0,
+                   double phiArc  = 360.0,
+                   int   SS       = 2,    /* supersampling                           */
+                   int   W0       = 1280, /* final width  (px)                       */
+                   int   H0       = 720,  /* final height (px)                       */
+                   int   FPS      = 25)   /* target playback rate                    */
 {
-    /*----------------------------------------------------------------------*/
-    /* 0. sanity checks                                                     */
-    /*----------------------------------------------------------------------*/
-    if (!h)       { Error("makeLegoGifHD", "null histogram pointer"); return; }
-    if (nFrames<2){ Error("makeLegoGifHD", "nFrames must be ≥ 2");     return; }
+    /* -- 0. sanity ------------------------------------------------------ */
+    if (!h)       { Error("makeLegoGifHD","null histogram"); return; }
+    if (nFrames<2){ Error("makeLegoGifHD","nFrames must be ≥ 2"); return; }
 
-    /*----------------------------------------------------------------------*/
-    /* 1. ensure batch mode and thread safety                               */
-    /*----------------------------------------------------------------------*/
 #if ROOT_VERSION_CODE >= ROOT_VERSION(6,30,0)
-    // Avoid the implicit multi‑threading ROOT enables since 6.30
-    ROOT::EnableImplicitMT(0);
+    ROOT::EnableImplicitMT(0);   // ROOT ≥6.30 spawns TThreads by default
 #endif
-    gROOT->SetBatch(kTRUE);
+    gROOT ->SetBatch(kTRUE);
 
-    /*----------------------------------------------------------------------*/
-    /* 2. one‑off ROOT style                                                */
-    /*----------------------------------------------------------------------*/
+    /* -- 1. one‑shot style --------------------------------------------- */
     gStyle->SetOptStat(0);
     gStyle->SetNumberContours(140);
-    gStyle->SetCanvasPreferGL(true);      // use OpenGL → MSAA
-    gErrorIgnoreLevel = kWarning;         // suppress harmless colour warnings
+    gStyle->SetCanvasPreferGL(true);
+    gErrorIgnoreLevel = kWarning;
 
-    /*----------------------------------------------------------------------*/
-    /* 3. supersampled canvas                                               */
-    /*----------------------------------------------------------------------*/
-    const int W = W0 * SS,  H = H0 * SS;
-    TString canvName = Form("c_%s_gif", tag);
-    std::unique_ptr<TCanvas> c(new TCanvas(canvName, "", W, H));
+    /* -- 2. supersampled canvas ---------------------------------------- */
+    const int W = W0*SS,  H = H0*SS;
+    std::unique_ptr<TCanvas> c(
+        new TCanvas( Form("c_%s_gif",tag), "", W, H) );
     c->SetRightMargin (0.15);
     c->SetBottomMargin(0.13);
     c->SetFillColorAlpha(kWhite, 0.0);
 
-    /*----------------------------------------------------------------------*/
-    /* 4. static scene (draw only once)                                     */
-    /*----------------------------------------------------------------------*/
+    /* -- 3. static scene (draw once) ----------------------------------- */
     h->GetXaxis()->SetTitleOffset(1.25);
     h->GetYaxis()->SetTitleOffset(1.55);
     h->GetZaxis()->SetTitleOffset(0.90);
@@ -4304,113 +4389,117 @@ void makeLegoGifHD(TH3 *h,
         pal->SetLabelSize(0.022 * SS / 2.0);
     }
 
-    TLatex head; head.SetNDC(); head.SetTextFont(42);
-    head.SetTextAlign(13);
+    /* ---- header incl. total entries ---------------------------------- */
+    const Long64_t nEnt = h->GetEntries();
+    TLatex head; head.SetNDC(); head.SetTextFont(42); head.SetTextAlign(13);
     head.SetTextSize(0.05 * SS / 2.0);
-    head.DrawLatex(0.04, 0.965, Form("#bf{%s}", hdr));
+    head.DrawLatex(0.04, 0.965,
+                   Form("#bf{%s  (N = %lld)}", hdr, (Long64_t)nEnt));
     gPad->Modified(); gPad->Update();
 
-    /*----------------------------------------------------------------------*/
-    /* 5. filenames & directories                                           */
-    /*----------------------------------------------------------------------*/
+    /* -- 4. file/dir names --------------------------------------------- */
     TString base   = Form("%s/lego_%s_spin", outDir, tag);
     TString pngDir = base + "_png";
     TString gifOut = base + ".gif";
     gSystem->mkdir(pngDir, kTRUE);
 
-    /*----------------------------------------------------------------------*/
-    /* 6. render PNG frames (8‑bit palette)                                 */
-    /*----------------------------------------------------------------------*/
-    Printf("\n[makeLegoGifHD]  %s", hdr);
-    Printf("  output dir  : %s", outDir);
-    Printf("  resolution  : %d × %d  (supersampled ×%d)", W0, H0, SS);
-    Printf("  frames/fps  : %d @ %d fps\n------------------------------", nFrames, FPS);
+    /* -- 5. render PNG frames ------------------------------------------ */
+    Printf("\n[makeLegoGifHD]  %s  – %lld entries",
+           hdr, (Long64_t)nEnt);
+    Printf("  resolution  : %d × %d (rendered %d× – SS=%d)",
+           W0,H0,W,H,SS);
+    Printf("  frames/fps  : %d  /  %d\n----------------------------------",
+           nFrames,FPS);
 
-    const char spin[4] = {'|','/','-','\\'};
+    const char spinner[4] = {'|','/','-','\\'};
     const TDatime tStart;
 
-    for (int i=0;i<nFrames;++i)
+    for (int i = 0; i < nFrames; ++i)
     {
-        double u   = double(i)/(nFrames-1);
-        double phi = phi0 + phiArc*u;
-        double th  = theta0 + (theta1-theta0)*
-                     0.5*(1-std::cos(u*TMath::Pi()));   // cosine‑ease
+        const double u   = double(i) / (nFrames-1);
+        const double phi = phi0 + phiArc * u;
+        const double th  = theta0 + (theta1-theta0) *
+                           0.5 * (1 - std::cos(u * TMath::Pi()));
 
-        gPad->SetPhi(phi); gPad->SetTheta(th);
-        gPad->Modified();  gPad->Update();
+        gPad->SetPhi(phi);  gPad->SetTheta(th);
+        gPad->Modified();   gPad->Update();
 
         TString fn = Form("%s/f%04d.png", pngDir.Data(), i);
-        c->Print(fn, "png");  // 8‑bit, ~1 MB at 1280×720
+        c->Print(fn, "png");
 
-        if (i%(nFrames/100<1?1:nFrames/100)==0||i==nFrames-1)
+        if (i % std::max(1,nFrames/100) == 0 || i == nFrames-1)
         {
-            int elapsed = TDatime().Convert()-tStart.Convert();
-            int eta     = elapsed*(nFrames-i-1)/(i+1);
-            printf("\r  %c %3d %%  %4d s ETA", spin[i%4], int(100.*(i+1)/nFrames), eta);
+            const int elapsed = TDatime().Convert() - tStart.Convert();
+            const int eta     = elapsed * (nFrames-i-1) / std::max(1,i+1);
+            printf("\r  %c %3d %%  %4d s ETA",
+                   spinner[i&3], int(100.*(i+1)/nFrames), eta);
             fflush(stdout);
         }
     }
     printf("\r  ✔ frame rendering done.                    \n");
 
-    /*----------------------------------------------------------------------*/
-    /* 7. encode GIF via ffmpeg > ImageMagick; abort if neither present     */
-    /*----------------------------------------------------------------------*/
+    /* -- 6. encode compact GIF ----------------------------------------- *
+     *     • scale → W0×H0  (Google Slides needs ≤ 1280 px ≈ ≤ 10 MB)      *
+     *     • max 128 colours                                              *
+     *     • ordered dithering  (sierra2_4a)                              *
+     * ------------------------------------------------------------------ */
     TString ffmpeg  = gSystem->Which(nullptr,"ffmpeg");
-    TString convert = gSystem->Which(nullptr,"convert");
+    TString convert = gSystem->Which(nullptr,"convert");  // fallback
 
-    /* Fallback #1 – common Home-brew prefix (Apple/Intel) */
-    if (ffmpeg .IsNull() && !gSystem->AccessPathName("/opt/homebrew/bin/ffmpeg", kExecutePermission))
-        ffmpeg  = "/opt/homebrew/bin/ffmpeg";
+    /* Home‑brew & /usr/local fall‑backs -------------------------------- */
+    if (ffmpeg.IsNull()
+        && !gSystem->AccessPathName("/opt/homebrew/bin/ffmpeg", kExecutePermission))
+        ffmpeg = "/opt/homebrew/bin/ffmpeg";
+    if (ffmpeg.IsNull()
+        && !gSystem->AccessPathName("/usr/local/bin/ffmpeg", kExecutePermission))
+        ffmpeg = "/usr/local/bin/ffmpeg";
 
-    if (convert.IsNull() && !gSystem->AccessPathName("/opt/homebrew/bin/convert", kExecutePermission))
-        convert = "/opt/homebrew/bin/convert";
-
-    /* Fallback #2 – classic /usr/local for older Intel Macs */
-    if (ffmpeg .IsNull() && !gSystem->AccessPathName("/usr/local/bin/ffmpeg", kExecutePermission))
-        ffmpeg  = "/usr/local/bin/ffmpeg";
-
-    if (convert.IsNull() && !gSystem->AccessPathName("/usr/local/bin/convert", kExecutePermission))
-        convert = "/usr/local/bin/convert";
-
-    if (!ffmpeg.IsNull())   /*------------ ffmpeg ––––––––––––––––––*/
+    if (!ffmpeg.IsNull())                 /* ---------- ffmpeg ---------- */
     {
-        TString pal = pngDir+"/palette.png";
-        TString cmd  = Form("%s -loglevel error -y -i %s/f%%04d.png "
-                            "-vf palettegen=max_colors=256 %s",
-                            ffmpeg.Data(), pngDir.Data(), pal.Data());
+        TString pal = pngDir + "/palette.png";
+
+        /* ─ palette ---------------------------------------------------- */
+        TString cmd = Form(
+            "%s -loglevel error -y -i %s/f%%04d.png "
+            "-vf \"scale=%d:%d:flags=lanczos,palettegen=max_colors=128\" %s",
+            ffmpeg.Data(), pngDir.Data(), W0, H0, pal.Data());
         if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","ffmpeg palettegen failed"); return; }
 
-        cmd = Form("%s -loglevel error -y -framerate %d -i %s/f%%04d.png -i %s "
-                   "-lavfi paletteuse -gifflags +transdiff -r %d %s",
-                   ffmpeg.Data(), FPS, pngDir.Data(), pal.Data(), FPS, gifOut.Data());
+        /* ─ gif -------------------------------------------------------- */
+        cmd = Form(
+            "%s -loglevel error -y -framerate %d -i %s/f%%04d.png -i %s "
+            "-lavfi \"scale=%d:%d:flags=lanczos[x];[x][1:v]paletteuse=dither=sierra2_4a\" "
+            "-gifflags +transdiff -r %d %s",
+            ffmpeg.Data(), FPS, pngDir.Data(), pal.Data(),
+            W0, H0, FPS, gifOut.Data());
         if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","ffmpeg paletteuse failed"); return; }
 
         gSystem->Unlink(pal);
         Printf("  ✔ encoded with ffmpeg (%s)", ffmpeg.Data());
     }
-    else if (!convert.IsNull())   /*------- ImageMagick convert ––––*/
+    else if (!convert.IsNull())           /* ------ ImageMagick --------- */
     {
-        int delay = lround(100.0/FPS);  // centiseconds
-        TString cmd = Form("%s -delay %d -loop 0 %s/f*.png "
-                           "-layers Optimize %s",
-                           convert.Data(), delay, pngDir.Data(), gifOut.Data());
+        int delay = lround(100.0 / FPS);
+        TString cmd = Form(
+            "%s -delay %d -loop 0 %s/f*.png "
+            "-resize %dx%d "
+            "-colors 128 -dither FloydSteinberg -layers Optimize %s",
+            convert.Data(), delay, pngDir.Data(), W0, H0, gifOut.Data());
         if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","convert failed"); return; }
         Printf("  ✔ encoded with ImageMagick (%s)", convert.Data());
     }
     else
     {
         Error("makeLegoGifHD",
-              "neither ffmpeg nor ImageMagick found – install one to produce GIFs");
+              "ffmpeg or ImageMagick not found – install one to create GIFs");
         return;
     }
 
-    /*----------------------------------------------------------------------*/
-    /* 8. cleanup                                                           */
-    /*----------------------------------------------------------------------*/
-    gSystem->Exec(Form("rm -rf %s", pngDir.Data()));
-    Printf("  ↪  %s\n  ▸ ready for Google Slides / Keynote (loops ∞)\n", gifOut.Data());
+    /* -- 7. cleanup ---------------------------------------------------- */
+    gSystem->Exec( Form("rm -rf %s", pngDir.Data()) );
+    Printf("  ↪  %s\n  ▸ ready for Google Slides / Keynote (loops ∞)\n",
+           gifOut.Data());
 }
-
 
 
 
@@ -4624,8 +4713,8 @@ void PDCanalysis()
                   0.045, 0.035);
 
 
-// makeLegoGifHD(hCor3D, "cor", "CORRECTED",   out2DDir);
-// makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED", out2DDir);
+ makeLegoGifHD(hCor3D, "cor", "CORRECTED",   out2DDir);
+ makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED", out2DDir);
 
 
   // after opening the file …
