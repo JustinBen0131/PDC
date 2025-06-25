@@ -2310,47 +2310,25 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
 
             if (hCorr) {            /* only if corrected histogram exists */
                 /* -------- sanity indicators -------------------------- */
-                const double relMuErr = (std::fabs(C.mu)>0)
-                                          ? C.muErr/std::fabs(C.mu) : 1e9;
-                const double relSgErr = (C.sg>0) ? C.sgErr/C.sg : 1e9;
-                const bool muNearZero   = (std::fabs(C.mu) < 1e-4) ||
-                                           (std::fabs(C.mu) < 0.20*C.sg);
-                const bool tinySigma    = (C.sg  < 1e-5);
-                const bool hugeMuErr    = (relMuErr > 0.50);   // >50 %
-                const bool hugeSgErr    = (relSgErr > 0.50);
-                const bool fewEntries   = (C.N < 50);
+                /* -------- sanity check : keep the fit unless it is truly invalid ---- */
+                const bool badSigma   = (C.sg < kMinSigma)               || !std::isfinite(C.sg);
+                const bool badRelErr  = (C.sgErr/C.sg > 1.0);            // >100 % relative σ‐err
+                const bool badFit     = badSigma || badRelErr;
 
-                /* -------- print original CORR result ----------------- */
-                printRes("CORR", C, kRed);
+                printRes("CORR", C, badFit ? kRed : kMagenta+1);
 
-                /* -------- diagnose / decide replacement -------------- */
-                std::vector<std::string> causes;
-                if (muNearZero)  causes.emplace_back("μ≈0 → σ/|μ| explodes");
-                if (tinySigma)   causes.emplace_back("σ ≈ 0");
-                if (hugeMuErr)   causes.emplace_back("μ‑err >50 %");
-                if (hugeSgErr)   causes.emplace_back("σ‑err >50 %");
-                if (fewEntries)  causes.emplace_back("N<50");
-
-                if (!causes.empty())
+                if (badFit)
                 {
-                    /* colourised warning banner ---------------------- */
-                    std::cerr << RED << BOLD
-                              << "[Δφ] ► slice " << tag
-                              << " flagged: " << RST
-                              << YEL;
-                    for (size_t i=0;i<causes.size();++i) {
-                        if (i) std::cerr << ", ";
-                        std::cerr << causes[i];
-                    }
-                    std::cerr << RST << '\n';
+                    std::cerr << "\033[1;31m[Δφ] slice " << tag
+                              << " – fit rejected (σ=" << C.sg
+                              << ", σ_err/σ=" << C.sgErr/C.sg << ")\033[0m\n";
 
-                    /* robust fallback -------------------------------- */
+                    /* robust fall‑back: mean / RMS ------------------------------------ */
                     C.mu     = hCorr->GetMean();
                     C.sg     = hCorr->GetRMS();
                     C.muErr  = C.sg / std::sqrt(2.*std::max(1.0,C.N-1.0));
-                    C.sgErr  = C.muErr;        // same formula
+                    C.sgErr  = C.muErr;
 
-                    /* print substituted numbers ---------------------- */
                     printRes("CORR*", C, kGreen);
                 }
             }
@@ -2674,6 +2652,77 @@ void OverlayDeltaPhiSlices(const std::vector<std::pair<double,double>>& eEdges,
                  "DeltaPhi_FracResVsE.png");
     }
     /* ------------------------------------------------------------------ */
+    /* ================================================================= *
+     *  EXTRA summary – width ratio  R(E) = σ_CORR / σ_RAW               *
+     *  ( R < 1  ⇒  improved resolution )                                *
+     * ================================================================= */
+    {
+        std::vector<double> ratio(nPts,0.0), ratioErr(nPts,0.0);
+
+        /* build R(E) and its uncertainty -------------------------------- */
+        for (int i=0;i<nPts;++i) {
+            if (sgRaw[i] > 0.0) {
+                ratio[i]    = sgCor[i] / sgRaw[i];
+                ratioErr[i] = ratio[i] *
+                              std::sqrt( std::pow(sgCorErr[i]/sgCor[i],2) +
+                                         std::pow(sgRawErr[i]/sgRaw[i],2) );
+            }
+        }
+
+        /* determine y‑range with padding -------------------------------- */
+        double yMin =  1e30, yMax = -1e30;
+        for (int i=0;i<nPts;++i) {
+            yMin = std::min(yMin, ratio[i]-ratioErr[i]);
+            yMax = std::max(yMax, ratio[i]+ratioErr[i]);
+        }
+        yMin = std::max(0.0, yMin - 0.05);
+        yMax = std::min(1.2,  yMax + 0.05);
+
+        /* canvas & axis -------------------------------------------------- */
+        TCanvas cRatio("cRatio","width ratio", 860, 620);
+        cRatio.SetLeftMargin(0.15);
+        cRatio.SetRightMargin(0.06);
+
+        TH1F fR("fR",
+                ";E_{slice}  [GeV];#sigma_{corr} / #sigma_{raw}",
+                1, eCtr.front()-1.0, eEdges.back().second);
+        fR.SetMinimum(yMin);
+        fR.SetMaximum(yMax);
+        fR.Draw("AXIS");
+
+        /* graph with error bars ----------------------------------------- */
+        auto gR = new TGraphErrors(nPts);
+        for (int i=0;i<nPts;++i) {
+            gR->SetPoint      (i, eCtr[i], ratio[i]);
+            gR->SetPointError (i,     0.0, ratioErr[i]);
+        }
+        gR->SetMarkerStyle(20);
+        gR->SetMarkerColor(kBlue+2);
+        gR->SetLineColor  (kBlue+2);
+        gR->Draw("PE SAME");              // P = points, E = error bars
+        keep.push_back(gR);
+
+        /* unity reference line ------------------------------------------ */
+        TLine l1(fR.GetXaxis()->GetXmin(), 1.0,
+                 fR.GetXaxis()->GetXmax(), 1.0);
+        l1.SetLineStyle(2);
+        l1.SetLineWidth(2);
+        l1.SetLineColor(kGray+2);
+        l1.Draw();
+
+        /* legend (top‑right) -------------------------------------------- */
+        TLegend leg(0.70, 0.80, 0.94, 0.92);
+        leg.SetBorderSize(0);
+        leg.SetFillStyle(0);
+        leg.SetTextSize(0.032);
+        leg.AddEntry(gR, "width ratio", "lp");
+        leg.Draw();
+
+        /* save ----------------------------------------------------------- */
+        cRatio.SaveAs(TString(outDir)+"/DeltaPhi_WidthRatioVsE.png");
+    }
+    /* ================================================================= */
+
 
   TString outAll = TString(outDir)+"/DeltaPhiCompare_AllOutput.png";
   c4x2.SaveAs(outAll);
@@ -2990,6 +3039,7 @@ void OverlayDeltaPhiClusterizerCP(const std::vector<std::pair<double,double>>& e
        frR,frRE, frC,frCE, frB,frBE,
        "DeltaPhiCP_FracResVsE.png");
 
+    
   /* ---------- 5. save overlay sheet ---------- */
   cMain.SaveAs(TString(outDir)+"/DeltaPhiCPCompare_AllOutput.png");
   std::cout<<"[Δφ‑CP] wrote overlays & summaries to "<<outDir<<'\n';
@@ -2999,8 +3049,7 @@ void OverlayDeltaPhiClusterizerCP(const std::vector<std::pair<double,double>>& e
 
 
 /******************************************************************************
- * OverlayDeltaPhiFiveWays  (2025‑06‑15)
- *
+ * OverlayDeltaPhiFiveWays
  *  – overlays 5 Δφ flavours per energy‑slice
  *  – writes   • per‑slice canvas
  *             • μ(E), σ(E)
@@ -3018,7 +3067,7 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
   gStyle->SetOptStat(0);
 
   static const Color_t  colArr[5]   = {kGreen + 2, kMagenta + 1, kBlack, kRed, kBlue};
-  static const Style_t  mksArr[5]   = {20,     21,   22,      33,        29};
+  static const Style_t  mksArr[5]   = {20,     20,   20,      20,        20};
   static const char*    legTxtArr[5]= {
         "no correction, from scratch coord transforms",
         "energy dep b correction, from scratch coord transforms",
@@ -3066,6 +3115,10 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
   /* storage for summary graphs -------------------------------------- */
   std::vector<double> eCtr;
   enum {kRaw,kRawB,kCP,kCPcp,kCPb};
+    // ---------- cache parameters for later summary ----------
+    static std::array<double,5> parA {{0.}},   // intercept  a
+                                 parB {{0.}};  // slope      b
+    static std::array<bool ,5>  hasFit{{false}};
   std::array<std::vector<double>,5> mu, muE, sg, sgE;
 
   std::vector<TObject*> guard;   // prevent premature deletion
@@ -3142,22 +3195,42 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
     guard.push_back(g); return g;
   };
 
+    /* ------------------------------------------------------------------ *
+     *  Δφ summary: Gaussian μ & σ vs energy, five reconstruction variants
+     * ------------------------------------------------------------------ *
+     *  This version adds a single “changePositions” switch:
+     *    – changePositions = true  → legend moves to the top‑right of the μ‑pad
+     *                                and extra head‑room is added so the legend
+     *                                never hides points;
+     *    – changePositions = false → original legend position and the y‑range is
+     *                                left exactly as the automatic calculation
+     *                                produced it.
+     * ------------------------------------------------------------------ */
+
+    /* ============================================================
+     * user options
+     * ============================================================
+     */
+    const bool   changePositions   = true;   // ← toggle legend & y‑range
+    const double extraHeadRoomFrac = 0.25;   // add 25 % head‑room if TRUE
+    const double manualMuMax       = 0.0;    // >0 ⇒ explicit upper limit
+
     /* ---------- 3. summary canvas μ & σ ---------- */
     {
-        /* offset between the 5 curves (-2 … +2) */
+        /* horizontal offset between the 5 TGraph points (-2 … +2) */
         const double dx = 0.0;
 
         /* ------------------------------------------------------------------ *
          *  Helper → return {min,max} over *all* curves, including ±σErr,
-         *  then pad the range by 5 % so markers never touch the frame
+         *  then pad the range by 5 % so markers never touch the frame.
          * ------------------------------------------------------------------ */
-        auto rangeOf = [&](bool useMu)->std::pair<double,double>
+        auto rangeOf = [&](bool wantMu) -> std::pair<double,double>
         {
             double lo =  1e30, hi = -1e30;
             for (int v = 0; v <= kCPb; ++v) {
                 if (mu[v].empty()) continue;
-                const auto &val =  useMu ?  mu[v] :  sg[v];
-                const auto &err =  useMu ?  muE[v] : sgE[v];
+                const auto& val =  wantMu ?  mu [v] :  sg [v];
+                const auto& err =  wantMu ?  muE[v] :  sgE[v];
                 for (size_t i = 0; i < val.size(); ++i) {
                     lo = std::min(lo, val[i] - err[i]);
                     hi = std::max(hi, val[i] + err[i]);
@@ -3168,49 +3241,69 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
         };
 
         /* ------------------------------------------------------------------ *
-         *  Canvas + two stacked pads
+         *  Canvas with two vertically stacked pads
          * ------------------------------------------------------------------ */
-        TCanvas cSum("cMuSigma5", "#Delta#phi five-way summary", 900, 780);
+        TCanvas cSum("cMuSigma5", "#Delta#phi five‑way summary", 900, 780);
         TPad pT("pT","",0,0.37,1,1);  pT.Draw();
         TPad pB("pB","",0,0   ,1,0.37); pB.Draw();
 
-        const double xMin =  eCtr.front() - 1.0;          // pad left by 1 GeV
-        const double xMax =  eEdges.back().second;        // true upper E-edge
+        const double xMin =  eCtr.front() - 1.0;        // pad left by 1 GeV
+        const double xMax =  eEdges.back().second;      // right edge is true E‑edge
 
         /* ====================  μ(E) top pad  ==================== */
         pT.cd();
         pT.SetLeftMargin(0.15);
-        pT.SetBottomMargin(0.03);               // hair-line gap
+        pT.SetBottomMargin(0.03);                       // hair‑line gap
 
-        auto [muMin, muMax] = rangeOf(true);    // auto-scaled y-range
+        auto [muMin, muMax] = rangeOf(/*wantMu=*/true);
+
+        /* optional extra head‑room when legend sits at the top */
+        if (changePositions) {
+            muMax += extraHeadRoomFrac * (muMax - muMin);
+            if (manualMuMax > 0.0) muMax = manualMuMax;   // explicit override
+        }
+
         TH1F fMu("fMu","; ;Gaussian mean  #mu  [rad]",1,xMin,xMax);
         fMu.SetMinimum(muMin);
         fMu.SetMaximum(muMax);
 
-        // hide x–axis labels/ticks on the top pad
-        TAxis* axT = fMu.GetXaxis();
-        axT->SetLabelSize(0);  axT->SetTickLength(0);  axT->SetTitleSize(0);
+        /* hide x‑axis on the upper pad */
+        TAxis* axTop = fMu.GetXaxis();
+        axTop->SetLabelSize(0);
+        axTop->SetTickLength(0);
+        axTop->SetTitleSize(0);
+
         fMu.Draw("AXIS");
 
-        /* dashed reference line at μ = 0 */
-        TLine *l0 = new TLine(xMin, 0.0, xMax, 0.0);
+        /* dashed reference line μ = 0 */
+        auto* l0 = new TLine(xMin, 0.0, xMax, 0.0);
         l0->SetLineStyle(2); l0->SetLineWidth(2); l0->SetLineColor(kGray+2);
-        l0->Draw();                 guard.push_back(l0);
+        l0->Draw();             guard.push_back(l0);
 
-        /* plot all five curves – circles, coloured, x-offset by (v-2)*dx */
+        /* plot the five μ‑curves (if present) */
         for (int v = 0; v <= kCPb; ++v) {
             if (mu[v].empty()) continue;
-            TGraphErrors *g = makeG(v, (v-2)*dx, colArr[v], 20);   // 20 = solid circle
+            TGraphErrors* g = makeG(v, (v-2)*dx, colArr[v], 20);
             g->Draw("P SAME");
         }
 
-        /* legend (use invisible TMarker clones to show colour) */
-        TLegend lg(0.4,0.08,0.82,0.28);
-        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.032);
+        /* legend – coordinates depend on changePositions */
+        double x1, y1, x2, y2;
+        if (changePositions) {           // top‑right
+            x1 = 0.38; y1 = 0.75; x2 = 0.85; y2 = 0.93;
+        } else {                         // original position (bottom‑right)
+            x1 = 0.40; y1 = 0.08; x2 = 0.82; y2 = 0.28;
+        }
+
+        TLegend lg(x1, y1, x2, y2);
+        lg.SetBorderSize(0);
+        lg.SetFillStyle(0);
+        lg.SetTextSize(0.032);
         for (int v = 0; v <= kCPb; ++v) {
             if (mu[v].empty()) continue;
-            auto m = new TMarker(0,0,20);           // circle
-            m->SetMarkerColor(colArr[v]); m->SetMarkerSize(1.1);
+            auto* m = new TMarker(0,0,20);           // invisible anchor
+            m->SetMarkerColor(colArr[v]);
+            m->SetMarkerSize(1.1);
             guard.push_back(m);
             lg.AddEntry(m, legTxtArr[v], "p");
         }
@@ -3222,12 +3315,13 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
         pB.SetTopMargin(0.07);
         pB.SetBottomMargin(0.35);
 
-        auto [siMin, siMax] = rangeOf(false);
+        auto [sgMin, sgMax] = rangeOf(/*wantMu=*/false);
+
         TH1F fSi("fSi",
                  ";Energy slice centre  [GeV];Gaussian width  #sigma  [rad]",
                  1, xMin, xMax);
-        fSi.SetMinimum(std::max(0.0, siMin));
-        fSi.SetMaximum(siMax);
+        fSi.SetMinimum(std::max(0.0, sgMin));
+        fSi.SetMaximum(sgMax);
         fSi.Draw("AXIS");
 
         for (int v = 0; v <= kCPb; ++v) {
@@ -3237,17 +3331,18 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
             std::vector<double> x(N), ex(N,0.);
             for (int i = 0; i < N; ++i) x[i] = eCtr[i] + (v-2)*dx;
 
-            TGraphErrors *g = new TGraphErrors(N, x.data(), sg[v].data(),
-                                               ex.data(), sgE[v].data());
-            g->SetMarkerStyle(20);                    // circle
+            TGraphErrors* g = new TGraphErrors(
+                      N, x.data(), sg[v].data(),
+                      ex.data(),  sgE[v].data());
+
+            g->SetMarkerStyle(20);
+            g->SetMarkerSize (1.1);
             g->SetMarkerColor(colArr[v]);
             g->SetLineColor  (colArr[v]);
-            g->SetMarkerSize(1.1);
             guard.push_back(g);
             g->Draw("P SAME");
         }
 
-        /* ------------------------------------------------------------------ */
         cSum.SaveAs(TString(outDir) + "/DeltaPhi5_MeanSigmaVsE.png");
     }
 
@@ -3370,10 +3465,394 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
     diag("DeltaPhi5_RMSE",    "#sqrt{#mu^{2} + #sigma^{2}}  [rad]", rm, rmE);
     diag("DeltaPhi5_FracRes", "#sigma / |#mu|",                     fr, frE);
 
+    /* ================================================================= *
+     *  width‑ratio summary – σ_variant / σ_baseline                      *
+     *  baseline variant = kCP  ( no‑corr, clusterizer transforms )       *
+     * ================================================================= */
+    {
+        const int base = kCP;                       // index of the reference
+        const int N    = static_cast<int>(eCtr.size());
+
+        /* build R(E) and its uncertainty for every variant -------------- */
+        std::array<std::vector<double>,5> R , dR ;
+        for (int v = 0; v <= kCPb; ++v) {
+            R [v].resize(N, 0.0);
+            dR[v].resize(N, 0.0);
+
+            if (sg[v].empty()) continue;            // variant absent
+
+            for (int i = 0; i < N; ++i) {
+                const double si   = sg [v][i];
+                const double dsi  = sgE[v][i];
+                const double sRef = sg [base][i];
+                const double dsRef= sgE[base][i];
+
+                if (sRef <= 0.0) continue;          // avoid divide‑by‑zero
+
+                R [v][i]  =  si / sRef;
+                dR[v][i]  =  R[v][i] *
+                             std::sqrt( std::pow(dsi /si ,2) +
+                                        std::pow(dsRef/sRef,2) );
+            }
+        }
+
+        /* auto y‑range --------------------------------------------------- */
+        double yMin =  1e30, yMax = -1e30;
+        for (int v=0; v<=kCPb; ++v)
+            for (int i=0;i<N;++i){
+                yMin = std::min(yMin, R[v][i]-dR[v][i]);
+                yMax = std::max(yMax, R[v][i]+dR[v][i]);
+            }
+        yMin = std::max(0.0, yMin-0.05);
+        yMax = std::min(1.5, yMax+0.05);            // clamp to 1.5
+
+        /* canvas & frame ------------------------------------------------- */
+        TCanvas cRat("cRat","width ratios", 900,640);
+        cRat.SetLeftMargin(0.15);  cRat.SetRightMargin(0.06);
+
+        TH1F frame("fRat",
+                   ";Energy slice centre  [GeV];#sigma_{variant} / #sigma_{baseline}",
+                   1, eCtr.front()-1.0,  eEdges.back().second);
+        frame.SetMinimum(yMin);
+        frame.SetMaximum(yMax);
+        frame.Draw("AXIS");
+
+        /* dashed unity line --------------------------------------------- */
+        TLine l1(frame.GetXaxis()->GetXmin(), 1.0,
+                 frame.GetXaxis()->GetXmax(), 1.0);
+        l1.SetLineStyle(2); l1.SetLineWidth(2); l1.SetLineColor(kGray+2);
+        l1.Draw();
+
+        /* horizontal separation between variants ------------------------ */
+        const double dxOff = 0.14;
+
+        /* legend – top‑right -------------------------------------------- */
+        TLegend lg(0.42,0.45,0.69,0.65);
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.025);
+
+        for (int v = 0; v <= kCPb; ++v)
+        {
+            if (v == base || sg[v].empty()) continue;       // skip baseline curve
+
+            std::vector<double> x(N), ex(N,0.);
+            for (int i=0;i<N;++i) x[i] = eCtr[i] + (v-base)*dxOff;
+
+            TGraphErrors* g = new TGraphErrors(N,
+                                               x.data(), R [v].data(),
+                                               ex.data(), dR[v].data());
+            g->SetMarkerStyle(20);
+            g->SetMarkerColor(colArr[v]);
+            g->SetLineColor  (colArr[v]);
+            g->Draw("PE SAME");                             // with error bars
+            guard.push_back(g);
+
+            lg.AddEntry(g, legTxtArr[v], "lp");
+        }
+        lg.Draw();
+
+        cRat.SaveAs(TString(outDir)+"/DeltaPhi5_WidthRatioVsE.png");
+    }
+    /* ================================================================= */
+
 
   /* ---------- 5. save slice sheet ---------- */
   cMain.SaveAs(TString(outDir)+"/DeltaPhi5_Compare_AllSlices.png");
   std::cout<<"[Δφ‑5] overlays & summaries written to "<<outDir<<'\n';
+    
+    /* ---------- 6.  log-E diagnostic : μ  versus  ln E  (five variants) ------ *
+     *  • overlays μ(E) for all 5 reconstruction flavours in ln E space          *
+     *  • fits   μ(E) = p0 + p1·lnE   (natural log, E in GeV)                    *
+     *  • writes the coefficients to  …/DeltaPhi5_MuVsLogE_fit.txt               *
+     *  • and saves a much cleaner plot  …/DeltaPhi5_MuVsLogE.png                *
+     * ------------------------------------------------------------------------ */
+    {
+        const int N = static_cast<int>(eCtr.size());
+        if (N < 2){
+            std::cerr << "[Δφ-5] log-E plot skipped (need ≥2 slices)\n";
+            /* nothing else to do */
+        } else {
+
+            /* ------------- build ln E array once ----------------------------- */
+            std::vector<double> lnE(N);
+            for (int i = 0; i < N; ++i) lnE[i] = std::log(eCtr[i]);
+
+            /* ------------- helper → graph builder --------------------------- */
+            auto makeGraph = [&](int v)->TGraphErrors*{
+                std::vector<double> ex(N,0.);
+                auto *g = new TGraphErrors(
+                            N, lnE.data(),   mu [v].data(),
+                            ex.data(),       muE[v].data());
+                g->SetMarkerStyle(mksArr[v]);
+                g->SetMarkerColor(colArr[v]);
+                g->SetLineColor  (colArr[v]);
+                guard.push_back(g);
+                return g;
+            };
+
+            std::array<TGraphErrors*,5> g{};
+            for (int v = 0; v <= kCPb; ++v)
+                if (!mu[v].empty()) g[v] = makeGraph(v);
+
+            /* ------------- canvas & axes ------------------------------------ */
+            TCanvas cLn("cMuVsLogE5",
+                        "#Delta#phi Gaussian #mu  versus lnE  –  five reconstructions",
+                        900,640);
+            cLn.SetLeftMargin(0.15);  cLn.SetRightMargin(0.06);
+            cLn.SetTopMargin (0.08);  cLn.SetBottomMargin(0.12);
+
+            const double xLo = *std::min_element(lnE.begin(), lnE.end()) - 0.05;
+            const double xHi = *std::max_element(lnE.begin(), lnE.end()) + 0.05;
+
+            double yLo =  1e30 , yHi = -1e30;
+            for (int v = 0; v <= kCPb; ++v)
+                if (!mu[v].empty()){
+                    yLo = std::min(yLo, *std::min_element(mu[v].begin(), mu[v].end()));
+                    yHi = std::max(yHi, *std::max_element(mu[v].begin(), mu[v].end()));
+                }
+            const double pad = 0.15 * (yHi - yLo);     // +15 % extra head-room
+            yLo -= pad;  yHi += 1.25*pad;              // more room on top
+
+            TH1F frame("fLn5",";ln E  [GeV];Gaussian mean  #mu  [rad]",1,xLo,xHi);
+            frame.SetMinimum(yLo);
+            frame.SetMaximum(yHi);
+            frame.Draw("AXIS");
+
+            /* ------------- draw points & dashed linear fits ------------------ */
+            std::array<TF1*,5> fit{};
+            
+            for (int v = 0; v <= kCPb; ++v)
+                if (g[v]){
+                    g[v]->Draw("P SAME");
+
+                    fit[v]  = new TF1(Form("f%d",v),"pol1",xLo,xHi);
+                    fit[v]->SetLineColor (colArr[v]);
+                    fit[v]->SetLineStyle (2);          // thin dashed
+                    fit[v]->SetLineWidth (2);
+                    g[v]->Fit(fit[v],"Q");             // quiet
+                    fit[v]->Draw("SAME");
+                    parA[v]   = fit[v]->GetParameter(0);   // save intercept
+                    parB[v]   = fit[v]->GetParameter(1);   // save slope
+                    hasFit[v] = true;                      // mark this variant as fitted
+                    guard.push_back(fit[v]);
+                }
+            
+            /* ---------- derive one (a,b) pair for the tilt correction ---------- */
+            double sumA = 0.0 , sumB = 0.0;     // running totals of p0 , p1
+            int    nFit = 0;                    // number of successful fits
+
+            for (int v = 0; v <= kCPb; ++v)
+            {
+              if (!fit[v]) continue;
+              sumA += fit[v]->GetParameter(0);   // p0  from  μ(E) ≈ p0 + p1 lnE
+              sumB += fit[v]->GetParameter(1);   // p1
+              ++nFit;
+            }
+
+            if (nFit > 0)
+            {
+              /* average over all reconstruction variants */
+              const double a_mean = sumA / nFit;          // still in  μ(E)  convention
+              const double b_mean = sumB / nFit;
+
+              /* convert to the φ = a – b lnE convention used in CorrectShowerDepth:        *
+               * we need  φ(E) = –μ(E)  ⇒  a_tilt = –a_mean ,  b_tilt =  +b_mean            */
+              const double a_tilt = -a_mean;              // positive ≈ +1.7 mrad
+              const double b_tilt =  b_mean;              // ≈ +0.83 mrad
+
+              std::cout << "\n[Δφ‑5]  recommended azimuth‑tilt constants  (detailed geometry)\n"
+                        << "        a  = " << std::scientific << a_tilt << "  rad\n"
+                        << "        b  = " << std::scientific << b_tilt << "  rad\n\n";
+            }
+            else
+            {
+              std::cerr << "[Δφ‑5]  WARNING: no valid fits – cannot derive tilt constants\n";
+            }
+
+
+            /* ------------- compact legend (bottom-right) --------------------- */
+            TLegend lg(0.16, 0.75,   // x-min, y-min   (NDC)
+                       0.90, 0.90);  // x-max, y-max
+            lg.SetBorderSize(0);
+            lg.SetFillStyle(0);
+            lg.SetTextFont(42);
+            lg.SetTextSize(0.02);
+            lg.SetMargin(0.10);       // <<< shrink gap between marker and text
+            
+
+            /* add an entry only if both the graph and its fit exist – use a marker clone
+             * instead of the TGraphErrors itself to keep the legend compact (no wings)   */
+            for (int v = 0; v <= kCPb; ++v)
+                if (g[v] && fit[v]) {
+                    auto *mk = new TMarker(0, 0, mksArr[v]);   // marker only
+                    mk->SetMarkerColor(colArr[v]);
+                    mk->SetMarkerSize(1.2);                    // match the plot size
+                    guard.push_back(mk);                       // survive until clean-up
+
+                    lg.AddEntry(mk,
+                                Form("%s  (a = %.2e,  b = %.2e)",
+                                     legTxtArr[v],
+                                     fit[v]->GetParameter(0),
+                                     fit[v]->GetParameter(1)),
+                                "p");                          // “p” → marker only
+                }
+
+            lg.Draw();
+            
+            /* ------------ explanatory label for the fit --------------------- */
+            TLatex info;
+            info.SetNDC();
+            info.SetTextFont(42);
+            info.SetTextSize(0.025);
+            info.SetTextAlign(13);          // left-top
+            /* place just below the legend – tweak y-coordinate if needed */
+            info.DrawLatex(0.5, 0.18,
+                           "#mu(E) = a - b lnE   (  a: intercept  |  b: slope )");
+
+            /* ------------- save PNG & ASCII ---------------------------------- */
+            TString pngName = TString(outDir) + "/DeltaPhi5_MuVsLogE.png";
+            cLn.SaveAs(pngName);
+
+            std::ofstream fout((std::string(outDir)+"/DeltaPhi5_MuVsLogE_fit.txt").c_str());
+            fout << "# Linear fit  mu(E) = p0 + p1*lnE   (E in GeV)\n"
+                 << "# columns: variant   p0(rad)   p1(rad)\n"
+                 << std::scientific << std::setprecision(6);
+
+            for (int v = 0; v <= kCPb; ++v)
+                if (fit[v])
+                    fout << std::left << std::setw(36) << legTxtArr[v]
+                         << fit[v]->GetParameter(0) << "   "
+                         << fit[v]->GetParameter(1) << "\n";
+            fout.close();
+
+            std::cout << "[Δφ-5] wrote cleaned-up lnE diagnostic plot → "
+                      << pngName << '\n';
+        }
+    }
+    
+    /* ===================================================================== *
+     *  EXTRA: summary of fit parameters  a  (intercept)  and  b  (slope)    *
+     *         – one point per reconstruction flavour + Virgile’s reference  *
+     *         – produces  .../DeltaPhi5_a_b_Summary.png                     *
+     * ===================================================================== */
+    try
+    {
+        std::cout << "[Δφ-5:ab] building coefficient summary …\n";
+
+        /* ---------- 1. gather coefficients --------------------------------- */
+        struct Coeff {
+            TString name;   double a;   double b;   Color_t col;  Style_t mk;
+        };
+        std::vector<Coeff> coeffs;
+
+        /* short, publication‑friendly labels matching the plotting order */
+        static const char* shortLbl[5] = {
+            "scratch, none", "scratch, b(E)",
+            "cluster, none", "cluster, CP", "cluster, b(E)"
+        };
+
+        for (int v = 0; v <= kCPb; ++v)
+            if (hasFit[v])                               // only variants that were fitted
+                coeffs.push_back( { shortLbl[v],
+                                    parA[v],              // a
+                                    parB[v],              // b
+                                    colArr[v], mksArr[v] } );
+
+        /* add Virgile’s reference rotation */
+        coeffs.push_back( { "Virgile's Output",  +3.3e-3,  +9.9e-4,   kGray+2,  29 /*star*/ } );
+
+        if (coeffs.empty())
+            throw std::runtime_error("[Δφ-5:ab] No coefficients collected – cannot draw summary.");
+
+        const int NV = static_cast<int>(coeffs.size());
+
+        /* ---------- 2. x‑positions (1,2,…) and dummy errors (0) ------------- */
+        std::vector<double> x (NV), ex(NV, 0.);
+        for (int i = 0; i < NV; ++i) x[i] = i + 1;
+
+        /* ---------- 3. helper → build a graph for a or b -------------------- */
+        auto makeParGraph = [&](bool wantA)->TGraphErrors*
+        {
+            std::vector<double> y (NV), ey(NV, 0.);
+            for (int i = 0; i < NV; ++i)
+                y[i] = wantA ? coeffs[i].a : coeffs[i].b;
+
+            auto* g = new TGraphErrors(NV, x.data(), y.data(), ex.data(), ey.data());
+            if (!g || g->GetN() == 0)
+                throw std::runtime_error("[Δφ-5:ab] Failed to create TGraphErrors.");
+
+            /* uniform styling per pad – larger circles */
+            const Color_t uniCol = wantA ? static_cast<Color_t>(kRed+1)
+                                         : static_cast<Color_t>(kBlue+1);
+            g->SetMarkerStyle(20);
+            g->SetMarkerColor(uniCol);
+            g->SetLineColor  (uniCol);
+
+            guard.push_back(g);
+            return g;
+        };
+
+        TGraphErrors* gA = makeParGraph(true);   // intercept (red)
+        TGraphErrors* gB = makeParGraph(false);  // slope     (blue)
+
+        /* ---------- 4. canvas with two aligned pads ------------------------ */
+        TCanvas cAB("cAB","Fit‑parameter summary", 900, 700);
+        cAB.Divide(1,2,0,0);
+
+        auto drawPad = [&](TPad* p, TGraphErrors* g,
+                           const char* yLab)
+        {
+            if (!p || !g) throw std::runtime_error("[Δφ-5:ab] Null pad or graph pointer.");
+
+            p->SetLeftMargin  (0.12);
+            p->SetRightMargin (0.04);
+            p->SetBottomMargin(0.16);
+            p->SetTopMargin   (0.05);
+            p->SetGrid(1,1);                 // full grid
+            p->Draw(); p->cd();
+
+            /* dynamic y‑range with 15 % head‑room */
+            double ymin = g->GetY()[0], ymax = ymin;
+            for (int i = 1; i < g->GetN(); ++i){
+                ymin = std::min(ymin, g->GetY()[i]);
+                ymax = std::max(ymax, g->GetY()[i]);
+            }
+            double pad = 0.15 * (ymax - ymin);
+            if (pad == 0) pad = std::fabs(ymax)*0.15 + 1e-6;
+            ymin -= pad;  ymax += pad;
+
+            /* keep axis histogram alive ------------------------------------- */
+            TH1F *frame = new TH1F(Form("fr_%s",yLab),
+                                   ";Variant index; ", NV+2, 0.5, NV+1.5);
+            frame->SetDirectory(nullptr);
+            frame->SetMinimum(ymin);  frame->SetMaximum(ymax);
+            frame->GetYaxis()->SetTitle(yLab);
+            frame->GetXaxis()->SetLabelSize(0);          // hide numbers – we’ll add names
+            frame->Draw("AXIS");
+            guard.push_back(frame);
+
+            g->Draw("P SAME");
+
+            /* variant labels below the x‑axis -------------------------------- */
+            TLatex lx; lx.SetTextFont(42); lx.SetTextSize(0.035);
+            lx.SetTextAlign(22);                         // centred
+            for (int i = 0; i < NV; ++i)
+                lx.DrawLatex( x[i], ymin - 0.07*(ymax - ymin), coeffs[i].name );
+        };
+
+        drawPad( (TPad*)cAB.cd(1), gA, "Intercept  a  [rad]" );
+        drawPad( (TPad*)cAB.cd(2), gB, "Slope  b  [rad]" );
+
+        /* ---------- 5. save ------------------------------------------------ */
+        TString outAB = TString(outDir) + "/DeltaPhi5_a_b_Summary.png";
+        cAB.SaveAs(outAB);
+        std::cout << "[Δφ-5:ab] wrote coefficient summary  →  " << outAB << '\n';
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "\n[Δφ-5:ab] FATAL: " << e.what() << "\n";
+        throw;                                // stop execution upstream
+    }
+
 
   for(auto* o:guard) delete o;
 }
@@ -4336,170 +4815,261 @@ void auditResidual(TH3F*  h,
 /* ════════════════════════════════════════════════════════════════════ *
  *  High‑quality LEGO3D spin‑gif generator  –  lightweight output      *
  * ════════════════════════════════════════════════════════════════════ */
-void makeLegoGifHD(TH3        *h,
-                   const char *tag,
-                   const char *hdr,
-                   const char *outDir,
-                   int   nFrames = 180,   /* 2°/frame → 360° in 7.2 s @ 25 fps        */
-                   double theta0  = 28.0, /* inclination at φ = φ0                   */
-                   double theta1  = 38.0, /* inclination at φ = φ0 + φArc            */
-                   double phi0    =   0.0,
-                   double phiArc  = 360.0,
-                   int   SS       = 2,    /* supersampling                           */
-                   int   W0       = 1280, /* final width  (px)                       */
-                   int   H0       = 720,  /* final height (px)                       */
-                   int   FPS      = 25)   /* target playback rate                    */
-{
-    /* -- 0. sanity ------------------------------------------------------ */
-    if (!h)       { Error("makeLegoGifHD","null histogram"); return; }
-    if (nFrames<2){ Error("makeLegoGifHD","nFrames must be ≥ 2"); return; }
+void makeLegoGifHD(TH3          *h1,                /* mandatory          */
+                    const char   *tag1,
+                    const char   *hdr1,
+                    TH3          *h2      = nullptr, /* optional ‑ morph   */
+                    const char   *tag2    = "",
+                    const char   *hdr2    = "",
+                    const char   *outDir  = ".",
+                    int   nFrames         = 180,
+                    double theta0         = 28.0,
+                    double theta1         = 38.0,
+                    double phi0           =   0.0,
+                    double phiArc         = 360.0,
+                    int   SS              = 2,
+                    int   W0              = 1280,
+                    int   H0              = 720,
+                    int   FPS             = 25)
+ {
+     /* ------------------------------------------------------------------ */
+     /* 0. defend against misuse                                           */
+     /* ------------------------------------------------------------------ */
+     if (!h1) { Error("makeLegoGifHD","h1 null"); return; }
+     if (nFrames < 2) { Error("makeLegoGifHD","need ≥2 frames"); return; }
+     if (h2 && ( h2->GetNbinsX()!=h1->GetNbinsX() ||
+                 h2->GetNbinsY()!=h1->GetNbinsY() ||
+                 h2->GetNbinsZ()!=h1->GetNbinsZ() ))
+     {
+         Error("makeLegoGifHD","h1 / h2 binning mismatch – no morph GIF");
+         h2 = nullptr;
+     }
 
-#if ROOT_VERSION_CODE >= ROOT_VERSION(6,30,0)
-    ROOT::EnableImplicitMT(0);   // ROOT ≥6.30 spawns TThreads by default
-#endif
-    gROOT ->SetBatch(kTRUE);
+ #if ROOT_VERSION_CODE >= ROOT_VERSION(6,30,0)
+     ROOT::EnableImplicitMT(0);
+ #endif
+     gROOT->SetBatch(kTRUE);
+     gStyle->SetOptStat(0);
+     gStyle->SetNumberContours(140);
+     gStyle->SetCanvasPreferGL(true);
+     gErrorIgnoreLevel = kWarning;
 
-    /* -- 1. one‑shot style --------------------------------------------- */
-    gStyle->SetOptStat(0);
-    gStyle->SetNumberContours(140);
-    gStyle->SetCanvasPreferGL(true);
-    gErrorIgnoreLevel = kWarning;
+     /* small helper – everything that renders one GIF ------------------- */
+     auto renderOne = [&](TH3 *h, const char *tag, const char *hdr,
+                          const char *suffix, bool downScale)
+     {
+         const int W = W0*SS, H = H0*SS;
+         std::unique_ptr<TCanvas> c(
+             new TCanvas(Form("c_%s_%s",tag,suffix), "", W, H));
+         c->SetRightMargin(.15);  c->SetBottomMargin(.13);
+         c->SetFillColorAlpha(kWhite,0);
 
-    /* -- 2. supersampled canvas ---------------------------------------- */
-    const int W = W0*SS,  H = H0*SS;
-    std::unique_ptr<TCanvas> c(
-        new TCanvas( Form("c_%s_gif",tag), "", W, H) );
-    c->SetRightMargin (0.15);
-    c->SetBottomMargin(0.13);
-    c->SetFillColorAlpha(kWhite, 0.0);
+         /* static scene -------------------------------------------------- */
+         h->GetXaxis()->SetTitleOffset(1.25);
+         h->GetYaxis()->SetTitleOffset(1.55);
+         h->GetZaxis()->SetTitleOffset(0.90);
+         h->Draw("LEGO2Z0");
+         gPad->Modified(); gPad->Update();
 
-    /* -- 3. static scene (draw once) ----------------------------------- */
-    h->GetXaxis()->SetTitleOffset(1.25);
-    h->GetYaxis()->SetTitleOffset(1.55);
-    h->GetZaxis()->SetTitleOffset(0.90);
-    h->Draw("LEGO2Z0");
-    gPad->Modified(); gPad->Update();
+         if (auto *pal =
+             dynamic_cast<TPaletteAxis*>(h->GetListOfFunctions()
+                                               ->FindObject("palette")))
+         {
+             pal->SetX1NDC(0.86); pal->SetX2NDC(0.89);
+             pal->SetBorderSize(0); pal->SetFillStyle(0);
+             pal->SetLabelSize(0.022*SS/2.0);
+         }
+         const Long64_t nEnt = h->GetEntries();
+         TLatex t; t.SetNDC(); t.SetTextFont(42); t.SetTextAlign(13);
+         t.SetTextSize(0.05*SS/2.0);
+         t.DrawLatex(.04,.965,Form("#bf{%s  (N = %lld)}",hdr,(Long64_t)nEnt));
+         gPad->Modified(); gPad->Update();
 
-    if (auto *pal =
-        dynamic_cast<TPaletteAxis*>(h->GetListOfFunctions()->FindObject("palette")))
-    {
-        pal->SetX1NDC(0.86); pal->SetX2NDC(0.89);
-        pal->SetBorderSize(0);
-        pal->SetFillStyle(0);
-        pal->SetLabelSize(0.022 * SS / 2.0);
-    }
+         /* dirs & filenames ---------------------------------------------- */
+         TString base   = Form("%s/lego_%s%s", outDir, tag, suffix);
+         TString pngDir = base + "_png"; TString gifOut = base + ".gif";
+         gSystem->mkdir(pngDir,kTRUE);
 
-    /* ---- header incl. total entries ---------------------------------- */
-    const Long64_t nEnt = h->GetEntries();
-    TLatex head; head.SetNDC(); head.SetTextFont(42); head.SetTextAlign(13);
-    head.SetTextSize(0.05 * SS / 2.0);
-    head.DrawLatex(0.04, 0.965,
-                   Form("#bf{%s  (N = %lld)}", hdr, (Long64_t)nEnt));
-    gPad->Modified(); gPad->Update();
+         /* frames -------------------------------------------------------- */
+         const char spin[4]={'|','/','-','\\'}; const TDatime t0;
+         for(int i=0;i<nFrames;++i)
+         {
+             double u   = double(i)/(nFrames-1);
+             gPad->SetPhi (phi0 + phiArc*u);
+             gPad->SetTheta(theta0 + (theta1-theta0)*
+                            0.5*(1-std::cos(u*TMath::Pi())));
+             gPad->Modified(); gPad->Update();
+             c->Print(Form("%s/f%04d.png",pngDir.Data(),i),"png");
+             if(i%std::max(1,nFrames/100)==0||i==nFrames-1)
+             {
+                 int e=TDatime().Convert()-t0.Convert();
+                 int eta=e*(nFrames-i-1)/std::max(1,i+1);
+                 printf("\r  %c %3d %%  %4d s ETA",
+                        spin[i&3], int(100.*(i+1)/nFrames), eta); fflush(stdout);
+             }
+         } puts("\r  ✔ frame rendering done.          ");
 
-    /* -- 4. file/dir names --------------------------------------------- */
-    TString base   = Form("%s/lego_%s_spin", outDir, tag);
-    TString pngDir = base + "_png";
-    TString gifOut = base + ".gif";
-    gSystem->mkdir(pngDir, kTRUE);
+         /* encoding ------------------------------------------------------ */
+         TString ff=gSystem->Which(nullptr,"ffmpeg");
+         if(ff.IsNull()
+            && !gSystem->AccessPathName("/opt/homebrew/bin/ffmpeg",kExecutePermission))
+             ff="/opt/homebrew/bin/ffmpeg";
+         if(ff.IsNull()
+            && !gSystem->AccessPathName("/usr/local/bin/ffmpeg",kExecutePermission))
+             ff="/usr/local/bin/ffmpeg";
+         if(ff.IsNull()){
+             Error("makeLegoGifHD","ffmpeg not found"); return;
+         }
 
-    /* -- 5. render PNG frames ------------------------------------------ */
-    Printf("\n[makeLegoGifHD]  %s  – %lld entries",
-           hdr, (Long64_t)nEnt);
-    Printf("  resolution  : %d × %d (rendered %d× – SS=%d)",
-           W0,H0,W,H,SS);
-    Printf("  frames/fps  : %d  /  %d\n----------------------------------",
-           nFrames,FPS);
+         TString pal = pngDir+"/pal.png";
+         TString cmd = Form("%s -loglevel error -y -i %s/f%%04d.png "
+                            "-vf \"scale=%d:%d:flags=lanczos,palettegen=max_colors=128\" %s",
+                            ff.Data(), pngDir.Data(), W0, H0, pal.Data());
+         if(gSystem->Exec(cmd)) { Error("ffmpeg","palettegen failed"); return; }
 
-    const char spinner[4] = {'|','/','-','\\'};
-    const TDatime tStart;
+         cmd = Form("%s -loglevel error -y -framerate %d -i %s/f%%04d.png -i %s "
+                    "-lavfi \"scale=%d:%d:flags=lanczos[x];[x][1:v]paletteuse"
+                    "=dither=sierra2_4a\" -gifflags +transdiff -r %d %s",
+                    ff.Data(), FPS, pngDir.Data(), pal.Data(),
+                    W0, H0, FPS, gifOut.Data());
+         if(gSystem->Exec(cmd)){ Error("ffmpeg","paletteuse failed"); return; }
 
-    for (int i = 0; i < nFrames; ++i)
-    {
-        const double u   = double(i) / (nFrames-1);
-        const double phi = phi0 + phiArc * u;
-        const double th  = theta0 + (theta1-theta0) *
-                           0.5 * (1 - std::cos(u * TMath::Pi()));
+         gSystem->Exec(Form("rm -rf %s",pngDir.Data()));
+         gSystem->Unlink(pal);
+         Printf("  ↪  %s", gifOut.Data());
+     };
 
-        gPad->SetPhi(phi);  gPad->SetTheta(th);
-        gPad->Modified();   gPad->Update();
+     /* ------------------------------------------------------------------ *
+      * 1. GIF #1  (h1)                                                    *
+      * ------------------------------------------------------------------ */
+     renderOne(h1, tag1, hdr1, "_spin", true);
 
-        TString fn = Form("%s/f%04d.png", pngDir.Data(), i);
-        c->Print(fn, "png");
+     /* ------------------------------------------------------------------ *
+      * 2. GIF #2  (h2) – only if supplied                                 *
+      * ------------------------------------------------------------------ */
+     if (h2) renderOne(h2, tag2, hdr2, "_spin", true);
 
-        if (i % std::max(1,nFrames/100) == 0 || i == nFrames-1)
-        {
-            const int elapsed = TDatime().Convert() - tStart.Convert();
-            const int eta     = elapsed * (nFrames-i-1) / std::max(1,i+1);
-            printf("\r  %c %3d %%  %4d s ETA",
-                   spinner[i&3], int(100.*(i+1)/nFrames), eta);
-            fflush(stdout);
-        }
-    }
-    printf("\r  ✔ frame rendering done.                    \n");
-
-    /* -- 6. encode compact GIF ----------------------------------------- *
-     *     • scale → W0×H0  (Google Slides needs ≤ 1280 px ≈ ≤ 10 MB)      *
-     *     • max 128 colours                                              *
-     *     • ordered dithering  (sierra2_4a)                              *
+    /* ------------------------------------------------------------------ *
+     * 3.  MORPH GIF  :  raw → corrected                                  *
      * ------------------------------------------------------------------ */
-    TString ffmpeg  = gSystem->Which(nullptr,"ffmpeg");
-    TString convert = gSystem->Which(nullptr,"convert");  // fallback
+    if (!h2) return;            // user did not request a morph
 
-    /* Home‑brew & /usr/local fall‑backs -------------------------------- */
-    if (ffmpeg.IsNull()
-        && !gSystem->AccessPathName("/opt/homebrew/bin/ffmpeg", kExecutePermission))
-        ffmpeg = "/opt/homebrew/bin/ffmpeg";
-    if (ffmpeg.IsNull()
-        && !gSystem->AccessPathName("/usr/local/bin/ffmpeg", kExecutePermission))
-        ffmpeg = "/usr/local/bin/ffmpeg";
+    /* --- 3.a  common Z‑range ------------------------------------------- */
+    const double zMin = std::min(h1->GetMinimum(), h2->GetMinimum());
+    const double zMax = std::max(h1->GetMaximum(), h2->GetMaximum());
 
-    if (!ffmpeg.IsNull())                 /* ---------- ffmpeg ---------- */
+    /* --- 3.b  template histogram --------------------------------------- */
+    std::unique_ptr<TH3> hMix( static_cast<TH3*>(h1->Clone("h_mix")) );
+    hMix->SetDirectory(nullptr);
+    hMix->SetMinimum(zMin);
+    hMix->SetMaximum(zMax);
+
+    /* --- 3.c  canvas & folder ------------------------------------------ */
+    const int W = W0*SS , H = H0*SS;
+    std::unique_ptr<TCanvas> c(
+        new TCanvas(Form("c_%s_%s_morph",tag1,tag2),"",W,H));
+    c->SetRightMargin(.15); c->SetBottomMargin(.13);
+    c->SetFillColorAlpha(kWhite,0);
+
+    TString base   = Form("%s/lego_%s-%s_morph", outDir, tag1, tag2);
+    TString pngDir = base + "_png";
+    gSystem->mkdir(pngDir,kTRUE);
+
+    /* --- 3.d  helper: encode a PNG folder → GIF ------------------------ */
+    auto encodeGif = [&](const TString &dir, const TString &gifOut)
     {
-        TString pal = pngDir + "/palette.png";
+        TString ff = gSystem->Which(nullptr,"ffmpeg");
+        if (ff.IsNull() &&
+            !gSystem->AccessPathName("/opt/homebrew/bin/ffmpeg",kExecutePermission))
+            ff="/opt/homebrew/bin/ffmpeg";
+        if (ff.IsNull() &&
+            !gSystem->AccessPathName("/usr/local/bin/ffmpeg",kExecutePermission))
+            ff="/usr/local/bin/ffmpeg";
+        if (ff.IsNull()) { Error("makeLegoGifHD","ffmpeg not found"); return; }
 
-        /* ─ palette ---------------------------------------------------- */
-        TString cmd = Form(
-            "%s -loglevel error -y -i %s/f%%04d.png "
-            "-vf \"scale=%d:%d:flags=lanczos,palettegen=max_colors=128\" %s",
-            ffmpeg.Data(), pngDir.Data(), W0, H0, pal.Data());
-        if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","ffmpeg palettegen failed"); return; }
+        TString pal = dir + "/pal.png";
+        TString cmd = Form("%s -loglevel error -y -i %s/f%%04d.png "
+                           "-vf \"scale=%d:%d:flags=lanczos,palettegen=max_colors=128\" %s",
+                           ff.Data(), dir.Data(), W0, H0, pal.Data());
+        if (gSystem->Exec(cmd)) { Error("ffmpeg","palettegen failed"); return; }
 
-        /* ─ gif -------------------------------------------------------- */
-        cmd = Form(
-            "%s -loglevel error -y -framerate %d -i %s/f%%04d.png -i %s "
-            "-lavfi \"scale=%d:%d:flags=lanczos[x];[x][1:v]paletteuse=dither=sierra2_4a\" "
-            "-gifflags +transdiff -r %d %s",
-            ffmpeg.Data(), FPS, pngDir.Data(), pal.Data(),
-            W0, H0, FPS, gifOut.Data());
-        if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","ffmpeg paletteuse failed"); return; }
+        cmd = Form("%s -loglevel error -y -framerate %d -i %s/f%%04d.png -i %s "
+                   "-lavfi \"scale=%d:%d:flags=lanczos[x];[x][1:v]paletteuse="
+                   "dither=sierra2_4a\" -gifflags +transdiff -r %d %s",
+                   ff.Data(), FPS, dir.Data(), pal.Data(),
+                   W0, H0, FPS, gifOut.Data());
+        if (gSystem->Exec(cmd)) { Error("ffmpeg","paletteuse failed"); return; }
 
         gSystem->Unlink(pal);
-        Printf("  ✔ encoded with ffmpeg (%s)", ffmpeg.Data());
-    }
-    else if (!convert.IsNull())           /* ------ ImageMagick --------- */
-    {
-        int delay = lround(100.0 / FPS);
-        TString cmd = Form(
-            "%s -delay %d -loop 0 %s/f*.png "
-            "-resize %dx%d "
-            "-colors 128 -dither FloydSteinberg -layers Optimize %s",
-            convert.Data(), delay, pngDir.Data(), W0, H0, gifOut.Data());
-        if (gSystem->Exec(cmd)!=0) { Error("makeLegoGifHD","convert failed"); return; }
-        Printf("  ✔ encoded with ImageMagick (%s)", convert.Data());
-    }
-    else
-    {
-        Error("makeLegoGifHD",
-              "ffmpeg or ImageMagick not found – install one to create GIFs");
-        return;
-    }
+        gSystem->Exec(Form("rm -rf %s", dir.Data()));
+    };
 
-    /* -- 7. cleanup ---------------------------------------------------- */
-    gSystem->Exec( Form("rm -rf %s", pngDir.Data()) );
-    Printf("  ↪  %s\n  ▸ ready for Google Slides / Keynote (loops ∞)\n",
-           gifOut.Data());
-}
+    /* --- 3.e  render frames -------------------------------------------- */
+    const char spin[4] = {'|','/','-','\\'};
+    const TDatime t0;
+
+    for (int i=0; i<nFrames; ++i)
+    {
+        const double u  = double(i)/(nFrames-1);   // 0 … 1
+        const double a  = u;                       // linear blend weight
+
+        /* blend h1 → h2 --------------------------------------------------- */
+        const int nX=h1->GetNbinsX(), nY=h1->GetNbinsY(), nZ=h1->GetNbinsZ();
+        for (int ix=1; ix<=nX; ++ix)
+          for (int iy=1; iy<=nY; ++iy)
+            for (int iz=1; iz<=nZ; ++iz)
+            {
+                const double v = (1.0-a)*h1->GetBinContent(ix,iy,iz)
+                               +        a *h2->GetBinContent(ix,iy,iz);
+                hMix->SetBinContent(ix,iy,iz, v);
+            }
+
+        /* first frame: draw & keep palette -------------------------------- */
+        if (i==0)
+            hMix->Draw("LEGO2Z0");
+        else
+            hMix->Draw("LEGO2Z0 SAME");          // re‑uses existing palette
+
+        if (i==0)                                // palette cosmetics once
+        {
+            if (auto *pal = dynamic_cast<TPaletteAxis*>(
+                    hMix->GetListOfFunctions()->FindObject("palette")))
+            {
+                pal->SetX1NDC(0.86); pal->SetX2NDC(0.89);
+                pal->SetBorderSize(0); pal->SetFillStyle(0);
+                pal->SetLabelSize(0.022*SS/2.0);
+            }
+        }
+
+        /* camera ---------------------------------------------------------- */
+        const double phi = phi0 + phiArc*u;
+        const double th  = theta0 + (theta1-theta0)*
+                           0.5*(1-std::cos(u*TMath::Pi()));
+        gPad->SetPhi(phi);  gPad->SetTheta(th);
+
+        /* title ----------------------------------------------------------- */
+        TLatex tl; tl.SetNDC(); tl.SetTextFont(42); tl.SetTextAlign(13);
+        tl.SetTextSize(0.05*SS/2.0);
+        tl.DrawLatex(0.04,0.965, Form("#bf{MORPH  %3.0f %%}", 100.*a));
+
+        gPad->Modified(); gPad->Update();
+        c->Print(Form("%s/f%04d.png", pngDir.Data(), i), "png");
+
+        if (i%std::max(1,nFrames/100)==0 || i==nFrames-1)
+        {
+            int e   = TDatime().Convert() - t0.Convert();
+            int eta = e*(nFrames-i-1)/std::max(1,i+1);
+            printf("\r  %c %3d %%  %4d s ETA",
+                   spin[i&3], int(100.*(i+1)/nFrames), eta); fflush(stdout);
+        }
+    }
+    puts("\r  ✔ morph frames rendered.            ");
+
+    /* --- 3.f  encode & clean‑up ---------------------------------------- */
+    encodeGif(pngDir, base + ".gif");
+    Printf("  ↪  %s.gif", base.Data());
+ }
+ 
 
 
 
@@ -4713,8 +5283,10 @@ void PDCanalysis()
                   0.045, 0.035);
 
 
- makeLegoGifHD(hCor3D, "cor", "CORRECTED",   out2DDir);
- makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED", out2DDir);
+//  makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED",
+//                  hCor3D, "cor", "CORRECTED",
+//                  out2DDir);                       // ← morph included
+
 
 
   // after opening the file …
