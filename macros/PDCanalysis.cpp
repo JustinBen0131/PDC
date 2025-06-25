@@ -3212,7 +3212,7 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
      * ============================================================
      */
     const bool   changePositions   = true;   // ← toggle legend & y‑range
-    const double extraHeadRoomFrac = 0.25;   // add 25 % head‑room if TRUE
+    const double extraHeadRoomFrac = 0.30;   // add 25 % head‑room if TRUE
     const double manualMuMax       = 0.0;    // >0 ⇒ explicit upper limit
 
     /* ---------- 3. summary canvas μ & σ ---------- */
@@ -3563,7 +3563,6 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
      *  • overlays μ(E) for all 5 reconstruction flavours in ln E space          *
      *  • fits   μ(E) = p0 + p1·lnE   (natural log, E in GeV)                    *
      *  • writes the coefficients to  …/DeltaPhi5_MuVsLogE_fit.txt               *
-     *  • and saves a much cleaner plot  …/DeltaPhi5_MuVsLogE.png                *
      * ------------------------------------------------------------------------ */
     {
         const int N = static_cast<int>(eCtr.size());
@@ -3799,7 +3798,8 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
         cAB.Divide(1,2,0,0);
 
         auto drawPad = [&](TPad* p, TGraphErrors* g,
-                           const char* yLab)
+                           const char* yLab,
+                           bool        wantA)
         {
             if (!p || !g) throw std::runtime_error("[Δφ-5:ab] Null pad or graph pointer.");
 
@@ -3830,6 +3830,14 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
             frame->Draw("AXIS");
             guard.push_back(frame);
 
+            if (wantA) {
+              const double xMin = frame->GetXaxis()->GetXmin();
+              const double xMax = frame->GetXaxis()->GetXmax();
+              TLine* l0 = new TLine(xMin, 0.0, xMax, 0.0);
+              l0->SetLineStyle(2); l0->SetLineWidth(2); l0->SetLineColor(kGray+2);
+              l0->Draw(); guard.push_back(l0);
+            }
+
             g->Draw("P SAME");
 
             /* variant labels below the x‑axis -------------------------------- */
@@ -3839,8 +3847,8 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
                 lx.DrawLatex( x[i], ymin - 0.07*(ymax - ymin), coeffs[i].name );
         };
 
-        drawPad( (TPad*)cAB.cd(1), gA, "Intercept  a  [rad]" );
-        drawPad( (TPad*)cAB.cd(2), gB, "Slope  b  [rad]" );
+        drawPad( (TPad*)cAB.cd(1), gA, "Intercept  a  [rad]", true);
+        drawPad( (TPad*)cAB.cd(2), gB, "Slope  b  [rad]", false);
 
         /* ---------- 5. save ------------------------------------------------ */
         TString outAB = TString(outDir) + "/DeltaPhi5_a_b_Summary.png";
@@ -4539,10 +4547,7 @@ void drawLego3D(TH3F*        h,
 /*                                                                          *
  *  Z‑value plotted: |ΔE| / ⟨E⟩ • 100 %                                    *
  *  – ΔE  =  mean cluster‑energy in block − global mean                     *
- *  – ⟨E⟩ =  global mean cluster‑energy                                     *
- *                                                                          *
- *  NEW (24‑Jun‑2025)                                                       *
- *  ─────────────────                                                       *
+ *  – ⟨E⟩ =  global mean cluster‑energy                                     *                                          *
  *  ‣ Stores the three finished objects (2‑D, φ‑profile, η‑profile)         *
  *    in a static cache keyed by tag.                                       *
  *  ‣ As soon as BOTH “UNCORRECTED” and “CORRECTED” are present, it          *
@@ -4569,7 +4574,7 @@ void auditResidual(TH3F*  h,
 /* ---------------------------------------------------------------------- */
 /* 1. build residual map                                                  */
 /* ---------------------------------------------------------------------- */
-  std::unique_ptr<TH2D> meanMap( h->Project3DProfile("yx") );
+  std::unique_ptr<TH2D> meanMap( h->Project3DProfile("xy") );
   const double mu = meanMap->GetMean();
 
   std::unique_ptr<TH2D> res(
@@ -5083,7 +5088,7 @@ void PDCanalysis()
     
   gStyle->SetOptStat(0);
     //_withVirgilesChange
-  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_withoutPhiTiltCorr.root";
+  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_withUpdatedPhiTiltCorr.root";
 
   // 2) Open input
   std::cout << "[INFO] Opening file: " << inFile << "\n";
