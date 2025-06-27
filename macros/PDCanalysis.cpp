@@ -3735,7 +3735,7 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
      * ===================================================================== */
     try
     {
-        std::cout << "[Δφ-5:ab] building coefficient summary …\n";
+        std::cout << "[Δφ‑5:ab] building coefficient summary …\n";
 
         /* ---------- 1. gather coefficients --------------------------------- */
         struct Coeff {
@@ -3743,123 +3743,113 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
         };
         std::vector<Coeff> coeffs;
 
-        /* short, publication‑friendly labels matching the plotting order */
+        /* publication‑friendly labels, same order as everywhere else -------- */
         static const char* shortLbl[5] = {
             "scratch, none", "scratch, b(E)",
             "cluster, none", "cluster, CP", "cluster, b(E)"
         };
 
         for (int v = 0; v <= kCPb; ++v)
-            if (hasFit[v])                               // only variants that were fitted
-                coeffs.push_back( { shortLbl[v],
-                                    parA[v],              // a
-                                    parB[v],              // b
-                                    colArr[v], mksArr[v] } );
+            if (hasFit[v])               // keep only variants that were fitted
+                coeffs.push_back({ shortLbl[v],
+                                   parA[v], parB[v],
+                                   colArr[v], mksArr[v] });
 
-        /* add Virgile’s reference rotation */
-        coeffs.push_back( { "Virgile's Output",  +3.3e-3,  +9.9e-4,   kGray+2,  29 /*star*/ } );
+        /* add Virgile’s reference tilt (grey star) -------------------------- */
+        coeffs.push_back({ "Virgile's Output",
+                           +3.3e-3, +9.9e-4,
+                           static_cast<Color_t>(kGray+2), 22 });
 
         if (coeffs.empty())
-            throw std::runtime_error("[Δφ-5:ab] No coefficients collected – cannot draw summary.");
+            throw std::runtime_error("[Δφ‑5:ab] No coefficients collected – cannot draw summary.");
 
         const int NV = static_cast<int>(coeffs.size());
+        std::vector<double> x(NV);                     // x‑positions 1 … NV
+        for (int i = 0; i < NV; ++i) x[i] = i + 1.0;
 
-        /* ---------- 2. x‑positions (1,2,…) and dummy errors (0) ------------- */
-        std::vector<double> x (NV), ex(NV, 0.);
-        for (int i = 0; i < NV; ++i) x[i] = i + 1;
-
-        /* ---------- 3. helper → build a graph for a or b -------------------- */
-        auto makeParGraph = [&](bool wantA)->TGraphErrors*
+        /* ---------- helper: draw one pad (a or b) -------------------------- */
+        auto drawPad = [&](TPad* p, const char* yLab, bool wantA)
         {
-            std::vector<double> y (NV), ey(NV, 0.);
-            for (int i = 0; i < NV; ++i)
-                y[i] = wantA ? coeffs[i].a : coeffs[i].b;
+            if (!p) throw std::runtime_error("[Δφ‑5:ab] Null pad pointer.");
 
-            auto* g = new TGraphErrors(NV, x.data(), y.data(), ex.data(), ey.data());
-            if (!g || g->GetN() == 0)
-                throw std::runtime_error("[Δφ-5:ab] Failed to create TGraphErrors.");
-
-            /* uniform styling per pad – larger circles */
-            const Color_t uniCol = wantA ? static_cast<Color_t>(kRed+1)
-                                         : static_cast<Color_t>(kBlue+1);
-            g->SetMarkerStyle(20);
-            g->SetMarkerColor(uniCol);
-            g->SetLineColor  (uniCol);
-
-            guard.push_back(g);
-            return g;
-        };
-
-        TGraphErrors* gA = makeParGraph(true);   // intercept (red)
-        TGraphErrors* gB = makeParGraph(false);  // slope     (blue)
-
-        /* ---------- 4. canvas with two aligned pads ------------------------ */
-        TCanvas cAB("cAB","Fit‑parameter summary", 900, 700);
-        cAB.Divide(1,2,0,0);
-
-        auto drawPad = [&](TPad* p, TGraphErrors* g,
-                           const char* yLab,
-                           bool        wantA)
-        {
-            if (!p || !g) throw std::runtime_error("[Δφ-5:ab] Null pad or graph pointer.");
-
+            /* ---- generic pad cosmetics ----------------------------------- */
             p->SetLeftMargin  (0.12);
             p->SetRightMargin (0.04);
             p->SetBottomMargin(0.16);
             p->SetTopMargin   (0.05);
-            p->SetGrid(1,1);                 // full grid
-            p->Draw(); p->cd();
+            p->SetGrid(1,1);
+            p->Draw();
+            p->cd();
 
-            /* dynamic y‑range with 15 % head‑room */
-            double ymin = g->GetY()[0], ymax = ymin;
-            for (int i = 1; i < g->GetN(); ++i){
-                ymin = std::min(ymin, g->GetY()[i]);
-                ymax = std::max(ymax, g->GetY()[i]);
+            /* ---- y‑range : global min/max over all points ---------------- */
+            double ymin =  1e30, ymax = -1e30;
+            for (const auto& c : coeffs) {
+                const double y = wantA ? c.a : c.b;
+                ymin = std::min(ymin, y);
+                ymax = std::max(ymax, y);
             }
             double pad = 0.15 * (ymax - ymin);
-            if (pad == 0) pad = std::fabs(ymax)*0.15 + 1e-6;
+            if (pad == 0) pad = std::fabs(ymax) * 0.15 + 1.e-6;
             ymin -= pad;  ymax += pad;
 
-            /* keep axis histogram alive ------------------------------------- */
-            TH1F *frame = new TH1F(Form("fr_%s",yLab),
-                                   ";Variant index; ", NV+2, 0.5, NV+1.5);
-            frame->SetDirectory(nullptr);
-            frame->SetMinimum(ymin);  frame->SetMaximum(ymax);
-            frame->GetYaxis()->SetTitle(yLab);
-            frame->GetXaxis()->SetLabelSize(0);          // hide numbers – we’ll add names
-            frame->Draw("AXIS");
-            guard.push_back(frame);
+            /* ---- axis frame (kept by the pad, no manual delete) ---------- */
+            TH1F* fr = new TH1F(Form("fr_%s", yLab),
+                                ";Variant index; ", NV+2, 0.5, NV + 1.5);
+            fr->SetDirectory(nullptr);
+            fr->SetMinimum(ymin);  fr->SetMaximum(ymax);
+            fr->GetYaxis()->SetTitle(yLab);
+            fr->GetXaxis()->SetLabelSize(0);                 // hide numbers
+            fr->Draw("AXIS");
 
+            /* dashed 0‑line for intercept panel ---------------------------- */
             if (wantA) {
-              const double xMin = frame->GetXaxis()->GetXmin();
-              const double xMax = frame->GetXaxis()->GetXmax();
-              TLine* l0 = new TLine(xMin, 0.0, xMax, 0.0);
-              l0->SetLineStyle(2); l0->SetLineWidth(2); l0->SetLineColor(kGray+2);
-              l0->Draw(); guard.push_back(l0);
+                TLine* l0 = new TLine(fr->GetXaxis()->GetXmin(), 0.0,
+                                      fr->GetXaxis()->GetXmax(), 0.0);
+                l0->SetLineStyle(2); l0->SetLineWidth(2); l0->SetLineColor(kGray+2);
+                l0->Draw();
             }
 
-            g->Draw("P SAME");
-
-            /* variant labels below the x‑axis -------------------------------- */
-            TLatex lx; lx.SetTextFont(42); lx.SetTextSize(0.035);
-            lx.SetTextAlign(22);                         // centred
+            /* ---- draw a one‑point TGraph per coefficient ----------------- */
+            std::vector<TGraph*> keepAlive;      // local, *no* manual delete
             for (int i = 0; i < NV; ++i)
-                lx.DrawLatex( x[i], ymin - 0.07*(ymax - ymin), coeffs[i].name );
+            {
+                const double y = wantA ? coeffs[i].a : coeffs[i].b;
+                double ex = 0., ey = 0.;
+
+                auto* g = new TGraphErrors(1, &x[i], &y, &ex, &ey);
+                g->SetMarkerStyle(coeffs[i].mk);
+                g->SetMarkerColor(coeffs[i].col);
+                g->SetMarkerSize (1.2);
+                g->Draw("P SAME");
+
+                keepAlive.push_back(g);          // survive until pad/canvas dies
+            }
+
+            /* ---- x‑axis labels under the frame --------------------------- */
+            TLatex lx; lx.SetTextFont(42); lx.SetTextSize(0.035); lx.SetTextAlign(22);
+            for (int i = 0; i < NV; ++i)
+                lx.DrawLatex(x[i], ymin - 0.07*(ymax - ymin), coeffs[i].name);
         };
 
-        drawPad( (TPad*)cAB.cd(1), gA, "Intercept  a  [rad]", true);
-        drawPad( (TPad*)cAB.cd(2), gB, "Slope  b  [rad]", false);
+        /* ---------- build the two‑pad canvas ----------------------------- */
+        TCanvas cAB("cAB", "Fit‑parameter summary", 900, 700);
+        cAB.Divide(1, 2, 0, 0);
 
-        /* ---------- 5. save ------------------------------------------------ */
+        drawPad( static_cast<TPad*>(cAB.cd(1)), "Intercept  a  [rad]", true  );
+        drawPad( static_cast<TPad*>(cAB.cd(2)), "Slope  b  [rad]"    , false );
+
+        /* ---------- save -------------------------------------------------- */
         TString outAB = TString(outDir) + "/DeltaPhi5_a_b_Summary.png";
         cAB.SaveAs(outAB);
-        std::cout << "[Δφ-5:ab] wrote coefficient summary  →  " << outAB << '\n';
+        std::cout << "[Δφ‑5:ab] wrote coefficient summary  →  "
+                  << outAB << '\n';
     }
     catch (const std::exception& e)
     {
-        std::cerr << "\n[Δφ-5:ab] FATAL: " << e.what() << "\n";
-        throw;                                // stop execution upstream
+        std::cerr << "\n[Δφ‑5:ab] FATAL: " << e.what() << "\n";
+        throw;                                // let caller decide what to do
     }
+
 
 
   for(auto* o:guard) delete o;
@@ -4590,18 +4580,38 @@ void auditResidual(TH3F*  h,
   res->SetMinimum(0.0);
   res->SetMaximum(res->GetMaximum());      // just to freeze the range
 
-/* ---------------------------------------------------------------------- */
-/* 2. 2‑D colour map (single histogram)                                   */
-/* ---------------------------------------------------------------------- */
-  TCanvas c2(Form("c_res_%s",tag),"",1000,850);
-  c2.SetLeftMargin(0.18); c2.SetBottomMargin(0.16); c2.SetRightMargin(0.12);
+    /* ---------------------------------------------------------------------- */
+    /* 2. 2‑D colour map (single histogram)                                   */
+    /* ---------------------------------------------------------------------- */
 
-  gStyle->SetPalette(kBird);     gStyle->SetNumberContours(255);
+    /* --- NEW: remember the maximum of the UNCORRECTED plot ---------------- */
+    static double uncorrZmax = -1.;      // sentinel – will stay ≥ 0 once filled
+    const bool   isUnc       = (std::strcmp(tag,"UNCORRECTED")==0);
+    const bool   isCor       = (std::strcmp(tag,"CORRECTED"  )==0);
 
-  res->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
-  res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
-  res->GetZaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
-  res->Draw("COLZ");  c2.Update();
+    /* keep the histogram self–contained, but postpone fixing the upper limit
+       until we know the UNCORRECTED reference value                           */
+    if (isUnc)
+      uncorrZmax = res->GetMaximum();          // remember for later calls
+
+    /* always use the UNCORRECTED range once it is known -------------------- */
+    const double zMax =
+      (uncorrZmax>0 ? uncorrZmax             // already defined → use it
+                    : res->GetMaximum());    // first call & happens to be COR
+
+    res->SetMinimum(0.0);
+    res->SetMaximum(zMax);                    // <-- unified palette range
+
+    /* ---------------------------------------------------------------------- */
+    TCanvas c2(Form("c_res_%s",tag),"",1000,850);
+    c2.SetLeftMargin(0.18); c2.SetBottomMargin(0.16); c2.SetRightMargin(0.12);
+
+    gStyle->SetPalette(kBird);     gStyle->SetNumberContours(255);
+
+    res->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+    res->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
+    res->GetZaxis()->SetTitle("|#DeltaE| / #LT E #GT  [%]");
+    res->Draw("COLZ");
 
   /* palette cosmetics */
   if (auto* pal = dynamic_cast<TPaletteAxis*>(
@@ -5074,9 +5084,6 @@ void makeLegoGifHD(TH3          *h1,                /* mandatory          */
     encodeGif(pngDir, base + ".gif");
     Printf("  ↪  %s.gif", base.Data());
  }
- 
-
-
 
 
 
@@ -5088,7 +5095,7 @@ void PDCanalysis()
     
   gStyle->SetOptStat(0);
     //_withVirgilesChange
-  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_withUpdatedPhiTiltCorr.root";
+  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_withoutPhiTiltCorr.root";
 
   // 2) Open input
   std::cout << "[INFO] Opening file: " << inFile << "\n";

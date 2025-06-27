@@ -650,7 +650,7 @@ generate_dst_lists() {
         echo "[WARNING] Could not find final .list file at: $list_path"
         echo "No DST lists will be created."
     else
-        CreateDstList.pl --build ana468 --cdb 2024p012_v001 DST_CALO_run2pp --list "$list_path"
+        CreateDstList.pl --tag ana468_2024p012_v001 DST_CALO_run2pp --list "$list_path"
         echo "DST lists generated under ${workplace}/../dst_list"
     fi
 
@@ -759,6 +759,7 @@ EOF
         echo "========================================"
         echo "[INFO] Using pre-generated bad segments file: $segments_file"
     fi
+
     echo "========================================"
     echo "[INFO] Problematic segments file is: $segments_file"
     if [[ ! -f "$segments_file" ]]; then
@@ -773,13 +774,18 @@ EOF
         [[ -z "$line" ]] && continue
 
         echo "[DEBUG] Processing segment line: '$line'"
+        # Each line is expected to be of the form "00046010-00003".
         run_part="${line%-*}"   # e.g. 00046010
         seg_part="${line#*-}"    # e.g. 00003
         echo "[DEBUG] Extracted run number: '$run_part'"
         echo "[DEBUG] Extracted segment number: '$seg_part'"
+
+        # Determine the corresponding DST .list file to modify.
         listfile="${workplace}/../dst_list/DST_CALO_run2pp-${run_part}.list"
         echo "[DEBUG] Looking for DST list file: $listfile"
         if [[ -f "$listfile" ]]; then
+            # The DST list lines are expected to contain something like:
+            # DST_CALO_run2pp_ana468_2024p012_v001-00046010-00003.root
             pattern="${run_part}-${seg_part}.root"
             echo "[DEBUG] Searching for pattern '$pattern' in $listfile"
             lines_to_remove=$(grep "$pattern" "$listfile")
@@ -801,8 +807,13 @@ EOF
     echo "========================================"
 }
 
+
+# After DST .list files are generated, check which runs successfully produced
+# run-specific .list files (DST_CALO_run2pp-xxxx.list).
+# Summarize success/fail in text files.
 apply_createDstList_cut() {
     echo "Collecting CreateDST File List success/failure for the main scenario..."
+
     if $DONT_GENERATE_FILELISTS; then
         echo "[INFO]: 'dontGenerateFileLists' was provided, so no DST creation was done for main scenario."
         export total_runs_createDst_success=0
@@ -811,6 +822,7 @@ apply_createDstList_cut() {
         export total_runs_after_createDst=0
         return
     fi
+
     final_stage4_file="FileLists/Full_ppGoldenRunList_Version1.txt"
     if [[ ! -f "$final_stage4_file" ]]; then
         echo "[ERROR]: Cannot find final stage file: $final_stage4_file"
@@ -820,28 +832,35 @@ apply_createDstList_cut() {
         export total_runs_after_createDst=0
         return
     fi
+
     success_file="list/list_runnumber_createDstSuccess.txt"
     failure_file="list/list_runnumber_createDstFailure.txt"
     > "$success_file"
     > "$failure_file"
+
     mapfile -t final_stage_runs < "$final_stage4_file"
+
     base_path="${workplace}/../dst_list"
     created_run_nums=()
-    for f in "${base_path}/DST_CALO_run2pp-"*.list; do
-        [ -e "$f" ] || continue
+
+    # ------------------------------------------------------------------
+    # allow both DST_CALO_run2pp-xxxx.list and dst_calo_run2pp-xxxx.list
+    # ------------------------------------------------------------------
+    shopt -s nullglob               # avoid literal pattern if nothing matches
+    for f in "${base_path}"/DST_CALO_run2pp-*.list "${base_path}"/dst_calo_run2pp-*.list; do
         bn=$(basename "$f" .list)
-        runnum_str=${bn#DST_CALO_run2pp-}
-        if [[ "$runnum_str" =~ ^0*([0-9]+)$ ]]; then
-            runnum=${BASH_REMATCH[1]}
-            created_run_nums+=("$runnum")
-        fi
+        runnum_str=${bn#*-}         # strip prefix up to first '-'
+        [[ $runnum_str =~ ^0*([0-9]+)$ ]] && created_run_nums+=("${BASH_REMATCH[1]}")
     done
+    shopt -u nullglob
+
     total_runs_createDst_success=0
     runs_dropped_createDst=0
     declare -A in_created
     for rn in "${created_run_nums[@]}"; do
         in_created["$rn"]=1
     done
+
     for runnumber in "${final_stage_runs[@]}"; do
         if [[ -n "${in_created[$runnumber]}" ]]; then
             echo "$runnumber" >> "$success_file"
@@ -851,12 +870,14 @@ apply_createDstList_cut() {
             (( runs_dropped_createDst++ ))
         fi
     done
+
     echo "Runs with successful .list creation: $total_runs_createDst_success"
     echo "Runs with no .list file: $runs_dropped_createDst"
     echo "List of runs that failed:  $failure_file"
     echo "List of runs that succeeded: $success_file"
     echo "----------------------------------------"
 
+    # Summation of events for runs that succeeded
     actual_events_after_createDst=$(get_actual_events_from_evt "$success_file")
     total_runs_after_createDst=$total_runs_createDst_success
 
@@ -866,6 +887,8 @@ apply_createDstList_cut() {
     export runs_dropped_createDst
     export actual_events_after_createDst
     export total_runs_after_createDst
+
+    # If noRunNumberLimit => do the same for the run≥47289 scenario
     if $NO_RUNNUMBER_LIMIT; then
         echo "Collecting CreateDST File List success/failure for the '≥47289' scenario..."
         final_stage4_file_ge47289="FileLists/Full_ppGoldenRunList_ge47289_Version1.txt"
@@ -894,6 +917,7 @@ apply_createDstList_cut() {
                     created_run_nums_ge47289+=("$runnum")
                 fi
             done
+
             total_runs_createDst_success_ge47289=0
             runs_dropped_createDst_ge47289=0
             declare -A in_created_ge47289
@@ -910,14 +934,18 @@ apply_createDstList_cut() {
                     (( runs_dropped_createDst_ge47289++ ))
                 fi
             done
+
             echo "≥47289 scenario: runs with successful .list creation: $total_runs_createDst_success_ge47289"
             echo "≥47289 scenario: runs with no .list file: $runs_dropped_createDst_ge47289"
             echo "≥47289 scenario: List of runs that failed:  $failure_file_ge47289"
             echo "≥47289 scenario: List of runs that succeeded: $success_file_ge47289"
             echo "----------------------------------------"
+
             actual_events_after_createDst_ge47289=$(get_actual_events_from_evt "$success_file_ge47289")
             total_runs_after_createDst_ge47289=$total_runs_createDst_success_ge47289
+
             cp "$success_file_ge47289" "FileLists/Full_ppGoldenRunList_ge47289_Version1_DSTsuccess.txt"
+
             export total_runs_createDst_success_ge47289
             export runs_dropped_createDst_ge47289
             export actual_events_after_createDst_ge47289
@@ -1266,6 +1294,10 @@ EOCOMPARISON
     fi
 }
 
+########################################
+# MAIN EXECUTION FLOW
+########################################
+
 echo -e "${BOLD}${GREEN}========================================${RESET}"
 echo -e "${BOLD}${GREEN}Starting the Golden Run List Generation${RESET}"
 echo -e "${BOLD}${GREEN}========================================${RESET}"
@@ -1291,6 +1323,10 @@ clean_old_dst_lists
 
 if ! $DONT_GENERATE_FILELISTS; then
     generate_dst_lists
+    # ------------------------------------------------------------------------
+    # NEW STEP: remove_problematic_segments, if 'removeBadSegments' was set
+    # This must happen AFTER we generate the .list files, or there is nothing to edit!
+    # ------------------------------------------------------------------------
     remove_problematic_segments
 fi
 

@@ -14,6 +14,13 @@
 #############################
 # 0) CONFIGURATION
 #############################
+CLR_R='\033[0m'   # reset
+CLR_B='\033[1m'   # bold
+CLR_G='\033[1;32m'
+CLR_Y='\033[1;33m'
+CLR_C='\033[1;36m'
+CLR_Rd='\033[1;31m'
+
 
 # Path to your Fun4All macro:
 MACRO_PATH="/sphenix/u/patsfan753/scratch/PDCrun24pp/macros/Fun4All_PDC.C"
@@ -51,15 +58,19 @@ WHAT="$2"  # "both", "noSim", or empty
 usage()
 {
   echo "Usage examples:"
+  echo "  $0 dataOnly splitGoldenRunList      # create goldenRuns_segment*.txt"
+  echo "  $0 dataOnly condor round <N>        # submit runs listed in segment N"
   echo "  $0 local both"
   echo "  $0 local noSim"
   echo "  $0 localSimTest"
   echo "  $0 noSim"
   echo "  $0 simOnly"
   echo "  $0 submitTestSimCondor"
+  echo "  $0 dataOnly  local|condorTest|condorAll|condorFirstTen"
   echo "  $0                      (submits both data & sim by default)"
   exit 1
 }
+
 
 echo "===================================================================="
 echo "[DEBUG] Starting PositionDependentCorrect_Condor_submit.sh"
@@ -75,281 +86,256 @@ echo "[DEBUG] LOCAL_NEVENTS    : $LOCAL_NEVENTS"
 echo "===================================================================="
 echo
 
-#############################
-# 2) LOCAL MODE FUNCTIONS
-#############################
+###############################################################################
+#   dataOnly splitGoldenRunList
+#        • Reads   $GOLDEN_RUN_LIST   (one run number / line)
+#        • Computes how many Condor jobs each run would generate
+#          (#jobs  =  ceil(  Nfiles / CHUNK_SIZE_DATA  ))
+#        • Writes successive segments
+#                 goldenRuns_segment1.txt, goldenRuns_segment2.txt, …
+#          so that       Σ #jobs   ≤  MAX_JOBS_DATA      in each file
+#        • Output location =  $GOLDEN_SPLIT_DIR
+###############################################################################
 
-##
-# Merge all data lists from DST_LIST_DIR => /tmp/local_data_merged.list
-##
-merge_files_for_local_data() {
-  echo "-----------------------------------------------------"
-  echo "[DEBUG] In merge_files_for_local_data()"
-  echo "[DEBUG] Checking DST_LIST_DIR contents: $DST_LIST_DIR"
-  ls -l "$DST_LIST_DIR"
-  echo "-----------------------------------------------------"
+GOLDEN_SPLIT_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp"
+GOLDEN_RUN_LIST="${GOLDEN_SPLIT_DIR}/Final_RunNumbers_After_All_Cuts.txt"
+GOLDEN_SEGMENT_PREFIX="${GOLDEN_SPLIT_DIR}/goldenRuns_segment"
 
-  local merged="/tmp/local_data_merged.list"
-  echo "[DEBUG] Creating/overwriting $merged"
-  rm -f "$merged"
-  touch "$merged"
+split_golden_run_list()(
+    set -e  # <- subshell only
 
-  local -a listFiles
-  # gather all that match 'dst_calo_run2pp-*.list'
-  listFiles=( $(ls -1 "${DST_LIST_DIR}"/dst_calo_run2pp-*.list 2>/dev/null) )
-  echo "[DEBUG] Found ${#listFiles[@]} data .list files"
+    [[ -f "$GOLDEN_RUN_LIST" ]] ||
+        { echo -e "${CLR_Rd}[ERROR]${CLR_R} Golden‑run list not found → $GOLDEN_RUN_LIST"; return 1; }
 
-  if [ ${#listFiles[@]} -eq 0 ]; then
-    echo "[ERROR] No data .list files found matching dst_calo_run2pp-* in $DST_LIST_DIR"
-    return 1
-  fi
+    echo -e "${CLR_B}────────────────────────────────────────────────────────────────────────────"
+    echo -e "          GOLDEN‑RUN SPLITTER – VERBOSE DIAGNOSTICS"
+    echo -e "          Source file  : ${CLR_C}$(basename "$GOLDEN_RUN_LIST")${CLR_R}"
+    echo -e "          Target files : ${CLR_C}$(basename "${GOLDEN_SEGMENT_PREFIX}")N.txt${CLR_R}"
+    echo -e "          Parameters   : CHUNK_SIZE_DATA=${CLR_Y}${CHUNK_SIZE_DATA}${CLR_R},  "\
+            "MAX_JOBS_DATA=${CLR_Y}${MAX_JOBS_DATA}${CLR_R}"
+    echo -e "────────────────────────────────────────────────────────────────────────────${CLR_R}"
 
-  echo "[INFO] Merging all data .list files => $merged"
-  for oneList in "${listFiles[@]}"; do
-    echo "   -> Adding from: $oneList"
-    cat "$oneList" >> "$merged"
-  done
+    # ───────────────— global counters ──────────────────────────────────────
+    local segment_no=1
+    local jobs_in_segment=0  runs_in_segment=0
+    local tot_runs=0  tot_jobs=0  tot_files=0
+    local current_file="${GOLDEN_SEGMENT_PREFIX}${segment_no}.txt"
+    : > "$current_file"
 
-  echo "[DEBUG] Combined data line count => $(wc -l < "$merged")"
-  echo "$merged"
-}
+    # keep stats per finished segment
+    declare -a segJobs  segRuns  segFiles
 
-##
-# Merge all SIM DST lines => /tmp/local_sim_dst_merged.list
-# Merge all SIM hits lines => /tmp/local_sim_hits_merged.list
-##
-merge_files_for_local_sim() {
-  echo "-----------------------------------------------------"
-  echo "[DEBUG] In merge_files_for_local_sim()"
-  echo "[DEBUG] Checking SIM_LIST_DIR: $SIM_LIST_DIR"
-  ls -l "$SIM_LIST_DIR"
-  echo "-----------------------------------------------------"
+    # ---------- helper: flush current segment and start a new one ----------
+    flush_segment() {
+        segJobs[segment_no]=$jobs_in_segment
+        segRuns[segment_no]=$runs_in_segment
+        segFiles[segment_no]=$files_in_segment
 
-  local mergedDst="/tmp/local_sim_dst_merged.list"
-  local mergedHits="/tmp/local_sim_hits_merged.list"
+        printf "${CLR_G}[SEGMENT %2d]${CLR_R} %-25s  runs=%3d  jobs=%5d  files=%6d\n" \
+               "$segment_no" "$(basename "$current_file")" \
+               "$runs_in_segment" "$jobs_in_segment" "$files_in_segment"
 
-  echo "[DEBUG] Creating/overwriting $mergedDst and $mergedHits"
-  rm -f "$mergedDst" "$mergedHits"
-  touch "$mergedDst" "$mergedHits"
+        (( ++segment_no ))
+        current_file="${GOLDEN_SEGMENT_PREFIX}${segment_no}.txt"
+        : > "$current_file"
+        jobs_in_segment=0
+        runs_in_segment=0
+        files_in_segment=0
+    }
 
-  # check if $SIM_DST_LIST exists
-  if [ ! -f "$SIM_DST_LIST" ]; then
-    echo "[ERROR] SIM_DST_LIST not found: $SIM_DST_LIST"
-    return 1
-  fi
+    # header for run‑level table
+    printf "${CLR_B}%-10s│%10s│%10s│%10s│%9s│%10s${CLR_R}\n" \
+           "Run" "Files" "Jobs(run)" "Seg#Now" "J(seg)" "J(seg)%"
+    printf "──────────┼──────────┼──────────┼──────────┼─────────┼──────────\n"
 
-  # check if $SIM_HITS_LIST exists
-  if [ ! -f "$SIM_HITS_LIST" ]; then
-    echo "[ERROR] SIM_HITS_LIST not found: $SIM_HITS_LIST"
-    return 1
-  fi
+    # ───────────────— MAIN LOOP OVER RUN NUMBERS ───────────────────────────
+    local files_in_segment=0
+    while IFS= read -r runRaw; do
+        [[ -z "$runRaw" || "$runRaw" =~ ^# ]] && continue
+        local run=$(printf "%08d" "$runRaw")
+        local list_file="${DST_LIST_DIR}/dst_calo_run2pp-${run}.list"
 
-  echo "[INFO] Merging sim DST => $mergedDst  (from $SIM_DST_LIST)"
-  cat "$SIM_DST_LIST" >> "$mergedDst"
+        if [[ ! -f "$list_file" ]]; then
+            echo -e "${CLR_Y}[WARN]${CLR_R} No DST list for run ${run} – skipped"
+            continue
+        fi
 
-  echo "[INFO] Merging sim G4Hits => $mergedHits (from $SIM_HITS_LIST)"
-  cat "$SIM_HITS_LIST" >> "$mergedHits"
+        local nFiles; nFiles=$(wc -l < "$list_file")
+        (( nFiles )) || { echo -e "${CLR_Y}[WARN]${CLR_R} Empty list for run ${run} – skipped"; continue; }
 
-  echo "[DEBUG] Final line count => DST: $(wc -l < "$mergedDst"), HITS: $(wc -l < "$mergedHits")"
-  # Return "dstFile hitsFile"
-  echo "$mergedDst $mergedHits"
-}
+        local nJobs=$(( (nFiles + CHUNK_SIZE_DATA - 1) / CHUNK_SIZE_DATA ))
 
-##
-# Local run for data => merges everything, runs 10k events
-##
-local_run_data() {
-  echo "######################################################################"
-  echo "[INFO] local_run_data => up to $LOCAL_NEVENTS events"
+        # overflow? → close segment first
+        if (( jobs_in_segment + nJobs > MAX_JOBS_DATA )); then
+            flush_segment
+        fi
 
-  local dataMerged
-  dataMerged="$(merge_files_for_local_data)"
-  if [ -z "$dataMerged" ] || [ ! -s "$dataMerged" ]; then
-    echo "[ERROR] Merged data .list is empty => cannot proceed"
-    exit 1
-  fi
+        # append run to current segment file
+        echo "$run" >> "$current_file"
 
-  local emptyFile="/tmp/local_empty_hits.list"
-  rm -f "$emptyFile"
-  touch "$emptyFile"
-  echo "[DEBUG] Using empty hits file => $emptyFile"
+        # update counters
+        (( jobs_in_segment += nJobs ))
+        (( runs_in_segment += 1 ))
+        (( files_in_segment += nFiles ))
+        (( tot_jobs += nJobs ))
+        (( tot_runs += 1 ))
+        (( tot_files += nFiles ))
 
-  echo "[INFO] Now calling root for data => will stop after $LOCAL_NEVENTS events"
-  outFile="$PWD/output_PositionDep_localDataTest.root"
-  root -b -q -l "${MACRO_PATH}(${LOCAL_NEVENTS}, \
-   \"${dataMerged}\", \"${emptyFile}\", \"${outFile}\")"
-  local rc=$?
-  if [ $rc -ne 0 ]; then
-    echo "[ERROR] local_run_data ended with code=$rc"
-    exit $rc
-  fi
-  echo "[INFO] local_run_data completed OK."
-}
+        # live line
+        local pct=$(( 100*jobs_in_segment / MAX_JOBS_DATA ))
+        printf "%-10s│%10d│%10d│%10d│%9d│%9s%%\n" \
+               "$run" "$nFiles" "$nJobs" "$segment_no" "$jobs_in_segment" "$pct"
+    done < "$GOLDEN_RUN_LIST"
 
-##
-# Local run for simulation => merges everything, runs 10k events
-##
-local_run_sim() {
-  echo "######################################################################"
-  echo "[INFO] local_run_sim => up to $LOCAL_NEVENTS events"
+    # flush last segment
+    flush_segment
 
-  local mergedSim
-  mergedSim="$(merge_files_for_local_sim)"
-  if [ -z "$mergedSim" ]; then
-    echo "[ERROR] Merging sim DST/HITS returned empty => cannot proceed"
-    exit 1
-  fi
+    # ───────────────— SUMMARY ──────────────────────────────────────────────
+    echo -e "${CLR_B}\n────────────────────────  SUMMARY  ────────────────────────${CLR_R}"
+    printf "Segments produced : %s\n" "${#segJobs[@]}"
+    printf "Total runs        : %s\n" "$tot_runs"
+    printf "Total DST files   : %s\n" "$tot_files"
+    printf "Total Condor jobs : %s  (theoretical)\n" "$tot_jobs"
+    echo "-----------------------------------------------------------"
+    printf "%-10s | %-5s jobs | %-5s runs | %-6s files\n" "Segment" "≈" "≈" "≈"
+    echo "-----------------------------------------------------------"
+    for s in "${!segJobs[@]}"; do
+        printf "segment%-3d | %7d | %7d | %9d\n" \
+               "$s" "${segJobs[$s]}" "${segRuns[$s]}" "${segFiles[$s]}"
+    done
+    echo -e "${CLR_G}[OK]${CLR_R} Golden‑run list split complete → files in  ${CLR_C}$GOLDEN_SPLIT_DIR${CLR_R}"
+)
 
-  local simDstFile simHitsFile
-  simDstFile="$(echo "$mergedSim" | awk '{print $1}')"
-  simHitsFile="$(echo "$mergedSim" | awk '{print $2}')"
+##############################################################################
+# 2)  DATA‑SIDE CONDOR SUBMISSION (full‑run, chunked)
+##############################################################################
 
-  if [ ! -s "$simDstFile" ] || [ ! -s "$simHitsFile" ]; then
-    echo "[ERROR] Merged sim DST/HITS list is empty => cannot proceed"
-    exit 1
-  fi
+# ---------- user‑tunable constants ----------
+CHUNK_SIZE_DATA=10          # N  – files per Condor job
+MAX_JOBS_DATA=10000         # Q  – global cap for “condor firstTen”
+# ---------------------------------------------------------------------------
 
-  echo "[INFO] Now calling root for sim => will stop after $LOCAL_NEVENTS events"
-  root -b -q -l "${MACRO_PATH}(${LOCAL_NEVENTS}, \"${simDstFile}\", \"${simHitsFile}\")"
-  local rc=$?
-  if [ $rc -ne 0 ]; then
-    echo "[ERROR] local_run_sim ended with code=$rc"
-    exit $rc
-  fi
-  echo "[INFO] local_run_sim completed OK."
-}
 
-##
-# localSimTest => read only the *first line* from each sim list
-#                 process up to 10k events
-##
-local_sim_test_first_pair() {
-  echo "######################################################################"
-  echo "[INFO] localSimTest => *only* the first line from each sim list"
-
-  # check if sim lists exist
-  if [ ! -f "$SIM_DST_LIST" ]; then
-    echo "[ERROR] SIM_DST_LIST not found => $SIM_DST_LIST"
-    exit 1
-  fi
-  if [ ! -f "$SIM_HITS_LIST" ]; then
-    echo "[ERROR] SIM_HITS_LIST not found => $SIM_HITS_LIST"
-    exit 1
-  fi
-
-  mapfile -t simDstAll < "$SIM_DST_LIST"
-  mapfile -t simHitsAll < "$SIM_HITS_LIST"
-
-  local totalDst=${#simDstAll[@]}
-  local totalHits=${#simHitsAll[@]}
-  local maxN=$(( totalDst < totalHits ? totalDst : totalHits ))
-
-  if [ "$maxN" -eq 0 ]; then
-    echo "[ERROR] No lines found in either sim DST list or hits list => cannot proceed"
-    exit 1
-  fi
-
-  # just pick the first line from each
-  local dstFile="${simDstAll[0]}"
-  local hitFile="${simHitsAll[0]}"
-  echo "[INFO] Using first pair:"
-  echo "  DST => $dstFile"
-  echo "  HIT => $hitFile"
-
-  # write them to /tmp
-  local tmpDst="/tmp/localSimTest_dst_firstpair.list"
-  local tmpHits="/tmp/localSimTest_hits_firstpair.list"
-  echo "$dstFile"  > "$tmpDst"
-  echo "$hitFile" > "$tmpHits"
-
-  echo "[INFO] Will run up to $LOCAL_NEVENTS events"
-  outFile="$PWD/output_PositionDep_localSimTest.root"
-  root -b -q -l "${MACRO_PATH}(${LOCAL_NEVENTS}, \
-   \"${tmpDst}\", \"${tmpHits}\", \"${outFile}\")"
-  local rc=$?
-  if [ $rc -ne 0 ]; then
-    echo "[ERROR] localSimTest ended with code=$rc"
-    exit $rc
-  fi
-  echo "[INFO] localSimTest (first pair) completed OK."
-}
-
-#############################
-# 3) CONDOR SUBMISSION FOR ALL EVENTS
-#############################
-
-##
-# submit_data_condor => Submits condor jobs for data (ALL events).
-##
 submit_data_condor() {
-  echo "######################################################################"
-  echo "[INFO] Submitting Condor jobs => data"
-  mkdir -p "$LOG_DIR"/{stdout,error} "$CONDOR_LISTFILES_DIR"
+    # Signature:
+    #   submit_data_condor  <runMode>  <limitSwitch>  [<runListFile>]
+    #
+    #     runMode       :  condor | condorTest
+    #     limitSwitch   :  "" | firstTen      (ignored for condorTest)
+    #     runListFile   :  optional flat file with run numbers (one / line);
+    #                     if supplied we *only* submit the runs listed there.
 
-  # find data .list files => e.g. "dst_calo_run2pp-00047289.list"
-  local listFiles
-  listFiles=( $(ls -1 "${DST_LIST_DIR}"/dst_calo_run2pp-*.list 2>/dev/null) )
-  echo "[DEBUG] Found ${#listFiles[@]} data run-lists in $DST_LIST_DIR"
+    local runMode="${1:-condor}"
+    local limitSwitch="${2:-}"
+    local runListFile="${3:-}"        # ← NEW
+    local jobLimit=0
 
-  if [ ${#listFiles[@]} -eq 0 ]; then
-    echo "[ERROR] No data .list found => cannot submit"
-    return
-  fi
+    # ----------------  fancy verbosity flag --------------------------------
+    local VERBOSE=0
+    [[ "$runMode" == "condorTest" || "$limitSwitch" == "firstTen" ]] && VERBOSE=1
+    vecho() { (( VERBOSE )) && echo "$@"; }
 
-  for dlist in "${listFiles[@]}"; do
-    local runBase
-    runBase="$(basename "$dlist")"
-    local runNum="${runBase#dst_calo_run2pp-}"   # e.g. 00047289.list
-    runNum="${runNum%.*}"                       # e.g. 00047289
+    # ----------------  global‑cap logic (old behaviour unchanged) ----------
+    [[ "$runMode" == "condor" && "$limitSwitch" == "firstTen" ]] && jobLimit=$MAX_JOBS_DATA
 
-    mapfile -t allfiles < "$dlist"
-    local total=${#allfiles[@]}
-    if [ "$total" -eq 0 ]; then
-      echo "[WARNING] $dlist is empty => skipping"
-      continue
+    mkdir -p "$LOG_DIR"/{stdout,error} "$CONDOR_LISTFILES_DIR"
+
+    # ----------------  (1) build the array   listFiles[]  -------------------
+    declare -a listFiles
+
+    if [[ -n "$runListFile" ]]; then
+        # ---------- ROUND N MODE -------------------------------------------
+        [[ -f "$runListFile" ]] || {
+            echo "[ERROR] Supplied run‑list file not found → $runListFile"; return 1; }
+        vecho "[VERBOSE] Using external run‑list file → $(basename "$runListFile")"
+
+        while IFS= read -r rn; do
+            [[ -z "$rn" || "$rn" =~ ^# ]] && continue
+            rn=$(printf "%08d" "$rn")      # normalise to 8 digits
+            lf="${DST_LIST_DIR}/dst_calo_run2pp-${rn}.list"
+            if [[ -f "$lf" ]]; then
+                listFiles+=( "$lf" )
+            else
+                echo "[WARN] Missing DST list for run ${rn} (skipped)"
+            fi
+        done < "$runListFile"
+
+    else
+        # ---------- ORIGINAL DIRECTORY SCAN --------------------------------
+        mapfile -t listFiles < <(ls -1 "${DST_LIST_DIR}"/dst_calo_run2pp-*.list 2>/dev/null)
     fi
 
-    echo "[INFO] Data run=$runNum => $total lines"
+    (( ${#listFiles[@]} )) || { echo "[ERROR] No run lists selected → aborting."; return 1; }
 
-    local chunkIndex=0
-    local i=0
-    local chunkListOfLists="${CONDOR_LISTFILES_DIR}/data_run_${runNum}_chunks.txt"
-    > "$chunkListOfLists"
+    # ----------------  (2) info banner -------------------------------------
+    vecho "[VERBOSE] Total run‑lists selected      : ${#listFiles[@]}"
+    vecho "[VERBOSE] CHUNK_SIZE_DATA               : $CHUNK_SIZE_DATA"
+    (( jobLimit )) && vecho "[VERBOSE] Global job cap (Q)        : $jobLimit"
 
-    while [ $i -lt $total ]; do
-      chunkIndex=$(( chunkIndex + 1 ))
-      local chunkFile="${CONDOR_LISTFILES_DIR}/data_run_${runNum}_chunk${chunkIndex}.list"
-      > "$chunkFile"
+    # ----------------  (3) loop over runs ----------------------------------
+    local submitted=0  runCounter=0
 
-      for (( cc=0; cc<FILES_PER_CHUNK && i<total; cc++ )); do
-        echo "${allfiles[$i]}" >> "$chunkFile"
-        i=$(( i + 1 ))
-      done
+    for dlist in "${listFiles[@]}"; do
+        ((++runCounter))
+        local runBase runNum
+        runBase="$(basename "$dlist")"
+        runNum="${runBase#dst_calo_run2pp-}"
+        runNum="${runNum%.*}"
 
-      echo "$chunkFile" >> "$chunkListOfLists"
-      echo "[DEBUG] Created chunk => $chunkFile"
-    done
+        mapfile -t allfiles < "$dlist"
+        local total=${#allfiles[@]}
+        (( total )) || { echo "[WARN] $runBase is empty – skipping"; continue; }
+        vecho "[VERBOSE] ---- run $runNum  (files=$total)"
 
-    # each job => process all events => nevents=0
-    cat > PositionDependentCorrect_data_${runNum}.sub <<EOL
-universe                = vanilla
-executable              = PositionDependentCorrect_Condor.sh
-# Args: <runNum> <listFileData> <"data"|"sim"> <clusterID> <nEvents> [<listFileHits>]
-arguments               = ${runNum} \$(filename) data \$(Cluster) 0
-log                     = /sphenix/user/patsfan753/PDCrun24pp/log/job.\$(Cluster).\$(Process).log
-output                  = /sphenix/user/patsfan753/PDCrun24pp/stdout/job.\$(Cluster).\$(Process).out
-error                   = /sphenix/user/patsfan753/PDCrun24pp/error/job.\$(Cluster).\$(Process).err
-request_memory          = 1000MB
-queue filename from ${chunkListOfLists}
+        # --- split the file into   CHUNK_SIZE_DATA‑line   parts -------------
+        rm -f "${CONDOR_LISTFILES_DIR}/run${runNum}_chunk_"* 2>/dev/null || true
+        split -l "$CHUNK_SIZE_DATA" -d -a 3 "$dlist" "${CONDOR_LISTFILES_DIR}/run${runNum}_chunk_"
+
+        mapfile -t chunks < <(ls "${CONDOR_LISTFILES_DIR}/run${runNum}_chunk_"* 2>/dev/null)
+        local nChunks=${#chunks[@]}
+        (( nChunks )) || { echo "[ERROR] split produced zero chunks for run $runNum"; return 2; }
+
+        # --- global‑cap guard ----------------------------------------------
+        if (( jobLimit && submitted + nChunks > jobLimit )); then
+            echo "[INFO] Adding run $runNum would exceed cap ($jobLimit) – stop."
+            break
+        fi
+
+        # --- create one .sub per run (atomic‑run rule) ----------------------
+        local subFile="PositionDependentCorrect_data_${runNum}.sub"
+        cat > "$subFile" <<EOL
+universe      = vanilla
+executable    = PositionDependentCorrect_Condor.sh
+log           = $LOG_DIR/job.\$(Cluster).\$(Process).log
+output        = $LOG_DIR/stdout/job.\$(Cluster).\$(Process).out
+error         = $LOG_DIR/error/job.\$(Cluster).\$(Process).err
+request_memory= 1000MB
+# Args: <runNum> <listFile> <data|sim> <clusterID> <nEvents> <chunkIdx> <hitsList> <destBase>
 EOL
 
-    echo "[INFO] condor_submit => PositionDependentCorrect_data_${runNum}.sub"
-    condor_submit PositionDependentCorrect_data_${runNum}.sub
-  done
+        local chunkIdx=0
+        for chunkFile in "${chunks[@]}"; do
+            ((++chunkIdx))
+            printf 'arguments = %s %s data $(Cluster) 0 %d "" %s\nqueue\n\n' \
+                   "$runNum" "$chunkFile" "$chunkIdx" "$OUTDIR_DATA" >> "$subFile"
+        done
+
+        echo "[INFO] condor_submit → $subFile  (jobs=$nChunks)"
+        condor_submit "$subFile"
+
+        (( submitted += nChunks ))
+
+        [[ "$runMode" == "condorTest" ]] && { vecho "[VERBOSE] condorTest stops after first run"; break; }
+    done
+
+    echo "[INFO] Grand‑total data jobs submitted : $submitted"
+    (( jobLimit )) && echo "[INFO] Global‑cap mode active (cap=$jobLimit)"
 }
 
+
+
 ###############################################################################
-# submit_sim_condor  –  drive Position‑Dependent‑Correction jobs
+# 3) submit_sim_condor  –  drive Position‑Dependent‑Correction jobs
 #                      • “first|second|third|fourthRound|sample|testSubmit”
 #                      • optional integer for sample size
 #                      • execution mode:  condor | local
@@ -508,50 +494,22 @@ EOL
 #############################
 case "$MODE" in
 
-  local)
-    if [ "$WHAT" == "both" ]; then
-      echo "===================================================================="
-      echo "[INFO] local => data + sim, each up to $LOCAL_NEVENTS events"
-      echo "===================================================================="
-      local_run_data
-      local_run_sim
-      exit 0
-
-    elif [ "$WHAT" == "noSim" ]; then
-      echo "===================================================================="
-      echo "[INFO] local => data only, up to $LOCAL_NEVENTS events"
-      echo "===================================================================="
-      local_run_data
-      exit 0
-
-    else
-      echo "[ERROR] For 'local' mode, specify 'both' or 'noSim'"
-      usage
-    fi
-    ;;
-
-  localSimTest)
-    echo "===================================================================="
-    echo "[INFO] localSimTest => first pair only, up to $LOCAL_NEVENTS events"
-    echo "===================================================================="
-    local_sim_test_first_pair
-    exit 0
-    ;;
-
-  noSim)
+  # -----------------------------------------------------------------------
+  #  LEGACY SHORT‑CUTS  (kept for backward‑compatibility)
+  # -----------------------------------------------------------------------
+  noSim)         # data only, unlimited jobs
     echo "===================================================================="
     echo "[INFO] Condor => data only (ALL events)."
     echo "===================================================================="
-    submit_data_condor
+    submit_data_condor          # defaults → runMode=condor limitSwitch=""
     exit 0
     ;;
 
-  simOnly)
-    # The second argument might be "firstRound" or "secondRound"
+  simOnly)       # simulation path is unchanged
     echo "===================================================================="
     echo "[INFO] Condor => sim only. round='$WHAT'"
     echo "===================================================================="
-    submit_sim_condor "$WHAT" "$3"   # <-- pass the optional count!
+    submit_sim_condor "$WHAT" "$3"      # pass optional count
     exit 0
     ;;
 
@@ -563,8 +521,61 @@ case "$MODE" in
     exit 0
     ;;
 
+  # -----------------------------------------------------------------------
+  #  NEW ALIASES / WRAPPERS  (data‑side convenience)
+  # -----------------------------------------------------------------------
+  condor)          # syntax:  condor [firstTen]
+    submit_data_condor "condor" "$WHAT"
+    exit 0
+    ;;
+
+  condorTest)
+    submit_data_condor "condorTest" ""
+    exit 0
+    ;;
+
+  dataOnly)
+      case "$WHAT" in
+            local)
+                echo "===================================================================="
+                echo "[INFO] dataOnly local – running ≤ $LOCAL_NEVENTS events"
+                echo "===================================================================="
+                local_run_data ;;
+
+            condorTest)
+                submit_data_condor "condorTest" "" ;;
+
+            condorFirstTen)
+                submit_data_condor "condor" "firstTen" ;;
+
+            condor)
+                # -----------------------------------------------
+                #   • dataOnly condor           → full scan (old)
+                #   • dataOnly condor round N   → submit segment N
+                # -----------------------------------------------
+                if [[ "$3" == "round" && "$4" =~ ^[0-9]+$ ]]; then
+                    segFile="${GOLDEN_SEGMENT_PREFIX}${4}.txt"
+                    submit_data_condor "condor" "" "$segFile"
+                else
+                    submit_data_condor "condor" ""          # legacy path
+                fi ;;
+
+            splitGoldenRunList)
+                split_golden_run_list ;;
+
+            ""|condorAll)
+                submit_data_condor "condor" "" ;;
+
+            *)
+                echo "[ERROR] Unknown dataOnly sub‑mode “$WHAT”"; usage ;;
+        esac
+        exit 0 ;;
+
+
+  # -----------------------------------------------------------------------
+  #  DEFAULT: submit both data & sim
+  # -----------------------------------------------------------------------
   "")
-    # no arguments => condor => data + sim
     echo "===================================================================="
     echo "[INFO] Condor => BOTH data & sim (ALL events)."
     echo "===================================================================="

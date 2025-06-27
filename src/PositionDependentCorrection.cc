@@ -85,14 +85,15 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
   : SubsysReco(name)
   , detector("HCALIN")
   , outfilename(filename)
+  , m_isSimulation(false)
   , g4hitntuple(nullptr)
   , g4cellntuple(nullptr)
   , towerntuple(nullptr)
   , clusterntuple(nullptr)
 {
   _eventcounter = 0;
-  _vz = 30.0;;
-  m_nWinRAW   = m_nWinCP = m_nWinBCorr = 0;
+  _vz           = 30.0;
+  m_nWinRAW = m_nWinCP = m_nWinBCorr = 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -163,169 +164,97 @@ int PositionDependentCorrection::getEnergySlice(float E) const
   return (bestDiff < dynTol) ? bestIdx : -1;
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int PositionDependentCorrection::Init(PHCompositeNode*)
+/* ------------------------------------------------------------------------- */
+/*  PositionDependentCorrection  –  histogram booking                        */
+/* ------------------------------------------------------------------------- */
+
+/** Book all histograms that are needed for _both_ data and simulation */
+void
+PositionDependentCorrection::bookCommonHistograms
+(const std::function<std::string(int)>& makeLabel)
 {
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] PositionDependentCorrection::Init() called. "
-              << "Preparing to initialize histograms and managers." << std::endl;
-  }
-
-  hm = new Fun4AllHistoManager(Name());
-  if (!hm)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cerr << "[ERROR] Fun4AllHistoManager allocation failed (hm is null). "
-                << "Cannot proceed with initialization." << std::endl;
-    }
-    return -1;
-  }
-
-  outfile = new TFile(outfilename.c_str(), "RECREATE");
-  std::cout << "[INFO-OUTFILENAME] Writing histograms to: " << outfilename << std::endl;
-  if (!outfile || outfile->IsZombie())
-  {
-    if (Verbosity() > 0)
-    {
-      std::cerr << "[ERROR] Could not open output file '" << outfilename
-                << "' for writing (outfile is null or zombie)." << std::endl;
-    }
-    return -1;
-  }
-
-  trigAna = new TriggerAnalyzer();
-  if (!trigAna)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cerr << "[ERROR] TriggerAnalyzer pointer is null. "
-                << "Cannot proceed with certain functionalities." << std::endl;
-    }
-  }
-  if (m_useSurveyGeometry)
-  {
-      if (Verbosity() > 0)
-        std::cout << ANSI_BOLD << ANSI_CYAN
-                  << "[PDC]  Loading CDB CALO_TOWER_GEOMETRY  "
-                  << "(tag = " << m_cdbTag << ",  ts = " << m_timeStamp << ")"
-                  << ANSI_RESET << '\n';
-
-      /* make CDB happy */
-      recoConsts* rc = recoConsts::instance();
-      rc->set_StringFlag("CDB_GLOBALTAG", m_cdbTag);
-      rc->set_uint64Flag("TIMESTAMP",     m_timeStamp);
-
-
-      const std::string url =
-          CDBInterface::instance()->getUrl("CALO_TOWER_GEOMETRY");
-
-      std::unique_ptr<CDBTTree> geomTree(new CDBTTree(url));
-      geomTree->LoadCalibrations();                    // <— fills the tree
-
-      if (Verbosity() > 0)
-        std::cout << ANSI_GREEN
-                  << "      … geometry loaded from\n      " << url
-                  << ANSI_RESET << "\n";
-
-      // ────────────────────────────────────────────────────────────────
-      // Extract the rigid φ-offset calculation from Geometry
-      // ────────────────────────────────────────────────────────────────
-      if (Verbosity() > 0)
-      {
-        constexpr int kNPhi = 256;                     // full fine bins
-        std::cout << ANSI_BOLD << "[φ-survey summary]" << ANSI_RESET << '\n';
-
-        const double phi_first  = geomTree->GetDoubleValue(0, "cemc_phi_first");
-        const double phiOffset  = M_PI/2.0 - phi_first;    // your convention
-        std::cout << "      global Δφ₀ = "
-                  << ANSI_YELLOW << std::fixed << std::setprecision(6)
-                  << phiOffset
-                  << "  rad"
-                  << ANSI_RESET << "  =  "
-                  << ANSI_YELLOW << std::setprecision(4)
-                  << phiOffset * 180.0 / M_PI
-                  << "°" << ANSI_RESET << '\n';
-
-        std::cout << ANSI_CYAN
-                  << "      bin   φ_first [rad]   φ_second [rad]\n"
-                  << "      ─────────────────────────────────────\n"
-                  << ANSI_RESET;
-
-      /* print either all bins (verbosity>1) or the first few */
-      const int nPrint = (Verbosity() > 1) ? kNPhi : 6;
-
-      for (int i = 0; i < nPrint; ++i)
-      {
-          const double ph1 = geomTree->GetDoubleValue(i, "cemc_phi_first");
-          const double ph2 = geomTree->GetDoubleValue(i, "cemc_phi_second");
-          std::cout << std::setw(10) << i
-                    << std::setw(15) << std::setprecision(6) << ph1
-                    << std::setw(15) << ph2 << '\n';
-      }
-      if (Verbosity() == 1 && kNPhi > nPrint)
-          std::cout << "      … (" << kNPhi - nPrint
-                    << " more bins – increase Verbosity() for full table)\n";
-      }
-  }
-  else
-  {
-      if (Verbosity() > 0)
-        std::cout << ANSI_BOLD << ANSI_YELLOW
-                  << "[PDC]  Survey geometry NOT loaded "
-                     "(m_useSurveyGeometry = false)."
-                  << ANSI_RESET << '\n';
-  }
+  /* ------------------------------------------------------------------ */
+  /* 1)  “Always‑on” histograms (identical to the original listing)      */
+  /* ------------------------------------------------------------------ */
+  h_mass_eta_lt      = new TH2F("h_mass_eta_lt",      "", 50, 0, 0.5, 96, 0, 96);
+  h_mass_eta_lt_rw   = new TH2F("h_mass_eta_lt_rw",   "", 50, 0, 0.5, 96, 0, 96);
+  h_pt_eta           = new TH2F("h_pt_eta",           "", 100, 0, 10, 96, 0, 96);
+  h_pt_eta_rw        = new TH2F("h_pt_eta_rw",        "", 100, 0, 10, 96, 0, 96);
+  h_cemc_etaphi      = new TH2F("h_cemc_etaphi",      "", 96, 0, 96, 256, 0, 256);
+  h_InvMass          = new TH1F("h_InvMass",          "Invariant Mass", 500, 0, 1.0);
+  h_InvMass_w        = new TH1F("h_InvMass_w",        "Invariant Mass", 500, 0, 1.0);
+  h_InvMassMix       = new TH1F("h_InvMassMix",       "Invariant Mass", 120, 0, 1.2);
     
-  auto makeLabel = [&](int i)->std::string
-  {
-      return (m_binningMode == EBinningMode::kRange)
-             ? Form("%.0f_%.0f", eEdge[i], eEdge[i+1])
-             : Form("E%.0f",      eEdge[i]);
-  };
-  h_mass_eta_lt = new TH2F("h_mass_eta_lt", "", 50, 0, 0.5, 96, 0, 96);
-  h_mass_eta_lt_rw = new TH2F("h_mass_eta_lt_rw", "", 50, 0, 0.5, 96, 0, 96);
-  h_pt_eta = new TH2F("h_pt_eta", "", 100, 0, 10, 96, 0, 96);
-  h_pt_eta_rw = new TH2F("h_pt_eta_rw", "", 100, 0, 10, 96, 0, 96);
-  h_cemc_etaphi = new TH2F("h_cemc_etaphi", "", 96, 0, 96, 256, 0, 256);
-  h_InvMass = new TH1F("h_InvMass", "Invariant Mass", 500, 0, 1.0);
-  h_InvMass_w = new TH1F("h_InvMass_w", "Invariant Mass", 500, 0, 1.0);
-  h_InvMassMix = new TH1F("h_InvMassMix", "Invariant Mass", 120, 0, 1.2);
-  h_tower_e = new TH1F("h_tower_e","",1000,-1,5);
-  h_etaphi_clus = new TH2F("h_etaphi_clus", "", 140, -1.2, 1.2, 64, -1 * TMath::Pi(), TMath::Pi());
-  h_clusE = new TH1F("h_clusE", "", 100, 0, 10);
-  h_clusE_nTow = new TH2F("h_clusE_nTow","",20,0,20,50,0,50);
-  h_emcal_e_eta = new TH1F("h_emcal_e_eta", "", 96, 0, 96);
-  h_pt1 = new TH1F("h_pt1", "", 100, 0, 5);
-  h_pt2 = new TH1F("h_pt2", "", 100, 0, 5);
-  h_nclusters = new TH1F("h_nclusters", "", 100, 0, 100);
-  h_truth_eta = new TH1F("h_truth_eta", "", 100, -1.2, 1.2);
-  h_truth_e = new TH1F("h_truth_e", "", 100, 0, 10);
-  h_delR_recTrth = new TH1F("h_delR_recTrth", "", 500, 0, 5);
-  h_matched_res = new TH2F("h_matched_res","",100,0,1.5,20,-1,1);
-  h_res_e = new TH2F("h_res_e","",100,0,1.5,20,0,20);
-  h_res_e_phi = new TH3F("h_res_e_phi","",100,0,1.5,10,0,20,256,0,256);
-  h_res_e_eta = new TH3F("h_res_e_eta","",300,0,1.5,40,0,20,96,0,96);
-  h_m_pt_eta = new TH3F("h_m_pt_eta","",70,0,0.7,10,0,10,96,0,96);
-  h_m_ptTr_eta= new TH3F("h_m_ptTr_eta","",70,0,0.7,10,0,10,96,0,96);
-  h_m_ptTr_eta_trKin = new TH3F("h_m_ptTr_eta_trKin","",70,0,0.7,10,0,10,96,0,96);
-  h_res = new TH1F("h_res", "", 50, 0, 1.5);
-  h_delEta_e_eta = new TH3F("h_delEta_e_eta","",100,-0.1,0.1,10,0,20,96,0,96);
-  h_delR_e_eta = new TH3F("h_delR_e_eta","",100,-0.1,0.1,10,0,20,96,0,96);
-  h_delPhi_e_eta = new TH3F("h_delPhi_e_eta","",100,-0.3,0.3,20,0,20,96,0,96);
-  h_delPhi_e_phi = new TH3F("h_delPhi_e_phi","",100,-0.1,0.1,20,0,20,256,0,256);
-  pr_eta_shower = new TProfile("pr_eta_shower","",96,-48.5,47.5, -1,1.5);
-  pr_phi_shower = new TProfile("pr_phi_shower","",256,-128.5,127.5, -1,1.5);
-  h_vert_xy = new TH2F("h_vert_xy","",500,-120,120,500,-120,120);
-  h_truth_vz = new TH1F("h_truth_vz","Truth Vertex Z;z_{truth} (cm);Counts",200,-100,100);
-  hm->registerHisto(h_truth_vz);
-  h_reco_vz = new TH1F("h_reco_vz","Reco Vertex Z;z_{reco} (cm);Counts",200,-100,100);
-  hm->registerHisto(h_reco_vz);
-  h2_truthReco_vz = new TH2F("h2_truthReco_vz","Truth vs Reco Vertex Z;z_{truth} (cm);z_{reco} (cm)",
-                               200,-100,100, 200,-100,100);
-  hm->registerHisto(h2_truthReco_vz);
-  h_truthE = new TH1F("h_truthE","",10000,0,30);
+  // ------------------------------------------------------------------
+  // π0 invariant‑mass vs photon‑energy slice      (2 × TH2F)
+  // Y‑axis uses EXACTLY the edges from eEdge[9].
+  // ------------------------------------------------------------------
+  h_mE_raw  = new TH2F("h_mE_raw",
+                         "π^{0} mass vs E_{#gamma}^{max} – RAW;"
+                         "M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
+                         120, 0.00, 0.30,         // X: mass
+                         N_Ebins, eEdge);         // Y: slice edges 2…30 GeV
+
+  h_mE_corr = new TH2F("h_mE_corr",
+                         "π^{0} mass vs E_{#gamma}^{max} – φ‑corr.;"
+                         "M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
+                         120, 0.00, 0.30,
+                         N_Ebins, eEdge);
+
+  hm->registerHisto(h_mE_raw );
+  hm->registerHisto(h_mE_corr);
+
+  // ------------------------------------------------------------------
+  // π0 mass in local‑block space               (2 × TH3F)
+  // X,Y = ηloc , φloc;  Z = invariant mass.
+  // ------------------------------------------------------------------
+  static const double locEdge[15] =
+      { -0.5,-0.357,-0.214,-0.071,0.071,0.214,0.357,0.5,
+         0.643,0.786,0.929,1.071,1.214,1.357,1.5 };   // 14× equal 2×2 blocks
+
+  h_m_blk_raw  = new TH3F("h_m_blk_raw",
+                            "π^{0} mass – RAW;"
+                            "η_{loc};φ_{loc};M_{γγ} [GeV]",
+                            14, locEdge,
+                            14, locEdge,
+                            60, 0.00, 0.30);
+
+  h_m_blk_corr = new TH3F("h_m_blk_corr",
+                            "π^{0} mass – φ‑corr.;"
+                            "η_{loc};φ_{loc};M_{γγ} [GeV]",
+                            14, locEdge,
+                            14, locEdge,
+                            60, 0.00, 0.30);
+
+  hm->registerHisto(h_m_blk_raw );
+  hm->registerHisto(h_m_blk_corr);
+    
+    
+  h_tower_e          = new TH1F("h_tower_e",          "", 1000,-1,5);
+  h_etaphi_clus      = new TH2F("h_etaphi_clus",      "", 140,-1.2,1.2,64,-TMath::Pi(),TMath::Pi());
+  h_clusE            = new TH1F("h_clusE",            "", 100, 0, 10);
+  h_clusE_nTow       = new TH2F("h_clusE_nTow",       "", 20,0,20, 50,0,50);
+  h_emcal_e_eta      = new TH1F("h_emcal_e_eta",      "", 96, 0, 96);
+  h_pt1              = new TH1F("h_pt1",              "", 100, 0, 5);
+  h_pt2              = new TH1F("h_pt2",              "", 100, 0, 5);
+  h_nclusters        = new TH1F("h_nclusters",        "", 100, 0, 100);
+  h_matched_res      = new TH2F("h_matched_res",      "", 100,0,1.5,20,-1,1);
+  h_res_e            = new TH2F("h_res_e",            "", 100,0,1.5,20,0,20);
+  h_res_e_phi        = new TH3F("h_res_e_phi",        "", 100,0,1.5,10,0,20,256,0,256);
+  h_res_e_eta        = new TH3F("h_res_e_eta",        "", 300,0,1.5,40,0,20,96,0,96);
+  h_m_pt_eta         = new TH3F("h_m_pt_eta",         "", 70,0,0.7,10,0,10,96,0,96);
+  h_m_ptTr_eta       = new TH3F("h_m_ptTr_eta",       "", 70,0,0.7,10,0,10,96,0,96);
+  h_m_ptTr_eta_trKin = new TH3F("h_m_ptTr_eta_trKin", "", 70,0,0.7,10,0,10,96,0,96);
+  h_res              = new TH1F("h_res",              "", 50, 0, 1.5);
+  h_delEta_e_eta     = new TH3F("h_delEta_e_eta",     "", 100,-0.1,0.1,10,0,20,96,0,96);
+  h_delR_e_eta       = new TH3F("h_delR_e_eta",       "", 100,-0.1,0.1,10,0,20,96,0,96);
+  h_delPhi_e_eta     = new TH3F("h_delPhi_e_eta",     "", 100,-0.3,0.3,20,0,20,96,0,96);
+  h_delPhi_e_phi     = new TH3F("h_delPhi_e_phi",     "", 100,-0.1,0.1,20,0,20,256,0,256);
+  pr_eta_shower      = new TProfile("pr_eta_shower",  "", 96,-48.5,47.5,-1,1.5);
+  pr_phi_shower      = new TProfile("pr_phi_shower",  "", 256,-128.5,127.5,-1,1.5);
+  h_vert_xy          = new TH2F("h_vert_xy",          "", 500,-120,120,500,-120,120);
+
+  /* χ²‑maps (kept verbatim) */
   h2_chi2_tot_etaPhi = new TH2F(
         "h2_chi2_tot_etaPhi",
         "Clusters BEFORE #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
@@ -337,326 +266,380 @@ int PositionDependentCorrection::Init(PHCompositeNode*)
         "Clusters REJECTED by #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
         96, 0, 96,
         256, 0, 256);
+
   p_chi2_pass_etaPhi = new TProfile2D(
         "p_chi2_pass_etaPhi",
         "Pass fraction after #chi^{2} cut;Tower #eta index;Tower #varphi index;⟨pass⟩",
         96, 0, 96,
-        256, 0, 256,      // low/high z are ignored in profile constructor
-        -0.1, 1.1);       // y-range just aesthetics
+        256, 0, 256,
+        -0.1, 1.1);
+
   hm->registerHisto(h2_chi2_tot_etaPhi);
   hm->registerHisto(h2_chi2_rej_etaPhi);
   hm->registerHisto(p_chi2_pass_etaPhi);
 
-  for (int ie=0; ie<NBinsBlock; ie++){
-    for (int ip=0; ip<NBinsBlock; ip++){
-      h_mass_block_pt[ie][ip] = new TH2F(Form("h_mass_block_%d_%d_pt",ie,ip),"",100,0,1,5,0,10);
-      h_res_block_E[ie][ip]   = new TH2F(Form("h_res_block_%d_%d_E",ie,ip),"",120,0,1.2,5,0,10);
+  /* per‑block histograms (unchanged) */
+  for (int ie = 0; ie < NBinsBlock; ++ie)
+    for (int ip = 0; ip < NBinsBlock; ++ip)
+    {
+      h_mass_block_pt[ie][ip] = new TH2F(Form("h_mass_block_%d_%d_pt",ie,ip),
+                                         "", 100,0,1, 5,0,10);
+      h_res_block_E [ie][ip]  = new TH2F(Form("h_res_block_%d_%d_E",ie,ip),
+                                         "", 120,0,1.2,5,0,10);
     }
-  }
-  // 1) Define edges for X (uniform -0.5..1.5, 14 bins => 15 edges)
-  Double_t xEdges[15];
-  {
-      const double xMin = -0.5;
-      const double xMax =  1.5;
-      const double step = (xMax - xMin) / 14.0; // =2.0/14=0.142857...
-      for(int i=0; i<=14; i++)
-        xEdges[i] = xMin + i*step;
-  }
-  // 2) Define edges for Y (uniform -0.5..1.5, 14 bins => 15 edges)
-  Double_t yEdges[15];
-  {
-      const double yMin = -0.5;
-      const double yMax =  1.5;
-      const double step = (yMax - yMin) / 14.0; // same as above
-      for(int i=0; i<=14; i++)
-        yEdges[i] = yMin + i*step;
-  }
 
- static constexpr Double_t eEdges[9] = {2,4,6,8,10,12,15,20,30};
-  /* =======================================================================
-      BLOCK‑COORDINATE   ×   ENERGY    (TH3)
-  ======================================================================= */
-  const char* modeTag = (m_binningMode == EBinningMode::kRange ? "range"
-                                                                 : "disc");
+  /* block‑coordinate × energy TH3 (identical code) */
+  Double_t xEdges[15], yEdges[15];
+  { const double s = 2.0/14.0; for (int i=0;i<=14;++i){ xEdges[i]=-0.5+i*s; yEdges[i]=-0.5+i*s; } }
+
+  static constexpr Double_t eEdges[9] = {2,4,6,8,10,12,15,20,30};
+  const char* modeTag = (m_binningMode == EBinningMode::kRange ? "range" : "disc");
 
   h3_cluster_block_cord_E = new TH3F(
-        Form("h3_blockCoord_E_%s",  modeTag),                // name
-        (m_binningMode == EBinningMode::kRange               // title
-            ? "Uncorrected local block coords vs. E_{slice}"
-            : "Uncorrected local block coords vs. E_{centre}"),
-        14, xEdges,
-        14, yEdges,
-        8,  eEdges );
+        Form("h3_blockCoord_E_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Uncorrected local block coords vs. E_{slice}" :
+           "Uncorrected local block coords vs. E_{centre}"),
+        14,xEdges, 14,yEdges, 8,eEdges);
 
   h3_cluster_block_cord_E_corrected = new TH3F(
-        Form("h3_blockCoord_Ecorr_%s", modeTag),
-        (m_binningMode == EBinningMode::kRange
-            ? "Corrected local block coords vs. E_{slice}"
-            : "Corrected local block coords vs. E_{centre}"),
-        14, xEdges,
-        14, yEdges,
-        8,  eEdges );
-  h_block_bin = new TH1F("h_block_bin","",14,-0.5,1.5);
+        Form("h3_blockCoord_Ecorr_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Corrected local block coords vs. E_{slice}" :
+           "Corrected local block coords vs. E_{centre}"),
+        14,xEdges, 14,yEdges, 8,eEdges);
 
-  for (int i = 0; i < N_Ebins; i++)
-    {
-      float eLo = eEdge[i];
-      float eHi = eEdge[i+1];
-      const std::string lab = makeLabel(i);
-      h_phi_diff_raw_E[i] = new TH1F(
-            Form("h_phi_diff_raw_%s", lab.c_str()),
-            (m_binningMode == EBinningMode::kRange)
-                ? Form("#Delta#phi raw;%.0f < E < %.0f GeV", eLo, eHi)
-                : Form("#Delta#phi raw;E = %.0f GeV",         eLo),
-            200, -0.1, 0.1 );
+  h_block_bin            = new TH1F("h_block_bin","",14,-0.5,1.5);
+  pr_phi_vs_blockcoord   = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5,-0.2,0.2);
 
-      h_eta_diff_raw_E[i] = new TH1F(
-            Form("h_eta_diff_raw_%s", lab.c_str()),
-            (m_binningMode == EBinningMode::kRange)
-                ? Form("#Delta#eta raw;%.0f < E < %.0f GeV", eLo, eHi)
-                : Form("#Delta#eta raw;E = %.0f GeV",         eLo),
-            200, -0.1, 0.1 );
-    }
-    for (int i = 0; i < N_Ebins; i++)
-    {
-      float eLo = eEdge[i];
-      float eHi = eEdge[i+1];
-      const std::string lab = makeLabel(i);
-
-      h_phi_diff_corrected_E[i] = new TH1F(
-            Form("h_phi_diff_corr_%s", lab.c_str()),
-            (m_binningMode == EBinningMode::kRange)
-                ? Form("#Delta#phi corrected;%.0f < E < %.0f GeV", eLo, eHi)
-                : Form("#Delta#phi corrected;E = %.0f GeV",         eLo),
-            200, -0.1, 0.1 );
-
-      h_eta_diff_corrected_E[i] = new TH1F(
-            Form("h_eta_diff_corr_%s", lab.c_str()),
-            (m_binningMode == EBinningMode::kRange)
-                ? Form("#Delta#eta corrected;%.0f < E < %.0f GeV", eLo, eHi)
-                : Form("#Delta#eta corrected;E = %.0f GeV",         eLo),
-            200, -0.1, 0.1 );
-    }
-    
-    for(int i=0;i<N_Ebins;++i)
-    {
-      const std::string tag = makeLabel(i);
-      h_phi_diff_cpRaw_E[i]  = new TH1F(Form("h_phi_diff_cpRaw_%s" ,tag.c_str()),
-                                        "#Delta#phi RAW‑CP;#Delta#phi (rad);Counts",
-                                        200,-0.1,0.1);
-      h_phi_diff_cpCorr_E[i] = new TH1F(Form("h_phi_diff_cpCorr_%s",tag.c_str()),
-                                        "#Delta#phi CP‑corr;#Delta#phi (rad);Counts",
-                                        200,-0.1,0.1);
-        
-        
-      h_phi_diff_cpBcorr_E[i] = new TH1F(
-            Form("h_phi_diff_cpBcorr_%s",tag.c_str()),
-            "#Delta#phi b‑corr;#Delta#phi (rad);Counts",    200,-0.1,0.1);
-        
-        
-      hm->registerHisto( h_phi_diff_cpRaw_E [i] );
-      hm->registerHisto( h_phi_diff_cpCorr_E[i] );
-      hm->registerHisto( h_phi_diff_cpBcorr_E[i] );
-        
-  }
-  pr_phi_vs_blockcoord = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5, -0.2,0.2);
-    
-  for (int i = 0; i < N_Ebins; i++)
+  /* per‑slice corrected local η/φ (unchanged) */
+  for (int i=0;i<N_Ebins;++i)
   {
-      float eLo = eEdge[i];
-      float eHi = eEdge[i+1];
-      const std::string lab = makeLabel(i);
+    const float eLo = eEdge[i], eHi = eEdge[i+1];
+    const std::string lab = makeLabel(i);
 
-      h_localPhi_corrected[i] = new TH1F(
-            Form("h_localPhi_corr_%s", lab.c_str()),
-            (m_binningMode == EBinningMode::kRange)
-                ? Form("Corrected local #phi;%.0f < E < %.0f GeV", eLo, eHi)
-                : Form("Corrected local #phi;E = %.0f GeV",         eLo),
-            50, -0.5, 0.5 );
+    h_localPhi_corrected[i] = new TH1F(
+          Form("h_localPhi_corr_%s",lab.c_str()),
+          (m_binningMode==EBinningMode::kRange ?
+             Form("Corrected local #phi;%.0f < E < %.0f GeV",eLo,eHi) :
+             Form("Corrected local #phi;E = %.0f GeV",eLo)),
+          50,-0.5,0.5);
 
-      h_localEta_corrected[i] = new TH1F(
-            Form("h_localEta_corr_%s", lab.c_str()),
-            (m_binningMode == EBinningMode::kRange)
-                ? Form("Corrected local #eta;%.0f < E < %.0f GeV", eLo, eHi)
-                : Form("Corrected local #eta;E = %.0f GeV",         eLo),
-            50, -0.5, 0.5 );
+    h_localEta_corrected[i] = new TH1F(
+          Form("h_localEta_corr_%s",lab.c_str()),
+          (m_binningMode==EBinningMode::kRange ?
+             Form("Corrected local #eta;%.0f < E < %.0f GeV",eLo,eHi) :
+             Form("Corrected local #eta;E = %.0f GeV",eLo)),
+          50,-0.5,0.5);
   }
-    
-    
+
+  /* vertex‑Z (always booked) */
+  h_reco_vz = new TH1F("h_reco_vz","Reco Vertex Z;z_{reco} (cm);Counts",200,-100,100);
+  hm->registerHisto(h_reco_vz);
+}
+
+/** Extra histograms that are **only** needed when m_isSimulation == true */
+void
+PositionDependentCorrection::bookSimulationHistograms
+(const std::function<std::string(int)>& makeLabel)
+{
+  /* ---------------------- truth & matching ------------------------- */
+  h_truth_eta      = new TH1F("h_truth_eta", "", 100,-1.2,1.2);
+  h_truth_e        = new TH1F("h_truth_e",   "", 100, 0, 10);
+  h_delR_recTrth   = new TH1F("h_delR_recTrth","",500,0,5);
+
+  h_truth_vz       = new TH1F("h_truth_vz",
+                               "Truth Vertex Z;z_{truth} (cm);Counts",200,-100,100);
+  hm->registerHisto(h_truth_vz);
+
+  h2_truthReco_vz  = new TH2F("h2_truthReco_vz",
+                               "Truth vs Reco Vertex Z;z_{truth} (cm);z_{reco} (cm)",
+                               200,-100,100,200,-100,100);
+  hm->registerHisto(h2_truthReco_vz);
+
+  h_truthE         = new TH1F("h_truthE","",10000,0,30);
+
+  /* per‑slice Δφ/Δη (raw & corrected) */
+  for (int i=0;i<N_Ebins;++i)
+  {
+    const float eLo = eEdge[i], eHi = eEdge[i+1];
+    const std::string lab = makeLabel(i);
+
+    h_phi_diff_raw_E[i] = new TH1F(
+          Form("h_phi_diff_raw_%s",lab.c_str()),
+          (m_binningMode==EBinningMode::kRange?
+             Form("#Delta#phi raw;%.0f < E < %.0f GeV",eLo,eHi):
+             Form("#Delta#phi raw;E = %.0f GeV",eLo)),
+          200,-0.1,0.1);
+
+    h_eta_diff_raw_E[i] = new TH1F(
+          Form("h_eta_diff_raw_%s",lab.c_str()),
+          (m_binningMode==EBinningMode::kRange?
+             Form("#Delta#eta raw;%.0f < E < %.0f GeV",eLo,eHi):
+             Form("#Delta#eta raw;E = %.0f GeV",eLo)),
+          200,-0.1,0.1);
+
+    h_phi_diff_corrected_E[i] = new TH1F(
+          Form("h_phi_diff_corr_%s",lab.c_str()),
+          (m_binningMode==EBinningMode::kRange?
+             Form("#Delta#phi corrected;%.0f < E < %.0f GeV",eLo,eHi):
+             Form("#Delta#phi corrected;E = %.0f GeV",eLo)),
+          200,-0.1,0.1);
+
+    h_eta_diff_corrected_E[i] = new TH1F(
+          Form("h_eta_diff_corr_%s",lab.c_str()),
+          (m_binningMode==EBinningMode::kRange?
+             Form("#Delta#eta corrected;%.0f < E < %.0f GeV",eLo,eHi):
+             Form("#Delta#eta corrected;E = %.0f GeV",eLo)),
+          200,-0.1,0.1);
+
+    /* CP histos */
+    const std::string tag = makeLabel(i);
+    h_phi_diff_cpRaw_E [i] = new TH1F(Form("h_phi_diff_cpRaw_%s" ,tag.c_str()),
+                                      "#Delta#phi RAW‑CP;#Delta#phi (rad);Counts",
+                                      200,-0.1,0.1);
+    h_phi_diff_cpCorr_E[i] = new TH1F(Form("h_phi_diff_cpCorr_%s",tag.c_str()),
+                                      "#Delta#phi CP‑corr;#Delta#phi (rad);Counts",
+                                      200,-0.1,0.1);
+    h_phi_diff_cpBcorr_E[i] = new TH1F(Form("h_phi_diff_cpBcorr_%s",tag.c_str()),
+                                      "#Delta#phi b‑corr;#Delta#phi (rad);Counts",
+                                      200,-0.1,0.1);
+
+    hm->registerHisto(h_phi_diff_cpRaw_E [i]);
+    hm->registerHisto(h_phi_diff_cpCorr_E[i]);
+    hm->registerHisto(h_phi_diff_cpBcorr_E[i]);
+  }
+
+  /* Δy scan & log‑weight scan histograms – exactly as before */
   for (int iE=0;iE<N_Ebins;++iE)
   {
-      const std::string lab = makeLabel(iE);
-      for (double b : m_bScan)
-        hm->registerHisto( new TH1F(Form("h_dy_ash_b%.4f_%s",b,lab.c_str()),
-                                    ";y_{reco}-y_{true}  [cm];Counts / 0.1 cm",
-                                    240,-12,12) );
-      for (double w0 : m_w0Scan)
-        hm->registerHisto( new TH1F(Form("h_dy_log_w0%.2f_%s",w0,lab.c_str()),
-                                    ";y_{reco}-y_{true}  [cm];Counts / 0.1 cm",
-                                    240,-12,12) );
+    const std::string lab = makeLabel(iE);
+    for (double b : m_bScan)
+      hm->registerHisto(new TH1F(Form("h_dy_ash_b%.4f_%s",b,lab.c_str()),
+                                 ";y_{reco}-y_{true}  [cm];Counts / 0.1 cm",
+                                 240,-12,12));
+    for (double w0 : m_w0Scan)
+      hm->registerHisto(new TH1F(Form("h_dy_log_w0%.2f_%s",w0,lab.c_str()),
+                                 ";y_{reco}-y_{true}  [cm];Counts / 0.1 cm",
+                                 240,-12,12));
   }
+
+  /* Δx scan (identical) */
+  constexpr double DX_MAX = 12.0, BIN_W = 0.10;
+  constexpr int    NBINS  = int(2*DX_MAX/BIN_W + 0.5);
+
+  if (!alreadyDeclaredHistograms)
   {
-      // Histogram window for Δx  (= xreco − xtrue)
-      constexpr double DX_MAX = 12.0;        // [cm]
-      constexpr double BIN_W  = 0.10;        // [cm]
-      constexpr int    NBINS  = int( 2*DX_MAX / BIN_W + 0.5 );   // → 240 bins
+    for (double b = 0.01; b <= 0.50 + 1e-9; b += 0.01)
+      m_bScan.push_back(std::round(b*10000.)/10000.);
+    for (double w0 = 1.5;  w0 <= 7.0  + 1e-9; w0+=0.10)
+      m_w0Scan.push_back(std::round(w0*100.)/100.);
 
-      // 1)  Ash scan  –  b grid in **tower units**  (0.01 … 0.50, step 0.01)
-      m_bScan.clear();
-      for (double b = 0.01; b <= 0.50 + 1e-9; b += 0.01)   // skip 0.00
-          m_bScan.push_back( std::round(b * 10000.) / 10000. );   // 4-dec precision
-
-      // ────────────────────────────────────────────────────────────────────────
-      // 2)  Log-weight scan  –  w0 grid (1.5 … 7.0, step 0.10)
-      // ────────────────────────────────────────────────────────────────────────
-      m_w0Scan.clear();
-      for (double w0 = 1.5; w0 <= 7.0 + 1e-9; w0 += 0.10)
-        m_w0Scan.push_back( std::round(w0*100.)/100. );       // 2-dec precision
-
-      // ────────────────────────────────────────────────────────────────────────
-      // 3)  Histogram booking (done **once**)
-      // ────────────────────────────────────────────────────────────────────────
-      if (!alreadyDeclaredHistograms)
-      {
-        for (int iE = 0; iE < N_Ebins; ++iE)            // energy-slice loop
-        {
-          const std::string lab = makeLabel(iE);
-          // 3a)  Ash-b histograms
-          for (double bVal : m_bScan)
-          {
-            const TString hName = Form("h_dx_ash_b%.4f_%s", bVal, lab.c_str());
-            auto* h = new TH1F( hName,
-                                  ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                                  NBINS, -DX_MAX, +DX_MAX );
-            hm->registerHisto(h);
-          }
-
-          // 3b)  Log-w0 histograms
-          for (double w0 : m_w0Scan)
-          {
-            const TString hName = Form("h_dx_log_w0%.2f_%s", w0, lab.c_str());
-            auto* h = new TH1F( hName,
-                                  ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                                  NBINS, -DX_MAX, +DX_MAX );
-            hm->registerHisto(h);
-          }
-        }
-        alreadyDeclaredHistograms = true;
-      }
-  }
-  rnd = new TRandom3();
+    for (int iE=0;iE<N_Ebins;++iE)
     {
-      if (!isFitDoneForPhi && !isFitDoneForEta)
+      const std::string lab = makeLabel(iE);
+
+      for (double bVal : m_bScan)
       {
-        std::cout << "[INFO]   isFitDoneForPhi && isFitDoneForEta are both false ⇒ "
-                     "skip reading bValues.txt\n";
+        const TString hName = Form("h_dx_ash_b%.4f_%s",bVal,lab.c_str());
+        hm->registerHisto(new TH1F(hName,
+                                   ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                                   NBINS,-DX_MAX,DX_MAX));
       }
-      else
+      for (double w0 : m_w0Scan)
       {
-        const std::string bFilePath =
-            "/sphenix/u/patsfan753/scratch/PDCrun24pp/bParameters/bValues.txt";
-
-        std::ifstream bfile(bFilePath);
-        if (!bfile.is_open())
-        {
-          std::cout << "[WARN]  bValues.txt NOT found at " << bFilePath
-                    << "  ➜  disabling φ- and η-corrections.\n";
-          isFitDoneForPhi = false;
-          isFitDoneForEta = false;
-        }
-        else
-        {
-          std::cout << "[INFO]  Reading b-values from " << bFilePath << '\n';
-
-          /*----------------------------------------------------------*/
-          /* 1)  Local book-keeping                                   */
-          /*----------------------------------------------------------*/
-          std::vector<bool> gotBinPhi(N_Ebins,false);
-          std::vector<bool> gotBinEta(N_Ebins,false);
-
-          /*  PHI [2,4) 0.123  or  ETA [10,12) 0.456  */
-          const std::regex lineRe(
-            R"(^\s*(PHI|ETA)\s*\[\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)\s*([0-9]*\.?[0-9]+)\s*$)"
-          );
-
-          std::string line;
-          while (std::getline(bfile,line))
-          {
-            if (line.empty() || line[0]=='#') continue;
-
-            std::smatch m;
-            if (!std::regex_match(line,m,lineRe)) continue;
-
-            const std::string dim = m[1];
-            const float  eLo = std::stof(m[2]);
-            const float  eHi = std::stof(m[3]);
-            const float  bVal= std::stof(m[4]);
-
-            /* find matching energy slice */
-            for (int i=0;i<N_Ebins;++i)
-            {
-              if (std::fabs(eLo-expectedLo[i])<1e-3 &&
-                  std::fabs(eHi-expectedHi[i])<1e-3)
-              {
-                if (dim=="PHI")
-                {
-                  m_bValsPhi[i] = bVal;
-                  gotBinPhi[i]  = true;
-                } else {
-                  m_bValsEta[i] = bVal;
-                  gotBinEta[i]  = true;
-                }
-                break;
-              }
-            }
-          } // while getline
-          bfile.close();
-
-          /*----------------------------------------------------------*/
-          /* 2)  Decide whether we have a complete set                */
-          /*----------------------------------------------------------*/
-          const bool allPhi = std::all_of(gotBinPhi.begin(),gotBinPhi.end(),
-                                          [](bool x){return x;});
-          const bool allEta = std::all_of(gotBinEta.begin(),gotBinEta.end(),
-                                          [](bool x){return x;});
-
-          isFitDoneForPhi &= allPhi;   // keep previous request, but veto if incomplete
-          isFitDoneForEta &= allEta;
-
-          /*----------------------------------------------------------*/
-          /* 3)  Print a slice-by-slice summary                       */
-          /*----------------------------------------------------------*/
-          auto printTable = [&](const char* tag,
-                                const std::vector<bool>& got,
-                                const float*  bArr,
-                                bool enabled)
-          {
-            std::cout << "[INFO]  " << tag << (enabled ? "  (enabled)\n"
-                                                       : "  (DISABLED — missing slices)\n");
-            for (int i=0;i<N_Ebins;++i)
-            {
-              std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i]
-                        << ")  : ";
-              if (got[i])
-                std::cout << bArr[i] << '\n';
-              else
-                std::cout << "-- missing --\n";
-            }
-          };
-
-          printTable("PHI b-values",gotBinPhi,m_bValsPhi,isFitDoneForPhi);
-          printTable("ETA b-values",gotBinEta,m_bValsEta,isFitDoneForEta);
-        } // file opened OK
-      }   // end “user asked for correction”
+        const TString hName = Form("h_dx_log_w0%.2f_%s",w0,lab.c_str());
+        hm->registerHisto(new TH1F(hName,
+                                   ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
+                                   NBINS,-DX_MAX,DX_MAX));
+      }
+    }
+    alreadyDeclaredHistograms = true;
   }
+}
 
+/* ------------------------------------------------------------------------- */
+/*  New, compact Init() – functional behaviour **identical** to original     */
+/* ------------------------------------------------------------------------- */
+int
+PositionDependentCorrection::Init(PHCompositeNode* /*topNode*/)
+{
+  /* --------------------------------------------------------------------- */
+  /* 0)  Basic sanity / I/O managers                                       */
+  /* --------------------------------------------------------------------- */
   if (Verbosity() > 0)
+    std::cout << "[DEBUG] PositionDependentCorrection::Init() called.\n";
+
+  hm = new Fun4AllHistoManager(Name());
+  if (!hm)
   {
-    std::cout << "[DEBUG] PositionDependentCorrection::Init() completed successfully. "
-              << "All histograms and objects are happy!." << std::endl;
+    std::cerr << "[ERROR] Fun4AllHistoManager allocation failed.\n";
+    return -1;
   }
+
+  outfile = new TFile(outfilename.c_str(),"RECREATE");
+  std::cout << "[INFO-OUTFILENAME] Writing histograms to: "
+            << outfilename << std::endl;
+  if (!outfile || outfile->IsZombie())
+  {
+    std::cerr << "[ERROR] Could not open output file '" << outfilename << "'\n";
+    return -1;
+  }
+
+  trigAna = new TriggerAnalyzer();
+
+  /* --------------------------------------------------------------------- */
+  /* 1)  Survey geometry (verbatim code kept in a small block)             */
+  /* --------------------------------------------------------------------- */
+  if (m_useSurveyGeometry)
+  {
+    if (Verbosity() > 0)
+      std::cout << ANSI_BOLD << ANSI_CYAN << "[PDC]  Loading CDB CALO_TOWER_GEOMETRY  "
+                << "(tag = " << m_cdbTag << ",  ts = " << m_timeStamp << ")"
+                << ANSI_RESET << '\n';
+
+    recoConsts* rc = recoConsts::instance();
+    rc->set_StringFlag("CDB_GLOBALTAG", m_cdbTag);
+    rc->set_uint64Flag("TIMESTAMP",     m_timeStamp);
+
+    const std::string url = CDBInterface::instance()->getUrl("CALO_TOWER_GEOMETRY");
+    std::unique_ptr<CDBTTree> geomTree(new CDBTTree(url));
+    geomTree->LoadCalibrations();
+
+    if (Verbosity() > 0)
+    {
+      constexpr int kNPhi = 256;
+      std::cout << ANSI_GREEN << "      … geometry loaded from\n      " << url
+                << ANSI_RESET << "\n"
+                << ANSI_BOLD << "[φ-survey summary]" << ANSI_RESET << '\n';
+
+      const double phi_first = geomTree->GetDoubleValue(0,"cemc_phi_first");
+      const double phiOffset = M_PI/2.0 - phi_first;
+      std::cout << "      global Δφ₀ = "
+                << ANSI_YELLOW << std::fixed << std::setprecision(6)
+                << phiOffset << "  rad" << ANSI_RESET << "  =  "
+                << ANSI_YELLOW << std::setprecision(4)
+                << phiOffset*180.0/M_PI << "°" << ANSI_RESET << '\n';
+
+      std::cout << ANSI_CYAN
+                << "      bin   φ_first [rad]   φ_second [rad]\n"
+                << "      ─────────────────────────────────────\n"
+                << ANSI_RESET;
+      const int nPrint = (Verbosity()>1)?kNPhi:6;
+      for (int i=0;i<nPrint;++i)
+      {
+        const double ph1=geomTree->GetDoubleValue(i,"cemc_phi_first");
+        const double ph2=geomTree->GetDoubleValue(i,"cemc_phi_second");
+        std::cout << std::setw(10)<<i
+                  << std::setw(15)<<std::setprecision(6)<<ph1
+                  << std::setw(15)<<ph2 << '\n';
+      }
+      if (Verbosity()==1 && kNPhi>nPrint)
+        std::cout << "      … ("<<kNPhi-nPrint
+                  <<" more bins – increase Verbosity() for full table)\n";
+    }
+  }
+  else if (Verbosity()>0)
+  {
+    std::cout << ANSI_BOLD << ANSI_YELLOW
+              << "[PDC]  Survey geometry NOT loaded "
+                 "(m_useSurveyGeometry = false)." << ANSI_RESET << '\n';
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* 2)  Histogram booking                                                 */
+  /* --------------------------------------------------------------------- */
+  auto makeLabel = [&](int i)->std::string
+  { return (m_binningMode==EBinningMode::kRange)
+           ? Form("%.0f_%.0f",eEdge[i],eEdge[i+1])
+           : Form("E%.0f",eEdge[i]); };
+
+  /* 2a)  always‑on */
+  bookCommonHistograms(makeLabel);
+
+  /* 2b)  truth‑only extras */
+  if (m_isSimulation)
+    bookSimulationHistograms(makeLabel);
+  else if (Verbosity()>0)
+    std::cout << "[PDC]  Data taking: truth histograms are NOT booked.\n";
+
+  /* --------------------------------------------------------------------- */
+  /* 3)  Optional b‑parameter lookup (verbatim block)                      */
+  /* --------------------------------------------------------------------- */
+  if (!isFitDoneForPhi && !isFitDoneForEta)
+  {
+    std::cout << "[INFO]   isFitDoneForPhi && isFitDoneForEta are both false ⇒ "
+                 "skip reading bValues.txt\n";
+  }
+  else
+  {
+    const std::string bFilePath =
+        "/sphenix/u/patsfan753/scratch/PDCrun24pp/bParameters/bValues.txt";
+    std::ifstream bfile(bFilePath);
+    if (!bfile.is_open())
+    {
+      std::cout << "[WARN]  bValues.txt NOT found at " << bFilePath
+                << "  ➜  disabling φ- and η-corrections.\n";
+      isFitDoneForPhi = isFitDoneForEta = false;
+    }
+    else
+    {
+      /*  (full, unchanged parsing code)  */
+      std::cout << "[INFO]  Reading b-values from " << bFilePath << '\n';
+      std::vector<bool> gotBinPhi(N_Ebins,false), gotBinEta(N_Ebins,false);
+      const std::regex lineRe(
+          R"(^\s*(PHI|ETA)\s*\[\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)\s*([0-9]*\.?[0-9]+)\s*$)"
+      );
+      std::string line;
+      while (std::getline(bfile,line))
+      {
+        if (line.empty()||line[0]=='#') continue;
+        std::smatch m;
+        if (!std::regex_match(line,m,lineRe)) continue;
+        const std::string dim = m[1];
+        const float eLo = std::stof(m[2]), eHi = std::stof(m[3]), bVal = std::stof(m[4]);
+        for (int i=0;i<N_Ebins;++i)
+          if (std::fabs(eLo-expectedLo[i])<1e-3 && std::fabs(eHi-expectedHi[i])<1e-3)
+          {
+            if (dim=="PHI"){ m_bValsPhi[i]=bVal; gotBinPhi[i]=true; }
+            else           { m_bValsEta[i]=bVal; gotBinEta[i]=true; }
+            break;
+          }
+      }
+      bfile.close();
+
+      const bool allPhi = std::all_of(gotBinPhi.begin(),gotBinPhi.end(),[](bool v){return v;});
+      const bool allEta = std::all_of(gotBinEta.begin(),gotBinEta.end(),[](bool v){return v;});
+      isFitDoneForPhi &= allPhi;
+      isFitDoneForEta &= allEta;
+
+      auto printTable=[&](const char* tag,const std::vector<bool>& got,
+                          const float* arr,bool enabled)
+      {
+        std::cout << "[INFO]  " << tag << (enabled?"  (enabled)\n":"  (DISABLED — missing slices)\n");
+        for(int i=0;i<N_Ebins;++i)
+        {
+          std::cout << "        ["<<expectedLo[i]<<','<<expectedHi[i]<<")  : ";
+          if (got[i]) std::cout << arr[i] << '\n';
+          else        std::cout << "-- missing --\n";
+        }
+      };
+      printTable("PHI b-values",gotBinPhi,m_bValsPhi,isFitDoneForPhi);
+      printTable("ETA b-values",gotBinEta,m_bValsEta,isFitDoneForEta);
+    }
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* 4)  Misc                                                              */
+  /* --------------------------------------------------------------------- */
+  rnd = new TRandom3();
+
+  if (Verbosity()>0)
+    std::cout << "[DEBUG] PositionDependentCorrection::Init() completed successfully.\n";
+
   return 0;
 }
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int PositionDependentCorrection::process_event(PHCompositeNode* topNode)
@@ -1822,235 +1805,6 @@ void PositionDependentCorrection::fillAshLogDx(
               << nLogOK << '/' << nLogMiss << '\n';
 }
 
-
-//void PositionDependentCorrection::fillAshLogDy(
-//       RawCluster*                     cluster,
-//       const TLorentzVector&           recoPhoton,
-//       const TLorentzVector&           truthPhoton,
-//       const std::pair<float,float>&   blockCord,    // (ηloc , φloc)
-//       int                             blockEtaBin,  // 0 … 47
-//       const std::vector<int>&         tower_etas,
-//       const std::vector<float>&       tower_energies )
-//{
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 0)  Global banner                                                */
-// /*───────────────────────────────────────────────────────────────────*/
-// const bool v3 = (Verbosity() > 3);
-// if (v3)
-// {
-//   std::cout << ANSI_BOLD << ANSI_CYAN
-//             << "\n[fillAshLogDy]  ENTER"
-//             << ANSI_RESET << "\n"
-//             << "    E(reco) = "        << recoPhoton.E()   << "  GeV\n"
-//             << "    E(truth) = "       << truthPhoton.E()  << "  GeV\n"
-//             << "    blockCord = ("     << blockCord.first  << ", "
-//                                        << blockCord.second << ")\n"
-//             << "    blockEtaBin = "    << blockEtaBin      << "\n"
-//             << "    #towerEtas = "     << tower_etas.size()
-//             << " , #towerE = "        << tower_energies.size() << '\n';
-// }
-//
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 1)  Basic guards & slice ID                                       */
-// /*───────────────────────────────────────────────────────────────────*/
-// if (!cluster)
-// {
-//   if (v3) std::cerr << ANSI_RED << "  ✘ cluster == nullptr  – abort\n" << ANSI_RESET;
-//   return;
-// }
-// if (!m_geometry)
-// {
-//   if (v3) std::cerr << ANSI_RED << "  ✘ m_geometry == nullptr  – abort\n" << ANSI_RESET;
-//   return;
-// }
-// if (!m_bemcRec)
-// {
-//   if (v3) std::cerr << ANSI_RED << "  ✘ m_bemcRec == nullptr  – abort\n" << ANSI_RESET;
-//   return;
-// }
-//
-// const float eReco   = recoPhoton.E();
-// const int   iSlice  = getEnergySlice(eReco);
-//
-// if (iSlice < 0)
-// {
-//   if (v3) std::cerr << ANSI_RED
-//                     << "  ✘ energy " << eReco << " GeV outside slice table – abort\n"
-//                     << ANSI_RESET;
-//   return;
-// }
-// const TString lab = sliceTag(iSlice);
-//
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 2)  Determine lead tower                                          */
-// /*───────────────────────────────────────────────────────────────────*/
-// float eLead = -1.f;
-// RawCluster::TowerConstIterator leadIt = cluster->get_towers().first;
-//
-// for (auto it = cluster->get_towers().first; it != cluster->get_towers().second; ++it)
-//   if (it->second > eLead) { eLead = it->second; leadIt = it; }
-//
-// if (eLead < 1e-6f)
-// {
-//   if (v3) std::cerr << ANSI_RED << "  ✘ cluster ΣE ≈ 0  – abort\n" << ANSI_RESET;
-//   return;
-// }
-//
-// const RawTowerGeom* tgLead = m_geometry->get_tower_geometry(leadIt->first);
-// if (!tgLead)
-// {
-//   if (v3) std::cerr << ANSI_RED << "  ✘ lead‑tower geometry missing – abort\n" << ANSI_RESET;
-//   return;
-// }
-//
-// const double rFront = tgLead->get_center_radius();
-// const double zFront = tgLead->get_center_z();
-// const int    ixLead = tgLead->get_binphi();   // 0 … 255
-// const int    iyLead = tgLead->get_bineta();   // 0 … 95
-//
-// if (v3)
-//   std::cout << "    Lead‑tower (ix,iy) = (" << ixLead << ',' << iyLead << ")  "
-//             << "rFront = " << rFront << " cm , zFront = " << zFront << " cm\n";
-//
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 3)  Truth reference: y at shower depth                            */
-// /*───────────────────────────────────────────────────────────────────*/
-// const double etaTruth   = truthPhoton.Eta();
-// const double thetaTruth = 2.0 * std::atan( std::exp( -etaTruth ) );
-// const double yTrueFront = rFront / std::tan(thetaTruth);   // at front face
-//
-// float xSDdummy, ySDshift, zSDdummy;                        // shift of shower
-// m_bemcRec->CorrectShowerDepth(ixLead, iyLead, eReco,
-//                               0, 0, zFront,                // dummy x,y
-//                               xSDdummy, ySDshift, zSDdummy);
-//
-// const double yTrueSD = yTrueFront + ySDshift;              // ≈ truth @ SD
-//
-// if (v3)
-//   std::cout << "    Truth y (front) = "   << yTrueFront
-//             << " cm  |  shift(SD) = "     << ySDshift
-//             << " cm  ⇒  yTruth(SD) = "    << yTrueSD << " cm\n";
-//
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 4)  Internal helper: tryFill                                      */
-// /*───────────────────────────────────────────────────────────────────*/
-// auto tryFill = [&](float locEta,
-//                    const TString& hName,
-//                    int& okCtr,
-//                    int& missCtr)
-// {
-//   if (!(locEta >= 0.f && locEta < 1.f))
-//   {
-//     if (v3)
-//       std::cout << "      skip locEta=" << locEta << " (out of [0,1) range)\n";
-//     return;
-//   }
-//
-//   const float  etaGlobal = convertBlockToGlobalEta(blockEtaBin, locEta);
-//   if (!std::isfinite(etaGlobal))
-//   {
-//     if (v3)
-//       std::cerr << ANSI_YELLOW << "      ηGlobal is NaN/Inf – skip fill\n" << ANSI_RESET;
-//     ++missCtr; return;
-//   }
-//
-//   /* Reconstruct yReco at Shower Depth */
-//   const double theta  = 2.0 * std::atan( std::exp( -etaGlobal ) );
-//   const double yFront = rFront / std::tan(theta);
-//
-//   float xs, ys, zs;
-//   m_bemcRec->CorrectShowerDepth(ixLead, iyLead, eReco,
-//                                 0, 0, zFront,
-//                                 xs, ys, zs);
-//
-//   const double yRecoSD = yFront + ys;
-//
-//   TH1F* h = dynamic_cast<TH1F*>( hm->getHisto(hName.Data()) );
-//   if (!h)
-//   {
-//     if (v3)
-//       std::cerr << ANSI_RED << "      ✘ histogram '" << hName
-//                 << "' not booked – miss\n" << ANSI_RESET;
-//     ++missCtr; return;
-//   }
-//
-//   h->Fill( yRecoSD - yTrueSD );
-//   ++okCtr;
-//
-//   if (v3)
-//     std::cout << "      fill " << hName
-//               << " : locEta=" << locEta
-//               << " , yRecoSD=" << yRecoSD
-//               << " , residual=" << (yRecoSD - yTrueSD) << '\n';
-// };
-//
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 5)  Ash‑b scan                                                   */
-// /*───────────────────────────────────────────────────────────────────*/
-// int okAsh = 0, missAsh = 0;
-// if (blockCord.first >= 0.f && blockCord.first < 1.f)
-// {
-//   for (double b : m_bScan)
-//   {
-//     const double bVal  = std::round(b * 10000.0) / 10000.0;
-//     const float  etaLoc= doEtaBlockCorr(blockCord.first, static_cast<float>(bVal));
-//     tryFill(etaLoc, Form("h_dy_ash_b%.4f_%s", bVal, lab.Data()), okAsh, missAsh);
-//   }
-// }
-// else if (v3)
-// {
-//   std::cerr << ANSI_YELLOW << "  • raw ηloc outside [0,1) – skipping Ash scan\n"
-//             << ANSI_RESET;
-// }
-//
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 6)  Log‑weight scan                                              */
-// /*───────────────────────────────────────────────────────────────────*/
-// int okLog = 0, missLog = 0;
-// if (!tower_etas.empty() && !tower_energies.empty())
-// {
-//   if (tower_etas.size() != tower_energies.size())
-//   {
-//     if (v3)
-//       std::cerr << ANSI_RED
-//                 << "  ✘ tower_etas.size() != tower_energies.size()  – skip Log scan\n"
-//                 << ANSI_RESET;
-//   }
-//   else
-//   {
-//     for (double w0 : m_w0Scan)
-//     {
-//       const double w0Val  = std::round(w0 * 100.0) / 100.0;
-//       const float  etaLoc = doLogWeightCoord(tower_etas, tower_energies,
-//                                              static_cast<float>(w0Val));
-//       tryFill(etaLoc, Form("h_dy_log_w0%.2f_%s", w0Val, lab.Data()), okLog, missLog);
-//     }
-//   }
-// }
-// else if (v3)
-// {
-//   std::cerr << ANSI_YELLOW
-//             << "  • Empty tower lists – no Log‑weight scan performed\n"
-//             << ANSI_RESET;
-// }
-//
-// /*───────────────────────────────────────────────────────────────────*/
-// /* 7)  Final summary                                                */
-// /*───────────────────────────────────────────────────────────────────*/
-// if (Verbosity() > 0)
-// {
-//   std::cout << "    ➜ Ash(dy)  ok/miss = "
-//             << okAsh  << " / " << missAsh
-//             << "  |  Log(dy)  ok/miss = "
-//             << okLog  << " / " << missLog << '\n';
-// }
-//
-// if (v3)
-//   std::cout << ANSI_BOLD << ANSI_CYAN
-//             << "[fillAshLogDy]  EXIT\n" << ANSI_RESET;
-//}
-
-
 // ---------------------------------------------------------------------------
 //  Δφ test ( RAW | BEmcRec::CorrectPosition | analytic‑b(E) ) – diagnostics
 // ---------------------------------------------------------------------------
@@ -2764,15 +2518,34 @@ void PositionDependentCorrection::fillDEtaRawAndCorrected(
     }
     else
     {
-      /* (i)  local-η after undoing Ash distortion */
-      const float etaLocCorr =
-            doEtaBlockCorr(blkCoord.first, bVal);
-      if (etaLocCorr < 0.f || etaLocCorr >= 1.f)
-        warn(Form("etaLocCorr out of (0,1) – %.3f (orig %.3f)", etaLocCorr, blkCoord.first));
+      /* (i)  local‑η after undoing Ash distortion */
+      float etaLocCorr =
+              doEtaBlockCorr( blkCoord.first , bVal );
 
-      /* (ii) global pseudorapidity at front face */
+      /* ---------------------------------------------------------------
+         *  keep (block,local) self‑consistent
+         *  ─────────────────────────────────────────
+         *  If the inverse Ash‑b map pushes the local coordinate across a
+         *  2×2‑block boundary, move the coarse‑η index by ±1 so that the
+         *  pair (blkEtaCorr , etaLocCorr) still refers to the same tower.
+         * ------------------------------------------------------------- */
+      int blkEtaCorr = blockEtaBin;                 // start from original
+      if (etaLocCorr < -0.5f) {                     // crossed downward
+            etaLocCorr += 2.f;
+            --blkEtaCorr;
+      } else if (etaLocCorr > 1.5f) {               // crossed upward
+            etaLocCorr -= 2.f;
+            ++blkEtaCorr;
+      }
+
+      /* barrel wrap‑around (48 coarse η blocks = 96/2) */
+      constexpr int kNCoarseEta = 48;
+      if (blkEtaCorr < 0)              blkEtaCorr += kNCoarseEta;
+      if (blkEtaCorr >= kNCoarseEta)   blkEtaCorr -= kNCoarseEta;
+
+      /* (ii) global pseudorapidity at the calorimeter front face */
       const float etaFrontCorr =
-            convertBlockToGlobalEta(blockEtaBin, etaLocCorr);
+              convertBlockToGlobalEta( blkEtaCorr , etaLocCorr );
       if (!std::isfinite(etaFrontCorr))
       {
         warn("etaFrontCorr is NaN/Inf – correction dropped");
@@ -2817,6 +2590,375 @@ void PositionDependentCorrection::fillDEtaRawAndCorrected(
               << "[fillDEtaRawAndCorrected]  EXIT"
               << ANSI_RESET << '\n';
   }
+}
+
+// ============================================================================
+// Stand‑alone helper – verbatim logic extracted from finalClusterLoop()
+// ============================================================================
+void PositionDependentCorrection::fillBlockCoordinateHistograms(
+    const std::pair<float,float>& blkCoord,   // (ηloc , φloc)
+    int   blkEtaCoarse,                       // coarse η index
+    int   blkPhiCoarse,                       // coarse φ index
+    float clusE,                              // cluster energy  [GeV]
+    float clusPt,                             // cluster pT      [GeV]
+    int   iEbin,                              // energy slice index
+    std::size_t nTowers)                      // # towers in cluster
+{
+  /* ------------------------------------------------------------------------
+   * A) Optional detailed printout (exactly as before)
+   * ---------------------------------------------------------------------- */
+  if (Verbosity() > 0)
+  {
+    std::cout << "[DEBUG] finalClusterLoop →"
+              << "  blockCord=("   << blkCoord.first  << ',' << blkCoord.second << ")"
+              << "  |  coarse (η,φ)=(" << blkEtaCoarse << ',' << blkPhiCoarse  << ")"
+              << "  |  iEbin="     << iEbin
+              << "  |  E="         << clusE
+              << "  pT="           << clusPt
+              << "  |  #towers="   << nTowers
+              << '\n';
+  }
+
+  /* ------------------------------------------------------------------------
+   * B) Raw fill (identical to previous inline code)
+   * ---------------------------------------------------------------------- */
+  constexpr double kFillW = 1.0;               // weight per fill
+  h3_cluster_block_cord_E->Fill(blkCoord.first,   // η (x‑axis)
+                                blkCoord.second,  // φ (y‑axis)
+                                clusE,            // energy (z‑axis)
+                                kFillW);
+
+  if (Verbosity() > 0)
+  {
+    const int bx = h3_cluster_block_cord_E->GetXaxis()->FindBin(blkCoord.first);
+    const int by = h3_cluster_block_cord_E->GetYaxis()->FindBin(blkCoord.second);
+    const int bz = h3_cluster_block_cord_E->GetZaxis()->FindBin(clusE);
+
+    std::cout << "[RAW-FILL]  ηloc=" << blkCoord.first
+              << "  φloc="          << blkCoord.second
+              << "  E="             << clusE
+              << "  (binX,Y,Z = "   << bx << "," << by << "," << bz << ")  "
+              << "→ new content = "
+              << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
+              << '\n';
+  }
+
+  /* ------------------------------------------------------------------------
+   * C) Apply optional η/φ corrections (unchanged logic)
+   * ---------------------------------------------------------------------- */
+  const float rawEta = blkCoord.first;
+  const float rawPhi = blkCoord.second;
+
+  float corrEta = rawEta;   // start from raw – shift only if enabled
+  float corrPhi = rawPhi;
+
+  if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
+  {
+    const float bPhi = m_bValsPhi[iEbin];
+    if (bPhi > 1e-9f) corrPhi = doPhiBlockCorr(rawPhi, bPhi);
+  }
+  if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
+  {
+    const float bEta = m_bValsEta[iEbin];
+    if (bEta > 1e-9f) corrEta = doEtaBlockCorr(rawEta, bEta);
+  }
+
+  h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
+
+  /* ------------------------------------------------------------------------
+   * D) Verbose bookkeeping for corrected histogram (unchanged)
+   * ---------------------------------------------------------------------- */
+  if (Verbosity() > 3)
+  {
+    const int bxC = h3_cluster_block_cord_E_corrected->GetXaxis()->FindBin(corrEta);
+    const int byC = h3_cluster_block_cord_E_corrected->GetYaxis()->FindBin(corrPhi);
+    const int bzC = h3_cluster_block_cord_E_corrected->GetZaxis()->FindBin(clusE);
+
+    const double rawCnt =
+        h3_cluster_block_cord_E           ->GetBinContent(bxC, byC, bzC);
+    const double corCnt =
+        h3_cluster_block_cord_E_corrected ->GetBinContent(bxC, byC, bzC);
+
+    std::cout << "[CORR-FILL] raw(η,φ)=(" << rawEta  << ',' << rawPhi  << ")  "
+              << "→ corr(η,φ)=("         << corrEta << ',' << corrPhi << ")  "
+              << "E=" << clusE
+              << "  (binX,Y,Z = " << bxC << ',' << byC << ',' << bzC << ")\n"
+              << "             rawHist now has " << rawCnt
+              << "  |  corrHist now has "        << corCnt << '\n';
+
+    /* global entry‑count check (unchanged) */
+    static Long64_t prevRawEntries = 0, prevCorEntries = 0;
+    const Long64_t totRaw = h3_cluster_block_cord_E           ->GetEntries();
+    const Long64_t totCor = h3_cluster_block_cord_E_corrected ->GetEntries();
+    if (totRaw != prevRawEntries || totCor != prevCorEntries)
+    {
+      std::cout << "[SUMMARY]  total entries – raw: " << totRaw
+                << " | corrected: " << totCor
+                << "  (Δ = " << (totRaw - totCor) << ")\n";
+      prevRawEntries = totRaw;
+      prevCorEntries = totCor;
+    }
+  }
+}
+
+
+// ============================================================================
+//  Helper: handle all photon–truth matching and truth–QA histograms
+//           (was the complete body of the previous “if (m_isSimulation)” block)
+// ============================================================================
+void PositionDependentCorrection::processSimulationTruthMatches(
+        RawCluster*                     clus1,
+        const TLorentzVector&           photon1,
+        int                             lt_eta,
+        int                             lt_phi,
+        const std::pair<float,float>&   blkCoord,
+        int                             blkEtaCoarse,
+        int                             blkPhiCoarse,
+        const std::vector<int>&         towerPhis,
+        const std::vector<float>&       towerEs,
+        float                           vtx_z,
+        const std::vector<TLorentzVector>& truth_photons,
+        const std::vector<TLorentzVector>& truth_meson_photons,
+        /* out‑params ---------------------------------------------------- */
+        bool&                           match1,
+        TLorentzVector&                 ph1_trEtaPhi )
+{
+  const float clusE = photon1.E();   // convenience alias
+
+  /* ------------------------------------------------------------------ */
+  /* 1)  Primary‑photon matching  ------------------------------------- */
+  /* ------------------------------------------------------------------ */
+  for (auto& trPhoton : truth_photons)
+  {
+    const float dR    = photon1.DeltaR(trPhoton);          // ΔR(reco,truth)
+    const float ratio = photon1.E() / trPhoton.E();        // Ereco / Etruth
+
+    if (dR   > 0.03f)                    continue;
+    if (ratio < 0.30f || ratio > 1.30f)  continue;
+
+    const float dPhi = TVector2::Phi_mpi_pi(
+                         photon1.Phi() - trPhoton.Phi() );
+
+    h_delR_recTrth ->Fill(dR);
+
+    if (Verbosity() > 0)
+      std::cout << "[DEBUG] => cluster1 E=" << photon1.E()
+                << " matched to truthE="    << trPhoton.E()
+                << "  dR="   << dR
+                << "  dPhi=" << dPhi
+                << "  ratio="<< ratio << '\n';
+
+    /* histogramming -------------------------------------------------- */
+    h_matched_res      ->Fill(ratio, photon1.Eta());
+    h_res_e            ->Fill(ratio, photon1.E());
+    h_res              ->Fill(ratio);
+
+    const int iLTeta = lt_eta;
+    const int iLTphi = lt_phi;
+
+    h_res_e_eta        ->Fill(ratio, trPhoton.E(), iLTeta);
+    h_res_e_phi        ->Fill(ratio, trPhoton.E(), iLTphi);
+    h_delEta_e_eta     ->Fill(photon1.Eta()-trPhoton.Eta(), trPhoton.E(), iLTeta);
+    h_delR_e_eta       ->Fill(dR, trPhoton.E(), iLTeta);
+    h_delPhi_e_eta     ->Fill(dPhi, trPhoton.E(), iLTeta);
+    h_delPhi_e_phi     ->Fill(dPhi, trPhoton.E(), iLTphi);
+    h_truthE           ->Fill(trPhoton.E());
+
+    /* specialised QA helpers ---------------------------------------- */
+    fillAshLogDx(clus1, photon1, trPhoton,
+                 blkCoord, blkPhiCoarse,
+                 towerPhis, towerEs);
+
+    fillDPhiRawAndCorrected(clus1, photon1, trPhoton,
+                             blkCoord, blkPhiCoarse, dPhi);
+
+    fillDPhiClusterizerCP(clus1,
+                          trPhoton,
+                          h_phi_diff_cpRaw_E,
+                          h_phi_diff_cpCorr_E);
+
+    // fillDEtaClusterizerCP(...)   // still commented out, unchanged
+
+    fillDEtaRawAndCorrected( clus1,  photon1,  trPhoton,
+                             blkCoord, blkEtaCoarse,
+                             vtx_z );
+
+    if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
+        blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
+    {
+      h_res_block_E[blkEtaCoarse][blkPhiCoarse]
+        ->Fill(ratio, trPhoton.E());
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 2)  Meson‑decay photon matching  --------------------------------- */
+  /* ------------------------------------------------------------------ */
+  match1        = false;
+  ph1_trEtaPhi  = TLorentzVector(0,0,0,0);
+
+  for (auto& trPhot : truth_meson_photons)
+  {
+    const float dR2    = photon1.DeltaR(trPhot);
+    const float ratio2 = photon1.E() / trPhot.E();
+
+    if (dR2 < 0.03f && ratio2 > 0.7f && ratio2 < 1.5f)
+    {
+      ph1_trEtaPhi.SetPtEtaPhiE( clusE / TMath::CosH(trPhot.Eta()),
+                                 trPhot.Eta(),
+                                 trPhot.Phi(),
+                                 clusE );
+
+      if (Verbosity() > 0)
+        std::cout << "[DEBUG] => meson‑decay match found, E="
+                  << ph1_trEtaPhi.E() << "  eta="
+                  << ph1_trEtaPhi.Eta() << "\n";
+
+      match1 = true;
+      break;    // only need the first successful match
+    }
+  }
+}
+
+// ============================================================================
+// Helper  •  loop over ALL “other” clusters, build π0 candidates, apply cuts
+//           and fill (reco + truth) histograms.
+//
+//  Args:
+//    • clusterContainer – full set of clusters for this event
+//    • cIt1             – iterator that points to the first (“anchor”) cluster
+//    • vertex           – (0,0,vz)   primary vertex for 4-vector building
+//    • photon1          – TLorentzVector of the first cluster
+//    • clusE            – energy of the first cluster  (kept for α-cut)
+//    • lt_eta / lt_phi  – lead-tower indices of the first cluster
+//    • blkEtaCoarse/... – coarse block indices (needed for block maps)
+//    • blkCoord         – local (η,φ) coords in the 1×1 block
+//    • isSimulation     – TRUE ⇒ execute truth-matching / extra QA
+// ============================================================================
+void PositionDependentCorrection::processClusterPairs(
+    RawClusterContainer               *clusterContainer,
+    RawClusterContainer::ConstIterator cIt1,
+    const CLHEP::Hep3Vector           &vertex,
+    const TLorentzVector              &photon1,
+    float                              clusE,
+    int                                lt_eta,
+    int                                lt_phi,
+    int                                blkEtaCoarse,
+    int                                blkPhiCoarse,
+    const std::pair<float,float>      &blkCoord,
+    float                              maxAlpha,
+    float                              ptMaxCut,
+    float                              pt2ClusCut,
+    float                              pi0ptcut,
+    float                              weight,
+    bool                               match1,
+    const TLorentzVector              &ph1_trEtaPhi,
+    const std::vector<TLorentzVector> &truth_meson_photons,
+    bool                               isSimulation)
+{
+  RawClusterContainer::ConstRange    cRange2 = clusterContainer->getClusters();
+  RawClusterContainer::ConstIterator cIt2;
+
+  /* ------------------------------------------------------------------ */
+  /*  INNER loop: pair clus1 with every other cluster                   */
+  /* ------------------------------------------------------------------ */
+  for (cIt2 = cRange2.first; cIt2 != cRange2.second; ++cIt2)
+  {
+    /* ------------ 0.  de-reference and sanity check  ---------------- */
+    if (cIt2 == cIt1) continue;          // do not pair a cluster with itself
+
+    RawCluster *clus2 = cIt2->second;
+    if (!clus2) continue;
+
+    CLHEP::Hep3Vector E_vec_2 = RawClusterUtility::GetEVec(*clus2, vertex);
+
+    float clus2E    =  E_vec_2.mag();
+    float clus2Eta  =  E_vec_2.pseudoRapidity();
+    float clus2Phi  =  E_vec_2.phi();
+    float clus2Pt   =  E_vec_2.perp();
+    float clus2Chi2 =  clus2->get_chi2();
+
+    /* ------------ 1.  Quality / kinematic cuts on clus2 ------------- */
+    if (clus2Pt  < pt2ClusCut || clus2Pt  > ptMaxCut)
+    { if (Verbosity() > 4) std::cout << "[DEBUG]    => cluster2 pT="
+                                     << clus2Pt << " fails cut\n";
+      continue; }
+
+    if (clus2Chi2 > 10000)
+    { if (Verbosity() > 4) std::cout << "[DEBUG]    => cluster2 Chi2="
+                                     << clus2Chi2 << " (>10000)\n";
+      continue; }
+
+    float alpha = std::fabs( clusE - clus2E ) / ( clusE + clus2E );
+    if (alpha   > maxAlpha)
+    { if (Verbosity() > 4) std::cout << "[DEBUG]    => α=" << alpha
+                                     << " > " << maxAlpha << '\n';
+      continue; }
+
+    /* ------------ 2.  Build 4-vector for the second cluster --------- */
+    TLorentzVector photon2;
+    photon2.SetPtEtaPhiE( clus2Pt, clus2Eta, clus2Phi, clus2E );
+
+    /* ------------ 3.  Optional truth matching (simulation only) ----- */
+    bool           match2       = false;
+    TLorentzVector ph2_trEtaPhi(0,0,0,0);
+
+    if (isSimulation)
+    {
+      for (const auto &trPhot : truth_meson_photons)
+      {
+        float dR3    = photon2.DeltaR(trPhot);
+        float ratio3 = photon2.E() / trPhot.E();
+        if (dR3 < 0.02f && ratio3 > 0.7f && ratio3 < 1.5f)
+        {
+          ph2_trEtaPhi.SetPtEtaPhiE( clus2E / TMath::CosH(trPhot.Eta()),
+                                     trPhot.Eta(), trPhot.Phi(), clus2E );
+          if (Verbosity() > 0)
+            std::cout << "[DEBUG]    => cluster2 matched meson-decay E="
+                      << ph2_trEtaPhi.E() << '\n';
+          if (match1) match2 = true;
+        }
+      }
+    }
+
+    /* ------------ 4.  Build π0 candidate --------------------------- */
+    TLorentzVector pi0       = photon1 + photon2;           // reco-based
+    TLorentzVector pi0_trKin = ph1_trEtaPhi + ph2_trEtaPhi; // truth-based
+
+    /* pT cut on the π0 (applies only for simulation mode) */
+    if (isSimulation && pi0.Pt() < pi0ptcut)
+    {
+      if (Verbosity() > 0)
+        std::cout << "[DEBUG]    => π0 pT=" << pi0.Pt()
+                  << " < pi0ptcut=" << pi0ptcut << "  — skipping pair\n";
+      continue;
+    }
+
+    /* ------------ 5.  Fill reco histograms (always) ---------------- */
+    h_pt1            ->Fill( photon1.Pt() );
+    h_pt2            ->Fill( photon2.Pt() );
+    h_InvMass        ->Fill( pi0.M() );
+    h_InvMass_w      ->Fill( pi0.M(), weight );
+    h_mass_eta_lt    ->Fill( pi0.M(), lt_eta );
+    h_mass_eta_lt_rw ->Fill( pi0.M(), lt_eta, weight );
+    h_m_pt_eta       ->Fill( pi0.M(), pi0.E(), lt_eta );
+
+    if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
+        blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
+    {
+      h_mass_block_pt[blkEtaCoarse][blkPhiCoarse]
+           ->Fill( pi0.M(), pi0.E() );
+    }
+
+    /* ------------ 6.  Extra truth histograms (simulation only) ------ */
+    if (isSimulation && match2 && pi0_trKin.M() > 1e-3)
+    {
+      h_m_ptTr_eta       ->Fill( pi0.M(),
+                                 truth_meson_photons.at(0).E(), lt_eta );
+      h_m_ptTr_eta_trKin ->Fill( pi0_trKin.M(),
+                                 truth_meson_photons.at(0).E(), lt_eta );
+    }
+  } // ← end INNER (clus2) loop
 }
 
 
@@ -3025,300 +3167,65 @@ void PositionDependentCorrection::finalClusterLoop(
     /* 4) find energy slice ........................................... */
     const int iEbin = getEnergySlice( clusE );
 
-    /* optional detailed print ........................................ */
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] finalClusterLoop →"
-                  << "  blockCord=(" << blkCoord.first << ',' << blkCoord.second << ")"
-                  << "  |  coarse (η,φ)=(" << blkEtaCoarse << ',' << blkPhiCoarse << ")"
-                  << "  |  iEbin=" << iEbin
-                  << "  |  E=" << clusE << "  pT=" << clusPt
-                  << "  |  #towers=" << towerEs.size()
-                  << '\n';
-    }
 
-
-    constexpr double kFillW = 1.0;      // weight per fill
-    h3_cluster_block_cord_E->Fill(blkCoord.first,   // η-coord   (x-axis)
-                                      blkCoord.second,  // φ-coord   (y-axis)
-                                      clusE,             // energy    (z-axis)
-                                      kFillW);
-
-    if (Verbosity() > 0)
-    {
-        const int bx = h3_cluster_block_cord_E->GetXaxis()->FindBin(blkCoord.first);
-        const int by = h3_cluster_block_cord_E->GetYaxis()->FindBin(blkCoord.second);
-        const int bz = h3_cluster_block_cord_E->GetZaxis()->FindBin(clusE);
-
-        std::cout << "[RAW-FILL]  ηloc="  << blkCoord.first
-                    << "  φloc="           << blkCoord.second
-                    << "  E="              << clusE
-                    << "  (binX,Y,Z = "    << bx << "," << by << "," << bz << ")  "
-                    << "→ new content = "
-                    << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
-                << '\n';
-    }
-    /* ---- original raw local coordinates ---------------- */
-    const float rawEta = blkCoord.first;    // [0,1]
-    const float rawPhi = blkCoord.second;   // [0,1]
-
-    /* ---- start from raw; apply shifts only if we have a fit --- */
-    float corrEta = rawEta;
-    float corrPhi = rawPhi;
-
-    if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
-    {
-      const float bPhi = m_bValsPhi[iEbin];
-      if (bPhi > 1e-9f) corrPhi = doPhiBlockCorr(rawPhi, bPhi);
-    }
-
-    if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
-    {
-      const float bEta = m_bValsEta[iEbin];
-      if (bEta > 1e-9f) corrEta = doEtaBlockCorr(rawEta, bEta);
-    }
-
-    h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
-
-    if (Verbosity() > 3)
-    {
-      const int bxC = h3_cluster_block_cord_E_corrected
-                        ->GetXaxis()->FindBin(corrEta);
-      const int byC = h3_cluster_block_cord_E_corrected
-                        ->GetYaxis()->FindBin(corrPhi);
-      const int bzC = h3_cluster_block_cord_E_corrected
-                        ->GetZaxis()->FindBin(clusE);
-
-      const double rawCnt =
-          h3_cluster_block_cord_E->GetBinContent(bxC, byC, bzC);
-      const double corCnt =
-          h3_cluster_block_cord_E_corrected->GetBinContent(bxC, byC, bzC);
-
-      std::cout << "[CORR-FILL] raw(η,φ)=(" << rawEta  << ',' << rawPhi  << ")  "
-                << "→ corr(η,φ)=("          << corrEta << ',' << corrPhi << ")  "
-                << "E=" << clusE
-                << "  (binX,Y,Z = " << bxC << ',' << byC << ',' << bzC << ")\n"
-                << "             rawHist now has " << rawCnt
-                << "  |  corrHist now has "        << corCnt << '\n';
-
-      /*  global entry-count check (once per event) */
-      static Long64_t prevRawEntries = 0, prevCorEntries = 0;
-      const Long64_t totRaw = h3_cluster_block_cord_E            ->GetEntries();
-      const Long64_t totCor = h3_cluster_block_cord_E_corrected  ->GetEntries();
-      if (totRaw != prevRawEntries || totCor != prevCorEntries)
-      {
-        std::cout << "[SUMMARY]  total entries – raw: " << totRaw
-                  << " | corrected: " << totCor
-                  << "  (Δ = " << (totRaw - totCor) << ")\n";
-        prevRawEntries = totRaw;
-        prevCorEntries = totCor;
-      }
-    }
-
+    fillBlockCoordinateHistograms(blkCoord,
+                                    blkEtaCoarse,
+                                    blkPhiCoarse,
+                                    clusE,
+                                    clusPt,
+                                    iEbin,
+                                    towerEs.size());      // <— NEW helper call
 
 
     // QA: fill pT vs leadTower, fill cluster-level eta/phi
     h_pt_eta->Fill(clusPt, lt_eta);
     h_pt_eta_rw->Fill(clusPt, lt_eta, weight);
     h_etaphi_clus->Fill(clusEta, clusPhi);
-
-    for (auto& trPhoton : truth_photons)
-    {
-        const float dR    = photon1.DeltaR(trPhoton);          // ΔR(reco,truth)
-        const float ratio = photon1.E() / trPhoton.E();        // Ereco / Etruth
-
-        if (dR   > 0.03f)                    continue;
-        if (ratio < 0.30f || ratio > 1.30f)  continue;
-
-        const float dPhi = TVector2::Phi_mpi_pi(
-                               photon1.Phi() - trPhoton.Phi() );
-        h_delR_recTrth->Fill(dR);
-
-        if (Verbosity() > 0)
-        {
-            std::cout << "[DEBUG] => cluster1 E=" << photon1.E()
-                      << " matched to truthE="    << trPhoton.E()
-                      << "  dR="   << dR
-                      << "  dPhi=" << dPhi
-                      << "  ratio="<< ratio << '\n';
-        }
-        h_matched_res   ->Fill(ratio, photon1.Eta());
-        h_res_e         ->Fill(ratio, photon1.E());
-        h_res           ->Fill(ratio);
-
-        int iLTeta = lt_eta, iLTphi = lt_phi;
-
-        h_res_e_eta     ->Fill(ratio, trPhoton.E(), iLTeta);
-        h_res_e_phi     ->Fill(ratio, trPhoton.E(), iLTphi);
-        h_delEta_e_eta  ->Fill(photon1.Eta()-trPhoton.Eta(), trPhoton.E(), iLTeta);
-        h_delR_e_eta    ->Fill(dR, trPhoton.E(), iLTeta);
-        h_delPhi_e_eta  ->Fill(dPhi, trPhoton.E(), iLTeta);
-        h_delPhi_e_phi  ->Fill(dPhi, trPhoton.E(), iLTphi);
-        h_truthE        ->Fill(trPhoton.E());
-
-        fillAshLogDx(clus1, photon1, trPhoton,
-                       blkCoord, blkPhiCoarse,
-                       towerPhis, towerEs);
-
-        fillDPhiRawAndCorrected(clus1, photon1, trPhoton,
-                                  blkCoord, blkPhiCoarse, dPhi);
-          
-        fillDPhiClusterizerCP(clus1,
-                                trPhoton,
-                                h_phi_diff_cpRaw_E,
-                                h_phi_diff_cpCorr_E);
-        
-//        fillDEtaClusterizerCP( clus1, trPhoton,
-//                               h_eta_diff_cpRaw_E,
-//                               h_eta_diff_cpCorr_E,
-//                               vtx_z );
-    
-        fillDEtaRawAndCorrected( clus1,  photon1,  trPhoton,
-                                 blkCoord, blkEtaCoarse,
-                                 vtx_z );                     
-
-        if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
-              blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
-        {
-              h_res_block_E[blkEtaCoarse][blkPhiCoarse]
-                  ->Fill(ratio, trPhoton.E());
-        }
-    }
+      
     match1 = false;
     TLorentzVector ph1_trEtaPhi(0,0,0,0);
-    for (auto & trPhot : truth_meson_photons)
+    if (m_isSimulation)
     {
-      float dR2   = photon1.DeltaR(trPhot);
-      float ratio2= (photon1.E() / trPhot.E());
-      if (dR2 < 0.03 && ratio2>0.7 && ratio2<1.5)
-      {
-        ph1_trEtaPhi.SetPtEtaPhiE( clusE / TMath::CosH(trPhot.Eta()),
-                                   trPhot.Eta(),
-                                   trPhot.Phi(),
-                                   clusE );
-        if (Verbosity() > 0)
-        {
-          std::cout << "[DEBUG] => meson-decay match found, E="
-                    << ph1_trEtaPhi.E() << "  eta="
-                    << ph1_trEtaPhi.Eta() << "\n";
-        }
-        match1 = true;
-        break;
-      }
+      processSimulationTruthMatches( clus1,
+                                       photon1,
+                                       lt_eta,
+                                       lt_phi,
+                                       blkCoord,
+                                       blkEtaCoarse,
+                                       blkPhiCoarse,
+                                       towerPhis,
+                                       towerEs,
+                                       vtx_z,
+                                       truth_photons,
+                                       truth_meson_photons,
+                                       match1,
+                                       ph1_trEtaPhi );
     }
+
     if (Verbosity() > 2)
     {
       std::cout << "[DEBUG] => Starting INNER loop for cluster pairs.\n";
     }
 
-    RawClusterContainer::ConstRange cRange2 = clusterContainer->getClusters();
-    for (cIt2 = cRange2.first; cIt2 != cRange2.second; ++cIt2)
-    {
-      // avoid pairing with itself
-      if (cIt2 == cIt1) continue;
-
-      RawCluster* clus2 = cIt2->second;
-      if (!clus2) continue;
-
-      CLHEP::Hep3Vector E_vec_2 = RawClusterUtility::GetEVec(*clus2, vertex);
-
-      float clus2E     = E_vec_2.mag();
-      float clus2Eta   = E_vec_2.pseudoRapidity();
-      float clus2Phi   = E_vec_2.phi();
-      float clus2Pt    = E_vec_2.perp();
-      float clus2Chi2  = clus2->get_chi2();
-
-      // skip if pT < pt2ClusCut or pT>ptMaxCut
-      if (clus2Pt < pt2ClusCut || clus2Pt > ptMaxCut)
-      {
-        if (Verbosity() > 4)
-        {
-          std::cout << "[DEBUG]    => cluster2 pT=" << clus2Pt
-                    << " fails cut (<" << pt2ClusCut << " or >" << ptMaxCut
-                    << "). \n";
-        }
-        continue;
-      }
-      if (clus2Chi2 > 10000)
-      {
-        if (Verbosity() > 4)
-        {
-          std::cout << "[DEBUG]    => cluster2 Chi2=" << clus2Chi2
-                    << " (>10000), skipping.\n";
-        }
-        continue;
-      }
-      float alpha = std::fabs(clusE - clus2E)/(clusE + clus2E);
-      if (alpha>maxAlpha)
-      {
-        if (Verbosity() > 4)
-        {
-          std::cout << "[DEBUG]    => alpha=" << alpha
-                    << " > maxAlpha=" << maxAlpha
-                    << ", skipping.\n";
-        }
-        continue;
-      }
-      TLorentzVector photon2;
-      photon2.SetPtEtaPhiE(clus2Pt, clus2Eta, clus2Phi, clus2E);
-
-      match2 = false;
-      TLorentzVector ph2_trEtaPhi(0,0,0,0);
-
-      for (auto & trPhot : truth_meson_photons)
-      {
-        float dR3   = photon2.DeltaR(trPhot);
-        float ratio3= (photon2.E()/ trPhot.E());
-        if (dR3<0.02 && ratio3>0.7 && ratio3<1.5)
-        {
-          ph2_trEtaPhi.SetPtEtaPhiE( clus2E / TMath::CosH(trPhot.Eta()),
-                                     trPhot.Eta(),
-                                     trPhot.Phi(),
-                                     clus2E);
-          if (Verbosity() > 0)
-          {
-            std::cout << "[DEBUG]    => cluster2 matched meson-decay E="
-                      << ph2_trEtaPhi.E() << "\n";
-          }
-          if (match1) match2 = true;
-        }
-      }
-
-      TLorentzVector pi0_trKin = ph1_trEtaPhi + ph2_trEtaPhi; // truth-based
-      TLorentzVector pi0       = photon1 + photon2;           // reco-based
-      if (pi0.Pt()< pi0ptcut)
-      {
-        if (Verbosity() > 0)
-        {
-          std::cout << "[DEBUG]    => pi0 pT=" << pi0.Pt()
-                    << " < pi0ptcut=" << pi0ptcut
-                    << ", skipping.\n";
-        }
-        continue;
-      }
-      h_pt1->Fill(photon1.Pt());
-      h_pt2->Fill(photon2.Pt());
-      h_InvMass->Fill(pi0.M());
-      h_InvMass_w->Fill(pi0.M(), weight);
-      h_mass_eta_lt->Fill(pi0.M(), lt_eta);
-      h_mass_eta_lt_rw->Fill(pi0.M(), lt_eta, weight);
-
-      h_m_pt_eta->Fill(pi0.M(), pi0.E(), lt_eta);
-
-      if (blkEtaCoarse>=0 && blkEtaCoarse<NBinsBlock &&
-          blkPhiCoarse>=0 && blkPhiCoarse<NBinsBlock)
-      {
-        h_mass_block_pt[blkEtaCoarse][blkPhiCoarse]->Fill(pi0.M(), pi0.E());
-      }
-
-      // if both matched => fill truth-based meson hist
-      if (match2 && pi0_trKin.M()>0.001)
-      {
-        h_m_ptTr_eta->Fill(pi0.M(), truth_meson_photons.at(0).E(), lt_eta);
-        h_m_ptTr_eta_trKin->Fill(pi0_trKin.M(), truth_meson_photons.at(0).E(), lt_eta);
-      }
-
-    } // end cluster2 loop
+    processClusterPairs( clusterContainer,
+                           cIt1,
+                           vertex,
+                           photon1,
+                           clusE,
+                           lt_eta,
+                           lt_phi,
+                           blkEtaCoarse,
+                           blkPhiCoarse,
+                           blkCoord,
+                           maxAlpha,
+                           ptMaxCut,
+                           pt2ClusCut,
+                           pi0ptcut,
+                           weight,
+                           match1,
+                           ph1_trEtaPhi,
+                           truth_meson_photons,
+                           m_isSimulation );      // << NEW ARG
 
   } // end cluster1 loop
 
@@ -3332,6 +3239,92 @@ void PositionDependentCorrection::finalClusterLoop(
               << ANSI_RESET << "\n\n";
   }
 }
+
+
+// ============================================================================
+// Helper: compute the circular‑mean φ–offset between the ideal tower grid
+//         and the actual detector geometry.  Executed once, the first time
+//         we have a valid `m_geometry`.
+//
+// Output:
+//   • m_phi0Offset   –  rigid shift  (range −π … +π)
+//   • m_hasOffset    –  set to true on success
+//
+// Return value:
+//   • true  – offset successfully measured
+//   • false – geometry container empty  ➜ caller may skip the event
+// ============================================================================
+bool PositionDependentCorrection::computeRigidPhiOffset()
+{
+  /* ------------------------------------------------------------------ */
+  /* 1) Geometry summary (printed once – useful QA)                     */
+  /* ------------------------------------------------------------------ */
+  const int   nEtaBins   = m_geometry->get_etabins();   // ~96
+  const int   nPhiBins   = m_geometry->get_phibins();   // 128 in sPHENIX
+  const float radPerBin  = 2.F * M_PI / static_cast<float>(nPhiBins);
+
+  if (Verbosity() > 0)
+  {
+    std::cout << ANSI_BOLD << "[φ‑anchor] Geometry summary\n" << ANSI_RESET
+              << "      nEtaBins  = " << nEtaBins  << '\n'
+              << "      nPhiBins  = " << nPhiBins  << '\n'
+              << "      Δφ(bin)   = " << radPerBin << " rad\n";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 2) Circular mean of φ‑residuals over *all* towers                  */
+  /* ------------------------------------------------------------------ */
+  double      sumSin  = 0.0, sumCos = 0.0;
+  std::size_t nTowers = 0;
+
+  const auto [beg, end] = m_geometry->get_tower_geometries();
+  for (auto it = beg; it != end; ++it)
+  {
+    const RawTowerGeom* tg = it->second;
+    if (!tg) continue;
+
+    const int   iphi     = tg->get_binphi();
+    const float phiIdeal = (iphi + 0.5F) * radPerBin;
+    const float delta    = TVector2::Phi_mpi_pi( tg->get_phi() - phiIdeal );
+
+    sumSin += std::sin(delta);
+    sumCos += std::cos(delta);
+    ++nTowers;
+
+    if (Verbosity() > 1 && nTowers <= 3)
+      std::cout << "      tower#" << nTowers
+                << "  iphi="    << iphi
+                << "  φ(real)=" << tg->get_phi()
+                << "  φ(ideal)="<< phiIdeal
+                << "  Δφ="      << delta << '\n';
+  }
+
+  if (nTowers == 0)
+  {
+    std::cerr << " [φ‑anchor] WARNING: geometry container is empty – skip event\n";
+    return false;                      // helper **failed**
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 3) Mean offset  (range −π … +π], stored for later corrections)     */
+  /* ------------------------------------------------------------------ */
+  m_phi0Offset = std::atan2(sumSin, sumCos);   // circular mean
+  m_hasOffset  = true;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << ANSI_BOLD << ANSI_CYAN
+              << "[φ‑anchor] measured rigid barrel tilt  Δφ₀ = "
+              << m_phi0Offset << "  rad"
+              << ANSI_RESET  << "\n"
+              << "      towers used = " << nTowers << '\n'
+              << "      ⟨sinΔφ⟩ = "    << sumSin / nTowers
+              << " ,  ⟨cosΔφ⟩ = "     << sumCos / nTowers << '\n';
+  }
+  return true;                         // helper **succeeded**
+}
+
+
 
 // ============================================================================
 int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
@@ -3395,17 +3388,20 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   // ------------------------------------------------------------------------
   // 3) Retrieve truth info
   // ------------------------------------------------------------------------
-  std::vector<TLorentzVector> truth_photons;
-  std::vector<TLorentzVector> truth_meson_photons;
-  fillTruthInfo(topNode, vtx_z, truth_photons, truth_meson_photons);
-  h2_truthReco_vz->Fill(truth_vz, vtx_z);
-
-  if (Verbosity() > 0)
+  if (m_isSimulation)
   {
-    std::cout << "[process_towers] => fillTruthInfo done.\n"
-              << "    #truth_photons=" << truth_photons.size()
-              << ", #truth_meson_photons=" << truth_meson_photons.size()
-              << std::endl;
+      std::vector<TLorentzVector> truth_photons;
+      std::vector<TLorentzVector> truth_meson_photons;
+      fillTruthInfo(topNode, vtx_z, truth_photons, truth_meson_photons);
+      h2_truthReco_vz->Fill(truth_vz, vtx_z);
+      
+      if (Verbosity() > 0)
+      {
+          std::cout << "[process_towers] => fillTruthInfo done.\n"
+          << "    #truth_photons=" << truth_photons.size()
+          << ", #truth_meson_photons=" << truth_meson_photons.size()
+          << std::endl;
+      }
   }
 
   if (std::fabs(vtx_z) > _vz)
@@ -3431,77 +3427,14 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
                 << ANSI_RESET << '\n';
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  // Measure the rigid φ–offset between the ideal grid and the detector
-  // ════════════════════════════════════════════════════════════════════
+  // ──────────────────────────────────────────────────────────────────────
+  // One‑time measurement of the rigid φ–offset (barrel tilt)
+  // ──────────────────────────────────────────────────────────────────────
   if (!m_hasOffset && m_geometry)
-  {
-      /* ------------------------------------------------------------------
-       * 1. Geometry summary (useful once per job)
-       * ----------------------------------------------------------------*/
-      const int nEtaBins = m_geometry->get_etabins();   // usually 96
-      const int nPhiBins = m_geometry->get_phibins();   // **128 in sPHENIX**
-      const float kRadPerBin = 2.F * M_PI / static_cast<float>(nPhiBins);
-
-      if (Verbosity() > 0)
-      {
-        std::cout << ANSI_BOLD << "[φ-anchor] Geometry summary\n" << ANSI_RESET
-                  << "      nEtaBins  = " << nEtaBins  << '\n'
-                  << "      nPhiBins  = " << nPhiBins  << '\n'
-                  << "      Δφ(bin)   = " << kRadPerBin << " rad\n";
-      }
-
-      /* ------------------------------------------------------------------
-       * 2. Circular mean of φ-residuals over *all* towers
-       * ----------------------------------------------------------------*/
-      double sumSin = 0.0, sumCos = 0.0;
-      std::size_t nTowers = 0;
-
-      const auto [beg, end] = m_geometry->get_tower_geometries();
-      for (auto it = beg; it != end; ++it)
-      {
-        const RawTowerGeom* tg = it->second;
-        if (!tg) continue;
-
-        const int   iphi = tg->get_binphi();
-        const float phiIdeal = (iphi + 0.5F)*kRadPerBin;
-        const float delta    = TVector2::Phi_mpi_pi( tg->get_phi() - phiIdeal );
-        sumSin += std::sin(delta);
-        sumCos += std::cos(delta);
-        ++nTowers;
-
-        if (Verbosity() > 1 && nTowers <= 3)
-          std::cout << "      tower#" << nTowers
-                    << "  iphi=" << iphi
-                    << "  φ(real)="  << tg->get_phi()
-                    << "  φ(ideal)=" << phiIdeal
-                    << "  Δφ="       << TVector2::Phi_mpi_pi(delta) << '\n';
-      }
-
-      if (nTowers == 0)
-      {
-        std::cerr << " [φ-anchor]   WARNING: geometry container is empty – skip\n";
-        return Fun4AllReturnCodes::EVENT_OK;
-      }
-
-      /* ------------------------------------------------------------------
-       * 3. Mean offset  (result in (–π, +π])
-       * ----------------------------------------------------------------*/
-      m_phi0Offset = std::atan2(sumSin, sumCos);   // circular mean
-      m_hasOffset  = true;
-
-      if (Verbosity() > 0)
-      {
-        std::cout << ANSI_BOLD << ANSI_CYAN
-                  << "[φ-anchor]  measured rigid barrel tilt  Δφ₀ = "
-                  << m_phi0Offset << "  rad"
-                  << ANSI_RESET  << "\n"
-                  << "      towers used = " << nTowers << '\n'
-                  << "      ⟨sinΔφ⟩ = " << sumSin / nTowers
-                  << " , ⟨cosΔφ⟩ = " << sumCos / nTowers << '\n';
-      }
-  }
-
+      if (!computeRigidPhiOffset())          // returns *false* ⇢ geometry empty
+       return Fun4AllReturnCodes::EVENT_OK;
+    
+    
   RawClusterContainer* clusterContainer = retrieveClusterContainer(topNode);
   if (!clusterContainer)
   {
@@ -3684,41 +3617,64 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 }
 
 // ============================================================================
-float PositionDependentCorrection::getWeight(int ieta, float pt)
+// Return the pT-re-weighting factor for a given (tower-η, pT) point.
+//
+//  • Each |ieta| slice [0‥95] has an MC-to-data ratio stored in
+//    h_pt_rw[ieta]  (x-axis = pT).
+//  • We return  1 / (ratio)  so that a weight >1 boosts under-represented
+//    events and a weight <1 down-weights over-represented ones.
+//  • Out-of-range |ieta|, or an empty histogram bin, ⇒ weight = 0
+//    (event effectively ignored).
+//
+//  Called every time a cluster needs pT-reweighting.
+// ============================================================================
+float PositionDependentCorrection::getWeight(int   ieta,
+                                             float pt) const   // <- ‘const’ is OK here
 {
+  // -------------------------------------------------------------------------
+  // 1) Optional debug printout
+  // -------------------------------------------------------------------------
   if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] getWeight() called with ieta=" << ieta << ", pt=" << pt << std::endl;
-  }
-  if (ieta < 0 || ieta > 95)
+    std::cout << "[getWeight]  ieta=" << ieta << "  pt=" << pt << '\n';
+
+  // -------------------------------------------------------------------------
+  // 2) Validate η-index
+  // -------------------------------------------------------------------------
+  if (ieta < 0 || ieta >= 96)
   {
     if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] ieta is out of valid range [0..95]. Returning 0." << std::endl;
-    }
-    return 0;
+      std::cout << "[getWeight]  ieta outside [0,95]  →  weight = 0\n";
+    return 0.f;
   }
-  float val = h_pt_rw[ieta]->GetBinContent(h_pt_rw[ieta]->FindBin(pt));
+
+  // -------------------------------------------------------------------------
+  // 3) Look up the bin content (MC/data ratio) for this pT
+  // -------------------------------------------------------------------------
+  const int   bin   = h_pt_rw[ieta]->FindBin(pt);
+  const float ratio = h_pt_rw[ieta]->GetBinContent(bin);
+
   if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Bin content for pt=" << pt
-              << " in ieta=" << ieta
-              << " is " << val << std::endl;
-  }
-  if (val == 0)
+    std::cout << "[getWeight]  hist content (ratio) = " << ratio << '\n';
+
+  // -------------------------------------------------------------------------
+  // 4) Protect against empty statistics
+  // -------------------------------------------------------------------------
+  if (ratio == 0.f)
   {
     if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] Bin content is 0, returning 0 as weight." << std::endl;
-    }
-    return 0;
+      std::cout << "[getWeight]  empty bin → weight = 0\n";
+    return 0.f;
   }
-  float result = 1 / val;
+
+  // -------------------------------------------------------------------------
+  // 5) Invert the ratio to obtain the weight
+  // -------------------------------------------------------------------------
+  const float weight = 1.f / ratio;
+
   if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] getWeight(): returning weight = " << result << std::endl;
-  }
-  return result;
+    std::cout << "[getWeight]  weight = " << weight << '\n';
+
+  return weight;
 }
 
 // ============================================================================

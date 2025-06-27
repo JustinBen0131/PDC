@@ -42,11 +42,14 @@ class PositionDependentCorrection : public SubsysReco
   PositionDependentCorrection(const std::string &name = "PositionDependentCorrection",
                               const std::string &fname = "MyNtuple.root");
   virtual ~PositionDependentCorrection();
+  void bookCommonHistograms(const std::function<std::string(int)>& makeLabel);
+  void bookSimulationHistograms(const std::function<std::string(int)>& makeLabel);
   int Init(PHCompositeNode *);
   int process_event(PHCompositeNode *);
   int End(PHCompositeNode *);
 
-  void setIsSimulation(bool sim) { isSimulation = sim; }
+  void setIsSimulation(bool flag)   { m_isSimulation = flag; }
+  bool isSimulation()         const { return m_isSimulation; }
     
   int process_g4hits(PHCompositeNode *);
   int process_g4cells(PHCompositeNode *);
@@ -84,6 +87,13 @@ class PositionDependentCorrection : public SubsysReco
   EBinningMode getBinningMode() const    { return m_binningMode; }
     
  protected:
+    
+  /** Measure the rigid φ–offset (barrel tilt) once per job.
+    *
+    *  – Uses `m_geometry`, fills `m_phi0Offset`, sets `m_hasOffset`.
+    *  – Returns *true* on success, *false* if the geometry container is empty.
+  */
+  bool computeRigidPhiOffset();
   // --------------------------------------------------------------------
   // 2) Method prototypes that reference RawClusterContainer, etc.
   // --------------------------------------------------------------------
@@ -143,7 +153,54 @@ class PositionDependentCorrection : public SubsysReco
   float doLogWeightCoord(const std::vector<int>& towerphis,
                            const std::vector<float>& towerenergies,
                            float w0);
+    
 
+  void fillBlockCoordinateHistograms(const std::pair<float,float>& blkCoord,
+                                       int   blkEtaCoarse,
+                                       int   blkPhiCoarse,
+                                       float clusE,
+                                       float clusPt,
+                                       int   iEbin,
+                                       std::size_t nTowers);
+
+  void processSimulationTruthMatches(
+        RawCluster*                     clus1,
+        const TLorentzVector&           photon1,
+        int                             lt_eta,
+        int                             lt_phi,
+        const std::pair<float,float>&   blkCoord,
+        int                             blkEtaCoarse,
+        int                             blkPhiCoarse,
+        const std::vector<int>&         towerPhis,
+        const std::vector<float>&       towerEs,
+        float                           vtx_z,
+        const std::vector<TLorentzVector>& truth_photons,
+        const std::vector<TLorentzVector>& truth_meson_photons,
+        bool&                           match1,
+        TLorentzVector&                 ph1_trEtaPhi);
+    
+    
+ void processClusterPairs(
+          RawClusterContainer*               clusterContainer,
+          RawClusterContainer::ConstIterator cIt1,
+          const CLHEP::Hep3Vector&           vertex,
+          const TLorentzVector&              photon1,
+          float                              clusE,
+          int                                lt_eta,
+          int                                lt_phi,
+          int                                blkEtaCoarse,
+          int                                blkPhiCoarse,
+          const std::pair<float,float>&      blkCoord,
+          float                              maxAlpha,
+          float                              ptMaxCut,
+          float                              pt2ClusCut,
+          float                              pi0ptcut,
+          float                              weight,
+          bool                               match1,
+          const TLorentzVector&              ph1_trEtaPhi,
+          const std::vector<TLorentzVector>& truth_meson_photons,
+          bool                               isSimulation);              // << NEW
+    
   void finalClusterLoop(PHCompositeNode* topNode,
                         RawClusterContainer* clusterContainer,
                         float vtx_z,
@@ -208,6 +265,7 @@ class PositionDependentCorrection : public SubsysReco
   // --------------------------------------------------------------------
   std::string detector;
   std::string outfilename;
+  bool m_isSimulation = false;      ///< true = MC, false = real data
   int Getpeaktime(TH1 *h);
   Fun4AllHistoManager *hm = nullptr;
   TFile *outfile = nullptr;
@@ -413,7 +471,13 @@ class PositionDependentCorrection : public SubsysReco
     
     
   std::map<std::string, std::string> triggerNameMap = {
-    {"MBD N&S >= 1", "MBD_NandS_geq_1"}
+        {"MBD N&S >= 1",          "MBD_NandS_geq_1"},
+//        {"Jet 8 GeV + MBD NS >= 1","Jet_8_GeV_plus_MBD_NS_geq_1"},
+//        {"Jet 10 GeV + MBD NS >= 1","Jet_10_GeV_plus_MBD_NS_geq_1"},
+//        {"Jet 12 GeV + MBD NS >= 1","Jet_12_GeV_plus_MBD_NS_geq_1"},
+        {"Photon 3 GeV + MBD NS >= 1","Photon_3_GeV_plus_MBD_NS_geq_1"},
+        {"Photon 4 GeV + MBD NS >= 1","Photon_4_GeV_plus_MBD_NS_geq_1"},
+        {"Photon 5 GeV + MBD NS >= 1","Photon_5_GeV_plus_MBD_NS_geq_1"}
   };
   std::map<int, std::string>* activeTriggerNameMap = nullptr;
 

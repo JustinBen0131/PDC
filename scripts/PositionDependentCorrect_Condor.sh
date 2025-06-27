@@ -32,6 +32,8 @@ clusterID="$4"
 nEvents="$5"
 chunkIndex="$6"   # offset + loop index
 chunkFile2="$7"
+destBase="$8"
+
 echo "---------------------------------------------------------------------"
 echo "[INFO] runNumber   = $runNumber"
 echo "[INFO] chunkFile1  = $chunkFile1"
@@ -53,60 +55,37 @@ fi
 #############################
 # 4) Decide output directory
 #############################
-OUTDIR_DATA="/sphenix/tg/tg01/bulk/jbennett/PDC/output"
-OUTDIR_SIM="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut"
-
-if [ "$dataOrSim" == "data" ]; then
-  outDir="$OUTDIR_DATA"
-elif [ "$dataOrSim" == "sim" ]; then
-  outDir="$OUTDIR_SIM"
+# Priority:
+#   (1) caller supplied destBase → use it
+#   (2) built‑in defaults      → OUTDIR_DATA / OUTDIR_SIM
+if [[ -n "$destBase" ]]; then
+  outDir="${destBase}/${runNumber}"
 else
-  echo "[WARNING] dataOrSim not recognized => defaulting to data output."
-  outDir="$OUTDIR_DATA"
+  if [[ "$dataOrSim" == "sim" ]]; then
+    outDir="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut/${runNumber}"
+  else
+    outDir="/sphenix/tg/tg01/bulk/jbennett/PDC/output/${runNumber}"
+  fi
 fi
 mkdir -p "$outDir"
+echo "[INFO] Output directory = $outDir"
 
-##############################
-## 5) Copy chunk files locally
-##############################
-#echo "[DEBUG] Checking chunkFile1 => $chunkFile1"
-#if [ ! -f "$chunkFile1" ]; then
-#  echo "[ERROR] chunkFile1 missing: $chunkFile1"
-#  exit 1
-#fi
-#cp "$chunkFile1" inputdata.txt
-
-#if [ "$dataOrSim" == "sim" ]; then
-#  if [ ! -f "$chunkFile2" ]; then
-#    echo "[ERROR] chunkFile2 missing for sim: $chunkFile2"
-#    exit 1
-#  fi
-#  cp "$chunkFile2" inputdatahits.txt
-#else
-#  echo "" > inputdatahits.txt
-#fi
-
-#echo "[DEBUG] inputdata.txt (first few lines):"
-#head -n 5 inputdata.txt
-#echo "[DEBUG] inputdatahits.txt (first few lines):"
-#head -n 5 inputdatahits.txt
 
 #############################
-# 6) Construct output filename
+# 5) Construct output filename
 #############################
-fileBaseName="$(basename "$chunkFile1")"
-fileTag="${fileBaseName%.*}"
+fileBaseName=$(basename "$chunkFile1")     # DST_CALO_run2pp_…‑00000.root
+fileTag=${fileBaseName%.*}
 
-if [ "$dataOrSim" = "data" ]; then
-  outFile="${outDir}/PositionDep_data_chunk${chunkIndex}.root"
+if [[ "$dataOrSim" == "sim" ]]; then
+  outFile="${outDir}/PositionDep_sim_${fileTag}.root"
 else
-  outFile="${outDir}/PositionDep_sim_chunk${chunkIndex}.root"
+  outFile="${outDir}/PositionDep_data_${fileTag}.root"
 fi
-mkdir -p "$(dirname "$outFile")"
 echo "[INFO] Final output file: $outFile"
 
 #############################
-# 7) Run the macro directly
+# 6) Run the macro directly
 #############################
 echo "[INFO] Invoking ROOT macro with command:"
 echo "root -b -l -q \"macros/Fun4All_PDC.C(${nEvents}, \\\"${chunkFile1}\\\", \\\"${chunkFile2}\\\", \\\"${outFile}\\\")\""
