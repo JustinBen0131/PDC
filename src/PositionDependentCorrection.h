@@ -468,13 +468,59 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_clus_E_size;
   TH1* h_block_bin;
   bool isSimulation = false;
+
     
+  // ════════════════════════════════════════════════════════════════════════
+  //  2×2‑block helper – ONE definition serves both φ and η directions
+  // ════════════════════════════════════════════════════════════════════════
+  static constexpr int kNCoarsePhi = 128;   // 256 fine / 2
+  static constexpr int kNCoarseEta =  48;   //  96 fine / 2
+
+  /** Generic 2×2‑block address (coarse index + local coord) */
+  struct BlockAddr
+  {
+      int   blk;   ///< coarse block index
+      float loc;   ///< local coordinate (‑0.5 , +1.5]
+
+      BlockAddr(int i, float u) : blk{i}, loc{u} {}
+  };
+
+  /* ---------- generic fold + wrap helper (internal use) ----------------- */
+  inline BlockAddr
+  undoAshAndReindexGeneric(BlockAddr  in,
+                             float      b,
+                             float    (*undo)(float,float),
+                             int        kNCoarse) const
+  {
+      float u = undo(in.loc, b);               // may leave (‑0.5 , +1.5]
+      int   i = in.blk;
+
+      if      (u < -0.5f) { u += 2.f; --i; }
+      else if (u >  1.5f) { u -= 2.f; ++i; }
+
+      if      (i < 0)            i += kNCoarse;
+      else if (i >= kNCoarse)    i -= kNCoarse;
+
+      return {i, u};
+  }
+
+  /* ---------- public wrappers for convenience --------------------------- */
+  inline BlockAddr undoAshAndReindexPhi(BlockAddr in, float b) const
+  { return undoAshAndReindexGeneric(in, b, doPhiBlockCorr, kNCoarsePhi); }
+
+  inline BlockAddr undoAshAndReindexEta(BlockAddr in, float b) const
+  { return undoAshAndReindexGeneric(in, b, doEtaBlockCorr, kNCoarseEta); }
+
+  /* ---------- raw (blk,loc) → global front‑face ------------------------- */
+  inline float phiFront(const BlockAddr& a) const
+  { return convertBlockToGlobalPhi(a.blk, a.loc); }
+
+  inline float etaFront(const BlockAddr& a) const
+  { return convertBlockToGlobalEta(a.blk, a.loc); }
+
     
   std::map<std::string, std::string> triggerNameMap = {
         {"MBD N&S >= 1",          "MBD_NandS_geq_1"},
-//        {"Jet 8 GeV + MBD NS >= 1","Jet_8_GeV_plus_MBD_NS_geq_1"},
-//        {"Jet 10 GeV + MBD NS >= 1","Jet_10_GeV_plus_MBD_NS_geq_1"},
-//        {"Jet 12 GeV + MBD NS >= 1","Jet_12_GeV_plus_MBD_NS_geq_1"},
         {"Photon 3 GeV + MBD NS >= 1","Photon_3_GeV_plus_MBD_NS_geq_1"},
         {"Photon 4 GeV + MBD NS >= 1","Photon_4_GeV_plus_MBD_NS_geq_1"},
         {"Photon 5 GeV + MBD NS >= 1","Photon_5_GeV_plus_MBD_NS_geq_1"}

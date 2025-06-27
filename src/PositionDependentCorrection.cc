@@ -2075,147 +2075,89 @@ catch (...)
             << ANSI_RESET << '\n'; }
 
 
-// ==========================================================================
-//  fillDPhiRawAndCorrected
-// --------------------------------------------------------------------------
-//  Computes Δφ between the reconstructed photon and its truth partner
-//  – first with *raw* local-block coordinates,
-//  – then with the Ash-b–corrected coordinates (if a fit exists).
-//
-//  ► All φ’s are propagated to **shower depth** so they can be compared
-//    1-to-1 with the Δx study.
-// ==========================================================================
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
         RawCluster*                  cluster,
         const TLorentzVector&        recoPhoton,
         const TLorentzVector&        truthPhoton,
-        const std::pair<float,float>& blkCoord, // <-- renamed
-        int                          blockPhiBin,     // 0 … 127  (coarse)
+        const std::pair<float,float>& blkCoord,   // (ηloc , φloc)
+        int                          blockPhiBin, // 0 … 127
         float /*rawDelPhi – ignored*/ )
 {
-  /* ────────────────────────  static per-job counters  ───────────────────── */
-  static std::uint64_t nSeen      = 0;     // clusters processed
-  static std::uint64_t nCorrUsed  = 0;     // clusters where b-fit existed
-  static double        sumAbsRaw  = 0.;    // Σ|Δφ_raw|
-  static double        sumAbsCorr = 0.;    // Σ|Δφ_corr|
+  /* unchanged banners, counters, guards … */
+  static std::uint64_t nSeen = 0, nCorrUsed = 0;
+  static double sumAbsRaw = 0., sumAbsCorr = 0.;
+  const bool v1 = Verbosity() > 0, v2 = Verbosity() > 1;
 
-  const bool v1 = Verbosity() > 0;
-  const bool v2 = Verbosity() > 1;
-  /* ────────────────────────   0) banner & fast sanity   ─────────────────── */
   if (v1)
   {
     std::cout << '\n' << ANSI_BOLD << ANSI_CYAN
-              << "[fillDPhiRawAndCorrected] cluster #" << nSeen + 1
-              << ANSI_RESET << "\n"
-              << "    • blockCoord = (ηloc=" << blkCoord.first
+              << "[fillDPhiRawAndCorrected] cluster #" << nSeen + 1 << ANSI_RESET
+              << "\n    • blockCoord = (ηloc=" << blkCoord.first
               << " , φloc=" << blkCoord.second << ")\n"
-              << "    • blockPhiBin (coarse) = " << blockPhiBin << '\n'
-              << "    • E(reco)  = " << recoPhoton.E()
+              << "    • blockPhiBin (coarse) = " << blockPhiBin
+              << "\n    • E(reco)  = " << recoPhoton.E()
               << " GeV   |   E(truth) = " << truthPhoton.E() << " GeV\n";
   }
+  if (!cluster || !m_geometry || !m_bemcRec) { if (v1) std::cout<<ANSI_RED<<"  ✘ Missing ptr – SKIP\n"<<ANSI_RESET; return; }
 
-  if (!cluster || !m_geometry || !m_bemcRec)
-  {
-    if (v1) std::cout << ANSI_RED
-      << "  ✘ Missing cluster or geometry pointers – SKIP\n"
-      << ANSI_RESET;
-    return;
-  }
-
-  /* ────────────────────────   1) energy slice id   ──────────────────────── */
   const float eReco = recoPhoton.E();
-  const int iSlice = getEnergySlice( eReco );
+  const int   iSlice = getEnergySlice(eReco);
   if (iSlice < 0) return;
-  const std::string lab = sliceTag( iSlice );
+  if (v2) std::cout << "    • slice = " << iSlice << '\n';
 
-  if (v2)
-    std::cout << "    • slice = " << iSlice
-              << "  [" << eEdge[iSlice] << " – " << eEdge[iSlice+1] << ")\n";
-
-  /* ────────────────────────   2) lead-tower geometry   ──────────────────── */
+  /* lead‑tower geometry (unchanged) */
   RawCluster::TowerConstIterator lead{};
   float eLead = -1.f;
-  for (auto it = cluster->get_towers().first;
-            it != cluster->get_towers().second; ++it)
+  for (auto it = cluster->get_towers().first; it!=cluster->get_towers().second; ++it)
     if (it->second > eLead) { eLead = it->second; lead = it; }
+  if (eLead < 1e-6) return;
 
-  if (eLead < 1e-6) { if (v1) std::cout << "  ΣE≈0 – SKIP\n"; return; }
-    
-  const RawTowerGeom* geo = m_geometry->get_tower_geometry( lead->first );
-  if (!geo) { if (v1) std::cout << "  ✘ lead-tower geom missing – SKIP\n"; return; }
-
+  const auto* geo = m_geometry->get_tower_geometry(lead->first);
+  if (!geo) return;
   const double rFront = geo->get_center_radius();
   const double zFront = geo->get_center_z();
-    
-  int ixLead = geo->get_binphi();   // 0 … 255   (column / φ)
-  int iyLead = geo->get_bineta();   // 0 … 95    (row / η)
-    
-  if (v2) std::cout << "    • rFront = " << rFront << " cm , zFront = "
-                    << zFront  << " cm\n";
+  const int ixLead = geo->get_binphi();
+  const int iyLead = geo->get_bineta();
 
-  const float phiSDtruth =
-      TVector2::Phi_mpi_pi( truthPhoton.Phi() );   // ← no depth propagation
+  const float phiSDtruth = TVector2::Phi_mpi_pi(truthPhoton.Phi());
 
-  /* ────────────────────────   4) RAW variant   ──────────────────────────── */
-  const float rawPhiFront  =
-    convertBlockToGlobalPhi( blockPhiBin, blkCoord.second );
-    
+  /* ---------------- RAW variant --------------------------------------- */
+  const BlockAddr addrRaw{ blockPhiBin, blkCoord.second };
+  const float     rawPhiFront = phiFront(addrRaw);
+
   const float phiSDrecoRaw =
-      phiAtShowerDepth(eReco, rFront, zFront,
-                       rawPhiFront, ixLead, iyLead);
-    
+      phiAtShowerDepth(eReco, rFront, zFront, rawPhiFront, ixLead, iyLead);
   const float dPhiRaw =
-      TVector2::Phi_mpi_pi( phiSDrecoRaw - phiSDtruth );
+      TVector2::Phi_mpi_pi(phiSDrecoRaw - phiSDtruth);
 
-  if (h_phi_diff_raw_E[iSlice]) h_phi_diff_raw_E[iSlice]->Fill( dPhiRaw );
-  if (pr_phi_vs_blockcoord) pr_phi_vs_blockcoord->Fill(blkCoord.second, dPhiRaw);
+  if (h_phi_diff_raw_E[iSlice]) h_phi_diff_raw_E[iSlice]->Fill(dPhiRaw);
+  if (pr_phi_vs_blockcoord)     pr_phi_vs_blockcoord->Fill(blkCoord.second, dPhiRaw);
+  if (v1) std::cout<<ANSI_YELLOW<<"    RAW  φFront="<<rawPhiFront<<"  Δφ_raw="<<dPhiRaw<<ANSI_RESET<<'\n';
 
-
-  if (v1) std::cout << ANSI_YELLOW
-    << "    RAW  φFront=" << rawPhiFront
-    << "  φSD(reco)=" << phiSDrecoRaw
-    << "  Δφ_raw=" << dPhiRaw << ANSI_RESET << '\n';
-
-  /* ────────────────────────   5) corrected variant (if fit)  ───────────── */
-  ++nSeen;
-  sumAbsRaw += std::fabs(dPhiRaw);
-
-  if (!isFitDoneForPhi || m_bValsPhi[iSlice] <= 0.f)
+  /* ---------------- corrected variant --------------------------------- */
+  ++nSeen;  sumAbsRaw += std::fabs(dPhiRaw);
+  if (isFitDoneForPhi && m_bValsPhi[iSlice] > 0.f)
   {
-    if (v2) std::cout << "    (no φ-fit for this slice)\n";
-  }
-  else
-  {
-    const float locCorr =
-        doPhiBlockCorr( blkCoord.second, m_bValsPhi[iSlice] );
+    const BlockAddr addrCorr = undoAshAndReindexPhi(addrRaw, m_bValsPhi[iSlice]);
+    const float     locCorr  = addrCorr.loc;
+    const float     corrPhiFront = phiFront(addrCorr);
 
-    const float corrPhiFront =
-        convertBlockToGlobalPhi( blockPhiBin, locCorr );
-      
     const float phiSDrecoCorr =
-        phiAtShowerDepth(eReco, rFront, zFront,
-                         corrPhiFront, ixLead, iyLead);
-      
+        phiAtShowerDepth(eReco, rFront, zFront, corrPhiFront, ixLead, iyLead);
     const float dPhiCorr =
-        TVector2::Phi_mpi_pi( phiSDrecoCorr - phiSDtruth );
+        TVector2::Phi_mpi_pi(phiSDrecoCorr - phiSDtruth);
 
-    if (h_phi_diff_corrected_E[iSlice])
-      h_phi_diff_corrected_E[iSlice]->Fill( dPhiCorr );
-    if (h_localPhi_corrected[iSlice])
-      h_localPhi_corrected[iSlice]->Fill( locCorr );
+    if (h_phi_diff_corrected_E[iSlice]) h_phi_diff_corrected_E[iSlice]->Fill(dPhiCorr);
+    if (h_localPhi_corrected   [iSlice]) h_localPhi_corrected[iSlice]->Fill(locCorr);
 
-    ++nCorrUsed;
-    sumAbsCorr += std::fabs(dPhiCorr);
-
-    if (v1) std::cout << ANSI_GREEN
-      << "    CORR b=" << m_bValsPhi[iSlice]
-      << "  φloc_corr=" << locCorr
-      << "  Δφ_corr=" << dPhiCorr << ANSI_RESET << '\n';
+    ++nCorrUsed; sumAbsCorr += std::fabs(dPhiCorr);
+    if (v1) std::cout<<ANSI_GREEN<<"    CORR b="<<m_bValsPhi[iSlice]
+                      <<"  φloc_corr="<<locCorr<<"  Δφ_corr="<<dPhiCorr
+                      <<ANSI_RESET<<'\n';
   }
-
-    /* ─────────── QA snapshots (only when Verbosity() > 1) ─────────── */
-    if (Verbosity() > 1)
-    {
+  /* ─────────── QA snapshots (only when Verbosity() > 1) ─────────── */
+  if (Verbosity() > 1)
+  {
       auto printSnapshot = [&](const char* tag)
       {
         const double meanRaw = sumAbsRaw  / static_cast<double>(nSeen);
@@ -2242,7 +2184,7 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
 
       if (nSeen == 2 || nSeen == 5 || nSeen == 10 || nSeen % 50 == 0)
         printSnapshot("checkpoint");
-    }
+  }
 }
 
 
@@ -2418,177 +2360,83 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
 
 
 
-/**********************************************************************
- *  fillDEtaRawAndCorrected – verbose, fault-tolerant version
- *  ------------------------------------------------------------------
- *  Computes Δη(reco,truth) twice:
- *    (i)  “raw”   – with original local-block coordinates;
- *    (ii) “corr”  – after Ash-b undo (if a valid fit exists).
- *
- *  Every non-fatal anomaly is reported when Verbosity()>3; critical
- *  faults abort the routine early with a red diagnostic.
- **********************************************************************/
 void PositionDependentCorrection::fillDEtaRawAndCorrected(
-        RawCluster                   *cluster,
-        const TLorentzVector         &recoPhoton,
-        const TLorentzVector         &truthPhoton,
-        const std::pair<float,float> &blkCoord,     // (ηloc , φloc)
-        int                           blockEtaBin,  // 0 … 47
+        RawCluster*                   cluster,
+        const TLorentzVector&         recoPhoton,
+        const TLorentzVector&         truthPhoton,
+        const std::pair<float,float>& blkCoord,   // (ηloc , φloc)
+        int                           blockEtaBin,// 0 … 47
         float                         vtx_z)
 {
-  /*--------------- verbosity helpers ---------------*/
-  const bool v1 = (Verbosity() > 0);
-  const bool v3 = (Verbosity() > 3);
+  /* same guards, banners … */
+  const bool v1 = Verbosity()>0, v3 = Verbosity()>3;
+  auto fail=[&](const std::string&w){ if(v3)std::cerr<<ANSI_RED<<w<<ANSI_RESET<<'\n';};
+  if(!cluster||!m_geometry||!m_bemcRec){ fail("null‑ptr"); return; }
 
-  auto fail = [&](const std::string &why)
-  {
-    if (v3)
-      std::cerr << ANSI_RED << "[fillDEtaRawAndCorrected]  ABORT – "
-                << why << ANSI_RESET << '\n';
-  };
-
-  auto warn = [&](const std::string &msg)
-  {
-    if (v3)
-      std::cerr << ANSI_YELLOW
-                << "[fillDEtaRawAndCorrected]  ⚠ " << msg
-                << ANSI_RESET << '\n';
-  };
-
-  /*--------------- sanity of mandatory objects ---------------*/
-  if (!cluster)      { fail("cluster == NULL");         return; }
-  if (!m_geometry)   { fail("m_geometry == NULL");      return; }
-  if (!m_bemcRec)    { fail("m_bemcRec == NULL");       return; }
-
-  /*--------------- energy-slice lookup ---------------*/
-  const float eReco  = recoPhoton.E();
+  const float eReco = recoPhoton.E();
   const int   iSlice = getEnergySlice(eReco);
-  if (iSlice < 0)    { fail("E outside slice table");   return; }
+  if(iSlice<0) return;
+  if(v1) std::cout<<ANSI_BOLD<<ANSI_CYAN<<"[fillDEtaRawAndCorrected] slice="
+                  <<iSlice<<"  E="<<eReco<<" GeV"<<ANSI_RESET<<'\n';
 
-  if (v1)
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[fillDEtaRawAndCorrected]  slice=" << iSlice
-              << " ,  E=" << eReco << " GeV"
-              << ANSI_RESET << '\n';
+  /* lead tower (unchanged) */
+  RawCluster::TowerConstIterator lead{};
+  float eLead=-1.f;
+  for(auto it=cluster->get_towers().first; it!=cluster->get_towers().second; ++it)
+    if(it->second>eLead){ eLead=it->second; lead=it; }
+  if(eLead<1e-6f) return;
+  const auto* tg = m_geometry->get_tower_geometry(lead->first);
+  if(!tg) return;
+  const double rFront=tg->get_center_radius();
+  const double zFront=tg->get_center_z();
+  const int ixLead=tg->get_binphi();
+  const int iyLead=tg->get_bineta();
 
-  /*--------------- lead-tower geometry ---------------*/
-  float eLead = -1.f;
-  RawCluster::TowerConstIterator leadIt {};
-  for (auto it = cluster->get_towers().first;
-            it != cluster->get_towers().second; ++it)
-    if (it->second > eLead) { eLead = it->second; leadIt = it; }
-
-  if (eLead < 1e-6f) { fail("ΣE(cluster) ≈ 0 – nothing to do"); return; }
-
-  const RawTowerGeom *tgLead =
-        m_geometry->get_tower_geometry(leadIt->first);
-  if (!tgLead) { fail("lead-tower geometry missing");   return; }
-
-  const double rFront = tgLead->get_center_radius();
-  const double zFront = tgLead->get_center_z();
-  const int    ixLead = tgLead->get_binphi();
-  const int    iyLead = tgLead->get_bineta();
-
-  /*--------------- truth reference ---------------*/
   const float etaTruth = truthPhoton.Eta();
+  const float phiUse   = recoPhoton.Phi();   // already depth‑shifted elsewhere
 
-  /*--------------- RAW variant ---------------*/
-  const float phiUse = recoPhoton.Phi();   // already depth-corrected elsewhere
-
+  /* ---------------- RAW (identical to old code) ------------------------ */
   const float etaSDraw =
-        etaAtShowerDepth(eReco, rFront, zFront, phiUse,
-                         ixLead, iyLead, vtx_z);
+      etaAtShowerDepth(eReco, rFront, zFront, phiUse, ixLead, iyLead, vtx_z);
+  float dEtaRaw = etaSDraw - etaTruth;
+  if (h_eta_diff_raw_E[iSlice]) h_eta_diff_raw_E[iSlice]->Fill(dEtaRaw);
+  if (v1) std::cout<<ANSI_YELLOW<<"    RAW  Δη="<<dEtaRaw<<ANSI_RESET<<'\n';
 
-  float dEtaRaw  = etaSDraw - etaTruth;
-  float dEtaCorr = std::numeric_limits<float>::quiet_NaN();   // set later
-
-  /* fill RAW histogram (warn if null) */
-  if (h_eta_diff_raw_E[iSlice])
-    h_eta_diff_raw_E[iSlice]->Fill(dEtaRaw);
-  else
-    warn("h_eta_diff_raw_E[" + std::to_string(iSlice) + "] is NULL");
-
-  /*--------------- Corrected variant (only if Ash-b fit exists) ---------------*/
-  if (isFitDoneForEta)
+  /* ---------------- corrected variant --------------------------------- */
+  float dEtaCorr = std::numeric_limits<float>::quiet_NaN();
+  if (isFitDoneForEta && m_bValsEta[iSlice] > 0.f)
   {
-    const float bVal = m_bValsEta[iSlice];
-    if (bVal <= 0.f)
+    const BlockAddr addrRaw{ blockEtaBin, blkCoord.first };
+    const BlockAddr addrCorr = undoAshAndReindexEta(addrRaw, m_bValsEta[iSlice]);
+
+    const float etaFrontCorr = etaFront(addrCorr);   // global front‑face η
+
+    if (std::isfinite(etaFrontCorr))
     {
-      if (v3) warn(Form("b-value for slice %d is %.4f ≤ 0 – skipping corr", iSlice, bVal));
-    }
-    else
-    {
-      /* (i)  local‑η after undoing Ash distortion */
-      float etaLocCorr =
-              doEtaBlockCorr( blkCoord.first , bVal );
+      const double thetaFC  = 2.0 * std::atan(std::exp(-etaFrontCorr));
+      const double zFrontC  = rFront / std::tan(thetaFC);
 
-      /* ---------------------------------------------------------------
-         *  keep (block,local) self‑consistent
-         *  ─────────────────────────────────────────
-         *  If the inverse Ash‑b map pushes the local coordinate across a
-         *  2×2‑block boundary, move the coarse‑η index by ±1 so that the
-         *  pair (blkEtaCorr , etaLocCorr) still refers to the same tower.
-         * ------------------------------------------------------------- */
-      int blkEtaCorr = blockEtaBin;                 // start from original
-      if (etaLocCorr < -0.5f) {                     // crossed downward
-            etaLocCorr += 2.f;
-            --blkEtaCorr;
-      } else if (etaLocCorr > 1.5f) {               // crossed upward
-            etaLocCorr -= 2.f;
-            ++blkEtaCorr;
-      }
+      const float etaSDcorr =
+          etaAtShowerDepth(eReco, rFront, zFrontC, phiUse, ixLead, iyLead, vtx_z);
 
-      /* barrel wrap‑around (48 coarse η blocks = 96/2) */
-      constexpr int kNCoarseEta = 48;
-      if (blkEtaCorr < 0)              blkEtaCorr += kNCoarseEta;
-      if (blkEtaCorr >= kNCoarseEta)   blkEtaCorr -= kNCoarseEta;
+      dEtaCorr = etaSDcorr - etaTruth;
 
-      /* (ii) global pseudorapidity at the calorimeter front face */
-      const float etaFrontCorr =
-              convertBlockToGlobalEta( blkEtaCorr , etaLocCorr );
-      if (!std::isfinite(etaFrontCorr))
-      {
-        warn("etaFrontCorr is NaN/Inf – correction dropped");
-      }
-      else
-      {
-        /* (iii) propagate to shower depth with *same* φ */
-        const double thetaFC  = 2.0 * std::atan(std::exp(-etaFrontCorr));
-        const double zFrontC  = rFront / std::tan(thetaFC);
+      if (h_eta_diff_corrected_E[iSlice]) h_eta_diff_corrected_E[iSlice]->Fill(dEtaCorr);
+      if (h_localEta_corrected   [iSlice]) h_localEta_corrected[iSlice]->Fill(addrCorr.loc);
 
-        const float etaSDcorr =
-              etaAtShowerDepth(eReco, rFront, zFrontC, phiUse,
-                               ixLead, iyLead, vtx_z);
-
-        dEtaCorr = etaSDcorr - etaTruth;
-
-        /* histograms (null-safe) */
-        if (h_eta_diff_corrected_E[iSlice])
-          h_eta_diff_corrected_E[iSlice]->Fill(dEtaCorr);
-        else
-          warn("h_eta_diff_corrected_E[" + std::to_string(iSlice) + "] is NULL");
-
-        if (h_localEta_corrected[iSlice])
-          h_localEta_corrected[iSlice]->Fill(etaLocCorr);
-        else
-          warn("h_localEta_corrected[" + std::to_string(iSlice) + "] is NULL");
-      }
+      if (v1) std::cout<<ANSI_GREEN<<"    CORR b="<<m_bValsEta[iSlice]
+                        <<"  ηloc_corr="<<addrCorr.loc
+                        <<"  Δη_corr="<<dEtaCorr<<ANSI_RESET<<'\n';
     }
   }
 
-  /*--------------- summary print ---------------*/
-  if (v1)
+  /* unchanged summary print */
+  if(v1)
   {
-    std::cout << ANSI_GREEN
-              << "    Δη_raw = "  << dEtaRaw;
-    if (std::isfinite(dEtaCorr))
-      std::cout << "   |   Δη_corr = " << dEtaCorr;
-    else
-      std::cout << "   |   Δη_corr = (n/a)";
-    std::cout << ANSI_RESET << '\n'
-              << ANSI_BOLD << ANSI_CYAN
-              << "[fillDEtaRawAndCorrected]  EXIT"
-              << ANSI_RESET << '\n';
+    std::cout<<ANSI_GREEN<<"    Δη_raw="<<dEtaRaw;
+    if(std::isfinite(dEtaCorr)) std::cout<<" | Δη_corr="<<dEtaCorr;
+    else                        std::cout<<" | Δη_corr=(n/a)";
+    std::cout<<ANSI_RESET<<'\n';
   }
 }
 
