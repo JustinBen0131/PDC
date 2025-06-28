@@ -11,6 +11,8 @@
 #include <TString.h>
 // CLHEP types appear in inline code inside the header
 #include <CLHEP/Vector/ThreeVector.h>   // Hep3Vector
+#include <functional>
+#include <atomic>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRec.h"
 
 class Fun4AllHistoManager;
@@ -50,6 +52,7 @@ class PositionDependentCorrection : public SubsysReco
 
   void setIsSimulation(bool flag)   { m_isSimulation = flag; }
   bool isSimulation()         const { return m_isSimulation; }
+  void setMassFitsDone(bool flag = true) { m_massFitsDone = flag; }
     
   int process_g4hits(PHCompositeNode *);
   int process_g4cells(PHCompositeNode *);
@@ -94,6 +97,9 @@ class PositionDependentCorrection : public SubsysReco
     *  – Returns *true* on success, *false* if the geometry container is empty.
   */
   bool computeRigidPhiOffset();
+  float m_eta0Offset {0.f};
+  bool  m_hasEtaOffset {false};
+  bool  computeRigidEtaOffset();
   // --------------------------------------------------------------------
   // 2) Method prototypes that reference RawClusterContainer, etc.
   // --------------------------------------------------------------------
@@ -309,6 +315,18 @@ class PositionDependentCorrection : public SubsysReco
       return hi;
   }();
     
+  /* ---------- π0‑mass‑window (pass‑2 helper) ------------------------------ */
+  static constexpr int kMaxEBins = N_Ebins;
+  struct MassWindow { float mu{0.f}; float sigma{0.f}; };
+
+  bool        m_massFitsDone {false};                // external flag
+  MassWindow  m_winRaw [kMaxEBins] {};               // RAW  (unused for now)
+  MassWindow  m_winCorr[kMaxEBins] {};               // CORR (unused for now)
+
+  /* ---------------- helper loaders --------------------------------------- */
+  bool loadBValues          (const std::string& path);   // b‑parameters
+  bool loadMassWindowTable  (const std::string& path);   // μ/σ table
+    
   void fillDPhiClusterizerCP( RawCluster*            cluster,
                                 const TLorentzVector&  truthPhoton,
                                 TH1F*                  cpRawHistArr  [N_Ebins], // renamed
@@ -495,8 +513,8 @@ class PositionDependentCorrection : public SubsysReco
       float u = undo(in.loc, b);               // may leave (‑0.5 , +1.5]
       int   i = in.blk;
 
-      if      (u < -0.5f) { u += 2.f; --i; }
-      else if (u >  1.5f) { u -= 2.f; ++i; }
+      if      (u <  -0.5f) { u += 2.f; --i; }
+      else if (u >= 1.5f)  { u -= 2.f; ++i; }
 
       if      (i < 0)            i += kNCoarse;
       else if (i >= kNCoarse)    i -= kNCoarse;
@@ -517,13 +535,40 @@ class PositionDependentCorrection : public SubsysReco
 
   inline float etaFront(const BlockAddr& a) const
   { return convertBlockToGlobalEta(a.blk, a.loc); }
-
     
+    /* -------- fine‑index helpers (0…255 / 0…95) ---------------- */
+  static constexpr int kFinePhiBins = 256;
+  static constexpr int kFineEtaBins = 96;
+
+  inline int finePhiIndex(int blk, float loc) const
+  {
+      float u = loc;
+      if (u <= -0.5f || u > 1.5f) u = std::fmod(u + 2.f, 2.f);
+      int idx = int(std::floor(blk*2 + u + 0.5f));
+      if      (idx < 0)              idx += kFinePhiBins;
+      else if (idx >= kFinePhiBins)  idx -= kFinePhiBins;
+      return idx;
+  }
+
+  inline int fineEtaIndex(int blk, float loc) const
+  {
+      float v = loc;
+      if (v <= -0.5f || v > 1.5f)
+      {
+        v = std::fmod(v + 2.f, 2.f);
+        if (v > 1.5f) v -= 2.f;
+      }
+      int idx = int(std::floor(blk*2 + v + 0.5f));
+      if      (idx < 0)             idx = 0;
+      else if (idx >= kFineEtaBins) idx = kFineEtaBins-1;
+      return idx;
+  }
+
   std::map<std::string, std::string> triggerNameMap = {
-        {"MBD N&S >= 1",          "MBD_NandS_geq_1"},
-        {"Photon 3 GeV + MBD NS >= 1","Photon_3_GeV_plus_MBD_NS_geq_1"},
-        {"Photon 4 GeV + MBD NS >= 1","Photon_4_GeV_plus_MBD_NS_geq_1"},
-        {"Photon 5 GeV + MBD NS >= 1","Photon_5_GeV_plus_MBD_NS_geq_1"}
+        {"MBD N&S >= 1",          "MBD_NandS_geq_1"}
+//        {"Photon 3 GeV + MBD NS >= 1","Photon_3_GeV_plus_MBD_NS_geq_1"},
+//        {"Photon 4 GeV + MBD NS >= 1","Photon_4_GeV_plus_MBD_NS_geq_1"},
+//        {"Photon 5 GeV + MBD NS >= 1","Photon_5_GeV_plus_MBD_NS_geq_1"}
   };
   std::map<int, std::string>* activeTriggerNameMap = nullptr;
 

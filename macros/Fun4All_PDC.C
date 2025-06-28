@@ -242,20 +242,44 @@ void Fun4All_PDC(int nevents = 0,
   }
 
     
-  PositionDependentCorrection *pdc
-    = new PositionDependentCorrection("PositionDepCorr", finalOut);
-  pdc->setBEmcRec(bemcPtr);
-  pdc->setIsSimulation(isSimulation);
-  pdc->UseSurveyGeometry(true);
-  // optionally specify a different tag / timestamp
-  // pdc->SetCDBTag("MDC3");
-  // pdc->SetTimeStamp(runNumber);
-    
-  //pdc->setBinningMode( EBinningMode::kRange || kDiscrete    );   // Eedges uses as bin RANGES
-  pdc->setBinningMode( PositionDependentCorrection::EBinningMode::kRange );
+    // ========================================================================
+    //  Position-dependent π0-correction module
+    //  ----------------------------------------------------------------------
+    //  How to drive the two most common switches from your macro:
+    //
+    //      • Simulation / Data
+    //          pdc->setIsSimulation(true);   // Monte-Carlo
+    //          pdc->setIsSimulation(false);  // Real data
+    //
+    //      • π0-mass windows (only after you have the pass-1 μ/σ table!)
+    //          pdc->setMassFitsDone(true);   // enable mass-window cuts (pass-2)
+    //          pdc->setMassFitsDone(false);  // disable  (default / pass-1)
+    // ========================================================================
 
-  pdc->Verbosity(0);
-  se->registerSubsystem(pdc);
+    auto* pdc = new PositionDependentCorrection("PositionDepCorr", finalOut);
+    /*------------------------------------------------------------
+      1)  Mandatory hooks and global switches
+      ------------------------------------------------------------*/
+    pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
+    pdc->setIsSimulation(isSimulation);
+    pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
+    /*------------------------------------------------------------
+      2)  π0-mass-window support
+      ------------------------------------------------------------*/
+    // Keep *false* for the first (pass-1) job that *produces* the μ/σ table.
+    // Set *true* for the second (pass-2) job that *consumes* the table and
+    // applies the slice-dependent mass cut.
+    pdc->setMassFitsDone(false);
+    /*------------------------------------------------------------
+      4)  Energy-binning mode
+      ------------------------------------------------------------*/
+    pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
+
+    pdc->Verbosity(0);                 // 0 = silent → raise for debugging
+
+    // Finally register the module with Fun4All
+    se->registerSubsystem(pdc);
+
 
   std::cout << "[INFO] Running Fun4All with nevents = " << nevents << std::endl;
   se->run(nevents);
