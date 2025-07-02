@@ -36,7 +36,7 @@
 ###############################################################################
 # 0) Configuration
 ###############################################################################
-SIM_CHUNK_DIR="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut"
+SIM_CHUNK_DIR="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut/9999"
 OUTPUT_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/output/simOutput"
 MERGED_FILE="PositionDep_sim_ALL.root"
 LISTFILE="sim_chunks_fulllist.txt"
@@ -87,7 +87,7 @@ if [[ "$MODE" == "condor" ]]; then
                                          -o -name "$MERGED_FILE" \) -delete
 
   # build full list of chunks
-  find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_chunk*.root" \
+  find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" \
        | sort > "$LISTFILE"
   [[ ! -s "$LISTFILE" ]] && { echo "[ERROR] No chunk files found"; exit 1; }
 

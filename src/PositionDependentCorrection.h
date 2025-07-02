@@ -7,12 +7,14 @@
 #include <map>
 #include <calotrigger/TriggerAnalyzer.h>
 #include <calobase/RawCluster.h>
+#include <calobase/RawClusterContainer.h>   // ← gives access to ConstIterator
 #include <cmath>
 #include <TString.h>
 // CLHEP types appear in inline code inside the header
 #include <CLHEP/Vector/ThreeVector.h>   // Hep3Vector
 #include <functional>
 #include <atomic>
+#include <TH3F.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRec.h"
 
 class Fun4AllHistoManager;
@@ -26,6 +28,7 @@ class TTree;
 class TH1;
 class TH1F;
 class TH3;
+class TH3F;
 class TH2;
 class TH2F;
 class TF1;
@@ -90,7 +93,9 @@ class PositionDependentCorrection : public SubsysReco
   EBinningMode getBinningMode() const    { return m_binningMode; }
     
  protected:
-    
+  /*! Current verbosity that static helpers can consult.                     *
+    *  It is updated for every instance in the constructor.                   */
+  static std::atomic<uint64_t> s_verbosityLevel;
   /** Measure the rigid φ–offset (barrel tilt) once per job.
     *
     *  – Uses `m_geometry`, fills `m_phi0Offset`, sets `m_hasOffset`.
@@ -126,11 +131,11 @@ class PositionDependentCorrection : public SubsysReco
                     float clus_chisq_cut,
                     int &nClusContainer);
     
-  float doPhiBlockCorr(float localPhi, float bphi);
-  float doEtaBlockCorr(float localEta, float bEta,  float dEtaTower = 1.f);
+  static float doPhiBlockCorr(float localPhi, float bphi);
+  static float doEtaBlockCorr(float localEta, float bEta,  float dEtaTower = 1.f);
     
-  float convertBlockToGlobalPhi(int block_phi_bin, float localPhi);
-  float convertBlockToGlobalEta(int block_eta_bin, float localEta);
+  float convertBlockToGlobalPhi(int block_phi_bin, float localPhi) const;
+  float convertBlockToGlobalEta(int block_eta_bin, float localEta) const;
 
   float  phiAtShowerDepth( float  energy,
                              double rFront,
@@ -335,9 +340,9 @@ class PositionDependentCorrection : public SubsysReco
 
   void fillDEtaClusterizerCP( RawCluster*            cluster,
                                 const TLorentzVector&  truthPhoton,
+                                float                 vtx_z,
                                 TH1F*                  cpRawHistArr  [N_Ebins],
-                                TH1F*                  cpCorrHistArr [N_Ebins],
-                                float                  vtx_z );
+                                TH1F*                  cpCorrHistArr [N_Ebins]);
   float m_bValsPhi[N_Ebins]{};
   float m_bValsEta[N_Ebins]{};
   std::vector<double> m_bScan;
@@ -361,6 +366,10 @@ class PositionDependentCorrection : public SubsysReco
   mutable std::atomic<std::uint64_t> m_nWinRAW   {0};
   mutable std::atomic<std::uint64_t> m_nWinCP    {0};
   mutable std::atomic<std::uint64_t> m_nWinBCorr {0};
+    
+  mutable std::atomic<std::uint64_t> m_nWinRAW_Eta   {0};
+  mutable std::atomic<std::uint64_t> m_nWinCP_Eta    {0};
+  mutable std::atomic<std::uint64_t> m_nWinBCorr_Eta {0};
     
   TProfile* pr_phi_vs_blockcoord = nullptr;
   TH2* h_emcal_mbd_correlation = nullptr;
@@ -468,6 +477,10 @@ class PositionDependentCorrection : public SubsysReco
   TH3* h_delEta_e_eta;
   TH3* h_delR_e_eta;
   TH3* h_delPhi_e_phi;
+  TH2F* h_mE_raw  {nullptr};
+  TH2F* h_mE_corr {nullptr};
+  TH3F* h_m_blk_raw  {nullptr};
+  TH3F* h_m_blk_corr {nullptr};
   TProfile* pr_eta_shower;
   TProfile* pr_phi_shower;
   TH2* h_vert_xy;
@@ -485,7 +498,6 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_block_eta;
   TH1* h_clus_E_size;
   TH1* h_block_bin;
-  bool isSimulation = false;
 
     
   // ════════════════════════════════════════════════════════════════════════
@@ -522,12 +534,33 @@ class PositionDependentCorrection : public SubsysReco
       return {i, u};
   }
 
-  /* ---------- public wrappers for convenience --------------------------- */
-  inline BlockAddr undoAshAndReindexPhi(BlockAddr in, float b) const
-  { return undoAshAndReindexGeneric(in, b, doPhiBlockCorr, kNCoarsePhi); }
+    /* ---------- public wrappers for convenience --------------------------- */
+    /* stub: 2‑argument facade so signature matches float (*)(float,float) */
+    static float doEtaBlockCorr_stub(float localEta, float bEta)
+    { return doEtaBlockCorr(localEta, bEta); }
 
-  inline BlockAddr undoAshAndReindexEta(BlockAddr in, float b) const
-  { return undoAshAndReindexGeneric(in, b, doEtaBlockCorr, kNCoarseEta); }
+    inline BlockAddr undoAshAndReindexPhi(BlockAddr in, float b) const
+    { return undoAshAndReindexGeneric(in, b, doPhiBlockCorr, kNCoarsePhi); }
+
+    // NEW – finite |η| coverage: clamp at the edges, never wrap
+    inline BlockAddr undoAshAndReindexEta(BlockAddr in, float b) const
+    {
+        // 1) non‑linear inverse of the Ash distortion
+        float u = doEtaBlockCorr_stub(in.loc, b);   // local coordinate
+        int   i = in.blk;                           // coarse η‑block (0…47)
+
+        // 2) bring u back into (‑0.5 , +1.5] and adjust the coarse index once
+        if      (u < -0.5f) { u += 2.f; --i; }
+        else if (u >= 1.5f) { u -= 2.f; ++i; }
+
+        // 3) η is NOT periodic – clamp to the physical limits of the barrel
+        constexpr int kMinBlk = 0;                    //  −1.1 ≤ η ≤ +1.1
+        constexpr int kMaxBlk = kNCoarseEta - 1;      // = 47
+        if (i < kMinBlk)      { i = kMinBlk;  u = -0.499f; }
+        else if (i > kMaxBlk) { i = kMaxBlk;  u =  1.499f; }
+
+        return { i, u };                              // safe (blk , loc)
+    }
 
   /* ---------- raw (blk,loc) → global front‑face ------------------------- */
   inline float phiFront(const BlockAddr& a) const

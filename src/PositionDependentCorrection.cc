@@ -78,6 +78,7 @@ R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 
 using namespace std;
 namespace CLHEP { class Hep3Vector; }
+std::atomic<uint64_t> PositionDependentCorrection::s_verbosityLevel{0};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
@@ -92,8 +93,9 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
   , clusterntuple(nullptr)
 {
   _eventcounter = 0;
-  _vz           = 30.0;
+  _vz           = 10.0;
   m_nWinRAW = m_nWinCP = m_nWinBCorr = 0;
+  s_verbosityLevel.store( Verbosity() );
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -204,26 +206,16 @@ PositionDependentCorrection::bookCommonHistograms
   hm->registerHisto(h_mE_raw );
   hm->registerHisto(h_mE_corr);
 
-  // ------------------------------------------------------------------
-  // π0 mass in local‑block space               (2 × TH3F)
-  // X,Y = ηloc , φloc;  Z = invariant mass.
-  // ------------------------------------------------------------------
-  static const double locEdge[15] =
-      { -0.5,-0.357,-0.214,-0.071,0.071,0.214,0.357,0.5,
-         0.643,0.786,0.929,1.071,1.214,1.357,1.5 };   // 14× equal 2×2 blocks
-
   h_m_blk_raw  = new TH3F("h_m_blk_raw",
-                            "π^{0} mass – RAW;"
-                            "η_{loc};φ_{loc};M_{γγ} [GeV]",
-                            14, locEdge,
-                            14, locEdge,
-                            60, 0.00, 0.30);
+                            "π^{0} mass – RAW;η_{loc};φ_{loc};M_{γγ} [GeV]",
+                            14, -0.5, 1.5,     // X: ηloc
+                            14, -0.5, 1.5,     // Y: φloc
+                            60, 0.00, 0.30);   // Z: mass
 
   h_m_blk_corr = new TH3F("h_m_blk_corr",
-                            "π^{0} mass – φ‑corr.;"
-                            "η_{loc};φ_{loc};M_{γγ} [GeV]",
-                            14, locEdge,
-                            14, locEdge,
+                            "π^{0} mass – φ‑corr.;η_{loc};φ_{loc};M_{γγ} [GeV]",
+                            14, -0.5, 1.5,
+                            14, -0.5, 1.5,
                             60, 0.00, 0.30);
 
   hm->registerHisto(h_m_blk_raw );
@@ -1012,144 +1004,133 @@ void PositionDependentCorrection::fillTruthInfo(
 }
 
 /*==========================================================================*
- *  φ-direction                                                             *
+ *  φ‑direction                                                             *
  *==========================================================================*/
 float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float b)
 {
+  /* Convenience alias – avoids repeated atomic loads                      */
+  const auto verb = s_verbosityLevel.load();
+
   /* —————————————————— banner —————————————————— */
-  if (Verbosity() > 0)
+  if (verb > 0)
     std::cout << ANSI_BOLD << "[doPhiBlockCorr] ENTER  "
               << "localPhi = " << localPhi << " ,  b = " << b
               << ANSI_RESET << '\n';
 
-  /* (0) nothing to undo when |b| ≈ 0 */
-  if (std::fabs(b) < 1e-9f) {                        // quick exit
-    if (Verbosity() > 0) std::cout << "  b≈0 → return unchanged\n";
+  /* (0) nothing to undo when |b| ≈ 0 ----------------------------------- */
+  if (std::fabs(b) < 1e-9f) {
+    if (verb > 0) std::cout << "  b≈0 → return unchanged\n";
     return localPhi;
   }
 
-  /* (1) single fold into (-0.5 … +1.5] */
+  /* (1) single fold into (‑0.5 … +1.5] ---------------------------------- */
   if (localPhi <= -0.5f || localPhi > 1.5f) {
-    if (Verbosity() > 1) std::cout << "  fold: " << localPhi << " → ";
+    if (verb > 1) std::cout << "  fold: " << localPhi << " → ";
     localPhi = std::fmod(localPhi + 2.f, 2.f);
-    if (Verbosity() > 1) std::cout << localPhi << '\n';
+    if (verb > 1) std::cout << localPhi << '\n';
   }
 
-  /* (2) map to (-0.5 … +0.5] */
+  /* (2) map to (‑0.5 … +0.5]                                             */
   const float Xmeas = (localPhi < 0.5f) ? localPhi : localPhi - 1.f;
-  if (Verbosity() > 1) std::cout << "  Xmeas = " << Xmeas << '\n';
+  if (verb > 1) std::cout << "  Xmeas = " << Xmeas << '\n';
 
-  /* (3) analytic inverse  ———  asinh! */
+  /* (3) analytic inverse  — asinh!                                       */
   const double S = std::sinh(1.0 / (2.0 * b));          // sinh(1/2b)
-  if (Verbosity() > 1) std::cout << "  S = sinh(1/2b) = " << S << '\n';
+  if (verb > 1) std::cout << "  S = sinh(1/2b) = " << S << '\n';
 
   const float Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
-  if (Verbosity() > 1) std::cout << "  Xtrue = " << Xtrue << '\n';
+  if (verb > 1) std::cout << "  Xtrue = " << Xtrue << '\n';
 
-  /* (4) shift back to (-0.5 … +1.5] */
+  /* (4) shift back to (‑0.5 … +1.5] and apply edge‑squash --------------- */
   float corrected = (localPhi < 0.5f) ? Xtrue : Xtrue + 1.f;
 
-    /* ---------- edge‑squash projectivity fix (b‑dependent) -------------- */
-    {
-        /* reference point:  b ≈ 0.18  →  A ≈ 1.2 %                        */
-        constexpr float Aref = 0.012f;          // 1.2 %
-        constexpr float bref = 0.18f;           // mid‑range b
+  /* ---------- edge‑squash projectivity fix (b‑dependent) -------------- */
+  {
+    constexpr float Aref = 0.012f;       // reference amplitude (1.2 %)
+    constexpr float bref = 0.18f;        // mid‑range b
 
-        /* scale with (b / bref)^2 and clamp into 0.8–1.6 %                 */
-        float A = Aref * (b / bref) * (b / bref);
-        if (A < 0.008f) A = 0.008f;
-        if (A > 0.016f) A = 0.016f;
+    float A = Aref * (b / bref) * (b / bref);
+    if (A < 0.008f) A = 0.008f;
+    if (A > 0.016f) A = 0.016f;
 
-        /* u ∈ [‑0.5 … +1.5]  →  s ∈ [‑π … +π]                              */
-        const float s     = static_cast<float>(M_PI) * (corrected - 0.5f);
+    const float s     = static_cast<float>(M_PI) * (corrected - 0.5f);
+    const float delta = A * std::sin(s) * (1.f - 0.25f * std::cos(s));
+    corrected -= delta;
+  }
+  /* -------------------------------------------------------------------- */
 
-        /* odd cubic‑sin variant: Δ = A·sin(s)·(1 – 0.25·cos s)             */
-        const float delta = A * std::sin(s) * (1.f - 0.25f * std::cos(s));
+  if (verb > 1)
+    std::cout << "  corrected (+edge‑fix) = " << corrected << '\n';
 
-        corrected -= delta;                       // apply
-    }
-    /* -------------------------------------------------------------------- */
-
-
-  if (Verbosity() > 1)
-      std::cout << "  corrected (+edge‑fix) = " << corrected << '\n';
-
-  /* (5) safety fold */
+  /* (5) safety fold ----------------------------------------------------- */
   if (corrected <= -0.5f || corrected > 1.5f) {
-        corrected = std::fmod(corrected + 2.f, 2.f);
-        if (corrected > 1.5f) corrected -= 2.f;
+    corrected = std::fmod(corrected + 2.f, 2.f);
+    if (corrected > 1.5f) corrected -= 2.f;
   }
 
-  if (Verbosity() > 0)
+  if (verb > 0)
     std::cout << ANSI_GREEN << "[doPhiBlockCorr] EXIT  → "
-              << corrected << " (rad-fraction)"
+              << corrected << " (rad‑fraction)"
               << ANSI_RESET << "\n\n";
 
   return corrected;
 }
 
+
 /*==========================================================================*
- *  η-direction                                *
+ *  η‑direction                                                             *
  *==========================================================================*/
 float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
                                                   float  b,
                                                   float  dEtaTower /* = 1.f */)
 {
-  if (Verbosity() > 0)
+  const auto verb = s_verbosityLevel.load();
+
+  if (verb > 0)
     std::cout << ANSI_BOLD << "[doEtaBlockCorr] ENTER  "
               << "ηloc=" << localEta << "  b=" << b
               << ANSI_RESET << '\n';
 
-  if (std::fabs(b) < 1e-9f)                         // nothing to undo
-  {
-    if (Verbosity() > 0) std::cout << "  b≈0 → return unchanged\n";
+  /* (0) fast exit if no correction is needed --------------------------- */
+  if (std::fabs(b) < 1e-9f) {
+    if (verb > 0) std::cout << "  b≈0 → return unchanged\n";
     return localEta;
   }
-  /* ------------------------------------------------------------------ *
-   * 1) fold once into (‑0.5 … +1.5]                                    *
-   * ------------------------------------------------------------------ */
+
+  /* (1) fold into (‑0.5 … +1.5] ---------------------------------------- */
   if (localEta <= -0.5f || localEta > 1.5f)
     localEta = std::fmod(localEta + 2.f, 2.f);
 
-  if (!std::isfinite(localEta))
-  {
-    if (Verbosity() > 0)
+  if (!std::isfinite(localEta)) {
+    if (verb > 0)
       std::cout << ANSI_RED << "  ηloc not finite → NaN\n" << ANSI_RESET;
     return std::numeric_limits<float>::quiet_NaN();
   }
-  /* ------------------------------------------------------------------ *
-   * 2) map measured coordinate to centre‑of‑gravity frame              *
-   * ------------------------------------------------------------------ */
+
+  /* (2) map to centre‑of‑gravity frame --------------------------------- */
   const float Xmeas = (localEta < 0.5f) ? localEta : localEta - 1.f;
 
-  /* ------------------------------------------------------------------ *
-   * 3) analytic inverse of forward Ash‑distortion                      *
-   *    (identical to φ)                                                *
-   * ------------------------------------------------------------------ */
+  /* (3) analytic inverse (same math as φ) ------------------------------ */
   const double  S     = std::sinh( 1.0 / (2.0 * b) );
   const float   Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
 
-  /* ------------------------------------------------------------------ *
-   * 4) add back integer tower pitch                                    *
-   * ------------------------------------------------------------------ */
-  float corrected = (localEta < 0.5f) ? Xtrue : Xtrue + 1.f;
+  /* (4) add back integer tower pitch ----------------------------------- */
+  float corrected = Xtrue;
+  if (corrected > 0.5f)           // now using Xtrue
+        corrected += 1.f;           // map (+0.5 … +1.5]
 
-  /* ------------------------------------------------------------------ *
-   * 5) safety fold & physical edge guard                               *
-   * ------------------------------------------------------------------ */
-  if (corrected <= -0.5f || corrected > 1.5f)
-  {
+  /* (5) safety fold & physical edge guard ------------------------------ */
+  if (corrected <= -0.5f || corrected > 1.5f) {
     corrected = std::fmod(corrected + 2.f, 2.f);
     if (corrected > 1.5f) corrected -= 2.f;
   }
-  /* If a caller supplied a non‑unity tower pitch (rare) apply it now */
-  corrected *= dEtaTower;
 
-  /* keep clusters inside the barrel acceptance (η ≈ ±1.1) */
-  if (std::fabs(corrected) > 1.6f)      // 2×2 block edge + margin
+  corrected *= dEtaTower;                       // non‑unity pitch (if any)
+
+  if (std::fabs(corrected) > 1.6f)              // keep inside barrel
     corrected = std::copysign(1.6f, corrected);
 
-  if (Verbosity() > 0)
+  if (verb > 0)
     std::cout << ANSI_GREEN << "[doEtaBlockCorr] EXIT → "
               << corrected << ANSI_RESET << "\n\n";
 
@@ -1291,7 +1272,7 @@ int PositionDependentCorrection::countClusters(
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 float
 PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
-                                                     float localPhi)
+                                                     float localPhi) const
 {
   constexpr int   kFinePerBlock   = 2;                       // 2 fine bins
   constexpr int   kNCoarseBlocks  = 128;                     // 256 / 2
@@ -1373,7 +1354,7 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
  *********************************************************************/
 float
 PositionDependentCorrection::convertBlockToGlobalEta(int   block_eta_bin,
-                                                     float localEta)
+                                                     float localEta) const
 {
   /*──────────────  compile-time constants  ──────────────*/
   constexpr int   kFinePerBlock   = 2;               // 2 fine η-towers / block
@@ -2088,6 +2069,224 @@ catch (...)
             << ANSI_RESET << '\n'; }
 
 
+/* ========================================================================
+ *  Δη test ( RAW  |  BEmcRec::CorrectPosition  |  analytic‑b(E) )
+ *  ---------------------------------------------------------------------- */
+void PositionDependentCorrection::fillDEtaClusterizerCP(
+        RawCluster*            cluster,
+        const TLorentzVector&  truthPhoton,
+        float                  vtx_z,                     // NEW
+        TH1F*                  cpRawHistArr [N_Ebins],
+        TH1F*                  cpCorrHistArr[N_Ebins])
+try
+{
+  const int vb = Verbosity();                  // 0 silent … ≥3 chatty
+  if (vb)
+    std::cout << '\n' << ANSI_BOLD << ANSI_CYAN
+              << "[fillDEtaClusterizerCP] ENTER" << ANSI_RESET << '\n';
+
+  /* ─── 0) sanity guards ───────────────────────────────────────────── */
+  if (!cluster || !m_geometry || !m_bemcRec)
+  {
+    if (vb) std::cerr << "  ✘ nullptr passed – abort\n";
+    return;
+  }
+
+  /* ─── 1) energy slice ────────────────────────────────────────────── */
+  const float eReco  = cluster->get_energy();
+  const int   iSlice = getEnergySlice(eReco);
+  if (iSlice < 0 || iSlice >= N_Ebins) return;
+
+  /* ─── 2) tower hit list (identical to φ‑branch) ──────────────────── */
+  std::vector<EmcModule> hits;
+  hits.reserve(cluster->getNTowers());
+  const int nPhiRec = m_bemcRec->GetNx();
+
+  for (auto it = cluster->get_towers().first;
+            it != cluster->get_towers().second; ++it)
+  {
+    const auto *tg = m_geometry->get_tower_geometry(it->first);
+    if (!tg) continue;
+    EmcModule m{};
+    m.ich = tg->get_binphi() + tg->get_bineta()*nPhiRec;
+    m.amp = it->second;
+    hits.emplace_back(m);
+  }
+  if (hits.empty()) return;
+
+  /* ─── 3) raw centre‑of‑gravity in tower units ───────────────────── */
+  float Ecl,xCG,yCG,xx,yy,xy;
+  m_bemcRec->Momenta(&hits, Ecl, xCG, yCG, xx, yy, xy);
+
+  const int ixSeed = int(xCG+0.5f);
+  const int iySeed = int(yCG+0.5f);
+
+  const auto *seedGeo = m_geometry->get_tower_geometry(
+        RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iySeed, ixSeed));
+  if (!seedGeo) return;
+
+  const double rFront = seedGeo->get_center_radius();
+
+  /* helper: propagate (ηFront,φFront) → shower‑depth pseudorapidity   */
+  auto etaSD = [&](float etaFront, float phiFront)
+  {
+    const double theta = 2.*std::atan( std::exp(-etaFront) );
+    const double zF    = rFront / std::tan(theta);            // front‑face z
+
+    float xSD,ySD,zSD;
+    m_bemcRec->CorrectShowerDepth(ixSeed, iySeed, eReco,
+                                  rFront*std::cos(phiFront),
+                                  rFront*std::sin(phiFront),
+                                  zF, xSD,ySD,zSD);
+
+    /* -------- include **event vertex** shift ----------------------- */
+    const double zRel = static_cast<double>(zSD) - static_cast<double>(vtx_z);
+
+    const double rSD  = std::hypot(xSD,ySD);
+    return -std::log( std::tan( 0.5*std::atan2(rSD, zRel) ) );
+  };
+
+  /* ========== 4) build the three flavours ========================== */
+  struct Rec {
+    const char* tag{"?"};
+    float etaFront{0.f};
+    float dEta{0.f};
+    float dMB{0.f};                         // module‑bias (diag)
+  } rec[3];
+
+  const float etaTruthSD = truthPhoton.Eta();
+
+  /* ---------- RAW -------------------------------------------------- */
+  {
+    float gx,gy,gz;
+    m_bemcRec->Tower2Global(eReco, xCG, yCG, gx,gy,gz);
+    const float etaF = -std::log( std::tan( 0.5*std::atan2(
+                              std::hypot(gx,gy), gz) ) );
+    rec[0] = { "RAW",
+               etaF,
+               float( etaSD(etaF, std::atan2(gy,gx)) - etaTruthSD ),
+               0.f };
+  }
+
+  /* ---------- CP (BEmcRec::CorrectPosition) ----------------------- */
+  float xCP=xCG, yCP=yCG;
+  m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
+
+  {
+    float gx,gy,gz;
+    m_bemcRec->Tower2Global(eReco, xCP, yCP, gx,gy,gz);
+    const float etaF = -std::log( std::tan( 0.5*std::atan2(
+                              std::hypot(gx,gy), gz) ) );
+    rec[1] = { "CP",
+               etaF,
+               float( etaSD(etaF, std::atan2(gy,gx)) - etaTruthSD ),
+               0.f };
+  }
+
+  /* ---------- BCORR (Ash‑b inverse + MB damping) ------------------- */
+  {
+    float yBC    = yCG;                     // start from RAW
+    float dMBeta = 0.f;                     // diagnostic
+
+    const float bEta = m_bValsEta[iSlice];
+    if (bEta > 0.f)
+    {
+      /* (i) non‑linear inverse ------------------------------------- */
+      const int   iy0   = int(yCG+0.5f);
+      const float uRaw  = yCG - iy0;                      // (-0.5 … +0.5]
+      const float uCorr = doEtaBlockCorr(uRaw, bEta);
+      yBC = iy0 + uCorr;
+
+      /* (ii) module‑bias reference point (CP’s bRef = 0.15) -------- */
+      const float uCorrCP   = doEtaBlockCorr(uRaw, 0.15f);
+      const float yCP_prefit= iy0 + uCorrCP;
+
+      /* (iii) adaptive Jacobian weighting (identical functional form
+             as in the φ treatment)                                  */
+      constexpr float bRef = 0.15f;
+      auto J = [](float b,float u)
+               { const float S=std::sinh(0.5f/b);
+                 return (2.f*b*S) / std::sqrt(1.f + 4.f*S*S*u*u); };
+
+      float w = (bEta/bRef) * ( J(bEta,uCorr) / J(bRef,uCorr) );
+      if (w < 0.40f) w = 0.40f;
+      if (w > 1.15f) w = 1.15f;
+
+      dMBeta = (yCP_prefit - yCP) * w;      // signed MB correction
+      yBC   -= dMBeta;                      // apply damping
+
+      /* (iv) one‑step Newton refinement ---------------------------- */
+      const int   iy1   = int(yBC+0.5f);
+      const float u1    = yBC - iy1;
+      const float u1Cor = doEtaBlockCorr(u1, bEta);
+      yBC = iy1 + u1Cor;                    // refined solution
+    }
+
+    /* keep φ same as CP so only η differs */
+    float gx,gy,gz;
+    m_bemcRec->Tower2Global(eReco, xCP, yBC, gx,gy,gz);
+
+    const float etaF = -std::log( std::tan( 0.5*std::atan2(
+                               std::hypot(gx,gy), gz) ) );
+
+    rec[2] = { "BCORR",
+               etaF,
+               float( etaSD(etaF, std::atan2(gy,gx)) - etaTruthSD ),
+               dMBeta };
+  }
+
+  /* ========== 5) histogram fills + win counter ==================== */
+  if (cpRawHistArr [iSlice]) cpRawHistArr [iSlice]->Fill(rec[0].dEta);
+  if (cpCorrHistArr[iSlice]) cpCorrHistArr[iSlice]->Fill(rec[1].dEta);
+  if (h_eta_diff_corrected_E[iSlice])
+      h_eta_diff_corrected_E[iSlice]->Fill(rec[2].dEta);
+
+  int iBest = 0;
+  if (std::fabs(rec[1].dEta) < std::fabs(rec[iBest].dEta)) iBest = 1;
+  if (std::fabs(rec[2].dEta) < std::fabs(rec[iBest].dEta)) iBest = 2;
+
+  switch (iBest)
+  {
+    case 0: ++m_nWinRAW_Eta;   break;
+    case 1: ++m_nWinCP_Eta;    break;
+    case 2: ++m_nWinBCorr_Eta; break;
+  }
+
+  /* ─── optional verbose table ───────────────────────────────────── */
+  if (vb)
+  {
+    std::cout << ANSI_BOLD
+              << "  Δη diagnostics (slice " << iSlice
+              << ", E=" << eReco << " GeV)\n"
+              << "  -------------------------------------------------------\n"
+              << "   tag       η_front     Δη_SD      Δy_MB\n"
+              << "  -------------------------------------------------------\n";
+    for (auto &r : rec)
+      std::cout << "   " << std::setw(5) << r.tag
+                << "   " << std::setw(10) << r.etaFront
+                << "   " << std::setw(10) << r.dEta
+                << "   " << std::setw(8)  << r.dMB   << '\n';
+    std::cout << "  -------------------------------------------------------\n"
+              << "  BEST → " << ANSI_GREEN << rec[iBest].tag << ANSI_RESET
+              << "  (|Δη|=" << std::fabs(rec[iBest].dEta) << ")\n";
+  }
+
+  if (vb)
+    std::cout << ANSI_GREEN
+              << "[fillDEtaClusterizerCP] EXIT – OK\n" << ANSI_RESET;
+}
+/* -------- exception guards ----------------------------------------- */
+catch (const std::exception& ex)
+{ std::cerr << ANSI_RED << "[fillDEtaClusterizerCP] EXCEPTION: "
+            << ex.what() << ANSI_RESET << '\n'; }
+catch (...)
+{ std::cerr << ANSI_RED << "[fillDEtaClusterizerCP] UNKNOWN EXCEPTION!"
+            << ANSI_RESET << '\n'; }
+
+
+
+
+
 void PositionDependentCorrection::fillDPhiRawAndCorrected(
         RawCluster*                  cluster,
         const TLorentzVector&        recoPhoton,
@@ -2138,8 +2337,8 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
   const BlockAddr addrRaw{ blockPhiBin, blkCoord.second };
   const float     rawPhiFront = phiFront(addrRaw);
 
-  const int ixCoG = finePhiIndex(blockPhiBin, blkCoord.second);
-  const int iyCoG = fineEtaIndex(blkEtaCoarse, blkCoord.first);
+  const int ixCoG = ixLead;
+  const int iyCoG = iyLead;
 
   const float phiSDrecoRaw =
         phiAtShowerDepth(eReco, rFront, zFront, rawPhiFront, ixCoG, iyCoG);
@@ -2157,9 +2356,6 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
     const BlockAddr addrCorr = undoAshAndReindexPhi(addrRaw, m_bValsPhi[iSlice]);
     const float     locCorr  = addrCorr.loc;
     const float     corrPhiFront = phiFront(addrCorr);
-
-    const int ixCoG = finePhiIndex(blockPhiBin, blkCoord.second);
-    const int iyCoG = fineEtaIndex(blkEtaCoarse, blkCoord.first);
 
     const float phiSDrecoCorr =
           phiAtShowerDepth(eReco, rFront, zFront, corrPhiFront, ixCoG, iyCoG);
@@ -2207,177 +2403,6 @@ void PositionDependentCorrection::fillDPhiRawAndCorrected(
 }
 
 
-///**********************************************************************
-// *  fillDEtaClusterizerCP – verbose, defensive edition
-// *  ------------------------------------------------------------------
-// *  Computes Δη(reco,truth) using ONLY the template clusteriser:
-// *    • “raw”  – centre-of-gravity before CorrectPosition
-// *    • “cp”   – after CorrectPosition
-// *
-// *  Every potential failure is trapped and reported when Verbosity()>3.
-// *  Concise green/red summaries are printed when Verbosity()>0.
-// **********************************************************************/
-//void PositionDependentCorrection::fillDEtaClusterizerCP(
-//        RawCluster                     *cluster,
-//        const TLorentzVector           &truthPhoton,
-//        TH1F*                           cpRawHistArr [N_Ebins],
-//        TH1F*                           cpCorrHistArr[N_Ebins],
-//        float                           vtx_z)
-//{
-//  /*──────────────────────────── helpers ─────────────────────────────*/
-//  const bool v1 = (Verbosity() > 0);
-//  const bool v3 = (Verbosity() > 3);
-//
-//  auto abortWith = [&](const std::string &msg)
-//  {
-//    if (v3)
-//      std::cerr << ANSI_RED << "[fillDEtaClusterizerCP]  ABORT – "
-//                << msg << ANSI_RESET << '\n';
-//  };
-//
-//  auto nullHistWarn = [&](TH1F* h, int idx, const char* tag)
-//  {
-//    if (!h && v3)
-//      std::cerr << ANSI_YELLOW << "  ⚠ Histogram pointer "
-//                << tag << "[" << idx << "] is NULL – fill skipped\n"
-//                << ANSI_RESET;
-//  };
-//
-//  /*───────────────────────── global guards ──────────────────────────*/
-//  if (!cluster)        { abortWith("cluster == NULL");        return; }
-//  if (!m_geometry)     { abortWith("m_geometry == NULL");     return; }
-//  if (!m_bemcRec)      { abortWith("m_bemcRec == NULL");      return; }
-//
-//  /* energy slice ----------------------------------------------------*/
-//  const float eReco  = cluster->get_energy();
-//  const int   iSlice = getEnergySlice(eReco);
-//  if (iSlice < 0)     { abortWith("energy slice < 0 (E out of table)"); return; }
-//
-//  if (v1)
-//    std::cout << ANSI_BOLD << ANSI_CYAN
-//              << "[fillDEtaClusterizerCP]  ENTER  ‖  slice=" << iSlice
-//              << " ,  E=" << eReco << " GeV"
-//              << ANSI_RESET << '\n';
-//
-//  /*──────────────── truth reference (already at SD) ────────────────*/
-//  const float etaTruthSD = truthPhoton.Eta();
-//
-//  /*────────────── 2) build raw tower hit-list for CG ───────────────*/
-//  std::vector<EmcModule> hitList;
-//  hitList.reserve(cluster->getNTowers());
-//
-//  for (auto it = cluster->get_towers().first;
-//            it != cluster->get_towers().second; ++it)
-//  {
-//    const RawTowerGeom* tg = m_geometry->get_tower_geometry(it->first);
-//    if (!tg)
-//    {
-//      abortWith("tower geom missing – key "
-//                + std::to_string(it->first));
-//      continue;                         // keep processing others
-//    }
-//
-//    EmcModule m{};
-//    const int phiCoarse = tg->get_binphi() % m_geometry->get_phibins();   // 0…127
-//    m.ich = phiCoarse + tg->get_bineta() * m_geometry->get_phibins();
-//    m.amp = it->second;
-//    m.tof = 0;
-//    hitList.push_back(std::move(m));
-//  }
-//
-//  if (hitList.empty()) { abortWith("hit list is empty – ΣE≈0?"); return; }
-//
-//  /*────────────── 3) CG moments (like BEmcRec::Momenta) ─────────────*/
-//  float E, xcg, ycg, xx, yy, xy;
-//  m_bemcRec->Momenta(&hitList, E, xcg, ycg, xx, yy, xy);
-//
-//  if (!std::isfinite(xcg) || !std::isfinite(ycg))
-//  {
-//    abortWith("CG coordinates are not finite");
-//    return;
-//  }
-//
-//  const int ixCG = int(xcg + 0.5f);
-//  const int iyCG = int(ycg + 0.5f);
-//
-//  const RawTowerGeom* cgGeom =
-//        m_geometry->get_tower_geometry(
-//           RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iyCG, ixCG));
-//
-//  if (!cgGeom) { abortWith("CG tower geometry missing"); return; }
-//
-//  const double rFront = cgGeom->get_center_radius();
-//  const double zFront = cgGeom->get_center_z();
-//
-//  /*──────────────── 3a) η with **NO** CorrectPosition ───────────────*/
-//  float xF = cgGeom->get_center_x();
-//  float yF = cgGeom->get_center_y();
-//
-//  const float dX = m_bemcRec->fTowerDist(float(ixCG), xcg);
-//  const float dY = ycg - iyCG;
-//
-//  TowerGeom tGeom;  m_bemcRec->GetTowerGeometry(ixCG, iyCG, tGeom);
-//  xF += dX * tGeom.dX[0] + dY * tGeom.dX[1];
-//  yF += dX * tGeom.dY[0] + dY * tGeom.dY[1];
-//
-//  const float phiFrontRaw = std::atan2(yF, xF);
-//
-//  float xSD, ySD, zSD;
-//  m_bemcRec->CorrectShowerDepth(ixCG, iyCG, eReco,
-//                                xF, yF, zFront,
-//                                xSD, ySD, zSD);
-//
-//  const float etaSDraw =
-//        etaAtShowerDepth(eReco, rFront, zFront, phiFrontRaw,
-//                         ixCG, iyCG, vtx_z);
-//
-//  /*──────────────── 3b) η after CorrectPosition ─────────────────────*/
-//  CLHEP::Hep3Vector vtx(0, 0, vtx_z);
-//  const float etaFrontCorr =
-//        RawClusterUtility::GetEVec(*cluster, vtx).pseudoRapidity();
-//
-//  const float phiFrontCorr = cluster->get_phi();
-//
-//  /* convert ηFront → new zFront for SD propagation */
-//  const double thetaF     = 2. * std::atan(std::exp(-etaFrontCorr));
-//  const double zFrontCorr = rFront / std::tan(thetaF);
-//
-//  float xF2 = rFront * std::cos(phiFrontCorr);
-//  float yF2 = rFront * std::sin(phiFrontCorr);
-//
-//  m_bemcRec->CorrectShowerDepth(ixCG, iyCG, eReco,
-//                                xF2, yF2, zFrontCorr,
-//                                xSD, ySD, zSD);
-//
-//  const float etaSDcorr =
-//        etaAtShowerDepth(eReco, rFront, zFrontCorr, phiFrontCorr,
-//                         ixCG, iyCG, vtx_z);
-//
-//  /*──────────────── 4) Δη and histogramming ─────────────────────────*/
-//  const float dEtaRaw  = etaSDraw  - etaTruthSD;
-//  const float dEtaCorr = etaSDcorr - etaTruthSD;
-//
-//  /* fill histograms (with null checks & warnings) */
-//  if (cpRawHistArr[iSlice]) cpRawHistArr[iSlice]->Fill(dEtaRaw);
-//  else                       nullHistWarn(cpRawHistArr[iSlice], iSlice, "cpRawHistArr");
-//
-//  if (cpCorrHistArr[iSlice]) cpCorrHistArr[iSlice]->Fill(dEtaCorr);
-//  else                        nullHistWarn(cpCorrHistArr[iSlice], iSlice, "cpCorrHistArr");
-//
-//  /*──────────────── summary printout ────────────────────────────────*/
-//  if (v1)
-//  {
-//    std::cout << (v3 ? ANSI_GREEN : ANSI_BOLD)
-//              << "    Δη_raw = "  << dEtaRaw
-//              << "   |   Δη_corr = " << dEtaCorr
-//              << ANSI_RESET << '\n'
-//              << ANSI_BOLD << ANSI_CYAN
-//              << "[fillDEtaClusterizerCP]  EXIT"
-//              << ANSI_RESET << '\n';
-//  }
-//}
-
-
 
 void PositionDependentCorrection::fillDEtaRawAndCorrected(
         RawCluster*                   cluster,
@@ -2410,8 +2435,8 @@ void PositionDependentCorrection::fillDEtaRawAndCorrected(
   const double zFront=tg->get_center_z();
   const int ixLead=tg->get_binphi();
   const int iyLead=tg->get_bineta();
-  const int ixCoG = finePhiIndex(blockPhiBin, blkCoord.second);
-  const int iyCoG = fineEtaIndex(blockEtaBin,  blkCoord.first);
+  const int ixCoG = ixLead;   // lead‑tower φ‑index
+  const int iyCoG = iyLead;   // lead‑tower η‑index
 
   const float etaTruth = truthPhoton.Eta();
   const float phiUse   = recoPhoton.Phi();   // already depth‑shifted elsewhere
@@ -2578,7 +2603,7 @@ void PositionDependentCorrection::fillBlockCoordinateHistograms(
 void PositionDependentCorrection::processSimulationTruthMatches(
         RawCluster*                     clus1,
         const TLorentzVector&           photon1,
-        int                             lt_eta,
+        [[maybe_unused]] int                             lt_eta,
         int                             lt_phi,
         const std::pair<float,float>&   blkCoord,
         int                             blkEtaCoarse,
@@ -2646,7 +2671,11 @@ void PositionDependentCorrection::processSimulationTruthMatches(
                           h_phi_diff_cpRaw_E,
                           h_phi_diff_cpCorr_E);
 
-    // fillDEtaClusterizerCP(...)   // still commented out, unchanged
+    fillDEtaClusterizerCP(clus1,
+                          trPhoton,
+                          vtx_z,
+                          h_eta_diff_cpRaw_E,     // RAW  η histos per E‑bin
+                          h_eta_diff_cpCorr_E);                 // primary‑vertex z
 
     fillDEtaRawAndCorrected( clus1,  photon1,  trPhoton,
                              blkCoord, blkEtaCoarse,
@@ -2720,6 +2749,7 @@ void PositionDependentCorrection::processClusterPairs(
         bool                               isSimulation)
 {
   const bool vb = (Verbosity() > 4);            // detailed debug switch
+  (void) lt_phi; 
 
   RawClusterContainer::ConstRange    cRange2 = clusterContainer->getClusters();
   for (auto cIt2 = cRange2.first; cIt2 != cRange2.second; ++cIt2)
@@ -2954,7 +2984,7 @@ void PositionDependentCorrection::finalClusterLoop(
 
   // Will hold booleans to see if first/second matched to meson photons
   bool match1 = false;
-  bool match2 = false;
+  bool match2 [[maybe_unused]] = false;
 
   if (Verbosity() > 0)
   {
@@ -3355,10 +3385,11 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   // ------------------------------------------------------------------------
   // 3) Retrieve truth info
   // ------------------------------------------------------------------------
+  std::vector<TLorentzVector> truth_photons;
+  std::vector<TLorentzVector> truth_meson_photons;
+    
   if (m_isSimulation)
   {
-      std::vector<TLorentzVector> truth_photons;
-      std::vector<TLorentzVector> truth_meson_photons;
       fillTruthInfo(topNode, vtx_z, truth_photons, truth_meson_photons);
       h2_truthReco_vz->Fill(truth_vz, vtx_z);
       
@@ -3562,9 +3593,9 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
     }
   }
 
-    // ---------- global performance summary ---------------------------------
-    if (Verbosity() > 0)
-    {
+  // ---------- global performance summary ---------------------------------
+  if (Verbosity() > 0)
+  {
       const std::uint64_t total = m_nWinRAW + m_nWinCP + m_nWinBCorr;
       std::cout << "\n[PERFORMANCE SUMMARY]\n"
                 << "  Events analysed : " << total << '\n'
@@ -3576,7 +3607,23 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
           std::cout << "  ➜  BCORR now matches or outperforms CP overall ✅\n";
       else
           std::cout << "  ➜  BCORR still behind CP — inspect damping/tuning ⚠️\n";
-    }
+  }
+    
+  /* -------- extra performance summary :  Δη  ------------------------- */
+  if (Verbosity() > 0)
+  {
+      const std::uint64_t totEta = m_nWinRAW_Eta + m_nWinCP_Eta + m_nWinBCorr_Eta;
+      std::cout << "\n[PERFORMANCE SUMMARY (η)]\n"
+                << "  Events analysed : " << totEta << '\n'
+                << "  │ best Δη  RAW   : " << m_nWinRAW_Eta   << '\n'
+                << "  │ best Δη  CP    : " << m_nWinCP_Eta    << '\n'
+                << "  │ best Δη  BCORR : " << m_nWinBCorr_Eta << '\n'
+                << "  └─────────────────────────────────────\n";
+      if (m_nWinBCorr_Eta >= m_nWinCP_Eta)
+          std::cout << "  ➜  BCORR now matches or outperforms CP in η ✅\n";
+      else
+          std::cout << "  ➜  BCORR still behind CP in η ⚠️\n";
+  }
     
   if (Verbosity() > 0)
   {
@@ -3599,7 +3646,7 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 //  Called every time a cluster needs pT-reweighting.
 // ============================================================================
 float PositionDependentCorrection::getWeight(int   ieta,
-                                             float pt) const   // <- ‘const’ is OK here
+                                             float pt)
 {
   // -------------------------------------------------------------------------
   // 1) Optional debug printout
