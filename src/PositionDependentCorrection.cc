@@ -1062,17 +1062,6 @@ float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float b)
   if (verb > 1)
     std::cout << "  corrected (+edge‑fix) = " << corrected << '\n';
 
-  /* (5) safety fold ----------------------------------------------------- */
-  if (corrected <= -0.5f || corrected > 1.5f) {
-    corrected = std::fmod(corrected + 2.f, 2.f);
-    if (corrected > 1.5f) corrected -= 2.f;
-  }
-
-  if (verb > 0)
-    std::cout << ANSI_GREEN << "[doPhiBlockCorr] EXIT  → "
-              << corrected << " (rad‑fraction)"
-              << ANSI_RESET << "\n\n";
-
   return corrected;
 }
 
@@ -1302,6 +1291,7 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
   if (localPhi <= -0.5f || localPhi >= 1.5f)
   {
     localPhi = std::fmod(localPhi + 2.0f, 2.0f);   // (0 … 2)
+    if (localPhi > 1.5f) localPhi -= 2.0f;         // (‑0.5 … +1.5]
     if (Verbosity() > 0)
       std::cout << ANSI_YELLOW
                 << "    • localPhi out of band – folded once to "
@@ -2452,18 +2442,28 @@ void PositionDependentCorrection::fillDEtaRawAndCorrected(
   float dEtaCorr = std::numeric_limits<float>::quiet_NaN();
   if (isFitDoneForEta && m_bValsEta[iSlice] > 0.f)
   {
-    const BlockAddr addrRaw{ blockEtaBin, blkCoord.first };
-    const BlockAddr addrCorr = undoAshAndReindexEta(addrRaw, m_bValsEta[iSlice]);
+      const BlockAddr addrRaw  = { blockEtaBin, blkCoord.first };
+      const BlockAddr addrCorr = undoAshAndReindexEta(addrRaw, m_bValsEta[iSlice]);
 
-    const float etaFrontCorr = etaFront(addrCorr);   // global front‑face η
+      /* ---------- translate corrected (blk,loc) to fine‑tower index ------ */
+      const int iyCorr = fineEtaIndex(addrCorr.blk, addrCorr.loc);   // NEW
+      /* guard – this should never fail, but stay defensive */
+      if (iyCorr < 0 || iyCorr >= kFineEtaBins) return;              // NEW
 
-    if (std::isfinite(etaFrontCorr))
-    {
-      const double thetaFC  = 2.0 * std::atan(std::exp(-etaFrontCorr));
-      const double zFrontC  = rFront / std::tan(thetaFC);
+      /* ---------- front‑face η of corrected block centre ----------------- */
+      const float etaFrontCorr = etaFront(addrCorr);
+      if (!std::isfinite(etaFrontCorr)) return;
 
+      /* ---------- compute z of tower centre on that row ------------------ */
+      const double thetaFC = 2.0 * std::atan(std::exp(-etaFrontCorr));
+      const double zFrontC = rFront / std::tan(thetaFC);
+
+        /* ---------- propagate to shower depth WITH UPDATED iyCorr ---------- */
       const float etaSDcorr =
-            etaAtShowerDepth(eReco, rFront, zFrontC, phiUse, ixCoG, iyCoG, vtx_z);
+              etaAtShowerDepth(eReco, rFront, zFrontC, phiUse,
+                               ixCoG,   /* unchanged φ index                  */
+                               iyCorr,  /* <-- use corrected η‑tower index */  // NEW
+                               vtx_z);
 
       dEtaCorr = etaSDcorr - etaTruth;
 
@@ -2473,18 +2473,17 @@ void PositionDependentCorrection::fillDEtaRawAndCorrected(
       if (v1) std::cout<<ANSI_GREEN<<"    CORR b="<<m_bValsEta[iSlice]
                         <<"  ηloc_corr="<<addrCorr.loc
                         <<"  Δη_corr="<<dEtaCorr<<ANSI_RESET<<'\n';
-    }
-  }
+  }   // ← closes the   if (isFitDoneForEta …)
 
   /* unchanged summary print */
   if(v1)
   {
-    std::cout<<ANSI_GREEN<<"    Δη_raw="<<dEtaRaw;
-    if(std::isfinite(dEtaCorr)) std::cout<<" | Δη_corr="<<dEtaCorr;
-    else                        std::cout<<" | Δη_corr=(n/a)";
-    std::cout<<ANSI_RESET<<'\n';
+      std::cout<<ANSI_GREEN<<"    Δη_raw="<<dEtaRaw;
+      if(std::isfinite(dEtaCorr)) std::cout<<" | Δη_corr="<<dEtaCorr;
+      else                        std::cout<<" | Δη_corr=(n/a)";
+      std::cout<<ANSI_RESET<<'\n';
   }
-}
+}     // ← closes the **function** – final brace
 
 // ============================================================================
 // Stand‑alone helper – verbatim logic extracted from finalClusterLoop()
@@ -2540,22 +2539,39 @@ void PositionDependentCorrection::fillBlockCoordinateHistograms(
   /* ------------------------------------------------------------------------
    * C) Apply optional η/φ corrections (unchanged logic)
    * ---------------------------------------------------------------------- */
-  const float rawEta = blkCoord.first;
-  const float rawPhi = blkCoord.second;
+    const float rawEta = blkCoord.first;     //  ηloc before any correction
+    const float rawPhi = blkCoord.second;    //  φloc before any correction
+    
+    int   blkEtaC = blkEtaCoarse;            // may change when we re‑index
+    int   blkPhiC = blkPhiCoarse;
+    float corrEta = rawEta;                  // start with raw, then shift
+    float corrPhi = rawPhi;
+    
+    
+    /* ---------- φ ---------------------------------------------------------- */
+    if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
+    {
+      const float bPhi = m_bValsPhi[iEbin];
+      if (bPhi > 1e-9f)
+      {
+        BlockAddr corr = undoAshAndReindexPhi({blkPhiC, rawPhi}, bPhi);
+        blkPhiC = corr.blk;           //  <‑‑ coarse index may have changed
+        corrPhi = corr.loc;           //      loc guaranteed in (‑0.5 … +1.5]
+      }
+    }
 
-  float corrEta = rawEta;   // start from raw – shift only if enabled
-  float corrPhi = rawPhi;
+    /* ---------- η ---------------------------------------------------------- */
+    if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
+    {
+      const float bEta = m_bValsEta[iEbin];
+      if (bEta > 1e-9f)
+      {
+        BlockAddr corr = undoAshAndReindexEta({blkEtaC, rawEta}, bEta);
+        blkEtaC = corr.blk;
+        corrEta = corr.loc;
+      }
+    }
 
-  if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
-  {
-    const float bPhi = m_bValsPhi[iEbin];
-    if (bPhi > 1e-9f) corrPhi = doPhiBlockCorr(rawPhi, bPhi);
-  }
-  if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
-  {
-    const float bEta = m_bValsEta[iEbin];
-    if (bEta > 1e-9f) corrEta = doEtaBlockCorr(rawEta, bEta);
-  }
 
   h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
 

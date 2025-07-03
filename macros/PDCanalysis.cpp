@@ -1386,6 +1386,32 @@ void Plot2DBlockEtaPhi(TH3F* hUnc3D,
   // Number of energy slices
   const int N_E = eEdges.size(); // typically 8
 
+  const double tSize = 0.045;     // title font size
+  const double lSize = 0.035;     // label font size
+
+  const double tOffX = 1.10;      // push X-title away from axis
+  const double tOffY = 1.35;      // push Y-title away from axis
+
+  gStyle->SetPadTickX(1);         // ticks on all sides
+  gStyle->SetPadTickY(1);
+
+  auto tuneAxes = [&](TH2* h)     // NEW helper
+  {
+      h->GetXaxis()->SetTitleSize(tSize);
+      h->GetYaxis()->SetTitleSize(tSize);
+      h->GetZaxis()->SetTitleSize(tSize);
+
+      h->GetXaxis()->SetLabelSize(lSize);
+      h->GetYaxis()->SetLabelSize(lSize);
+      h->GetZaxis()->SetLabelSize(lSize);
+
+      h->GetXaxis()->SetTitleOffset(tOffX);
+      h->GetYaxis()->SetTitleOffset(tOffY);
+      h->GetZaxis()->SetTitleOffset(1.8);       // Z needs more room
+  };
+  /* ------------------------------------------------------------ */
+
+
   // ===================================================================
   // (A) 2D blockEta vs blockPhi (4×2)
   // ===================================================================
@@ -1406,7 +1432,7 @@ void Plot2DBlockEtaPhi(TH3F* hUnc3D,
     for (int p = 1; p <= 8; ++p) {
           TPad *pad = (TPad*) c2D_cor->cd(p);   //  <-  use ->
           pad->SetRightMargin(0.18);
-          pad->SetLeftMargin (0.12);
+          pad->SetLeftMargin (0.18);
           pad->SetBottomMargin(0.12);
     }
   }
@@ -1435,6 +1461,8 @@ void Plot2DBlockEtaPhi(TH3F* hUnc3D,
           h2_unc->GetYaxis()->SetTitle("block #phi_{local, 2#times 2}");
           h2_unc->GetZaxis()->CenterTitle();          // optional
           h2_unc->GetZaxis()->SetTitleOffset(2.1);    // move label away
+          tuneAxes(h2_unc);
+          h2_unc->GetZaxis()->SetTitleOffset(1.3);
           h2_unc->Draw("COLZ");
           // do NOT delete here – wait until after SaveAs()
           /* TLatex header ------------------------------------------------ */
@@ -1470,6 +1498,8 @@ void Plot2DBlockEtaPhi(TH3F* hUnc3D,
             h2_cor->GetZaxis()->SetTitle("Energy [GeV]");
             h2_cor->GetZaxis()->SetTitleOffset(2.1);
             h2_cor->GetZaxis()->CenterTitle();
+            h2_cor->GetZaxis()->SetTitleOffset(1.3);
+            tuneAxes(h2_cor);
             h2_cor->Draw("COLZ");
           
             TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
@@ -5430,7 +5460,7 @@ void PDCanalysis()
     
   gStyle->SetOptStat(0);
     //_withVirgilesChange
-  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_test.root";
+  const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
 
   // 2) Open input
   std::cout << "[INFO] Opening file: " << inFile << "\n";
@@ -5633,9 +5663,9 @@ void PDCanalysis()
                   0.045, 0.035);
 
 
-//  makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED",
-//                  hCor3D, "cor", "CORRECTED",
-//                  out2DDir);                       // ← morph included
+  makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED",
+                  hCor3D, "cor", "CORRECTED",
+                  out2DDir);
 
 
 

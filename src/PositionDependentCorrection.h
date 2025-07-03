@@ -576,7 +576,10 @@ class PositionDependentCorrection : public SubsysReco
   inline int finePhiIndex(int blk, float loc) const
   {
       float u = loc;
-      if (u <= -0.5f || u > 1.5f) u = std::fmod(u + 2.f, 2.f);
+      if (u <= -0.5f || u > 1.5f) {
+          u = std::fmod(u + 2.f, 2.f);
+          if (u > 1.5f) u -= 2.f;        // keep in (‑0.5 … +1.5]
+      }
       int idx = int(std::floor(blk*2 + u + 0.5f));
       if      (idx < 0)              idx += kFinePhiBins;
       else if (idx >= kFinePhiBins)  idx -= kFinePhiBins;
