@@ -79,6 +79,7 @@ R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 using namespace std;
 namespace CLHEP { class Hep3Vector; }
 std::atomic<uint64_t> PositionDependentCorrection::s_verbosityLevel{0};
+static std::uint64_t g_nCorrPhiRight = 0;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
@@ -1097,16 +1098,17 @@ float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
   }
 
   /* (2) map to centre‑of‑gravity frame --------------------------------- */
-  const float Xmeas = (localEta < 0.5f) ? localEta : localEta - 1.f;
+  const bool  wasRight = (localEta > 0.5f);                 // remember original half
+  const float Xmeas    =  wasRight ? localEta - 1.f         // bring to (‑0.5 … +0.5]
+                                        : localEta;
 
   /* (3) analytic inverse (same math as φ) ------------------------------ */
   const double  S     = std::sinh( 1.0 / (2.0 * b) );
   const float   Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
 
   /* (4) add back integer tower pitch ----------------------------------- */
-  float corrected = Xtrue;
-  if (corrected > 0.5f)           // now using Xtrue
-        corrected += 1.f;           // map (+0.5 … +1.5]
+  float corrected = wasRight ? Xtrue + 1.f       // *explicitly* restore right tower
+                        : Xtrue;            // left tower unchanged
 
   /* (5) safety fold & physical edge guard ------------------------------ */
   if (corrected <= -0.5f || corrected > 1.5f) {
@@ -2485,129 +2487,100 @@ void PositionDependentCorrection::fillDEtaRawAndCorrected(
   }
 }     // ← closes the **function** – final brace
 
-// ============================================================================
-// Stand‑alone helper – verbatim logic extracted from finalClusterLoop()
-// ============================================================================
 void PositionDependentCorrection::fillBlockCoordinateHistograms(
-    const std::pair<float,float>& blkCoord,   // (ηloc , φloc)
-    int   blkEtaCoarse,                       // coarse η index
-    int   blkPhiCoarse,                       // coarse φ index
-    float clusE,                              // cluster energy  [GeV]
-    float clusPt,                             // cluster pT      [GeV]
-    int   iEbin,                              // energy slice index
-    std::size_t nTowers)                      // # towers in cluster
+        const std::pair<float,float>& blkCoord,   // (ηloc , φloc)
+        int   blkEtaCoarse,                       // coarse η index
+        int   blkPhiCoarse,                       // coarse φ index
+        float clusE,                              // cluster energy  [GeV]
+        int   iEbin,                              // energy slice
+        std::size_t nTowers)                      // # towers in cluster
 {
-  /* ------------------------------------------------------------------------
-   * A) Optional detailed printout (exactly as before)
-   * ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------ *
+   *  A)  optional verbose banner                                       *
+   * ------------------------------------------------------------------ */
   if (Verbosity() > 0)
   {
-    std::cout << "[DEBUG] finalClusterLoop →"
-              << "  blockCord=("   << blkCoord.first  << ',' << blkCoord.second << ")"
-              << "  |  coarse (η,φ)=(" << blkEtaCoarse << ',' << blkPhiCoarse  << ")"
-              << "  |  iEbin="     << iEbin
-              << "  |  E="         << clusE
-              << "  pT="           << clusPt
-              << "  |  #towers="   << nTowers
-              << '\n';
+    std::cout << "[DEBUG] finalClusterLoop → "
+              << "blockCoord=(" << blkCoord.first << ',' << blkCoord.second << ")  "
+              << "coarse(η,φ)=(" << blkEtaCoarse  << ',' << blkPhiCoarse  << ")  "
+              << "iEbin=" << iEbin << "  E=" << clusE << " GeV  "
+              << "#towers=" << nTowers << '\n';
   }
 
-  /* ------------------------------------------------------------------------
-   * B) Raw fill (identical to previous inline code)
-   * ---------------------------------------------------------------------- */
-  constexpr double kFillW = 1.0;               // weight per fill
-  h3_cluster_block_cord_E->Fill(blkCoord.first,   // η (x‑axis)
-                                blkCoord.second,  // φ (y‑axis)
-                                clusE,            // energy (z‑axis)
-                                kFillW);
+  /* ------------------------------------------------------------------ *
+   *  B)  RAW histogram fill                                            *
+   * ------------------------------------------------------------------ */
+  constexpr double kFillW = 1.0;
+  h3_cluster_block_cord_E->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
 
-  if (Verbosity() > 0)
+  if (Verbosity() > 2)
   {
     const int bx = h3_cluster_block_cord_E->GetXaxis()->FindBin(blkCoord.first);
     const int by = h3_cluster_block_cord_E->GetYaxis()->FindBin(blkCoord.second);
     const int bz = h3_cluster_block_cord_E->GetZaxis()->FindBin(clusE);
-
-    std::cout << "[RAW-FILL]  ηloc=" << blkCoord.first
-              << "  φloc="          << blkCoord.second
-              << "  E="             << clusE
-              << "  (binX,Y,Z = "   << bx << "," << by << "," << bz << ")  "
-              << "→ new content = "
-              << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
+    std::cout << "  [RAW‑FILL] bin(x,y,z)=(" << bx << ',' << by << ',' << bz
+              << ")  new content=" << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
               << '\n';
   }
 
-  /* ------------------------------------------------------------------------
-   * C) Apply optional η/φ corrections (unchanged logic)
-   * ---------------------------------------------------------------------- */
-    const float rawEta = blkCoord.first;     //  ηloc before any correction
-    const float rawPhi = blkCoord.second;    //  φloc before any correction
-    
-    int   blkEtaC = blkEtaCoarse;            // may change when we re‑index
-    int   blkPhiC = blkPhiCoarse;
-    float corrEta = rawEta;                  // start with raw, then shift
-    float corrPhi = rawPhi;
-    
-    
-    /* ---------- φ ---------------------------------------------------------- */
+  /* ------------------------------------------------------------------ *
+   *  C)  undo Ash distortion (φ periodic, η finite)                    *
+   * ------------------------------------------------------------------ */
+  const float rawEta = blkCoord.first;            // save originals
+  const float rawPhi = blkCoord.second;
+
+  int   blkEtaC = blkEtaCoarse;                   // may change
+  int   blkPhiC = blkPhiCoarse;
+  float corrEta = rawEta;                         // start with raw
+  float corrPhi = rawPhi;
+
+    /* -------- φ (periodic) -------------------------------------------- */
     if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
     {
-      const float bPhi = m_bValsPhi[iEbin];
-      if (bPhi > 1e-9f)
-      {
-        BlockAddr corr = undoAshAndReindexPhi({blkPhiC, rawPhi}, bPhi);
-        blkPhiC = corr.blk;           //  <‑‑ coarse index may have changed
-        corrPhi = corr.loc;           //      loc guaranteed in (‑0.5 … +1.5]
-      }
+        const float bPhi = m_bValsPhi[iEbin];
+        if (bPhi > 1e-9f)                      // <-- ASCII minus
+        {
+            const int blkPhiBefore = blkPhiC;    // remember
+            BlockAddr c = undoAshAndReindexPhi({blkPhiBefore, rawPhi}, bPhi);
+            blkPhiC = c.blk;
+            corrPhi = c.loc;                   // in (-0.5 … +0.5]
+
+            /* symmetrical un‑fold: wrap went *through +1.5*  */
+            if (c.blk == blkPhiBefore + 1)      // crossed to the right
+                corrPhi += 1.f;                 // (+0.5 … +1.5]
+        }
     }
 
-    /* ---------- η ---------------------------------------------------------- */
+    /* -------- η (finite, no un-fold) ---------------------------------- */
     if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
     {
-      const float bEta = m_bValsEta[iEbin];
-      if (bEta > 1e-9f)
-      {
-        BlockAddr corr = undoAshAndReindexEta({blkEtaC, rawEta}, bEta);
-        blkEtaC = corr.blk;
-        corrEta = corr.loc;
-      }
+        const float bEta = m_bValsEta[iEbin];
+        if (bEta > 1e-9f)                      // <-- ASCII minus
+        {
+            BlockAddr c = undoAshAndReindexEta({blkEtaC, rawEta}, bEta);
+            blkEtaC = c.blk;
+            corrEta = c.loc;                   // stays in (-0.5 … +1.5]
+        }
     }
 
-
+  /* ------------------------------------------------------------------ *
+   *  D)  corrected histogram fill + QA counter                         *
+   * ------------------------------------------------------------------ */
   h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
 
-  /* ------------------------------------------------------------------------
-   * D) Verbose bookkeeping for corrected histogram (unchanged)
-   * ---------------------------------------------------------------------- */
-  if (Verbosity() > 3)
+  if (corrPhi > 0.5f) ++g_nCorrPhiRight;          // QA: right‑hand fine tower
+
+  if (Verbosity() > 2)
   {
-    const int bxC = h3_cluster_block_cord_E_corrected->GetXaxis()->FindBin(corrEta);
-    const int byC = h3_cluster_block_cord_E_corrected->GetYaxis()->FindBin(corrPhi);
-    const int bzC = h3_cluster_block_cord_E_corrected->GetZaxis()->FindBin(clusE);
+    const int bx = h3_cluster_block_cord_E_corrected->GetXaxis()->FindBin(corrEta);
+    const int by = h3_cluster_block_cord_E_corrected->GetYaxis()->FindBin(corrPhi);
+    const int bz = h3_cluster_block_cord_E_corrected->GetZaxis()->FindBin(clusE);
 
-    const double rawCnt =
-        h3_cluster_block_cord_E           ->GetBinContent(bxC, byC, bzC);
-    const double corCnt =
-        h3_cluster_block_cord_E_corrected ->GetBinContent(bxC, byC, bzC);
-
-    std::cout << "[CORR-FILL] raw(η,φ)=(" << rawEta  << ',' << rawPhi  << ")  "
-              << "→ corr(η,φ)=("         << corrEta << ',' << corrPhi << ")  "
-              << "E=" << clusE
-              << "  (binX,Y,Z = " << bxC << ',' << byC << ',' << bzC << ")\n"
-              << "             rawHist now has " << rawCnt
-              << "  |  corrHist now has "        << corCnt << '\n';
-
-    /* global entry‑count check (unchanged) */
-    static Long64_t prevRawEntries = 0, prevCorEntries = 0;
-    const Long64_t totRaw = h3_cluster_block_cord_E           ->GetEntries();
-    const Long64_t totCor = h3_cluster_block_cord_E_corrected ->GetEntries();
-    if (totRaw != prevRawEntries || totCor != prevCorEntries)
-    {
-      std::cout << "[SUMMARY]  total entries – raw: " << totRaw
-                << " | corrected: " << totCor
-                << "  (Δ = " << (totRaw - totCor) << ")\n";
-      prevRawEntries = totRaw;
-      prevCorEntries = totCor;
-    }
+    std::cout << "  [CORR‑FILL] bin(x,y,z)=(" << bx << ',' << by << ',' << bz
+              << ")  rawΦloc=" << rawPhi << "  corrΦloc=" << corrPhi
+              << "  rawΗloc=" << rawEta << "  corrΗloc=" << corrEta
+              << "  new content=" << h3_cluster_block_cord_E_corrected->GetBinContent(bx,by,bz)
+              << '\n';
   }
 }
 
@@ -3155,7 +3128,6 @@ void PositionDependentCorrection::finalClusterLoop(
                                        blkEtaCoarse,
                                        blkPhiCoarse,
                                        clusE,
-                                       clusPt,
                                        iEbin,
                                        towerEs.size() );
 
@@ -3640,6 +3612,15 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
       else
           std::cout << "  ➜  BCORR still behind CP in η ⚠️\n";
   }
+    
+    // --------------------------------------------------------------------
+    //  QA: How many corrected entries landed in the right‑hand fine tower?
+    // --------------------------------------------------------------------
+    if (Verbosity() > 0)                                                // +++
+    {                                                                   // +++
+      std::cout << "[QA] 0.5 < φloc,corr ≤ 1.5  : "                     // +++
+                << g_nCorrPhiRight << " entries\n";                     // +++
+    }
     
   if (Verbosity() > 0)
   {

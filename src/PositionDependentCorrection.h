@@ -170,7 +170,6 @@ class PositionDependentCorrection : public SubsysReco
                                        int   blkEtaCoarse,
                                        int   blkPhiCoarse,
                                        float clusE,
-                                       float clusPt,
                                        int   iEbin,
                                        std::size_t nTowers);
 

@@ -3886,59 +3886,42 @@ void OverlayDeltaPhiFiveWays(const std::vector<std::pair<double,double>>& eEdges
 }
 
 /**********************************************************************
- *  OverlayDeltaEtaFiveWays  –  robust & talkative version
+ *  OverlayDeltaEtaFiveWays  –  robust & talkative version  (FIXED)
  *  ------------------------------------------------------------------
- *  Author : ChatGPT rewrite, 2025‑06‑28
- *  Usage  : drop this function in **exactly** as‑is.  Before running
- *           you may tune the global   gOverlayEtaDbg   variable from
- *           the ROOT prompt, e.g.
- *
- *              root [0] gOverlayEtaDbg = 3;  // max verbosity
- *
- *           Verbosity levels
- *              0  silent except fatal errors
- *              1  entry / exit + file‑written messages          (default)
- *              2  per‑slice progress and main ranges
- *              3  full dump of μ/σ tables
+ *  Author : ChatGPT patch, 2025‑07‑03
  *********************************************************************/
 
 namespace {
-  /* ------------------------------------------------------------------ *
-   *  DEBUG / ASSERT helpers                                            *
-   * ------------------------------------------------------------------ */
-  int gOverlayEtaDbg = 1;                     // run‑time adjustable
+  int gOverlayEtaDbg = 1;                           // run‑time adjustable
 
-  #define DBG(lvl,msg)                                                             \
-      do{ if(gOverlayEtaDbg >= lvl)                                                \
-              std::cout << "[Δη‑DBG] " << msg << std::endl; }while(0)
+  #define DBG(lvl,msg)  do{ if(gOverlayEtaDbg>=lvl) \
+        std::cout<<"[Δη‑DBG] "<<msg<<std::endl; }while(0)
 
-  #define CHK(cond,msg)                                                            \
-      do{ if(!(cond)){                                                             \
-              std::ostringstream oss; oss << msg;                                  \
-              throw std::runtime_error(oss.str()); } }while(0)
+  #define CHK(cond,msg) do{ if(!(cond)){            \
+        std::ostringstream oss; oss<<msg;           \
+        throw std::runtime_error(oss.str()); } }while(0)
 }
 
-/* ====================================================================== *
- *  OverlayDeltaEtaFiveWays (robust variant)
- * ====================================================================== */
+/* =================================================================== *
+ *  OverlayDeltaEtaFiveWays
+ * =================================================================== */
 void OverlayDeltaEtaFiveWays(const std::vector<std::pair<double,double>>& eEdges,
                              EBinningMode  binMode,
                              bool          isFirstPass,
-                             const char*   outDir = "plots/DeltaEta5")
+                             const char*   outDir="plots/DeltaEta5")
 {
-  /* wrap the *entire* body so that any exception is caught once      */
   try{
     DBG(1,"ENTER  – isFirstPass="<<isFirstPass
            <<"  slices="<<eEdges.size()
            <<"  outDir="<<outDir);
 
-    /* -------- 0. Book‑keeping / style ------------------------------ */
+    /* ---- 0. housekeeping ---------------------------------------- */
     gSystem->mkdir(outDir,true);
     gStyle->SetOptStat(0);
 
-    static const Color_t  colArr[5] = {kGreen+2,kMagenta+1,kBlack,kRed,kBlue};
-    static const Style_t  mksArr[5] = {20,20,20,20,20};
-    static const char*    legTxt[5] = {
+    static const Color_t col[5] = {kGreen+2,kMagenta+1,kBlack,kRed,kBlue};
+    static const Style_t mks[5] = {20,20,20,20,20};
+    static const char*   leg[5] = {
       "scratch, none","scratch, b(E)",
       "cluster, none","cluster, CP","cluster, b(E)"
     };
@@ -3946,106 +3929,107 @@ void OverlayDeltaEtaFiveWays(const std::vector<std::pair<double,double>>& eEdges
     const int nSlices = static_cast<int>(eEdges.size());
     CHK(nSlices>0,"eEdges is empty – nothing to do");
 
-    auto tagOf = [&](int i)->std::string{
-      return (binMode==EBinningMode::kRange)
-           ? Form("%.0f_%.0f",eEdges[i].first,eEdges[i].second)
-           : Form("E%.0f",eEdges[i].first);
+    auto tagOf = [&](int i){
+        return (binMode==EBinningMode::kRange)
+             ? Form("%.0f_%.0f",eEdges[i].first,eEdges[i].second)
+             : Form("E%.0f",     eEdges[i].first);
     };
 
-    /* ---------------------------------------------------------------- *
-     *  tiny helper – robust Gaussian fit with IQR pre‑clipping         *
-     * ---------------------------------------------------------------- */
-    struct GRes { double mu,muE,sg,sgE; };
+    /* ---- helper: robust Gaussian -------------------------------- */
+    struct GRes{ double mu,muE,sg,sgE; };
     auto robust = [&](TH1* h)->GRes
     {
-      if(!h || h->Integral()==0) return {0,0,0,0};
+      if(!h || h->Integral()==0) return {NAN,NAN,NAN,NAN};
 
-      const double q[3]={0.25,0.50,0.75};  double quart[3];
+      const double q[3]={0.25,0.50,0.75}; double quart[3];
       h->GetQuantiles(3,quart,(double*)q);
-      double med=quart[1], iqr=quart[2]-quart[0];
-      double lo = med-2.5*iqr , hi = med+2.5*iqr;
+      const double med=quart[1], iqr=quart[2]-quart[0];
+      double lo=med-2.5*iqr, hi=med+2.5*iqr;
       if(lo>=hi){ lo=h->GetMean()-2*h->GetRMS(); hi=h->GetMean()+2*h->GetRMS(); }
 
       TF1 g("g","gaus",lo,hi);
       g.SetParameters(h->GetMaximum(),med,0.5*h->GetRMS());
-
-      /* turn *off* stats box updates – they do heavy access in TList */
       g.SetParNames("A","mu","sigma");
-      TFitResultPtr fr = h->Fit(&g,"QNR0S");
+      TFitResultPtr fr=h->Fit(&g,"QNR0S");
 
       if(!fr || !fr->IsValid()){
         const double rms=h->GetRMS();
         const double err=rms/std::sqrt(std::max(1.,h->GetEntries()-1.));
         return {h->GetMean(),err,rms,err};
       }
-      return { g.GetParameter(1),g.GetParError(1),
-               std::fabs(g.GetParameter(2)),g.GetParError(2)};
+      return {g.GetParameter(1),g.GetParError(1),
+              std::fabs(g.GetParameter(2)),g.GetParError(2)};
     };
 
-    /* -------- 1. containers --------------------------------------- */
-    enum {kRAW,kRAWb,kCP,kCPcp,kCPb};            // histogram flavours
-
-    std::array<std::vector<double>,5> mu , muE , sg , sgE ;
+    /* ---- 1. containers ------------------------------------------ */
+    enum {kRAW,kRAWb,kCP,kCPcp,kCPb};
+    std::array<std::vector<double>,5> mu ,muE ,sg ,sgE ;
     std::vector<double> eCtr;
 
-    std::vector<std::unique_ptr<TH1>>  clones;   // we own *only* our clones
-    std::vector<std::unique_ptr<TObject>>   keep;/* graphs, legends, lines */
+    std::vector<std::unique_ptr<TH1>>      clones;
+    std::vector<std::unique_ptr<TObject>>  keep;   // graphs etc.
 
-    /* -------- 2. master canvas with overlays ---------------------- */
+    /* ---- 2. master canvas --------------------------------------- */
     const int nCols=4, nRows=(binMode==EBinningMode::kDiscrete?4:2);
-    auto cMain = std::make_unique<TCanvas>("cDEta5","Δη five‑way",1800,600*nRows);
+    auto cMain=std::make_unique<TCanvas>("cDEta5","Δη five‑way",1800,600*nRows);
     cMain->Divide(nCols,nRows);
 
-    for(int is=0; is<nSlices; ++is)
+    for(int is=0;is<nSlices;++is)
     {
-      const std::string tag = tagOf(is);
-      DBG(2,"… slice "<<is<<" / "<<nSlices<<"  tag="<<tag);
+      const std::string tag=tagOf(is);
+      DBG(2,"… slice "<<is<<" tag="<<tag);
 
-      /* locate histograms already sitting in memory ---------------- */
-      TH1F* src[5] = {};
+      /* --- fetch what exists ------------------------------------ */
+      TH1F* src[5]={};
       src[kRAW ] = (TH1F*)gROOT->FindObject(Form("h_eta_diff_raw_%s",tag.c_str()));
-      src[kRAWb] = (TH1F*)gROOT->FindObject(Form("h_eta_diff_corr_%s",tag.c_str()));
+
+      /* tolerate either “…corr…” or “…corrected…” ---------------- */
+      src[kRAWb] = (TH1F*)gROOT->FindObject(Form("h_eta_diff_corrected_%s",tag.c_str()));
+      if(!src[kRAWb])
+        src[kRAWb]=(TH1F*)gROOT->FindObject(Form("h_eta_diff_corr_%s",tag.c_str()));
 
       if(!isFirstPass){
-        src[kCP  ] = (TH1F*)gROOT->FindObject(Form("h_eta_diff_cpRaw_%s" ,tag.c_str()));
+        src[kCP ]  = (TH1F*)gROOT->FindObject(Form("h_eta_diff_cpRaw_%s", tag.c_str()));
         src[kCPcp] = (TH1F*)gROOT->FindObject(Form("h_eta_diff_cpCorr_%s",tag.c_str()));
         src[kCPb ] = (TH1F*)gROOT->FindObject(Form("h_eta_diff_cpBcorr_%s",tag.c_str()));
       }
-
       CHK(src[kRAW],"Missing mandatory histogram h_eta_diff_raw_"<<tag);
 
-      /* ---- clone + style + fit ---------------------------------- */
+      /* --- clone, style, fit ------------------------------------ */
       GRes res[5]={{}};
       TH1* hPlot[5]={};
 
-      for(int v=0; v<=kCPb; ++v)
+      for(int v=0;v<=kCPb;++v)
         if(src[v]){
-          auto c = std::unique_ptr<TH1F>((TH1F*)src[v]->Clone(
-                                  Form("h_eta_%d_%d",v,is)));
+          auto c=std::unique_ptr<TH1F>((TH1F*)src[v]->Clone(
+                         Form("h_clone_%d_%d",v,is)));
           c->SetDirectory(nullptr);
           if(c->Integral()>0) c->Scale(1./c->Integral());
-
-          c->SetMarkerStyle(mksArr[v]); c->SetMarkerSize(0.8);
-          c->SetMarkerColor(colArr[v]); c->SetLineColor(colArr[v]);
-
-          res[v]  = robust(c.get());
-          hPlot[v]= c.get();
+          c->SetMarkerStyle(mks[v]); c->SetMarkerSize(0.8);
+          c->SetMarkerColor(col[v]); c->SetLineColor(col[v]);
+          res[v]=robust(c.get());
+          hPlot[v]=c.get();
           clones.emplace_back(std::move(c));
         }
 
-      eCtr.push_back(0.5*(eEdges[is].first+eEdges[is].second));
-      for(int v=0; v<=kCPb; ++v){
-        mu [v].push_back(res[v].mu );  muE[v].push_back(res[v].muE);
-        sg [v].push_back(res[v].sg );  sgE[v].push_back(res[v].sgE);
+      /* --- bookkeeping for summaries ---------------------------- */
+      const double eMid=0.5*(eEdges[is].first+eEdges[is].second);
+      eCtr.push_back(eMid);
+
+      for(int v=0;v<=kCPb;++v){
+        const bool have=hPlot[v];
+        mu [v].push_back( have?res[v].mu :NAN);
+        muE[v].push_back( have?res[v].muE:NAN);
+        sg [v].push_back( have?res[v].sg :NAN);
+        sgE[v].push_back( have?res[v].sgE:NAN);
       }
 
-      /* ---- draw overlay ---------------------------------------- */
-      TPad* pad = (TPad*)cMain->cd(is+1);
-      CHK(pad,"null pad pointer");
+      /* --- draw overlay ----------------------------------------- */
+      TPad* pad=(TPad*)cMain->cd(is+1);  CHK(pad,"null pad");
       pad->SetLeftMargin(0.23); pad->SetBottomMargin(0.18);
 
-      double yMax=0; for(int v=0; v<=kCPb; ++v) if(hPlot[v])
-        yMax = std::max(yMax, hPlot[v]->GetMaximum());
+      double yMax=0; for(int v=0;v<=kCPb;++v)
+        if(hPlot[v]) yMax=std::max(yMax,hPlot[v]->GetMaximum());
 
       hPlot[kRAW]->SetTitle(Form("#Delta#eta  [%.0f,%.0f) GeV",
                                  eEdges[is].first,eEdges[is].second));
@@ -4053,172 +4037,106 @@ void OverlayDeltaEtaFiveWays(const std::vector<std::pair<double,double>>& eEdges
       hPlot[kRAW]->GetYaxis()->SetTitle("probability density");
       hPlot[kRAW]->GetYaxis()->SetRangeUser(0,1.25*yMax);
 
-      for(int v=0; v<=kCPb; ++v)
-        if(hPlot[v]) hPlot[v]->Draw(v==kRAW? "E":"E SAME");
+      for(int v=0;v<=kCPb;++v)
+        if(hPlot[v]) hPlot[v]->Draw(v==kRAW? "E" : "E SAME");
 
-      auto lg = std::make_unique<TLegend>(0.24,0.66,0.78,0.90);
+      auto lg=std::make_unique<TLegend>(0.24,0.66,0.78,0.90);
       lg->SetBorderSize(0); lg->SetFillStyle(0); lg->SetTextSize(0.028);
-      for(int v=0; v<=kCPb; ++v)
-        if(hPlot[v]) lg->AddEntry(hPlot[v],legTxt[v],"lp");
-      lg->Draw();  keep.emplace_back(std::move(lg));
+      for(int v=0;v<=kCPb;++v)
+        if(hPlot[v]) lg->AddEntry(hPlot[v],leg[v],"lp");
+      lg->Draw(); keep.emplace_back(std::move(lg));
     } /* slice loop */
 
-    /* write the big sheet early so we know it succeeded ---------- */
+    /* ---- 3. big sheet ------------------------------------------ */
     {
-      TString fn = TString::Format("%s/DeltaEta5_Compare_AllSlices.png",outDir);
-      cMain->SaveAs(fn);
-      DBG(1,"Wrote "<<fn);
+      TString fn=Form("%s/DeltaEta5_Compare_AllSlices.png",outDir);
+      cMain->SaveAs(fn);  DBG(1,"Wrote "<<fn);
     }
 
-    /* -------- 3. build summary tables --------------------------- */
-    const int N = static_cast<int>(eCtr.size());
-    CHK(N>0,"No valid slices accumulated – summary aborted");
+    /* ---- 4. helper for summary graphs -------------------------- */
+    const int N=eCtr.size();
+    CHK(N>0,"No valid slices – summary aborted");
 
-    auto makeGraph =
-      [&](const std::vector<double>& Y,const std::vector<double>& dY,int v)
-          -> std::unique_ptr<TGraphErrors>
-      {
-        std::vector<double> X(N),eX(N,0.);
-        for(int i=0;i<N;++i) X[i]=eCtr[i];
-        auto g = std::make_unique<TGraphErrors>(N,X.data(),Y.data(),
-                                                eX.data(),dY.data());
-        g->SetMarkerStyle(mksArr[v]); g->SetMarkerSize(1.1);
-        g->SetMarkerColor(colArr[v]); g->SetLineColor(colArr[v]);
-        return g;
-      };
+    auto makeGraph=[&](const std::vector<double>& Y,
+                       const std::vector<double>& dY,int v)
+                     {
+                       std::vector<double> X(N),eX(N,0.);
+                       for(int i=0;i<N;++i) X[i]=eCtr[i];
+                       auto g=new TGraphErrors(N,X.data(),Y.data(),eX.data(),dY.data());
+                       g->SetMarkerStyle(mks[v]); g->SetMarkerSize(1.1);
+                       g->SetMarkerColor(col[v]); g->SetLineColor(col[v]);
+                       return std::unique_ptr<TGraphErrors>(g);
+                     };
 
-    /* -------- 3a. μ / σ canvas ---------------------------------- */
-    {
-      TCanvas c("cMuSig","Δη μ/σ",900,780);
-
-      /* --- top (μ) pad --- */
-      TPad pT("pT","",0,0.37,1,1); pT.SetLeftMargin(0.15);
-      pT.SetBottomMargin(0.03); pT.Draw(); pT.cd();
-
-      double yLo=1e30,yHi=-1e30;
-      for(int v=0;v<=kCPb;++v) for(int i=0;i<N;++i){
-        yLo=std::min(yLo,mu[v][i]-muE[v][i]);
-        yHi=std::max(yHi,mu[v][i]+muE[v][i]);
-      }
-      yLo-=0.05*(yHi-yLo); yHi+=0.25*(yHi-yLo);   // head‑room for legend
-
-      TH1F frame("f","; ;Gaussian μ  (η‑units)",1,
-                 eCtr.front()-1.0,eCtr.back()+1.0);
-      frame.SetMinimum(yLo); frame.SetMaximum(yHi); frame.Draw("AXIS");
-
-      TLine l0(frame.GetXaxis()->GetXmin(),0,
-               frame.GetXaxis()->GetXmax(),0);
-      l0.SetLineStyle(2); l0.SetLineColor(kGray+2); l0.Draw();
-
-      auto lg = std::make_unique<TLegend>(0.38,0.78,0.85,0.93);
-      lg->SetBorderSize(0); lg->SetFillStyle(0); lg->SetTextSize(0.030);
-
-      for(int v=0;v<=kCPb;++v){
-        auto g = makeGraph(mu[v],muE[v],v);
-        if(g->GetN()==0) continue;
-        g->Draw("P SAME");
-        lg->AddEntry(g.get(),legTxt[v],"p");
-        keep.emplace_back(std::move(g));
-      }
-      lg->Draw(); keep.emplace_back(std::move(lg));
-
-      /* --- bottom (σ) pad --- */
-      c.cd();
-      TPad pB("pB","",0,0,1,0.37); pB.SetLeftMargin(0.15);
-      pB.SetTopMargin(0.07); pB.SetBottomMargin(0.35);
-      pB.Draw(); pB.cd();
-
-      yLo=1e30; yHi=-1e30;
-      for(int v=0;v<=kCPb;++v) for(int i=0;i<N;++i){
-        yLo=std::min(yLo,sg[v][i]-sgE[v][i]);
-        yHi=std::max(yHi,sg[v][i]+sgE[v][i]);
-      }
-      yLo = std::max(0.0,yLo-0.05*(yHi-yLo)); yHi+=0.05*(yHi-yLo);
-
-      TH1F frame2("f2",";E slice centre [GeV];Gaussian σ  (η‑units)",1,
-                  eCtr.front()-1.0,eCtr.back()+1.0);
-      frame2.SetMinimum(yLo); frame2.SetMaximum(yHi); frame2.Draw("AXIS");
-
-      for(int v=0;v<=kCPb;++v){
-        auto g = makeGraph(sg[v],sgE[v],v);
-        if(g->GetN()==0) continue;
-        g->Draw("P SAME");
-        keep.emplace_back(std::move(g));
-      }
-
-      TString fn = TString::Format("%s/DeltaEta5_MeanSigmaVsE.png",outDir);
-      c.SaveAs(fn);
-      DBG(1,"Wrote "<<fn);
-    }
-
-    /* -------- 3b. derived metrics (RMSE, frac‑res) -------------- */
-    std::array<std::vector<double>,5> rm , rmE , fr , frE ;
-    rm.fill({}); rmE.fill({}); fr.fill({}); frE.fill({});
-    for(int v=0;v<=kCPb;++v){
-      rm [v].resize(N); rmE[v].resize(N);
-      fr [v].resize(N); frE[v].resize(N);
-
-      for(int i=0;i<N;++i){
-        const double m=mu[v][i], s=sg[v][i];
-        const double dm=std::max(1e-12,muE[v][i]);
-        const double ds=std::max(1e-12,sgE[v][i]);
-
-        const double R  = std::hypot(m,s);
-        const double dR = R? R*std::hypot(dm/m,ds/s):0.;
-
-        const double F  = (std::fabs(m)>1e-12)? s/std::fabs(m):0.;
-        const double dF = F? F*std::hypot(ds/s,dm/m):0.;
-
-        rm [v][i]=R;  rmE[v][i]=dR;
-        fr [v][i]=F;  frE[v][i]=dF;
-      }
-    }
-
-    auto makeDiag =
-      [&](const char* stem,const char* yTit,
-          const std::array<std::vector<double>,5>& Y,
-          const std::array<std::vector<double>,5>& dY)
+    /* ---- 5. generic diagnostic canvas builder ----------------- */
+    auto makeDiag=[&](const char* stem,const char* yTit,
+                      const std::array<std::vector<double>,5>& Y,
+                      const std::array<std::vector<double>,5>& dY)
     {
       TCanvas c(stem,stem,900,640); c.SetLeftMargin(0.15); c.SetRightMargin(0.06);
 
-      double yLo=1e30,yHi=-1e30;
-      for(int v=0;v<=kCPb;++v) for(int i=0;i<N;++i){
-        yLo=std::min(yLo,Y[v][i]-dY[v][i]);
-        yHi=std::max(yHi,Y[v][i]+dY[v][i]);
-      }
-      if(yLo>0) yLo=0; const double pad=0.07*(yHi-yLo); yLo-=pad; yHi+=pad;
+      double yLo=+1e30,yHi=-1e30;
+      for(int v=0;v<=kCPb;++v) for(int i=0;i<N;++i)
+        if(std::isfinite(Y[v][i])){
+          yLo=std::min(yLo,Y[v][i]-dY[v][i]);
+          yHi=std::max(yHi,Y[v][i]+dY[v][i]);
+        }
+      if(yHi<=yLo){ yLo=0; yHi=1; }
+      const double pad=0.07*(yHi-yLo); yLo-=pad; yHi+=pad;
 
       TH1F frame("f",Form(";E slice centre [GeV];%s",yTit),1,
                  eCtr.front()-1.0,eCtr.back()+1.0);
       frame.SetMinimum(yLo); frame.SetMaximum(yHi); frame.Draw("AXIS");
 
-      auto lg = std::make_unique<TLegend>(0.15,0.75,0.55,0.93);
-      lg->SetBorderSize(0); lg->SetFillStyle(0); lg->SetTextSize(0.024);
+      auto lg=std::make_unique<TLegend>(0.15,0.77,0.55,0.93);
+      lg->SetBorderSize(0); lg->SetFillStyle(0); lg->SetTextSize(0.027);
 
       for(int v=0;v<=kCPb;++v){
-        auto g = makeGraph(Y[v],dY[v],v);
-        if(g->GetN()==0) continue;
-        g->Draw("P SAME");
-        lg->AddEntry(g.get(),legTxt[v],"p");
+        if(std::all_of(Y[v].begin(),Y[v].end(),
+           [](double x){return !std::isfinite(x);} )) continue;
+        auto g=makeGraph(Y[v],dY[v],v);
+        g->Draw("P SAME"); lg->AddEntry(g.get(),leg[v],"p");
         keep.emplace_back(std::move(g));
       }
       lg->Draw(); keep.emplace_back(std::move(lg));
 
-      TString fn = TString::Format("%s/%s.png",outDir,stem);
-      c.SaveAs(fn);
-      DBG(1,"Wrote "<<fn);
+      TString fn=Form("%s/%s.png",outDir,stem);
+      c.SaveAs(fn);  DBG(1,"Wrote "<<fn);
     };
 
-    makeDiag("DeltaEta5_RMSE"   ,"#sqrt{#mu^{2}+ #sigma^{2}}" ,rm ,rmE);
+    /* ---- 6. summaries ------------------------------------------ */
+    makeDiag("DeltaEta5_Mean","#LT#mu#GT  (η‑units)",   mu ,muE);
+    makeDiag("DeltaEta5_Sigma","Gaussian σ  (η‑units)", sg ,sgE);
+
+    /* derived: RMSE & frac‑res ----------------------------------- */
+    std::array<std::vector<double>,5> rm ,rmE ,fr ,frE ;
+    for(int v=0;v<=kCPb;++v){
+      rm [v].resize(N,NAN); rmE[v].resize(N,NAN);
+      fr [v].resize(N,NAN); frE[v].resize(N,NAN);
+      for(int i=0;i<N;++i){
+        const double m=mu[v][i] ,s=sg[v][i];
+        if(!std::isfinite(m)||!std::isfinite(s)) continue;
+        const double dm=std::max(1e-12,muE[v][i]);
+        const double ds=std::max(1e-12,sgE[v][i]);
+
+        const double R = std::hypot(m,s);
+        const double dR=R?R*std::hypot(dm/m,ds/s):NAN;
+
+        const double F = (std::fabs(m)>1e-12)? s/std::fabs(m):NAN;
+        const double dF = (std::isfinite(F)&&F)?F*std::hypot(ds/s,dm/m):NAN;
+
+        rm [v][i]=R;  rmE[v][i]=dR;
+        fr [v][i]=F;  frE[v][i]=dF;
+      }
+    }
+    makeDiag("DeltaEta5_RMSE"   ,"#sqrt{#mu^{2}+ #sigma^{2}}",rm ,rmE);
     makeDiag("DeltaEta5_FracRes","#sigma / |#mu|"             ,fr ,frE);
 
     DBG(1,"EXIT – OK");
-  } /* try body */
-
-  /* -------- global catch : print & re‑throw so ROOT prompt survives ---- */
+  }
   catch(const std::exception& e){
-    std::cerr << "[Δη‑FATAL] "<<e.what()<<std::endl;
-    throw;        // so you get the full cling back‑trace if desired
+    std::cerr<<"[Δη‑FATAL] "<<e.what()<<std::endl;
+    throw;
   }
 }
 
@@ -5663,9 +5581,9 @@ void PDCanalysis()
                   0.045, 0.035);
 
 
-  makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED",
-                  hCor3D, "cor", "CORRECTED",
-                  out2DDir);
+//  makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED",
+//                  hCor3D, "cor", "CORRECTED",
+//                  out2DDir);
 
 
 
