@@ -267,9 +267,6 @@ class PositionDependentCorrection : public SubsysReco
   static constexpr std::array<float,7> vzEdge = { 0, 5, 10, 15, 20, 25, 30};
   static constexpr int N_VzBins = vzEdge.size() - 1;
 
-  // Forward helper (defined inline just below the declaration body)
-  int getVzSlice(float vz) const;
-    
   std::string outfilename;
   bool m_isSimulation = false;      ///< true = MC, false = real data
   int Getpeaktime(TH1 *h);
@@ -531,12 +528,11 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_block_bin;
 
     
-  inline int
-  PositionDependentCorrection::getVzSlice(float vz) const
+  inline int getVzSlice(float vz) const
   {
-      for (int i = 0; i < N_VzBins; ++i)
-        if (vz >= vzEdge[i] && vz < vzEdge[i+1]) return i;
-      return -1;                        // outside configured window
+        for (int i = 0; i < N_VzBins; ++i)
+            if (vz >= vzEdge[i] && vz < vzEdge[i + 1]) return i;
+        return -1;
   }
   // ════════════════════════════════════════════════════════════════════════
   //  2×2‑block helper – ONE definition serves both φ and η directions

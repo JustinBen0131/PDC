@@ -73,13 +73,13 @@ constexpr const char* ANSI_GREEN = "\033[32m";
 constexpr const char* ANSI_YELLOW= "\033[33m";
 constexpr const char* ANSI_CYAN    = "\033[36m";
 constexpr const char* ANSI_RED   = "\033[31m";
+constexpr const char* ANSI_MAGENTA = "\033[35m";
 
 R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 
 using namespace std;
 namespace CLHEP { class Hep3Vector; }
 std::atomic<uint64_t> PositionDependentCorrection::s_verbosityLevel{0};
-static std::uint64_t g_nCorrPhiRight = 0;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
@@ -1868,7 +1868,7 @@ void PositionDependentCorrection::fillAshLogDx(
 // ════════════════════════════════════════════════════════════════════════
 void PositionDependentCorrection::fillDPhiAllVariants(
         RawCluster*                   cluster,
-        const TLorentzVector&         recoPhoton,
+        [[maybe_unused]] const TLorentzVector&         recoPhoton,
         const TLorentzVector&         truthPhoton,
         const std::pair<float,float>& blkCoord,     // (ηloc , φloc)
         int                           blockPhiBin,  // coarse φ-block
@@ -2570,7 +2570,7 @@ void PositionDependentCorrection::processSimulationTruthMatches(
         int                             blkPhiCoarse,
         const std::vector<int>&         towerPhis,
         const std::vector<float>&       towerEs,
-        float                           vtx_z,
+        [[maybe_unused]] float                           vtx_z,
         const std::vector<TLorentzVector>& truth_photons,
         const std::vector<TLorentzVector>& truth_meson_photons,
         /* out‑params ---------------------------------------------------- */
