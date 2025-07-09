@@ -1,0 +1,4 @@
+# Linear fit  mu(E) = p0 + p1*lnE   (E in GeV)
+# columns: dataset   p0(rad)   p1(rad)
+RAW         -2.499447e-04   -1.178115e-05
+CORRECTED   3.770070e-05   8.733596e-06

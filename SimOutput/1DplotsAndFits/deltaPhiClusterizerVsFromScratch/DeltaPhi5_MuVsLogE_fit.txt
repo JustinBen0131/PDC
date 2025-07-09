@@ -1,7 +1,7 @@
 # Linear fit  mu(E) = p0 + p1*lnE   (E in GeV)
 # columns: variant   p0(rad)   p1(rad)
-no correction, from scratch coord transforms-2.208605e-04   -2.357609e-05
-energy dep b correction, from scratch coord transforms1.292394e-05   1.466460e-05
-no correction, clusterizer coord transforms-1.905299e-03   2.714704e-05
-BEmcRecCEMC::CorrectPosition, clusterizer coord transforms-1.261002e-03   -1.545286e-05
-energy dep b correction, clusterizer coord transforms-5.670277e-04   -6.225311e-05
+no correction, from scratch coord transforms-2.506445e-04   -1.283310e-05
+energy dep b correction, from scratch coord transforms3.294728e-05   9.591117e-06
+no correction, clusterizer coord transforms-1.897519e-03   2.168527e-05
+BEmcRecCEMC::CorrectPosition, clusterizer coord transforms-1.236854e-03   -2.036418e-05
+energy dep b correction, clusterizer coord transforms-5.757888e-04   -5.712886e-05

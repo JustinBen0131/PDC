@@ -236,28 +236,8 @@ class PositionDependentCorrection : public SubsysReco
         const std::vector<float>& tower_energies
   );
     
-  void fillAshLogDy( RawCluster*                     cluster,
-                       const TLorentzVector&           recoPhoton,
-                       const TLorentzVector&           truthPhoton,
-                       const std::pair<float,float>&   blockCord,
-                       int                             blockEtaBin,
-                       const std::vector<int>&         tower_etas,
-                       const std::vector<float>&       tower_energies );
 
     
-  void fillDPhiRawAndCorrected( RawCluster*            cluster,
-                                  const TLorentzVector&  recoPhoton,
-                                  const TLorentzVector&  truthPhoton,
-                                  const std::pair<float,float>& blkCoord,
-                                  int   blockPhiBin,
-                                  float rawDelPhi /* unused – kept for call-site compatibility */ );
-
-  void fillDEtaRawAndCorrected( RawCluster* cluster,
-                                  const TLorentzVector& recoPhoton,
-                                  const TLorentzVector& truthPhoton,
-                                  const std::pair<float,float>& blockCord,
-                                  int  blockEtaBin,
-                                  float vtx_z );
   int  getEnergySlice(float E) const;
     
   float getAvgEta(const std::vector<int> &toweretas,
@@ -330,18 +310,32 @@ class PositionDependentCorrection : public SubsysReco
   /* ---------------- helper loaders --------------------------------------- */
   bool loadBValues          (const std::string& path);   // b‑parameters
   bool loadMassWindowTable  (const std::string& path);   // μ/σ table
-    
-  void fillDPhiClusterizerCP( RawCluster*            cluster,
-                                const TLorentzVector&  truthPhoton,
-                                TH1F*                  cpRawHistArr  [N_Ebins], // renamed
-                                TH1F*                  cpCorrHistArr [N_Ebins]  // renamed
-                              );
+  static constexpr std::array<float,7> vzEdge = { 0, 5, 10, 15, 20, 25, 30 };
+  static constexpr int N_VzBins = vzEdge.size() - 1;
 
-  void fillDEtaClusterizerCP( RawCluster*            cluster,
-                                const TLorentzVector&  truthPhoton,
-                                float                 vtx_z,
-                                TH1F*                  cpRawHistArr  [N_Ebins],
-                                TH1F*                  cpCorrHistArr [N_Ebins]);
+  // Forward helper (defined inline just below the declaration body)
+  int getVzSlice(float vz) const;
+    
+  /* 5-way residual helpers (Δφ / Δη) -- NEW */
+  void fillDPhiAllVariants( RawCluster*                cluster,
+                              const TLorentzVector&      recoPhoton,
+                              const TLorentzVector&      truthPhoton,
+                              const std::pair<float,float>& blkCoord,
+                              int                        blockPhiBin,
+                              float                      vtx_z,
+                              TH1F*                      cpRawHistArr [N_Ebins],
+                              TH1F*                      cpCorrHistArr[N_Ebins] );
+
+  void fillDEtaAllVariants( RawCluster*                cluster,
+                              const TLorentzVector&      recoPhoton,
+                              const TLorentzVector&      truthPhoton,
+                              const std::pair<float,float>& blkCoord,
+                              int                        blockEtaBin,
+                              float                      vtx_z,
+                              TH1F*                      cpRawHistArr [N_Ebins],
+                              TH1F*                      cpCorrHistArr[N_Ebins] );
+
+
   float m_bValsPhi[N_Ebins]{};
   float m_bValsEta[N_Ebins]{};
   std::vector<double> m_bScan;
@@ -360,6 +354,14 @@ class PositionDependentCorrection : public SubsysReco
     
   TH1F* h_eta_diff_cpRaw_E     [N_Ebins]{};
   TH1F* h_eta_diff_cpCorr_E    [N_Ebins]{};
+  TH1F* h_eta_diff_cpBcorr_E   [N_Ebins] {};
+    
+  TH1F* h_eta_diff_raw_E_vz     [N_Ebins][N_VzBins] {};
+  TH1F* h_eta_diff_corrected_E_vz[N_Ebins][N_VzBins]{};
+
+  TH1F* h_eta_diff_cpRaw_E_vz   [N_Ebins][N_VzBins]{};
+  TH1F* h_eta_diff_cpCorr_E_vz  [N_Ebins][N_VzBins]{};
+  TH1F* h_eta_diff_cpBcorr_E_vz [N_Ebins][N_VzBins]{};
     
   // –– NEW –– global tallies (initialised to zero in ctor)
   mutable std::atomic<std::uint64_t> m_nWinRAW   {0};
@@ -369,6 +371,25 @@ class PositionDependentCorrection : public SubsysReco
   mutable std::atomic<std::uint64_t> m_nWinRAW_Eta   {0};
   mutable std::atomic<std::uint64_t> m_nWinCP_Eta    {0};
   mutable std::atomic<std::uint64_t> m_nWinBCorr_Eta {0};
+    
+ /* 5‑way Δφ win‑counters */
+  std::atomic<std::uint64_t> m_phiWinCLUSraw   {0};
+  std::atomic<std::uint64_t> m_phiWinCLUScp    {0};
+  std::atomic<std::uint64_t> m_phiWinCLUSbcorr {0};
+  std::atomic<std::uint64_t> m_phiWinPDCraw    {0};
+  std::atomic<std::uint64_t> m_phiWinPDCcorr   {0};
+
+  std::atomic<std::uint64_t> m_etaWinCLUSraw   {0};
+  std::atomic<std::uint64_t> m_etaWinCLUScp    {0};
+  std::atomic<std::uint64_t> m_etaWinCLUSbcorr {0};
+  std::atomic<std::uint64_t> m_etaWinPDCraw    {0};
+  std::atomic<std::uint64_t> m_etaWinPDCcorr   {0};
+    
+    
+  /* optional numerical‑anomaly monitors */
+  std::atomic<std::uint64_t> g_nanPhi {0};
+  std::atomic<std::uint64_t> g_nanEta {0};
+  std::atomic<std::uint64_t> g_nCorrPhiRight {0};  
     
   TProfile* pr_phi_vs_blockcoord = nullptr;
   TH2* h_emcal_mbd_correlation = nullptr;
@@ -499,6 +520,13 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_block_bin;
 
     
+  inline int
+  PositionDependentCorrection::getVzSlice(float vz) const
+  {
+      for (int i = 0; i < N_VzBins; ++i)
+        if (vz >= vzEdge[i] && vz < vzEdge[i+1]) return i;
+      return -1;                        // outside configured window
+  }
   // ════════════════════════════════════════════════════════════════════════
   //  2×2‑block helper – ONE definition serves both φ and η directions
   // ════════════════════════════════════════════════════════════════════════
