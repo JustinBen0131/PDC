@@ -339,9 +339,11 @@ class PositionDependentCorrection : public SubsysReco
                               const TLorentzVector&      truthPhoton,
                               const std::pair<float,float>& blkCoord,
                               int                        blockEtaBin,
+                              int                        blockPhiBin,
                               float                      vtx_z,
                               TH1F*                      cpRawHistArr [N_Ebins],
-                              TH1F*                      cpCorrHistArr[N_Ebins] );
+                              TH1F*                      cpCorrHistArr[N_Ebins],
+                              bool                       fillGlobal = true );
 
 
   float m_bValsPhi[N_Ebins]{};
