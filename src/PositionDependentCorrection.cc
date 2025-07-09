@@ -2233,7 +2233,6 @@ try
   if (!tgLead) return;
 
   const double rFront = tgLead->get_center_radius();
-  const double zFront = tgLead->get_center_z();
   const int    ixCoG  = tgLead->get_binphi();
   const int    iyCoG  = tgLead->get_bineta();
 
