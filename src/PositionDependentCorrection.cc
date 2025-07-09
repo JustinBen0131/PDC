@@ -94,7 +94,9 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
   , clusterntuple(nullptr)
 {
   _eventcounter = 0;
-  _vz           = 10.0;
+  /* vertex‑Z limits                                                     */
+  m_vzTightCut  = 10.f;           // |z| ≤ 10 cm  → “physics” histograms
+  m_vzSliceMax  = vzEdge.back();  // |z| ≤ 30 cm  → Δη(E,vz) spectra only
   m_nWinRAW = m_nWinCP = m_nWinBCorr = 0;
   s_verbosityLevel.store( Verbosity() );
 }
@@ -2621,23 +2623,16 @@ void PositionDependentCorrection::processSimulationTruthMatches(
                  blkCoord, blkPhiCoarse,
                  towerPhis, towerEs);
 
-    fillDPhiRawAndCorrected(clus1, photon1, trPhoton,
-                             blkCoord, blkPhiCoarse, dPhi);
+    /* Δφ – five‑way */
+    fillDPhiAllVariants( clus1,            // the RawCluster*
+                           photon1,          // reco photon 4‑vector
+                           trPhoton,         // truth photon 4‑vector
+                           blkCoord,         // (ηloc,φloc)
+                           blkPhiCoarse,     // coarse φ‑block
+                           /*vtx_z=*/0.f,    // not used in φ path
+                           h_phi_diff_cpRaw_E,           // RAW   per‑E slice array
+                           h_phi_diff_cpCorr_E );        // CP    per‑E slice array
 
-    fillDPhiClusterizerCP(clus1,
-                          trPhoton,
-                          h_phi_diff_cpRaw_E,
-                          h_phi_diff_cpCorr_E);
-
-    fillDEtaClusterizerCP(clus1,
-                          trPhoton,
-                          vtx_z,
-                          h_eta_diff_cpRaw_E,     // RAW  η histos per E‑bin
-                          h_eta_diff_cpCorr_E);                 // primary‑vertex z
-
-    fillDEtaRawAndCorrected( clus1,  photon1,  trPhoton,
-                             blkCoord, blkEtaCoarse,
-                             vtx_z );
 
     if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
         blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
@@ -3282,43 +3277,59 @@ bool PositionDependentCorrection::computeRigidEtaOffset()
 // ============================================================================
 int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 {
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[process_towers] START" << ANSI_RESET
-              << "  => event counter: " << _eventcounter
-              << std::endl;
-  }
-  if ((_eventcounter % 1000) == 0)
-  {
-    std::cout << ANSI_BOLD << ANSI_YELLOW
-              << "[Info] Processing event " << _eventcounter
-              << ANSI_RESET << std::endl;
-  }
-
-  float emcal_hit_threshold = 0.5;  // GeV
-
-  if (debug)
-  {
-    std::cout << ANSI_BOLD << "[DEBUG] " << ANSI_RESET
-              << "-----------------------------------" << std::endl;
-  }
-  float maxAlpha       = 0.6;
-  float clus_chisq_cut = 4.0;
-  float nClus_ptCut    = 0.5;
-  int   max_nClusCount = 3000000;
-
-  // ------------------------------------------------------------------------
-  // 1) Retrieve vertex z-position
-  // ------------------------------------------------------------------------
-  float vtx_z = retrieveVertexZ(topNode);
-  float truth_vz = 0.0;
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_BOLD
-              << "[process_towers] Retrieved vertex Z position: "
-              << ANSI_RESET << vtx_z << std::endl;
-  }
+    if (Verbosity() > 0)
+    {
+        std::cout << ANSI_BOLD << ANSI_CYAN
+        << "[process_towers] START" << ANSI_RESET
+        << "  => event counter: " << _eventcounter
+        << std::endl;
+    }
+    if ((_eventcounter % 1000) == 0)
+    {
+        std::cout << ANSI_BOLD << ANSI_YELLOW
+        << "[Info] Processing event " << _eventcounter
+        << ANSI_RESET << std::endl;
+    }
+    
+    float emcal_hit_threshold = 0.5;  // GeV
+    
+    if (debug)
+    {
+        std::cout << ANSI_BOLD << "[DEBUG] " << ANSI_RESET
+        << "-----------------------------------" << std::endl;
+    }
+    float maxAlpha       = 0.6;
+    float clus_chisq_cut = 4.0;
+    float nClus_ptCut    = 0.5;
+    int   max_nClusCount = 3000000;
+    
+    // ------------------------------------------------------------------------
+    // 1) Retrieve vertex z-position
+    // ------------------------------------------------------------------------
+    float vtx_z = retrieveVertexZ(topNode);
+    float truth_vz = 0.0;
+    
+    if (Verbosity() > 0)
+    {
+        std::cout << ANSI_BOLD
+        << "[process_towers] Retrieved vertex Z position: "
+        << ANSI_RESET << vtx_z << std::endl;
+    }
+    /* ================================================================ *
+     * Two‑tier vertex‑Z acceptance
+     * ================================================================ */
+    const float absVz = std::fabs(vtx_z);
+    /* (B) outside the configured slice table → ignore event completely */
+    if (absVz > m_vzSliceMax)
+    {
+        if (Verbosity() > 1)
+            std::cout << "[PDC]  |z_vtx|=" << absVz
+                      << " cm > " << m_vzSliceMax
+                      << " cm – skip event\n";
+        return Fun4AllReturnCodes::EVENT_OK;
+    }
+    /* (C) tight physics window                                         */
+    const bool passTightVz = (absVz <= m_vzTightCut);
 
   // ------------------------------------------------------------------------
   // 2) Tower info
@@ -3357,22 +3368,56 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
           << std::endl;
       }
   }
-
-  if (std::fabs(vtx_z) > _vz)
-  {
-    if (Verbosity() > 5)
+    
+    m_geometry = checkTowerGeometry(topNode);
+    /* --------------------------------------------------------------- *
+     * Loose but *not* tight → fill only Δη(E,vz) spectra              *
+     * --------------------------------------------------------------- */
+    if (!passTightVz)
     {
-      std::cout << ANSI_BOLD << ANSI_YELLOW
-                << "[process_towers] => Vertex Z out of range (|"
-                << vtx_z << "| > " << _vz
-                << ") => Skipping event..."
-                << ANSI_RESET << std::endl
-                << ANSI_BOLD << "[process_towers] END\n" << ANSI_RESET
-                << std::endl;
+        RawClusterContainer* cc = retrieveClusterContainer(topNode);
+        if (cc && m_geometry)
+        {
+            RawClusterContainer::ConstRange rng = cc->getClusters();
+            for (auto it = rng.first; it != rng.second; ++it)
+            {
+                RawCluster* cl = it->second;     if (!cl) continue;
+                CLHEP::Hep3Vector vtx(0,0,vtx_z);
+                CLHEP::Hep3Vector evec = RawClusterUtility::GetEVec(*cl, vtx);
+                TLorentzVector    reco;  reco.SetPtEtaPhiE(evec.perp(),
+                                                           evec.pseudoRapidity(),
+                                                           evec.phi(),
+                                                           evec.mag());
+                /* minimal block address (ηloc,φloc) ----------------------- */
+                std::vector<int>   tEta, tPhi;   std::vector<float> tE;
+                for (auto t = cl->get_towers().first;
+                     t != cl->get_towers().second; ++t)
+                {
+                    const auto* tg = m_geometry->get_tower_geometry(t->first);
+                    if (!tg) continue;
+                    tEta.push_back(tg->get_bineta());
+                    tPhi.push_back(tg->get_binphi());
+                    tE  .push_back(t->second);
+                }
+                int blkPhi=-1, blkEta=-1;
+                auto blk = getBlockCord(tEta, tPhi, tE, blkPhi, blkEta);
+                /* dummy truth photon – only the residual is used            */
+                TLorentzVector truth;
+                /* Δη – five‑way */
+                fillDEtaAllVariants( cl,
+                                     reco,
+                                     truth,
+                                     blk,
+                                     blkEta,     // coarse η‑block
+                                     vtx_z,            // *** needed for vz‑binning ***
+                                     h_eta_diff_cpRaw_E,
+                                     h_eta_diff_cpCorr_E );
+                
+            }
+        }
+        return Fun4AllReturnCodes::EVENT_OK;      // done with loose event
     }
-    return Fun4AllReturnCodes::EVENT_OK;
-  }
-  m_geometry = checkTowerGeometry(topNode);
+
 
   if (Verbosity() > 0 && m_geometry)
   {
@@ -3434,20 +3479,23 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   float pt2ClusCut = 0.9;  // 0.7
   float pi0ptcut   = 0.f; // was 0 by default
 
-  finalClusterLoop(topNode,
-                   clusterContainer,
-                   vtx_z,
-                   truth_photons,
-                   truth_meson_photons,
-                   tower_tot_e,
-                   max_nClusCount,
-                   nClusCount,
-                   maxAlpha,
-                   ptMaxCut,
-                   pt1ClusCut,
-                   pt2ClusCut,
-                   pi0ptcut,
-                   weight);
+ if (passTightVz)
+ {
+     finalClusterLoop(topNode,
+                      clusterContainer,
+                      vtx_z,
+                      truth_photons,
+                      truth_meson_photons,
+                      tower_tot_e,
+                      max_nClusCount,
+                      nClusCount,
+                      maxAlpha,
+                      ptMaxCut,
+                      pt1ClusCut,
+                      pt2ClusCut,
+                      pi0ptcut,
+                      weight);
+ }
 
   // Clear vectors for tower bin indices
   ht_phi.clear();

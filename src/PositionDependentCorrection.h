@@ -105,6 +105,7 @@ class PositionDependentCorrection : public SubsysReco
   float m_eta0Offset {0.f};
   bool  m_hasEtaOffset {false};
   bool  computeRigidEtaOffset();
+    
   // --------------------------------------------------------------------
   // 2) Method prototypes that reference RawClusterContainer, etc.
   // --------------------------------------------------------------------
@@ -254,6 +255,21 @@ class PositionDependentCorrection : public SubsysReco
   // 3) Data members
   // --------------------------------------------------------------------
   std::string detector;
+  /* ----------------------------------------------------------------
+   *   –  m_vzTightCut  … “physics” histograms (default 10 cm)
+   *   –  m_vzSliceMax  … upper edge of the vzEdge table   (30 cm)
+   * -------------------------------------------------------------- */
+  float m_vzTightCut {10.f};
+  float m_vzSliceMax {30.f};
+  /// steer the tight cut from a macro if desired
+  void setTightVzCut(float cm) { m_vzTightCut = std::fabs(cm); }
+    
+  static constexpr std::array<float,7> vzEdge = { 0, 5, 10, 15, 20, 25, 30};
+  static constexpr int N_VzBins = vzEdge.size() - 1;
+
+  // Forward helper (defined inline just below the declaration body)
+  int getVzSlice(float vz) const;
+    
   std::string outfilename;
   bool m_isSimulation = false;      ///< true = MC, false = real data
   int Getpeaktime(TH1 *h);
@@ -310,11 +326,6 @@ class PositionDependentCorrection : public SubsysReco
   /* ---------------- helper loaders --------------------------------------- */
   bool loadBValues          (const std::string& path);   // b‑parameters
   bool loadMassWindowTable  (const std::string& path);   // μ/σ table
-  static constexpr std::array<float,7> vzEdge = { 0, 5, 10, 15, 20, 25, 30 };
-  static constexpr int N_VzBins = vzEdge.size() - 1;
-
-  // Forward helper (defined inline just below the declaration body)
-  int getVzSlice(float vz) const;
     
   /* 5-way residual helpers (Δφ / Δη) -- NEW */
   void fillDPhiAllVariants( RawCluster*                cluster,
