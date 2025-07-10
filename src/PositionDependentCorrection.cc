@@ -2139,102 +2139,47 @@ catch (...)
 
 
 
+/* =======================================================================
+ *  Fills raw & corrected 2×2‑block‑coordinate histograms
+ * ===================================================================== */
 void PositionDependentCorrection::fillBlockCoordinateHistograms(
-        const std::pair<float,float>& blkCoord,   // (ηloc , φloc)
-        int   blkEtaCoarse,                       // coarse η index
-        int   blkPhiCoarse,                       // coarse φ index
-        float clusE,                              // cluster energy  [GeV]
-        int   iEbin,                              // energy slice
-        std::size_t nTowers)                      // # towers in cluster
+        const PDC::Geo::LocalCoord& loc,   // full block address
+        float              clusE,
+        int                iEbin,
+        std::size_t        nTowers )
 {
-  /* ------------------------------------------------------------------ *
-   *  A)  optional verbose banner                                       *
-   * ------------------------------------------------------------------ */
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] finalClusterLoop → "
-              << "blockCoord=(" << blkCoord.first << ',' << blkCoord.second << ")  "
-              << "coarse(η,φ)=(" << blkEtaCoarse  << ',' << blkPhiCoarse  << ")  "
-              << "iEbin=" << iEbin << "  E=" << clusE << " GeV  "
-              << "#towers=" << nTowers << '\n';
-  }
+    constexpr double kFillW = 1.0;
 
-  /* ------------------------------------------------------------------ *
-   *  B)  RAW histogram fill                                            *
-   * ------------------------------------------------------------------ */
-  constexpr double kFillW = 1.0;
-  h3_cluster_block_cord_E->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+    /* ------------ A) raw fill ---------------------------------------- */
+    h3_cluster_block_cord_E->Fill(loc.locEta, loc.locPhi, clusE, kFillW);
 
-  if (Verbosity() > 2)
-  {
-    const int bx = h3_cluster_block_cord_E->GetXaxis()->FindBin(blkCoord.first);
-    const int by = h3_cluster_block_cord_E->GetYaxis()->FindBin(blkCoord.second);
-    const int bz = h3_cluster_block_cord_E->GetZaxis()->FindBin(clusE);
-    std::cout << "  [RAW‑FILL] bin(x,y,z)=(" << bx << ',' << by << ',' << bz
-              << ")  new content=" << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
-              << '\n';
-  }
+    /* ------------ B) optional Ash‑correction ------------------------- */
+    float corrEta = loc.locEta;
+    float corrPhi = loc.locPhi;
+    int   blkEtaC = loc.blkEta;
+    int   blkPhiC = loc.blkPhi;
 
-  /* ------------------------------------------------------------------ *
-   *  C)  undo Ash distortion (φ periodic, η finite)                    *
-   * ------------------------------------------------------------------ */
-  const float rawEta = blkCoord.first;            // save originals
-  const float rawPhi = blkCoord.second;
-
-  int   blkEtaC = blkEtaCoarse;                   // may change
-  int   blkPhiC = blkPhiCoarse;
-  float corrEta = rawEta;                         // start with raw
-  float corrPhi = rawPhi;
-
-    /* -------- φ (periodic) -------------------------------------------- */
+    /* φ (periodic) */
     if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
     {
         const float bPhi = m_bValsPhi[iEbin];
-        if (bPhi > 1e-9f)                      // <-- ASCII minus
-        {
-            const int blkPhiBefore = blkPhiC;    // remember
-            BlockAddr c = undoAshAndReindexPhi({blkPhiBefore, rawPhi}, bPhi);
-            blkPhiC = c.blk;
-            corrPhi = c.loc;                   // in (-0.5 … +0.5]
-
-            /* symmetrical un‑fold: wrap went *through +1.5*  */
-            if (c.blk == blkPhiBefore + 1)      // crossed to the right
-                corrPhi += 1.f;                 // (+0.5 … +1.5]
-        }
+        if (bPhi > 1e-9F)
+            corrPhi = PDC::Geo::phi::undoAsh(corrPhi, bPhi);
     }
-
-    /* -------- η (finite, no un-fold) ---------------------------------- */
+    /* η (finite)   */
     if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
     {
         const float bEta = m_bValsEta[iEbin];
-        if (bEta > 1e-9f)                      // <-- ASCII minus
-        {
-            BlockAddr c = undoAshAndReindexEta({blkEtaC, rawEta}, bEta);
-            blkEtaC = c.blk;
-            corrEta = c.loc;                   // stays in (-0.5 … +1.5]
-        }
+        if (bEta > 1e-9F)
+            corrEta = PDC::Geo::eta::undoAsh(corrEta, bEta);
     }
 
-  /* ------------------------------------------------------------------ *
-   *  D)  corrected histogram fill + QA counter                         *
-   * ------------------------------------------------------------------ */
-  h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
+    h3_cluster_block_cord_E_corrected
+        ->Fill(corrEta, corrPhi, clusE, kFillW);
 
-  if (corrPhi > 0.5f) ++g_nCorrPhiRight;          // QA: right‑hand fine tower
-
-  if (Verbosity() > 2)
-  {
-    const int bx = h3_cluster_block_cord_E_corrected->GetXaxis()->FindBin(corrEta);
-    const int by = h3_cluster_block_cord_E_corrected->GetYaxis()->FindBin(corrPhi);
-    const int bz = h3_cluster_block_cord_E_corrected->GetZaxis()->FindBin(clusE);
-
-    std::cout << "  [CORR‑FILL] bin(x,y,z)=(" << bx << ',' << by << ',' << bz
-              << ")  rawΦloc=" << rawPhi << "  corrΦloc=" << corrPhi
-              << "  rawΗloc=" << rawEta << "  corrΗloc=" << corrEta
-              << "  new content=" << h3_cluster_block_cord_E_corrected->GetBinContent(bx,by,bz)
-              << '\n';
-  }
+    if (corrPhi > 0.5F) ++g_nCorrPhiRight;   // QA counter
 }
+
 
 
 // ============================================================================
@@ -2767,11 +2712,14 @@ void PositionDependentCorrection::finalClusterLoop(
     // -----------------------------------------------------------------
     // (C) Determine block coordinates (coarse & local)
     // -----------------------------------------------------------------
-    int   blkPhiCoarse = -1;             // will be filled by getBlockCord
-    int blkEtaCoarse = -1;
-    auto blkCoord =
-            getBlockCord(towerEtas, towerPhis, towerEs,
-                         blkPhiCoarse, blkEtaCoarse);
+    /* ➊ build LocalCoord in one line – no side‑effects */
+    PDC::Geo::LocalCoord loc =
+              PDC::Geo::computeLocal(towerEtas, towerPhis, towerEs);
+
+    /* ➋ copy what downstream code still expects … */
+    int   blkPhiCoarse = loc.blkPhi;      // 0 … 127
+    int   blkEtaCoarse = loc.blkEta;      // 0 …  47
+    auto  blkCoord     = std::make_pair(loc.locEta, loc.locPhi);
 
     /* 4) find energy slice ........................................... */
     const int iEbin = getEnergySlice( clusE );

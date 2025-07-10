@@ -163,11 +163,6 @@ class PositionDependentCorrection : public SubsysReco
                     float clus_chisq_cut,
                     int &nClusContainer);
     
-  static float doPhiBlockCorr(float localPhi, float bphi);
-  static float doEtaBlockCorr(float localEta, float bEta,  float dEtaTower = 1.f);
-    
-  float convertBlockToGlobalPhi(int block_phi_bin, float localPhi) const;
-  float convertBlockToGlobalEta(int block_eta_bin, float localEta) const;
 
   float  phiAtShowerDepth( float  energy,
                              double rFront,
@@ -272,16 +267,6 @@ class PositionDependentCorrection : public SubsysReco
     
   int  getEnergySlice(float E) const;
     
-  float getAvgEta(const std::vector<int> &toweretas,
-                    const std::vector<float> &towerenergies);
-  float getAvgPhi(const std::vector<int> &towerphis,
-                    const std::vector<float> &towerenergies);
-
-  std::pair<float,float> getBlockCord(const std::vector<int>&   towerEtas,
-                                          const std::vector<int>&   towerPhis,
-                                          const std::vector<float>& towerEs,
-                                          int&                      blkPhiOut,
-                                          int&                      blkEtaOut);
   // --------------------------------------------------------------------
   // 3) Data members
   // --------------------------------------------------------------------
