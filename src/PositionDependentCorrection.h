@@ -536,105 +536,123 @@ class PositionDependentCorrection : public SubsysReco
             if (vz >= vzEdge[i] && vz < vzEdge[i + 1]) return i;
         return -1;
   }
-  // ════════════════════════════════════════════════════════════════════════
-  //  2×2‑block helper – ONE definition serves both φ and η directions
-  // ════════════════════════════════════════════════════════════════════════
-  static constexpr int kNCoarsePhi = 128;   // 256 fine / 2
-  static constexpr int kNCoarseEta =  48;   //  96 fine / 2
+    // ══════════════════════════════════════════════════════════════════════
+    //  2×2‑block helper – shared by φ‑ and η‑direction
+    //  *  convertBlockToGlobalEtaCenter(..)  – centre of a fine tower (+0.5)
+    //  *  convertBlockToGlobalEtaEdge  (..)  – front face of a fine tower (no +0.5)
+    //  *  etaFront(..) now uses the *edge* version – required by PDC path
+    // ══════════════════════════════════════════════════════════════════════
+    static constexpr int kNCoarsePhi = 128;   // 256 fine / 2
+    static constexpr int kNCoarseEta =  48;   //  96 fine / 2
 
-  /** Generic 2×2‑block address (coarse index + local coord) */
-  struct BlockAddr
-  {
-      int   blk;   ///< coarse block index
-      float loc;   ///< local coordinate (‑0.5 , +1.5]
+    /** Generic 2×2‑block address (coarse index + local coord) */
+    struct BlockAddr
+    {
+        int   blk;   ///< coarse block index
+        float loc;   ///< local coordinate (‑0.5 , +1.5]
+        BlockAddr(int i,float u): blk{i},loc{u} {}
+    };
 
-      BlockAddr(int i, float u) : blk{i}, loc{u} {}
-  };
-
-  /* ---------- generic fold + wrap helper (internal use) ----------------- */
-  inline BlockAddr
-  undoAshAndReindexGeneric(BlockAddr  in,
+    /* ---------- generic fold + wrap helper (internal use) ---------------- */
+    inline BlockAddr
+    undoAshAndReindexGeneric(BlockAddr  in,
                              float      b,
                              float    (*undo)(float,float),
                              int        kNCoarse) const
-  {
-      float u = undo(in.loc, b);               // may leave (‑0.5 , +1.5]
-      int   i = in.blk;
-
-      if      (u <  -0.5f) { u += 2.f; --i; }
-      else if (u >= 1.5f)  { u -= 2.f; ++i; }
-
-      if      (i < 0)            i += kNCoarse;
-      else if (i >= kNCoarse)    i -= kNCoarse;
-
-      return {i, u};
-  }
-
-    /* ---------- public wrappers for convenience --------------------------- */
-    /* stub: 2‑argument facade so signature matches float (*)(float,float) */
-    static float doEtaBlockCorr_stub(float localEta, float bEta)
-    { return doEtaBlockCorr(localEta, bEta); }
-
-    inline BlockAddr undoAshAndReindexPhi(BlockAddr in, float b) const
-    { return undoAshAndReindexGeneric(in, b, doPhiBlockCorr, kNCoarsePhi); }
-
-    // NEW – finite |η| coverage: clamp at the edges, never wrap
-    inline BlockAddr undoAshAndReindexEta(BlockAddr in, float b) const
     {
-        // 1) non‑linear inverse of the Ash distortion
-        float u = doEtaBlockCorr_stub(in.loc, b);   // local coordinate
-        int   i = in.blk;                           // coarse η‑block (0…47)
+        float u = undo(in.loc,b);                 // may leave (‑0.5 , +1.5]
+        int   i = in.blk;
 
-        // 2) bring u back into (‑0.5 , +1.5] and adjust the coarse index once
-        if      (u < -0.5f) { u += 2.f; --i; }
-        else if (u >= 1.5f) { u -= 2.f; ++i; }
+        if      (u < -0.5f){ u+=2.f; --i; }
+        else if (u>= 1.5f){ u-=2.f; ++i; }
 
-        // 3) η is NOT periodic – clamp to the physical limits of the barrel
-        constexpr int kMinBlk = 0;                    //  −1.1 ≤ η ≤ +1.1
-        constexpr int kMaxBlk = kNCoarseEta - 1;      // = 47
-        if (i < kMinBlk)      { i = kMinBlk;  u = -0.499f; }
-        else if (i > kMaxBlk) { i = kMaxBlk;  u =  1.499f; }
+        if      (i<0)          i+=kNCoarse;
+        else if (i>=kNCoarse)  i-=kNCoarse;
 
-        return { i, u };                              // safe (blk , loc)
+        return {i,u};
     }
 
-  /* ---------- raw (blk,loc) → global front‑face ------------------------- */
-  inline float phiFront(const BlockAddr& a) const
-  { return convertBlockToGlobalPhi(a.blk, a.loc); }
+    /* ---------- public wrappers ------------------------------------------ */
+    static float doEtaBlockCorr_stub(float u,float b){ return doEtaBlockCorr(u,b); }
 
-  inline float etaFront(const BlockAddr& a) const
-  { return convertBlockToGlobalEta(a.blk, a.loc); }
-    
-    /* -------- fine‑index helpers (0…255 / 0…95) ---------------- */
-  static constexpr int kFinePhiBins = 256;
-  static constexpr int kFineEtaBins = 96;
+    inline BlockAddr undoAshAndReindexPhi(BlockAddr in,float b) const
+    { return undoAshAndReindexGeneric(in,b,doPhiBlockCorr,kNCoarsePhi); }
 
-  inline int finePhiIndex(int blk, float loc) const
-  {
-      float u = loc;
-      if (u <= -0.5f || u > 1.5f) {
-          u = std::fmod(u + 2.f, 2.f);
-          if (u > 1.5f) u -= 2.f;        // keep in (‑0.5 … +1.5]
-      }
-      int idx = int(std::floor(blk*2 + u + 0.5f));
-      if      (idx < 0)              idx += kFinePhiBins;
-      else if (idx >= kFinePhiBins)  idx -= kFinePhiBins;
-      return idx;
-  }
+    /* finite |η| – clamp, never wrap */
+    inline BlockAddr undoAshAndReindexEta(BlockAddr in,float b) const
+    {
+        float u = doEtaBlockCorr_stub(in.loc,b);
+        int   i = in.blk;
 
-  inline int fineEtaIndex(int blk, float loc) const
-  {
-      float v = loc;
-      if (v <= -0.5f || v > 1.5f)
-      {
-        v = std::fmod(v + 2.f, 2.f);
-        if (v > 1.5f) v -= 2.f;
-      }
-      int idx = int(std::floor(blk*2 + v + 0.5f));
-      if      (idx < 0)             idx = 0;
-      else if (idx >= kFineEtaBins) idx = kFineEtaBins-1;
-      return idx;
-  }
+        if      (u < -0.5f){ u+=2.f; --i; }
+        else if (u>= 1.5f){ u-=2.f; ++i; }
+
+        constexpr int kMin=0, kMax=kNCoarseEta-1;
+        if      (i<kMin){ i=kMin; u=-0.499f; }
+        else if (i>kMax){ i=kMax; u= 1.499f; }
+
+        return {i,u};
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*                    front‑face → global converters                   */
+    /* ------------------------------------------------------------------ */
+    /* existing “centre” version (kept for cluster paths) */
+    inline float convertBlockToGlobalEtaCenter(int blk,float loc) const
+    { return convertBlockToGlobalEta(blk,loc); }   // old implementation (+0.5)
+
+    /* NEW: *edge* converter – identical maths but **no +0.5 offset**      */
+    inline float convertBlockToGlobalEtaEdge(int blk,float loc) const
+    {
+        constexpr float kEtaMin      = -1.1f;
+        constexpr float kDEtaFine    = 2.2f/96.f;          // 0.0229167
+        /* one symmetric fold */
+        if(loc<=-0.5f || loc>1.5f){
+            loc = std::fmod(loc+2.f,2.f);
+            if(loc>1.5f) loc-=2.f;
+        }
+        const float fineIdx = static_cast<float>(blk)*2.f + loc;   // *** NO +0.5 ***
+        float eta = kEtaMin + fineIdx*kDEtaFine;
+        if(m_hasEtaOffset) eta += m_eta0Offset;
+        return eta;
+    }
+
+    /* ---------- raw (blk,loc) → global front‑face ----------------------- */
+    inline float phiFront(const BlockAddr& a) const
+    { return convertBlockToGlobalPhi(a.blk,a.loc); }
+
+    inline float etaFront(const BlockAddr& a) const          // *** changed target ***
+    { return convertBlockToGlobalEtaEdge(a.blk,a.loc); }     // <── front face, no +0.5
+
+    /* -------- fine‑index helpers (unchanged) ---------------------------- */
+    static constexpr int kFinePhiBins = 256;
+    static constexpr int kFineEtaBins = 96;
+
+    inline int finePhiIndex(int blk,float loc) const
+    {
+        float u=loc;
+        if(u<=-0.5f || u>1.5f){
+            u=std::fmod(u+2.f,2.f);
+            if(u>1.5f) u-=2.f;
+        }
+        int idx=int(std::floor(blk*2+u+0.5f));
+        if(idx<0) idx+=kFinePhiBins;
+        else if(idx>=kFinePhiBins) idx-=kFinePhiBins;
+        return idx;
+    }
+
+    inline int fineEtaIndex(int blk,float loc) const
+    {
+        float v=loc;
+        if(v<=-0.5f || v>1.5f){
+            v=std::fmod(v+2.f,2.f);
+            if(v>1.5f) v-=2.f;
+        }
+        int idx=int(std::floor(blk*2+v+0.5f));
+        if(idx<0) idx=0;
+        else if(idx>=kFineEtaBins) idx=kFineEtaBins-1;
+        return idx;
+    }
 
   std::map<std::string, std::string> triggerNameMap = {
         {"MBD N&S >= 1",          "MBD_NandS_geq_1"}
