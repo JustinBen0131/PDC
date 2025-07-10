@@ -3798,24 +3798,25 @@ PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
   float locPhi = phiCoG - blkPhi * kFinePerBlock;
 
   /* ─── 4) single symmetric fold helper ───────────────────────────────── */
-  auto foldOnce = [&](float &loc, int &coarse, const char *tag)
-  {
-    if (loc <= -0.5f || loc > 1.5f)
+    auto foldOnce = [&](float &loc, int &coarse, const char *tag)
     {
-      const float before = loc;
-      loc = std::fmod(loc + 2.0f, 2.0f);           // (0 … 2)
-      if (loc > 1.5f) { loc -= 2.0f; ++coarse; }   // shift block by +1
+      /* fold if we are *outside* (‑0.5 , +1.5]  →  i.e.  loc < ‑0.5  OR  loc ≥ +1.5 */
+      if (loc < -0.5f || loc >= 1.5f)
+      {
+        const float before = loc;
+        loc = std::fmod(loc + 2.0f, 2.0f);        // now in [0 , 2)
+        if (loc >= 1.5f)           { loc -= 2.0f; ++coarse; }   // shift block by +1
 
-      if (coarse == kNCoarseBlocks) coarse = 0;    // φ wrap-around
+        if (coarse == kNCoarseBlocks) coarse = 0;               // φ wrap‑around
 
-      if (Verbosity() > 0)
-        std::cout << ANSI_YELLOW
-                  << "    • " << tag
-                  << " folded: " << before << " → " << loc
-                  << "  |  blk+1 → " << coarse
-                  << ANSI_RESET << '\n';
-    }
-  };
+        if (Verbosity() > 0)
+          std::cout << ANSI_YELLOW
+                    << "    • " << tag
+                    << " folded: " << before << " → " << loc
+                    << "  |  blk+1 → " << coarse
+                    << ANSI_RESET << '\n';
+      }
+    };
 
   foldOnce(locEta, blkEta, "η");
   foldOnce(locPhi, blkPhi, "φ");

@@ -1,5 +1,0 @@
-# Linear fit  mu(E) = p0 + p1*lnE   (E in GeV)
-# columns: variant   p0(rad)   p1(rad)
-Current Clusterizer, Bypass Position Correction-2.177622e-06   5.466741e-07
-energy dep b correction, from scratch coord transforms1.921183e-03   6.031121e-06
-Current Clusterizer, BEmcRecCEMC::CorrectPosition6.632740e-04   -2.945157e-05

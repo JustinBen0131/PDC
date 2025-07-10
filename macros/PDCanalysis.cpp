@@ -3726,10 +3726,43 @@ void PDCanalysis()
         etaGlobal[4][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_cpBcorr_%s", tag.Data())) );
     }
 
-    /* vertex‑resolved Δη vectors (leave empty for now – fill later if needed) */
-    std::array<std::vector<std::vector<TH1F*>>,5> etaVz;   // default‑constructed
-    for(int v = 0; v < 5; ++v)
-        etaVz[v].resize(eEdges.size());   // guarantee etaVz[v][iE] exists*/
+    /* vertex‑resolved Δη vectors ------------------------------------------- */
+    static constexpr std::array<float,7> vzEdge = {0,5,10,15,20,25,30};
+    constexpr int N_Vz = vzEdge.size() - 1;          // = 6 bins
+
+    std::array<std::vector<std::vector<TH1F*>>,5> etaVz;
+
+    /* –– allocate –– */
+    for (int v = 0; v < 5; ++v)
+    {
+        etaVz[v].resize(eEdges.size());              // energy dimension
+        for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+            etaVz[v][iE].resize(N_Vz, nullptr);      // vz‑dimension
+    }
+
+    /* –– fill –– */
+    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+    {
+        const TString eTag = makeSliceTag(iE, eEdges[iE]);   // e.g. “2_4”
+
+        for (int iVz = 0; iVz < N_Vz; ++iVz)
+        {
+            const TString vzTag = Form("vz%d_%d",
+                                       int(vzEdge[iVz]), int(vzEdge[iVz+1])); // e.g. “vz5_10”
+
+            /* variant‑selector ------------------------------------------------ */
+            etaVz[0][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_raw_%s_%s"    , eTag.Data(), vzTag.Data())) );
+            etaVz[1][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_corr_%s_%s"   , eTag.Data(), vzTag.Data())) );
+            etaVz[2][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_cpRaw_%s_%s"  , eTag.Data(), vzTag.Data())) );
+            etaVz[3][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_cpCorr_%s_%s" , eTag.Data(), vzTag.Data())) );
+            etaVz[4][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_cpBcorr_%s_%s", eTag.Data(), vzTag.Data())) );
+        }
+    }
 
     /* ----- produce all plots ----------------------------------------------------- */
     /* ‘binMode’ (or whatever local/argument name you use) is already in scope */
