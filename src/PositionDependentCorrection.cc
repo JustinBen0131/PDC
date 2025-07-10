@@ -1710,26 +1710,57 @@ try
 
   //---------------- (4) PDC-RAW --------------------------------------
   {
-    const BlockAddr aRaw{ blockPhiBin, blkCoord.second };
-    const float phiSDraw =
-          phiAtShowerDepth(eReco, rFront, zFront,
-                           phiFront(aRaw), ixCoG, iyCoG);
-    rec[3] = { "PDC-RAW", blkCoord.second, phiSDraw };
+      /* Front face φ from the *raw* ⟨blk,loc⟩ pair -------------------- */
+      const float phiFrontRaw =
+          convertBlockToGlobalPhi( blockPhiBin,          // coarse‑φ block
+                                   blkCoord.second );    // local coord  (-0.5…+1.5]
+
+      /* Propagate to shower depth (existing helper) ------------------- */
+      const float phiSDraw =
+          phiAtShowerDepth( eReco,
+                            rFront, zFront,
+                            phiFrontRaw,
+                            ixCoG,  iyCoG );
+
+      /* Book‑keeping record ------------------------------------------- */
+      rec[3] = { "PDC-RAW",
+                 blkCoord.second,      // keep the raw local φ for diagnostics
+                 phiSDraw };
   }
 
+
   //---------------- (5) PDC-CORR -------------------------------------
-  if (isFitDoneForPhi && m_bValsPhi[iSlice] > 0.f)
+  const float bPhi = m_bValsPhi[iSlice];
+
+  /* only attempt the correction if the slice was fitted  ---------- */
+  if (isFitDoneForPhi && bPhi > 1e-9f)
   {
-    const BlockAddr aCor =
-        undoAshAndReindexPhi( BlockAddr{blockPhiBin, blkCoord.second},
-                              m_bValsPhi[iSlice] );
-    const float phiSDcor =
-          phiAtShowerDepth(eReco, rFront, zFront,
-                           phiFront(aCor), ixCoG, iyCoG);
-    rec[4] = { "PDC-CORR", aCor.loc, phiSDcor };
+    /* 5‑a) analytic inverse of Ash distortion (local coordinate) -- */
+    float locCorr   = PDC::Geo::phi::undoAsh( blkCoord.second, bPhi );
+
+    /* 5‑b) one symmetric fold + block bookkeeping (periodic axis) - */
+    int   blkPhiCorr = blockPhiBin;              // may step by ±1
+    PDC::Geo::foldAndStep<true>( locCorr,
+                                    blkPhiCorr,
+                                    PDC::Geo::kCoarsePhiBins );
+
+    /* 5‑c) front‑face → global φ (honours run‑time φ‑offset) ------ */
+    const float phiFrontCorr =
+           convertBlockToGlobalPhi( blkPhiCorr, locCorr );
+
+    /* 5‑d) propagate to shower depth ------------------------------ */
+    const float phiSDcorr =
+           phiAtShowerDepth( eReco,
+                             rFront, zFront,
+                             phiFrontCorr,
+                             ixCoG,  iyCoG );
+
+    rec[4] = { "PDC-CORR", locCorr, phiSDcorr };
   }
   else   // keep table aligned even when correction disabled
-    rec[4] = { "PDC-CORR", 0.f, rec[3].phi };
+    rec[4] = { "PDC-CORR",
+                 blkCoord.second,   // dummy local coord
+                 rec[3].phi };      // copy RAW global φ
 
   /* ────────────────────────────────────────────────────────────────── */
   /*  G)  Residuals, sanity checks, histogram fills                    */
@@ -2039,15 +2070,55 @@ try
     };
     
   /* ────────────────── G-4) PDC-RAW ─────────────────────────────────── */
-  const BlockAddr aRaw{ blockEtaBin, blkCoord.first };
-  buildPDC( aRaw, "PDC-RAW", rec[3] );
+    {
+        /* (a)   front‑face η from the raw ⟨blk,loc⟩ pair                  */
+        const float etaFrontRaw =
+            convertBlockToGlobalEta( blockEtaBin, blkCoord.first );
 
+        /* (b)   tower row that belongs to that local coordinate           */
+        const int iyRaw =
+            PDC::Geo::fineEtaIdx( blockEtaBin, blkCoord.first );
+
+        /* (c)   propagate to shower depth                                */
+        const float etaSDraw =
+            etaSD_from_front( etaFrontRaw, phiFrontRaw, iyRaw );
+
+        rec[3] = { "PDC-RAW",
+                   blkCoord.first,          // y‑coord in tower units
+                   etaSDraw,
+                   etaSDraw - etaTruth };
+    }
   /* ────────────────── G-5) PDC-CORR (Ash inverse + re-index) ──────── */
-  if (isFitDoneForEta && m_bValsEta[iSlice] > 0.f)
-  {
-      const BlockAddr aCor = undoAshAndReindexEta( aRaw, m_bValsEta[iSlice] );
-      buildPDC( aCor, "PDC-CORR", rec[4] );
-  }
+    {
+        const float bEta = m_bValsEta[iSlice];
+        if (isFitDoneForEta && bEta > 1e-9f)
+        {
+            /* (a) analytic inverse of Ash distortion (local η)            */
+            float locCorr = PDC::Geo::eta::undoAsh( blkCoord.first, bEta );
+
+            /* (b) at most one symmetric fold  (η does *not* wrap)         */
+            int blkEtaCorr = blockEtaBin;          // may step by ±1
+            PDC::Geo::foldAndStep<false>( locCorr,
+                                          blkEtaCorr,
+                                          PDC::Geo::kCoarseEtaBins );
+
+            /* (c) global front‑face η                                     */
+            const float etaFrontCorr =
+                convertBlockToGlobalEta( blkEtaCorr, locCorr );
+
+            /* (d) tower row index after the correction                    */
+            const int iyCorr =
+                PDC::Geo::fineEtaIdx( blkEtaCorr, locCorr );
+
+            /* (e) propagate to shower depth                               */
+            const float etaSDcorr =
+                etaSD_from_front( etaFrontCorr, phiFrontRaw, iyCorr );
+
+            rec[4] = { "PDC-CORR",
+                       locCorr,
+                       etaSDcorr,
+                       etaSDcorr - etaTruth };
+        }
   else
       rec[4] = { "PDC-CORR", 0.f, rec[3].eta, rec[3].dEta };
 
