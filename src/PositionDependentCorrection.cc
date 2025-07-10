@@ -2233,6 +2233,7 @@ try
   if (!tgLead) return;
 
   const double rFront = tgLead->get_center_radius();
+  //const double zFront = tgLead->get_center_z();   // <-- add this line
   const int    ixCoG  = tgLead->get_binphi();
   const int    iyCoG  = tgLead->get_bineta();
 
@@ -2245,17 +2246,17 @@ try
       [&](float etaF, float phiF)->float
       {
         const double thetaF = 2.0 * std::atan( std::exp(-etaF) );
-        const double zF     = rFront / std::tan(thetaF);
-
+        const double zF     = rFront / std::tan(thetaF);        // varies with η
+          
         float xSD,ySD,zSD;
         m_bemcRec->CorrectShowerDepth(ixCoG, iyCoG, eReco,
-                                      rFront*std::cos(phiF),
-                                      rFront*std::sin(phiF),
-                                      zF, xSD,ySD,zSD);
-
+                                        rFront*std::cos(phiF),
+                                        rFront*std::sin(phiF),
+                                        zF,                       // proper depth
+                                        xSD, ySD, zSD);
+          
         const double zRel = static_cast<double>(zSD) - vtx_z;
-        const double rSD  = std::hypot(xSD,ySD);
-        return float( std::asinh( zRel / rSD ) );      // exact inversion
+        return float( std::asinh( zRel / std::hypot(xSD,ySD) ) );
       };
 
   /* ────────────────── F) bookkeeping struct ───────────────────────── */
@@ -2342,8 +2343,8 @@ try
   /* ────────────────── helper to avoid duplication for PDC variants ── */
   auto buildPDC = [&](const BlockAddr& a, const char* tag, Rec& out)
   {
-      /* front-face η → shower-depth η (one single propagation) */
       const float etaF  = etaFront( a );
+      /* front-face η → shower-depth η (one single propagation) */
       const float etaSD = etaSD_from_front( etaF, phiFrontRaw );
 
       out = { tag, a.loc, etaSD, etaSD - etaTruth };

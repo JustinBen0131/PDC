@@ -157,18 +157,18 @@ void Fun4All_PDC(int nevents = 0,
   gvertex->Verbosity(0);
   se->registerSubsystem(gvertex);
     
-    BEmcRecCEMC* bemcPtr = new BEmcRecCEMC();
-    bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
+  BEmcRecCEMC* bemcPtr = new BEmcRecCEMC();
+  bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
 
-    /* 4a) Let CaloGeomMapping put "TOWERGEOM_CEMC_DETAILED" on the node-tree */
-    CaloGeomMapping* geomMap = new CaloGeomMapping("CEMC_GeomFiller");
-    geomMap->set_detector_name("CEMC");
-    geomMap->set_UseDetailedGeometry(true);   // we want the 8-vertex blocks
-    geomMap->Verbosity(0);
-    se->registerSubsystem(geomMap);           // register *before* anything that uses it
+  /* 4a) Let CaloGeomMapping put "TOWERGEOM_CEMC_DETAILED" on the node-tree */
+  CaloGeomMapping* geomMap = new CaloGeomMapping("CEMC_GeomFiller");
+  geomMap->set_detector_name("CEMC");
+  geomMap->set_UseDetailedGeometry(true);   // we want the 8-vertex blocks
+  geomMap->Verbosity(0);
+  se->registerSubsystem(geomMap);           // register *before* anything that uses it
 
-    /* 4b) AFTER CaloGeomMapping is in place, copy the geometry into BEmcRec */
-    {
+  /* 4b) AFTER CaloGeomMapping is in place, copy the geometry into BEmcRec */
+  {
       PHCompositeNode* topNode = Fun4AllServer::instance()->topNode();
 
       // --- 1) fetch the container written by CaloGeomMapping
@@ -202,7 +202,7 @@ void Fun4All_PDC(int nevents = 0,
         }
       }
       bemcPtr->CompleteTowerGeometry();   // derive dX/dY/dZ once
-    }
+  }
     
   ////////////////////////////////////////////////////////////
   // 6) Our PositionDependentCorrection code
@@ -242,44 +242,43 @@ void Fun4All_PDC(int nevents = 0,
   }
 
     
-    // ========================================================================
-    //  Position-dependent π0-correction module
-    //  ----------------------------------------------------------------------
-    //  How to drive the two most common switches from your macro:
-    //
-    //      • Simulation / Data
-    //          pdc->setIsSimulation(true);   // Monte-Carlo
-    //          pdc->setIsSimulation(false);  // Real data
-    //
-    //      • π0-mass windows (only after you have the pass-1 μ/σ table!)
-    //          pdc->setMassFitsDone(true);   // enable mass-window cuts (pass-2)
-    //          pdc->setMassFitsDone(false);  // disable  (default / pass-1)
-    // ========================================================================
+  // ========================================================================
+  //  Position-dependent π0-correction module
+  //  ----------------------------------------------------------------------
+  //  How to drive the two most common switches from your macro:
+  //
+  //      • Simulation / Data
+  //          pdc->setIsSimulation(true);   // Monte-Carlo
+  //          pdc->setIsSimulation(false);  // Real data
+  //
+  //      • π0-mass windows (only after you have the pass-1 μ/σ table!)
+  //          pdc->setMassFitsDone(true);   // enable mass-window cuts (pass-2)
+  //          pdc->setMassFitsDone(false);  // disable  (default / pass-1)
+  // ========================================================================
 
-    auto* pdc = new PositionDependentCorrection("PositionDepCorr", finalOut);
-    /*------------------------------------------------------------
+  auto* pdc = new PositionDependentCorrection("PositionDepCorr", finalOut);
+  /*------------------------------------------------------------
       1)  Mandatory hooks and global switches
-      ------------------------------------------------------------*/
-    pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
-    pdc->setIsSimulation(isSimulation);
-    pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
-    /*------------------------------------------------------------
+  ------------------------------------------------------------*/
+  pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
+  pdc->setIsSimulation(isSimulation);
+  pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
+  /*------------------------------------------------------------
       2)  π0-mass-window support
-      ------------------------------------------------------------*/
-    // Keep *false* for the first (pass-1) job that *produces* the μ/σ table.
-    // Set *true* for the second (pass-2) job that *consumes* the table and
-    // applies the slice-dependent mass cut.
-    pdc->setMassFitsDone(false);
-    /*------------------------------------------------------------
+    ------------------------------------------------------------*/
+  // Keep *false* for the first (pass-1) job that *produces* the μ/σ table.
+  // Set *true* for the second (pass-2) job that *consumes* the table and
+  // applies the slice-dependent mass cut.
+  pdc->setMassFitsDone(false);
+  /*------------------------------------------------------------
       4)  Energy-binning mode
-      ------------------------------------------------------------*/
-    pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
+  ------------------------------------------------------------*/
+  pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
 
-    pdc->Verbosity(0);                 // 0 = silent → raise for debugging
+  pdc->Verbosity(0);                 // 0 = silent → raise for debugging
 
-    // Finally register the module with Fun4All
-    se->registerSubsystem(pdc);
-
+  // Finally register the module with Fun4All
+  se->registerSubsystem(pdc);
 
   std::cout << "[INFO] Running Fun4All with nevents = " << nevents << std::endl;
   se->run(nevents);
