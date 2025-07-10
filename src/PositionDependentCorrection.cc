@@ -1065,126 +1065,6 @@ void PositionDependentCorrection::fillTruthInfo(
   }
 }
 
-/*==========================================================================*
- *  φ‑direction                                                             *
- *==========================================================================*/
-float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float b)
-{
-  /* Convenience alias – avoids repeated atomic loads                      */
-  const auto verb = s_verbosityLevel.load();
-
-  /* —————————————————— banner —————————————————— */
-  if (verb > 0)
-    std::cout << ANSI_BOLD << "[doPhiBlockCorr] ENTER  "
-              << "localPhi = " << localPhi << " ,  b = " << b
-              << ANSI_RESET << '\n';
-
-  /* (0) nothing to undo when |b| ≈ 0 ----------------------------------- */
-  if (std::fabs(b) < 1e-9f) {
-    if (verb > 0) std::cout << "  b≈0 → return unchanged\n";
-    return localPhi;
-  }
-
-  /* (1) single fold into (‑0.5 … +1.5] ---------------------------------- */
-  if (localPhi <= -0.5f || localPhi > 1.5f) {
-    if (verb > 1) std::cout << "  fold: " << localPhi << " → ";
-    localPhi = std::fmod(localPhi + 2.f, 2.f);
-    if (verb > 1) std::cout << localPhi << '\n';
-  }
-
-  /* (2) map to (‑0.5 … +0.5]                                             */
-  const float Xmeas = (localPhi < 0.5f) ? localPhi : localPhi - 1.f;
-  if (verb > 1) std::cout << "  Xmeas = " << Xmeas << '\n';
-
-  /* (3) analytic inverse  — asinh!                                       */
-  const double S = std::sinh(1.0 / (2.0 * b));          // sinh(1/2b)
-  if (verb > 1) std::cout << "  S = sinh(1/2b) = " << S << '\n';
-
-  const float Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
-  if (verb > 1) std::cout << "  Xtrue = " << Xtrue << '\n';
-
-  /* (4) shift back to (‑0.5 … +1.5] and apply edge‑squash --------------- */
-  float corrected = (localPhi < 0.5f) ? Xtrue : Xtrue + 1.f;
-
-  /* ---------- edge‑squash projectivity fix (b‑dependent) -------------- */
-  {
-    constexpr float Aref = 0.012f;       // reference amplitude (1.2 %)
-    constexpr float bref = 0.18f;        // mid‑range b
-
-    float A = Aref * (b / bref) * (b / bref);
-    if (A < 0.008f) A = 0.008f;
-    if (A > 0.016f) A = 0.016f;
-
-    const float s     = static_cast<float>(M_PI) * (corrected - 0.5f);
-    const float delta = A * std::sin(s) * (1.f - 0.25f * std::cos(s));
-    corrected -= delta;
-  }
-  /* -------------------------------------------------------------------- */
-
-  if (verb > 1)
-    std::cout << "  corrected (+edge‑fix) = " << corrected << '\n';
-
-  return corrected;
-}
-
-
-/*==========================================================================*
- *  η‑direction                                                             *
- *==========================================================================*/
-float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
-                                                  float  b,
-                                                  float  dEtaTower /* = 1.f */)
-{
-  const auto verb = s_verbosityLevel.load();
-
-  if (verb > 0)
-    std::cout << ANSI_BOLD << "[doEtaBlockCorr] ENTER  "
-              << "ηloc=" << localEta << "  b=" << b
-              << ANSI_RESET << '\n';
-
-  /* (0) fast exit if no correction is needed --------------------------- */
-  if (std::fabs(b) < 1e-9f) {
-    if (verb > 0) std::cout << "  b≈0 → return unchanged\n";
-    return localEta;
-  }
-
-  /* (1) fold into (‑0.5 … +1.5] ---------------------------------------- */
-  if (localEta <= -0.5f || localEta > 1.5f)
-    localEta = std::fmod(localEta + 2.f, 2.f);
-
-  if (!std::isfinite(localEta)) {
-    if (verb > 0)
-      std::cout << ANSI_RED << "  ηloc not finite → NaN\n" << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /* (2) map to centre‑of‑gravity frame --------------------------------- */
-  const bool  wasRight = (localEta > 0.5f);                 // remember original half
-  const float Xmeas    =  wasRight ? localEta - 1.f         // bring to (‑0.5 … +0.5]
-                                        : localEta;
-
-  /* (3) analytic inverse (same math as φ) ------------------------------ */
-  const double  S     = std::sinh( 1.0 / (2.0 * b) );
-  const float   Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
-
-  /* (4) add back integer tower *offset* --------------------------------- */
-  float corrected = wasRight ? Xtrue + 1.f       // *explicitly* restore right tower
-                        : Xtrue;            // left tower unchanged
-
-  /* no automatic fold here – one and only one wrap is done later */
-    
-  corrected *= dEtaTower;                       // non‑unity pitch (if any)
-
-  if (std::fabs(corrected) > 1.6f)              // keep inside barrel
-    corrected = std::copysign(1.6f, corrected);
-
-  if (verb > 0)
-    std::cout << ANSI_GREEN << "[doEtaBlockCorr] EXIT → "
-              << corrected << ANSI_RESET << "\n\n";
-
-  return corrected;
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 RawTowerGeomContainer* PositionDependentCorrection::checkTowerGeometry(PHCompositeNode* topNode)
 {
@@ -1310,204 +1190,6 @@ int PositionDependentCorrection::countClusters(
   return nClusCount;
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//  convertBlockToGlobalPhi – (blk,loc) → absolute EMCAL φ in (−π , +π]
-// ----------------------------------------------------------------------------
-//  • Accepts any real local coordinate; performs **exactly one** fold into
-//    the canonical domain (−0.5 … +1.5] without ever touching the coarse index.
-//  • Returns NaN if the coarse index is illegal or if the folded local
-//    coordinate is still out of bounds (should never happen).
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-float
-PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
-                                                     float localPhi) const
-{
-  constexpr int   kFinePerBlock   = 2;                       // 2 fine bins
-  constexpr int   kNCoarseBlocks  = 128;                     // 256 / 2
-  constexpr int   kNTowerBins     = 256;                     // total fine
-  constexpr float kRadPerBin      = 2.0f * static_cast<float>(M_PI) / kNTowerBins;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalPhi] ENTER\n"
-              << "    ▸ block_phi_bin = " << block_phi_bin
-              << "  ,  localPhi(raw) = " << localPhi
-              << ANSI_RESET << '\n';
-  }
-
-  /* ─── sanity on coarse index ─────────────────────────────────────────── */
-  if (block_phi_bin < 0 || block_phi_bin >= kNCoarseBlocks)
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED
-                << "  ✘ coarse index outside 0…" << kNCoarseBlocks-1
-                << "   → return NaN\n" << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /* ─── single, non-destructive fold of the local coordinate ───────────── */
-  if (localPhi <= -0.5f || localPhi >= 1.5f)
-  {
-    localPhi = std::fmod(localPhi + 2.0f, 2.0f);   // (0 … 2)
-    if (localPhi > 1.5f) localPhi -= 2.0f;         // (‑0.5 … +1.5]
-    if (Verbosity() > 0)
-      std::cout << ANSI_YELLOW
-                << "    • localPhi out of band – folded once to "
-                << localPhi << ANSI_RESET << '\n';
-  }
-
-  if (!std::isfinite(localPhi) ||
-      localPhi <= -0.5f || localPhi > 1.5f)
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED
-                << "  ✘ localPhi still invalid – return NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /* ─── fine-bin centre of the requested tower ─────────────────────────── */
-  const float fullPhiIndex =
-        static_cast<float>(block_phi_bin) * kFinePerBlock +  // coarse origin
-        localPhi +                                           // intra-block
-        0.5f;                                                // centre of fine bin
-
-  if (Verbosity() > 1)
-    std::cout << "    ▸ fullPhiIndex = " << fullPhiIndex
-              << "   (coarse*2 + local + 0.5)\n";
-
-  /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
-  float globalPhi = fullPhiIndex * kRadPerBin;  // ideal grid
-  if (m_hasOffset) globalPhi += m_phi0Offset;   // shift to real detector
-  globalPhi = TVector2::Phi_mpi_pi(globalPhi);
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_GREEN
-              << "    ▸ OUTPUT  global φ = " << globalPhi << " rad\n"
-              << ANSI_RESET
-              << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalPhi] EXIT\n"
-              << ANSI_RESET << '\n';
-  }
-  return globalPhi;
-}
-
-/**********************************************************************
- *  convertBlockToGlobalEta – ultra-safe version
- *  ---------------------------------------------------------------
- *  • Maps a local block-η coordinate to the absolute tower pseudorapidity.
- *  • Performs exactly one symmetric fold of the local coordinate.
- *  • Any illegal input immediately returns NaN *and* prints a red error.
- *********************************************************************/
-float
-PositionDependentCorrection::convertBlockToGlobalEta(int   block_eta_bin,
-                                                     float localEta) const
-{
-  /*──────────────  compile-time constants  ──────────────*/
-  constexpr int   kFinePerBlock   = 2;               // 2 fine η-towers / block
-  constexpr int   kNFineEtaBins   = 96;              // full barrel
-  constexpr int   kNCoarseBlocks  = kNFineEtaBins / kFinePerBlock; // 48
-  constexpr float kEtaMin         = -1.1f;           // centre of tower 0
-  constexpr float kDEtaPerFine    = 2.2f / 96.0f;    // ≈0.0229167 per fine bin
-
-  const bool v3 = (Verbosity() > 3);
-
-  /*──────────────  banner  ──────────────*/
-  if (v3)
-  {
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalEta]  ENTER\n"
-              << "      block_eta_bin = " << block_eta_bin
-              << "   |   localEta(raw) = " << localEta
-              << ANSI_RESET << '\n';
-  }
-
-  /*-------------------------------------------------------------------*
-   * 0)  Guard: coarse index in range                                   *
-   *-------------------------------------------------------------------*/
-  if (block_eta_bin < 0 || block_eta_bin >= kNCoarseBlocks)
-  {
-    if (v3)
-      std::cerr << ANSI_RED
-                << "  ✘ block_eta_bin outside valid range [0,"
-                << kNCoarseBlocks-1 << "] – returning NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /*-------------------------------------------------------------------*
-   * 1)  Guard: finite localEta                                         *
-   *-------------------------------------------------------------------*/
-  if (!std::isfinite(localEta))
-  {
-    if (v3)
-      std::cerr << ANSI_RED
-                << "  ✘ localEta is NaN/Inf – returning NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /*-------------------------------------------------------------------*
-   * 2)  One (and only one) symmetric fold into (-0.5 … +1.5]           *
-   *-------------------------------------------------------------------*/
-  if (localEta <= -0.5f || localEta >= 1.5f)
-  {
-    const float before = localEta;
-    localEta = std::fmod(localEta + 2.0f, 2.0f);   // → (0 … 2]
-    if (localEta > 1.5f) localEta -= 2.0f;         // → (-0.5 … +1.5]
-    if (v3)
-      std::cout << ANSI_YELLOW
-                << "    • localEta folded once: " << before
-                << "  →  " << localEta
-                << ANSI_RESET << '\n';
-  }
-
-  /*-------------------------------------------------------------------*
-   * 3)  Post-fold validity check                                       *
-   *-------------------------------------------------------------------*/
-  if (localEta <= -0.5f || localEta > 1.5f)
-  {
-    if (v3)
-      std::cerr << ANSI_RED
-                << "  ✘ localEta still outside (-0.5,1.5] after fold – NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /*-------------------------------------------------------------------*
-   * 4)  Compute fine-tower index (centre of tower)                     *
-   *-------------------------------------------------------------------*/
-  const float fullEtaIndex =
-        static_cast<float>(block_eta_bin) * kFinePerBlock   // coarse origin
-      + localEta                                            // intra-block
-      + 0.5f;                                               // centre shift
-
-  if (v3)
-    std::cout << "      fullEtaIndex = " << fullEtaIndex
-              << "   (coarse*2 + local + 0.5)\n";
-
-  /*-------------------------------------------------------------------*
-   * 5)  Linear index → pseudorapidity                                 *
-   *-------------------------------------------------------------------*/
-  float globalEta = kEtaMin + fullEtaIndex * kDEtaPerFine;
-  if (m_hasEtaOffset) globalEta += m_eta0Offset;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_GREEN
-              << "    ➜ global η = " << globalEta
-              << ANSI_RESET << '\n';
-  }
-
-  if (v3)
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalEta]  EXIT\n"
-              << ANSI_RESET << '\n';
-
-  return globalEta;
-}
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2235,29 +1917,32 @@ try
   const double rFront = tgLead->get_center_radius();
   //const double zFront = tgLead->get_center_z();   // <-- add this line
   const int    ixCoG  = tgLead->get_binphi();
-  const int    iyCoG  = tgLead->get_bineta();
+//  const int    iyCoG  = tgLead->get_bineta();
 
   /* front-face φ that belongs to the block under test (for PDC) */
   const float phiFrontRaw =
         phiFront( BlockAddr{ blockPhiBin, blkCoord.second } );
 
   /* ────────────────── E) helper: front-face → shower-depth η ───────── */
-  const auto etaSD_from_front =
-      [&](float etaF, float phiF)->float
-      {
-        const double thetaF = 2.0 * std::atan( std::exp(-etaF) );
-        const double zF     = rFront / std::tan(thetaF);        // varies with η
-          
-        float xSD,ySD,zSD;
-        m_bemcRec->CorrectShowerDepth(ixCoG, iyCoG, eReco,
-                                        rFront*std::cos(phiF),
-                                        rFront*std::sin(phiF),
-                                        zF,                       // proper depth
-                                        xSD, ySD, zSD);
-          
-        const double zRel = static_cast<double>(zSD) - vtx_z;
-        return float( std::asinh( zRel / std::hypot(xSD,ySD) ) );
-      };
+    /* helper: front‑face → shower‑depth η (uses the *requested* tower row) */
+    const auto etaSD_from_front =
+        [&](float etaF, float phiF, int iyTower)->float
+        {
+            const double thetaF = 2.0 * std::atan( std::exp(-etaF) );
+            const double zF     = rFront / std::tan(thetaF);
+
+            float xSD, ySD, zSD;
+            m_bemcRec->CorrectShowerDepth( ixCoG,      // same φ‑row
+                                           iyTower,    // *** correct η‑row ***
+                                           eReco,
+                                           rFront*std::cos(phiF),
+                                           rFront*std::sin(phiF),
+                                           zF,
+                                           xSD, ySD, zSD );
+
+            const double zRel = static_cast<double>(zSD) - vtx_z;
+            return static_cast<float>( std::asinh( zRel / std::hypot(xSD,ySD) ) );
+        };
 
   /* ────────────────── F) bookkeeping struct ───────────────────────── */
   struct Rec {
@@ -2341,23 +2026,18 @@ try
   }
 
   /* ────────────────── helper to avoid duplication for PDC variants ── */
-  auto buildPDC = [&](const BlockAddr& a, const char* tag, Rec& out)
-  {
-      const float etaF  = etaFront( a );
-      /* front-face η → shower-depth η (one single propagation) */
-      const float etaSD = etaSD_from_front( etaF, phiFrontRaw );
+    auto buildPDC = [&](const BlockAddr& a,
+                        const char*      tag,
+                        Rec&             out)
+    {
+        const float etaF = etaFront(a);
+        const int   iy   = fineEtaIndex(a.blk, a.loc);   // ← matches the block
 
-      out = { tag, a.loc, etaSD, etaSD - etaTruth };
+        const float etaSD = etaSD_from_front( etaF, phiFrontRaw, iy );
 
-      if (vb >= 2)
-          std::cout << (tag[4]=='R'?ANSI_CYAN:ANSI_MAGENTA)
-                    << "  ["<<tag<<"] blkEta="<<a.blk
-                    << "  locEta="<<a.loc
-                    << "  etaFront="<<etaF
-                    << "  etaSD="<<etaSD
-                    << ANSI_RESET << '\n';
-  };
-
+        out = { tag, a.loc, etaSD, etaSD - etaTruth };
+    };
+    
   /* ────────────────── G-4) PDC-RAW ─────────────────────────────────── */
   const BlockAddr aRaw{ blockEtaBin, blkCoord.first };
   buildPDC( aRaw, "PDC-RAW", rec[3] );
@@ -3737,246 +3417,4 @@ float PositionDependentCorrection::getWeight(int   ieta,
     std::cout << "[getWeight]  weight = " << weight << '\n';
 
   return weight;
-}
-
-// ============================================================================
-//  getBlockCord – returns the cluster position *inside* one 2×2 coarse block
-// ---------------------------------------------------------------------------
-//  • Output local coordinates are in (−0.5 … +1.5]  *before* any further
-//    calibration (this matches the convention used by downstream code).
-//  • A single symmetric fold is applied if |loc| > 1.5 or ≤ −0.5;
-//    the associated coarse index is advanced **once** so that the caller
-//    sees a self-consistent (blk,loc) pair.
-//  • blkPhi is returned via the extra out-parameter `blockPhiBinOut` –
-//    *always* the *possibly-updated* value, so that the caller never works
-//    with stale information.
-// ============================================================================
-std::pair<float, float>
-PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
-                                          const std::vector<int>   &towerPhis,
-                                          const std::vector<float> &towerEs,
-                                          int                      &blockPhiBinOut,
-                                          int                      &blockEtaBinOut)
-{
-  [[maybe_unused]] constexpr int kNEtaFine        =  96;   // mapping only
-  [[maybe_unused]] constexpr int kNPhiFine        = 256;
-  constexpr int      kFinePerBlock   = 2;                 // 2×2 super-cell
-  constexpr int      kNCoarseBlocks  = kNPhiFine / 2;     // 128
-
-  const std::size_t nT = towerEs.size();
-
-  if (Verbosity() > 0)
-    std::cout << ANSI_CYAN << "[getBlockCord] ENTER  nTowers = "
-              << nT << ANSI_RESET << '\n';
-
-  if (nT == 0 ||
-      towerEtas.size() != nT ||
-      towerPhis.size() != nT)
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED
-                << "  ✘ empty vectors or size mismatch – return {0,0}\n"
-                << ANSI_RESET;
-    blockPhiBinOut = 0;
-    return {0.0f, 0.0f};
-  }
-
-  /* ─── 1) energy-weighted centroids in *fine* bins ────────────────────── */
-  const float etaCoG = getAvgEta(towerEtas, towerEs);   //  0 … <96
-  const float phiCoG = getAvgPhi(towerPhis, towerEs);   //  0 … <256
-
-  if (Verbosity() > 1)
-    std::cout << "    ⟨η⟩_tower=" << etaCoG
-              << "  ⟨φ⟩_tower=" << phiCoG << '\n';
-
-  /* ─── 2) parent coarse-block indices ─────────────────────────────────── */
-  int blkEta = static_cast<int>(std::floor(etaCoG)) / kFinePerBlock;   // 0 … 47
-  int blkPhi = static_cast<int>(std::floor(phiCoG)) / kFinePerBlock;   // 0 … 127
-
-  /* ─── 3) raw local coords (still in fine-bin units) ──────────────────── */
-  float locEta = etaCoG - blkEta * kFinePerBlock;
-  float locPhi = phiCoG - blkPhi * kFinePerBlock;
-
-  /* ─── 4) single symmetric fold helper ───────────────────────────────── */
-    auto foldOnce = [&](float &loc, int &coarse, const char *tag)
-    {
-      /* fold if we are *outside* (‑0.5 , +1.5]  →  i.e.  loc < ‑0.5  OR  loc ≥ +1.5 */
-      if (loc < -0.5f || loc >= 1.5f)
-      {
-        const float before = loc;
-        loc = std::fmod(loc + 2.0f, 2.0f);        // now in [0 , 2)
-        if (loc >= 1.5f)           { loc -= 2.0f; ++coarse; }   // shift block by +1
-
-        if (coarse == kNCoarseBlocks) coarse = 0;               // φ wrap‑around
-
-        if (Verbosity() > 0)
-          std::cout << ANSI_YELLOW
-                    << "    • " << tag
-                    << " folded: " << before << " → " << loc
-                    << "  |  blk+1 → " << coarse
-                    << ANSI_RESET << '\n';
-      }
-    };
-
-  foldOnce(locEta, blkEta, "η");
-  foldOnce(locPhi, blkPhi, "φ");
-
-  /* ─── 5) propagate the *updated* block index and return ─────────────── */
-  blockPhiBinOut = blkPhi;
-  blockEtaBinOut = blkEta;
-              
-  if (Verbosity() > 0)
-    std::cout << ANSI_CYAN << "[getBlockCord] EXIT\n" << ANSI_RESET << '\n';
-
-  return {locEta, locPhi};
-}
-// ============================================================================
-//  getAvgEta – energy–weighted η–centre of a cluster (no wrapping necessary)
-//  ----------------------------------------------------------------------------
-//  INPUT  towerEtas       int  vector, raw η–row of every tower hit (0 … 95)
-//         towerEnergies   float vector, same length, tower energy in GeV
-//
-//  OUTPUT float           fractional η–index in the 96-row grid
-//                         0.0 ≤  avgη  ≤ 95.0
-// ============================================================================
-float PositionDependentCorrection::getAvgEta(const std::vector<int>   &towerEtas,
-                                             const std::vector<float> &towerEnergies)
-{
-  const int nTowers = towerEtas.size();
-
-  if (Verbosity() > 0)
-    std::cout << ANSI_CYAN << "[getAvgEta] called with nTowers = "
-              << nTowers << ANSI_RESET << '\n';
-
-  if (nTowers == 0 || nTowers != static_cast<int>(towerEnergies.size()))
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED << "  ERROR – empty or size-mismatched vectors!"
-                << ANSI_RESET << std::endl;
-    return 0.f;
-  }
-
-  // Single-tower cluster – fast exit
-  if (nTowers == 1) return static_cast<float>( towerEtas[0] );
-
-  // -------------------------------------------------------------------------
-  // 1) Energy-weighted sum
-  // -------------------------------------------------------------------------
-  double sumE      = 0.0;   // ΣE
-  double sumEeta   = 0.0;   // Σ(E · η)
-
-  for (int i = 0; i < nTowers; ++i)
-  {
-    const double E   = towerEnergies[i];
-    const int    eta = towerEtas[i];          // 0 … 95
-
-    sumE    += E;
-    sumEeta += E * eta;
-
-    if (Verbosity() > 1)
-      std::cout << "    tower[" << i << "]  η=" << eta
-                << "  E=" << E << '\n';
-  }
-
-  if (sumE < 1e-9) return 0.f;                // guard against ΣE ≈ 0
-
-  // -------------------------------------------------------------------------
-  // 2) Energy-weighted centroid
-  // -------------------------------------------------------------------------
-  const double avgEta = sumEeta / sumE;       // guaranteed 0.0 … 95.0
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_GREEN << "  RESULT ⟨η⟩ = " << avgEta
-              << ANSI_RESET << '\n'
-              << ANSI_CYAN  << "[getAvgEta] END"
-              << ANSI_RESET << "\n";
-  }
-  return static_cast<float>(avgEta);
-}
-
-// ============================================================================
-//  getAvgPhi – energy-weighted φ–centroid  (0 ≤ ⟨φ⟩ < 256)
-// ----------------------------------------------------------------------------
-float
-PositionDependentCorrection::getAvgPhi(const std::vector<int>   &towerPhis,
-                                       const std::vector<float> &towerEs)
-{
-  constexpr int   kNPhiFine  = 256;                // total fine bins
-  constexpr float kHalfSpan  = kNPhiFine / 2.0f;   // 128.0
-  const std::size_t nT       = towerPhis.size();
-
-  if (Verbosity() > 0)
-    std::cout << ANSI_CYAN << "[getAvgPhi] ENTER | nTowers = "
-              << nT << ANSI_RESET << '\n';
-
-  if (nT == 0 || towerEs.size() != nT)
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED
-                << "  ✘ empty vectors or size mismatch – return 0\n"
-                << ANSI_RESET;
-    return 0.0f;
-  }
-
-  /* ─── 1) choose reference (highest-energy tower) ─────────────────────── */
-  const std::size_t iRef =
-      static_cast<std::size_t>(
-          std::distance(towerEs.begin(),
-                        std::max_element(towerEs.begin(), towerEs.end())));
-  const int refBin = towerPhis[iRef];              // 0 … 255
-
-  if (Verbosity() > 1)
-    std::cout << "    reference φ-bin (max-E) = " << refBin << '\n';
-
-  /* ─── 2) accumulate energy and moment after *one* wrap ───────────────── */
-  double sumE = 0.0;
-  double sumEphi = 0.0;
-  int    nWrapLow = 0, nWrapHigh = 0;
-
-  for (std::size_t i = 0; i < nT; ++i)
-  {
-    float E   = towerEs[i];
-    int   phi = towerPhis[i];                      // raw fine bin
-
-    int d = phi - refBin;                          // distance to reference
-
-    if (d < -kHalfSpan) { phi += kNPhiFine; ++nWrapLow;  }
-    if (d >  kHalfSpan) { phi -= kNPhiFine; ++nWrapHigh; }
-
-    sumE     += E;
-    sumEphi  += static_cast<double>(E) * phi;
-
-    if (Verbosity() > 2)
-      std::cout << "      tower#" << std::setw(2) << i
-                << "  bin(raw)=" << std::setw(3) << towerPhis[i]
-                << "  bin(adj)=" << std::setw(3) << phi
-                << "  E=" << E << '\n';
-  }
-
-  if (sumE < 1e-12)
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED << "  ✘ ΣE ≈ 0 – return 0\n" << ANSI_RESET;
-    return 0.0f;
-  }
-
-  /* ─── 3) energy-weighted mean and fold to canonical domain ───────────── */
-  double phiAvg = sumEphi / sumE;                  // may be negative/large
-  phiAvg = std::fmod(phiAvg + kNPhiFine, kNPhiFine); // 0 … <256
-
-  if ((nWrapLow + nWrapHigh) && Verbosity() > 0)
-    std::cout << ANSI_YELLOW
-              << "    • wrap corrections: " << nWrapLow
-              << " low , " << nWrapHigh << " high\n"
-              << ANSI_RESET;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_GREEN
-              << "    RETURN ⟨φ⟩ = " << phiAvg << "  (fine-bin units)\n"
-              << ANSI_RESET
-              << ANSI_CYAN << "[getAvgPhi] EXIT\n" << ANSI_RESET << '\n';
-  }
-  return static_cast<float>(phiAvg);
 }

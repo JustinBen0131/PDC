@@ -2125,8 +2125,8 @@ namespace
 // ─────────────────────────────────────────────────────────────────────────────
 //  Formatting constants (shared by φ & η)
 // ─────────────────────────────────────────────────────────────────────────────
-constexpr std::array<Color_t,5> kCol { kGreen+2, kMagenta+1, kBlack, kRed, kBlue };
-constexpr std::array<Style_t,5> kMk  { 20,        20,        20,     20,    20   };
+constexpr std::array<Color_t,5>  kCol { kGreen+2, kMagenta+1, kBlack, kRed, kBlue };
+constexpr std::array<Style_t,5>  kMk  { 20,        20,        20,     20,    20   };
 constexpr std::array<const char*,5> kLab{
         "no corr, scratch",
         "b(E) corr, scratch",
@@ -2134,6 +2134,32 @@ constexpr std::array<const char*,5> kLab{
         "CorrectPosition, cluster",
         "b(E) corr, cluster"
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Generic legend helper – one definition for all canvases
+// ─────────────────────────────────────────────────────────────────────────────
+struct LegendPos   { double x1{0.20}, y1{0.67}, x2{0.80}, y2{0.90}; };
+
+inline TLegend*
+addVariantLegend(const std::vector<int>& shown,
+                 const LegendPos& lp             = {},
+                 const char*      header         = nullptr,
+                 double           txtSize        = 0.028 )
+{
+    auto* lg = new TLegend(lp.x1, lp.y1, lp.x2, lp.y2);
+    lg->SetBorderSize(0); lg->SetFillStyle(0); lg->SetTextSize(txtSize);
+    if(header) lg->SetHeader(header,"C");
+
+    for(int v : shown)
+    {
+        auto* mk = new TMarker(0,0,kMk[v]);
+        mk->SetMarkerColor(kCol[v]);
+        lg->AddEntry(mk,kLab[v],"p");
+    }
+    lg->Draw();
+    return lg;                // caller keeps ownership
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Small helpers
@@ -2217,10 +2243,7 @@ SliceResult drawSlice(const std::array<std::vector<TH1F*>,5>& h,
         hh->Draw( (v==shown.front()) ? "E" : "E SAME" );
     }
 
-    TLegend lg(0.20,0.67,0.80,0.90);
-    lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.028);
-    for(int v:shown) lg.AddEntry((TObject*)nullptr,kLab[v],"");
-    lg.Draw();
+    addVariantLegend(shown, LegendPos{});
     return out;
 }
 
@@ -2284,13 +2307,7 @@ void drawMuSigmaSummary(const std::string&     fileStem,
         g->Draw("P SAME");
     }
 
-    TLegend legU(0.38,0.77,0.85,0.94);
-    legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.03);
-    for(int v:shown){
-        auto* d = new TMarker(0,0,kMk[v]); d->SetMarkerColor(kCol[v]);
-        legU.AddEntry(d,kLab[v],"p");
-    }
-    legU.Draw();
+    addVariantLegend(shown, LegendPos{}, nullptr, 0.03);
 
     // --- σ pad ----------------------------------------------------------
     auto padL = static_cast<TPad*>(c.cd(2));
@@ -2361,11 +2378,7 @@ void drawDiag(const std::string&                 outPng,
         g->SetLineColor(kCol[v]);  g->SetMarkerSize(1.1);
         g->Draw("P SAME");
     }
-    TLegend lg(0.15,0.8,0.55,0.93);
-    lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.025);
-    for(int v:shown) lg.AddEntry((TObject*)nullptr,kLab[v],"");
-    lg.Draw();
-
+    addVariantLegend(shown, LegendPos{}, nullptr, 0.025);
     c.SaveAs(outPng.c_str());
 }
 
@@ -2427,10 +2440,7 @@ void drawMuVsLnE(const std::string&                 baseDir,
         lg.AddEntry(mk,Form("%s  (a=%.2e, b=%.2e)",kLab[v],
                     f.GetParameter(0),f.GetParameter(1)),"p");
     }
-    TLatex tl; tl.SetNDC(); tl.SetTextFont(42); tl.SetTextSize(0.025);
-    tl.DrawLatex(0.5,0.18,"#mu(E) = a + b lnE");
-    lg.Draw();
-    c.SaveAs((baseDir + std::string("/") + fileStem + "_MuVsLogE.png").c_str());
+    addVariantLegend(shown, LegendPos{}, nullptr, 0.02);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
