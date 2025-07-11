@@ -72,8 +72,6 @@ class PositionDependentCorrection : public SubsysReco
   void set_vertex_cut(const float &v)     { _vz = v; }
   void apply_vertex_cut(bool Vtx_cut)     { m_vtxCut = Vtx_cut; }
 
-  float getWeight(int ieta, float pt);
-
   TF1* fitHistogram(TH1* h);
   void fitEtaSlices(const std::string& infile,
                     const std::string& fitOutFile,
