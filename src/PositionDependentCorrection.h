@@ -91,7 +91,7 @@ class PositionDependentCorrection : public SubsysReco
     
   void setBinningMode(EBinningMode mode) { m_binningMode = mode; }
   EBinningMode getBinningMode() const    { return m_binningMode; }
-    
+  static uint64_t getVerbosityLevel() { return s_verbosityLevel.load(); }
 
   static inline float doPhiBlockCorr(float u, float b)
   { return PDC::Geo::phi::undoAsh(u, b); }
