@@ -297,7 +297,7 @@ namespace _impl
         {
             const double Ei = E[i];
             out.sumE    += Ei;
-            out.sumEeta += Ei * eta[i];
+            out.sumEeta += Ei * (eta[i] + 0.5);
 
             if (Ei > out.refE) { out.refE = Ei; out.refPhiBin = phi[i]; }
         }
@@ -336,7 +336,7 @@ computeLocal(const IntVec& towerEta,
         if (d < -Half) bin += Nphi;              // unwrap left
         if (d >  Half) bin -= Nphi;              // unwrap right
 
-        sumEphi += towerE[i] * bin;
+        sumEphi += towerE[i] * (bin + 0.5);
     }
     float phiFine = static_cast<float>(sumEphi / scan.sumE);
     phiFine       = std::fmod(phiFine + Nphi, Nphi);      // back to [0,256)
