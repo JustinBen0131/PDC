@@ -336,7 +336,7 @@ computeLocal(const IntVec& towerEta,
         if (d < -Half) bin += Nphi;              // unwrap left
         if (d >  Half) bin -= Nphi;              // unwrap right
 
-        sumEphi += towerE[i] * (bin + 0.5);
+        sumEphi += towerE[i] * bin;
     }
     float phiFine = static_cast<float>(sumEphi / scan.sumE);
     phiFine       = std::fmod(phiFine + Nphi, Nphi);      // back to [0,256)
