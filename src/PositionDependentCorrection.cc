@@ -3241,7 +3241,7 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
           }
 
           /* 2) quick strip check ----------------------------------------- */
-          auto pct = [](double n, double d)->double { return d ? 100.*n/d : 0.; };
+          auto pct_d = [](double n, double d)->double { return d ? 100.*n/d : 0.; };
 
           TH1D* h_eta_proj = h2_local->ProjectionX("_p_eta", 1, h2_local->GetNbinsY());
           TH1D* h_phi_proj = h2_local->ProjectionY("_p_phi", 1, h2_local->GetNbinsX());
@@ -3254,10 +3254,11 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 
           std::cout << "\nStrip diagnostics (share of total entries)\n"
                     << "  ηloc = 0 : " << std::fixed << std::setprecision(2)
-                    << pct(h_eta_proj->GetBinContent(iEta0), tot) << " %\n"
-                    << "  ηloc = 1 : " << pct(h_eta_proj->GetBinContent(iEta1), tot) << " %\n"
-                    << "  φloc = 0 : " << pct(h_phi_proj->GetBinContent(iPhi0), tot) << " %\n"
-                    << "  φloc = 1 : " << pct(h_phi_proj->GetBinContent(iPhi1), tot) << " %\n";
+                    << pct_d(h_eta_proj->GetBinContent(iEta0), tot) << " %\n"
+                    << "  ηloc = 1 : " << pct_d(h_eta_proj->GetBinContent(iEta1), tot) << " %\n"
+                    << "  φloc = 0 : " << pct_d(h_phi_proj->GetBinContent(iPhi0), tot) << " %\n"
+                    << "  φloc = 1 : " << pct_d(h_phi_proj->GetBinContent(iPhi1), tot) << " %\n";
+
 
           delete h_eta_proj;
           delete h_phi_proj;
