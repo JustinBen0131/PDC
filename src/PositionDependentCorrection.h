@@ -162,32 +162,24 @@ class PositionDependentCorrection : public SubsysReco
                     float nClus_ptCut,
                     float clus_chisq_cut,
                     int &nClusContainer);
-    
 
-  float  phiAtShowerDepth( float  energy,
-                             double rFront,
-                             double zFront,
-                             float  phiFront,
-                             int    ix,          ///< lead-tower fine φ-index
-                             int    iy ) const;  ///< lead-tower fine η-index
+  // ───────────────────────────────────────────────────────────────
+  // Forward Ash distortion  ( true  →  measured )
+  //
+  //   PDC::Geo::phi::undoAsh() converts   measured → true
+  //   therefore,  true → measured  is obtained with  (‑b).
+  //   The sign flip is the only difference.
+  //
+  //   • keeps all folding & edge fixes identical to the library
+  //   • zero duplicate maintenance burden
+  // ───────────────────────────────────────────────────────────────
+  inline float
+  doAshShift(float localPhi, float b)  // header unchanged
+  {
+        // direct call into the constexpr helper – *no* extra branches
+        return PDC::Geo::phi::undoAsh(localPhi, -b);
+  }
 
-  double xAtShowerDepth ( float  energy,
-                             double rFront,
-                             double zFront,
-                             float  phiFront,
-                             int    ix,
-                             int    iy ) const;
-    
-  float  etaAtShowerDepth( float  energy,
-                             double rFront,
-                             double zFront,
-                             float  phiFront,
-                             int    ix,
-                             int    iy,
-                             float  vtx_z ) const;   // 7-parameter, const
-    
-
-  float doAshShift(float localPhi, float bVal);
   float doLogWeightCoord(const std::vector<int>& towerphis,
                            const std::vector<float>& towerenergies,
                            float w0);
