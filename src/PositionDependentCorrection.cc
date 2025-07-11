@@ -1754,7 +1754,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       while (locB >= nX-.5F)   locB -= nX;
     }
     rec[2] = {"CLUS-BCORR", locB,
-              cg2GlobalPhi(m_bemcRec, eReco, locB, yCP)};
+        cg2GlobalPhi(m_bemcRec, eReco,  locB, yCG)};
   }
 
   //---------------- (4) PDC‑RAW  -------------------------------------
@@ -1922,7 +1922,7 @@ void PositionDependentCorrection::fillDEtaAllVariants(
       loc = iy0 + doEtaBlockCorr(off, bEta);
     }
     rec[2] = {"CLUS-BCORR", loc,
-              cg2ShowerEta(m_bemcRec, eReco, xCP, loc, vtxZ)};
+        cg2ShowerEta(m_bemcRec, eReco, xCG,  loc, vtxZ)}; // consistent pair
   }
 
   // 4) PDC‑RAW
