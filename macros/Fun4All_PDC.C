@@ -133,25 +133,15 @@ void Fun4All_PDC(int nevents = 0,
 
   // (a) for the calo cluster DST
   Fun4AllInputManager* in0 = new Fun4AllDstInputManager("in0");
-  if (!in0)
-  {
-    std::cerr << "[ERROR] Could not create Fun4AllDstInputManager for in0" << std::endl;
-    gSystem->Exit(1);
-  }
+
   // The second argument '1' means topNode level or segment, depending on your usage
   in0->AddFile(caloListFile);
   se->registerInputManager(in0);
 
   // (b) for G4Hits
   Fun4AllInputManager* in1 = new Fun4AllDstInputManager("in1");
-  if (!in1)
-  {
-    std::cerr << "[ERROR] Could not create Fun4AllDstInputManager for in1" << std::endl;
-    gSystem->Exit(1);
-  }
   in1->AddFile(g4HitsListFile);
   se->registerInputManager(in1);
-
 
   GlobalVertexReco *gvertex = new GlobalVertexReco("GlobalVertexReco");
   gvertex->Verbosity(0);
