@@ -297,7 +297,7 @@ namespace _impl
         {
             const double Ei = E[i];
             out.sumE    += Ei;
-            out.sumEeta += Ei * (eta[i] + 0.5);
+            out.sumEeta += Ei * (eta[i] + 0.5F);
 
             if (Ei > out.refE) { out.refE = Ei; out.refPhiBin = phi[i]; }
         }
@@ -336,17 +336,21 @@ computeLocal(const IntVec& towerEta,
         if (d < -Half) bin += Nphi;              // unwrap left
         if (d >  Half) bin -= Nphi;              // unwrap right
 
-        sumEphi += towerE[i] * bin;
+        sumEphi += towerE[i] * (bin + 0.5F);
     }
     float phiFine = static_cast<float>(sumEphi / scan.sumE);
     phiFine       = std::fmod(phiFine + Nphi, Nphi);      // back to [0,256)
 
-    /* ── 3) Coarse indices + local offsets ─────────────────────────── */
+    /* ── 3) Coarse indices + local offsets  (centre‑of‑tower origin) ── */
+    const float etaFineC = etaFine - 0.5F;            // shift down by ½ fine bin
+    float       phiFineC = phiFine - 0.5F;            // idem for φ
+    if (phiFineC < 0.0F) phiFineC += static_cast<float>(Nphi);  // wrap to [0,256)
+
     LocalCoord c;
-    c.blkEta = static_cast<int>(std::floor(etaFine)) / kFinePerBlock;
-    c.blkPhi = static_cast<int>(std::floor(phiFine)) / kFinePerBlock;
-    c.locEta = etaFine - c.blkEta * kFinePerBlock;
-    c.locPhi = phiFine - c.blkPhi * kFinePerBlock;
+    c.blkEta = static_cast<int>(std::floor(etaFineC)) / kFinePerBlock;
+    c.blkPhi = static_cast<int>(std::floor(phiFineC)) / kFinePerBlock;
+    c.locEta = etaFineC - c.blkEta * kFinePerBlock;
+    c.locPhi = phiFineC - c.blkPhi * kFinePerBlock;
 
     /* ── 4) Canonical symmetric fold (exactly once per axis) ───────── */
     foldAndStep<false>(c.locEta, c.blkEta, kCoarseEtaBins);

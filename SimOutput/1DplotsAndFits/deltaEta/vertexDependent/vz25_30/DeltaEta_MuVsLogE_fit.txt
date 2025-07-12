@@ -2,5 +2,5 @@
 no corr, scratch            2.659233e-04   -4.106597e-05
 b(E) corr, scratch          9.254652e-03   1.360043e-04
 no corr, cluster            -4.637878e-05   2.000745e-05
-CorrectPosition, cluster    -4.105511e-03   -1.942545e-03
+CorrectPosition, cluster    -4.105632e-03   -1.942497e-03
 b(E) corr, cluster          2.601275e-06   -1.880756e-06
