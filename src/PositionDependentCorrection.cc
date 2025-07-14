@@ -2537,7 +2537,7 @@ void PositionDependentCorrection::finalClusterLoop(
 
     if (clusE < 0.1f)
     {
-      if (Verbosity() > 5)
+      if (Verbosity() > 11)
       {
         std::cout << "[DEBUG]  => Skipping cluster with E=" << clusE
                   << " (<0.1). \n";
@@ -2599,7 +2599,7 @@ void PositionDependentCorrection::finalClusterLoop(
 
     if (clusPt < pt1ClusCut || clusPt > ptMaxCut)
     {
-      if (Verbosity() > 5)
+      if (Verbosity() > 11)
       {
         std::cout << "[DEBUG]  => cluster #1 pT=" << clusPt
                   << " fails cut ( <" << pt1ClusCut << " or >" << ptMaxCut
