@@ -266,24 +266,24 @@ fineEtaIdx(int blk, float loc) noexcept
 { return fineIdx<kFineEtaBins, false>(blk, loc); }
 
 /* ═══════════════════════════════════════════════════════════════════════
- *  7.  Local 2×2‑block coordinate toolkit
+ *  7.  Local 2×2-block coordinate toolkit
  * ═════════════════════════════════════════════════════════════════════ */
 struct LocalCoord
 {
     int   blkEta  = 0;          ///< coarse η index  (0 … 47)
     int   blkPhi  = 0;          ///< coarse φ index  (0 … 127)
-    float locEta  = 0.F;        ///< local η in (‑0.5 … +1.5]
-    float locPhi  = 0.F;        ///< local φ in (‑0.5 … +1.5]
+    float locEta  = 0.F;        ///< local η in (-0.5 … +1.5]
+    float locPhi  = 0.F;        ///< local φ in (-0.5 … +1.5]
 };
 
 namespace _impl
 {
-    /* Internal helper – accumulate ΣE, ΣE·η, reference φ‑tower, … */
+    /* Internal helper – accumulate ΣE, ΣE·η and find lead-φ tower */
     struct ScanOut
     {
         double sumE      = 0.0;
         double sumEeta   = 0.0;
-        int    refPhiBin = 0;        ///< fine‑bin with the highest E
+        int    refPhiBin = 0;        ///< fine-bin with the highest E
         double refE      = 0.0;
     };
 
@@ -297,7 +297,7 @@ namespace _impl
         {
             const double Ei = E[i];
             out.sumE    += Ei;
-            out.sumEeta += Ei * (eta[i] + 0.5F);
+            out.sumEeta += Ei * (eta[i] + 0.5F);       // tower-centre η
 
             if (Ei > out.refE) { out.refE = Ei; out.refPhiBin = phi[i]; }
         }
@@ -315,48 +315,34 @@ computeLocal(const IntVec& towerEta,
     /* ── 0) Quick validation ───────────────────────────────────────── */
     const std::size_t nT = towerE.size();
     if (nT == 0 || towerEta.size() != nT || towerPhi.size() != nT)
-        return {};                                // invalid → zero‑init
+        return {};                                // invalid → zero-init
 
-    /* ── 1) ΣE, ΣE·η and ref‑φ tower (single pass) ────────────────── */
+    /* ── 1) ΣE, ΣE·η and lead-φ tower (single pass) ───────────────── */
     const auto scan = _impl::scanTowers(towerEta, towerPhi, towerE);
-
     if (scan.sumE < 1e-12) return {};            // all towers zero
 
     const float etaFine = static_cast<float>(scan.sumEeta / scan.sumE);  // 0 … 96
 
-    /* ── 2) Unwrap φ around the reference tower and accumulate ΣE·φ ─ */
-    constexpr int   Nphi = kFinePhiBins;
-    constexpr float Half = Nphi / 2.F;
+    /* ── 2) φ from the lead (highest-E) fine tower only ────────────── */
+    constexpr int Nphi = kFinePhiBins;
+    float phiFine = static_cast<float>(scan.refPhiBin) + 0.5F;           // tower centre
 
-    double sumEphi = 0.0;
-    for (std::size_t i = 0; i < nT; ++i)
-    {
-        int bin = towerPhi[i];
-        int d   = bin - scan.refPhiBin;
-        if (d < -Half) bin += Nphi;              // unwrap left
-        if (d >  Half) bin -= Nphi;              // unwrap right
-
-        sumEphi += towerE[i] * (bin + 0.5F);
-    }
-    float phiFine = static_cast<float>(sumEphi / scan.sumE);
-    phiFine       = std::fmod(phiFine + Nphi, Nphi);      // back to [0,256)
-
-    /* ── 3) Coarse indices + local offsets  (centre‑of‑tower origin) ── */
-    const float etaFineC = etaFine - 0.5F;            // shift down by ½ fine bin
+    /* ── 3) Coarse indices + local offsets  (centre-of-tower origin) ─ */
+    const float etaFineC = etaFine - 0.5F;            // shift down by ½ fine-bin
     float       phiFineC = phiFine - 0.5F;            // idem for φ
     if (phiFineC < 0.0F) phiFineC += static_cast<float>(Nphi);  // wrap to [0,256)
 
     LocalCoord c;
-    c.blkEta = static_cast<int>(std::floor(etaFineC)) / kFinePerBlock;
-    c.blkPhi = static_cast<int>(std::floor(phiFineC)) / kFinePerBlock;
+    c.blkEta = static_cast<int>(std::floor(etaFineC / kFinePerBlock));
+    c.blkPhi = static_cast<int>(std::floor(phiFineC / kFinePerBlock));
     c.locEta = etaFineC - c.blkEta * kFinePerBlock;
     c.locPhi = phiFineC - c.blkPhi * kFinePerBlock;
 
     /* ── 4) Canonical symmetric fold (exactly once per axis) ───────── */
     foldAndStep<false>(c.locEta, c.blkEta, kCoarseEtaBins);
-    foldAndStep< true>(c.locPhi, c.blkPhi, kCoarsePhiBins);
+    foldAndStep< true >(c.locPhi, c.blkPhi, kCoarsePhiBins);
 
-    /* Final hard clamp in η (defensive, should *never* trigger) */
+    /* Final hard clamp in η (defensive – should never trigger) */
     if      (c.blkEta < 0)               { c.blkEta = 0;                   c.locEta = -0.499F; }
     else if (c.blkEta >= kCoarseEtaBins) { c.blkEta = kCoarseEtaBins - 1;  c.locEta =  1.499F; }
 
