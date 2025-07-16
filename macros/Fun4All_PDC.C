@@ -55,7 +55,6 @@
 #include <Event/Event.h>
 #include <mbd/MbdReco.h>
 #include <GlobalVariables.C>
-#include "Calo_Calib.C"
 
 ////////////////////////////////////////////////////////////
 // Possibly your custom code
@@ -253,13 +252,13 @@ void Fun4All_PDC(int nevents = 0,
   pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
   pdc->setIsSimulation(isSimulation);
   pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
-  /*------------------------------------------------------------
-      2)  π0-mass-window support
-    ------------------------------------------------------------*/
-  // Keep *false* for the first (pass-1) job that *produces* the μ/σ table.
-  // Set *true* for the second (pass-2) job that *consumes* the table and
-  // applies the slice-dependent mass cut.
-  pdc->setMassFitsDone(false);
+//  /*------------------------------------------------------------
+//      2)  π0-mass-window support
+//    ------------------------------------------------------------*/
+//  // Keep *false* for the first (pass-1) job that *produces* the μ/σ table.
+//  // Set *true* for the second (pass-2) job that *consumes* the table and
+//  // applies the slice-dependent mass cut.
+//  pdc->setMassFitsDone(false);
   /*------------------------------------------------------------
       4)  Energy-binning mode
   ------------------------------------------------------------*/

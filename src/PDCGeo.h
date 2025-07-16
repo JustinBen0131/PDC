@@ -87,31 +87,35 @@ foldOnce(float u) noexcept
     }
     return u;
 }
-
-/** Fold + coarse‑index bookkeeping
- *  *If* the coordinate jumps across a 2‑tower border we increment (or
- *  decrement) the coarse index so that (blk,loc) stays a *bona‑fide*
- *  representation of the same physical position. */
+/* ===============================================================
+ *  foldAndStep  –  single symmetric fold + coarse-index bookkeeping
+ *  Periodic = true  ➜ φ   (coarse index wraps)
+ *  Periodic = false ➜ η   (coarse index clamps)
+ * ===============================================================*/
 template<bool Periodic>
 inline constexpr void
 foldAndStep(float& loc, int& coarse, int nCoarse)
 {
-    if (loc > -0.5F && loc < 1.5F) return;      // nothing to do
+    if (loc > -0.5F && loc < 1.5F) return;          // nothing to do
 
-    const bool crossedLeft = (loc < -0.5F);     // left ↔ decreasing φ
+    const bool crossedLeft = (loc < -0.5F);
 
     loc = std::fmod(loc + 2.F, 2.F);
     if (loc >= 1.5F) loc -= 2.F;
 
     coarse += crossedLeft ? -1 : +1;
 
-    /* φ wraps around, η clamps at physical ends */
-    if constexpr (Periodic)
+    if constexpr (Periodic)                        // φ-wrap
     {
         if (coarse < 0)               coarse += nCoarse;
         else if (coarse >= nCoarse)   coarse -= nCoarse;
     }
 }
+
+/* --  POD returned by undoAshAndReindex -------------------------------- */
+template<bool Periodic>
+struct CorrOut { float loc; int blk; };
+
 
 /* ═══════════════════════════════════════════════════════════════════════
  *  3.  Ash‑distortion inverse
@@ -276,6 +280,30 @@ struct LocalCoord
     float locPhi  = 0.F;        ///< local φ in (-0.5 … +1.5]
 };
 
+template<bool Periodic>
+[[nodiscard]] inline constexpr CorrOut<Periodic>
+undoAshAndReindex(float locIn, int blkIn, float b) noexcept
+{
+    float loc;
+    if constexpr (Periodic)
+        loc = PDC::Geo::phi::undoAsh(locIn, b);   // φ variant
+    else
+        loc = PDC::Geo::eta::undoAsh(locIn, b);   // η variant
+
+    int blk = blkIn;
+
+    if (loc <= -0.5F) { loc += 2.F; --blk; }
+    if (loc >  +1.5F) { loc -= 2.F; ++blk; }
+
+    if constexpr (Periodic)                       // φ-wrap
+    {
+        if (blk < 0)               blk += kCoarsePhiBins;
+        if (blk >= kCoarsePhiBins) blk -= kCoarsePhiBins;
+    }
+    return {loc, blk};
+}
+
+
 namespace _impl
 {
     /* Internal helper – accumulate ΣE, ΣE·η and find lead-φ tower */
@@ -305,6 +333,8 @@ namespace _impl
     }
 } // namespace _impl
 
+
+
 /** Compute the *canonical* local coordinate of a tower cluster. */
 template<class IntVec, class FloatVec>
 [[nodiscard]] inline LocalCoord
@@ -324,9 +354,21 @@ computeLocal(const IntVec& towerEta,
     const float etaFine = static_cast<float>(scan.sumEeta / scan.sumE);  // 0 … 96
 
     /* ── 2) φ from the lead (highest-E) fine tower only ────────────── */
-    constexpr int Nphi = kFinePhiBins;
-    float phiFine = static_cast<float>(scan.refPhiBin) + 0.5F;           // tower centre
-
+    /* ── 2) energy‑weighted φ centroid with one wrap around ref tower ─ */
+    constexpr int  Nphi      = kFinePhiBins;
+    constexpr float HalfSpan = Nphi / 2.F;
+    double sumEphi = 0.0;
+    for (std::size_t i = 0; i < nT; ++i)
+    {
+        int   phi = towerPhi[i];
+        int   d   = phi - scan.refPhiBin;
+        if (d < -HalfSpan) phi += Nphi;      // unwrap left
+        if (d >  HalfSpan) phi -= Nphi;      // unwrap right
+        sumEphi += towerE[i] * (phi + 0.5F);
+    }
+    float phiFine = static_cast<float>(sumEphi / scan.sumE);  // may be <0 or >256
+    phiFine = std::fmod(phiFine + Nphi, Nphi);                // wrap to [0,256)
+    
     /* ── 3) Coarse indices + local offsets  (centre-of-tower origin) ─ */
     const float etaFineC = etaFine - 0.5F;            // shift down by ½ fine-bin
     float       phiFineC = phiFine - 0.5F;            // idem for φ

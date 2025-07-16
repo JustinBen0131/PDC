@@ -2052,31 +2052,47 @@ void PositionDependentCorrection::fillBlockCoordinateHistograms(
     const float locPhi = blkCoord.second;
     h3_cluster_block_cord_E->Fill(locEta, locPhi, clusE, kFillW);
 
-    /* ------------ B) optional Ash‑correction ------------------------- */
+    /* ------------ B) optional Ash-correction ------------------------- */
     float corrEta = locEta;
     float corrPhi = locPhi;
-    [[maybe_unused]] const int blkEtaC = blkEtaCoarse;   // retained for future diagnostics
-    [[maybe_unused]] const int blkPhiC = blkPhiCoarse;   // retained for future diagnostics
 
-    /* φ (periodic) */
+    /* -------- φ (periodic) ------------------------------------------ */
     if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
     {
         const float bPhi = m_bValsPhi[iEbin];
         if (bPhi > 1e-9F)
-            corrPhi = PDC::Geo::phi::undoAsh(corrPhi, bPhi);
+        {
+            auto p       = PDC::Geo::undoAshAndReindex<true>(corrPhi,
+                                                             blkPhiCoarse, bPhi);
+            corrPhi      = PDC::Geo::foldOnce(p.loc);   // safety fold
+            blkPhiCoarse = p.blk;                       // keep index in sync
+        }
     }
-    /* η (finite)   */
+
+    /* -------- η (finite) -------------------------------------------- */
     if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
     {
         const float bEta = m_bValsEta[iEbin];
         if (bEta > 1e-9F)
-            corrEta = PDC::Geo::eta::undoAsh(corrEta, bEta);
+        {
+            auto e       = PDC::Geo::undoAshAndReindex<false>(corrEta,
+                                                              blkEtaCoarse, bEta);
+            corrEta      = PDC::Geo::foldOnce(
+                               PDC::Geo::eta::undoAsh(e.loc, bEta,
+                                                      PDC::Geo::kDEtaPerFine));
+            blkEtaCoarse = e.blk;
+        }
     }
+
 
     h3_cluster_block_cord_E_corrected
         ->Fill(corrEta, corrPhi, clusE, kFillW);
 
     if (corrPhi > 0.5F) ++g_nCorrPhiRight;   // QA counter
+    /* ------------ C) occupancy statistics for End() summary ----------- */
+    const int iEta = (corrEta > 0.5F) ? 1 : 0;      // 0 ↔ (-0.5…0.5] , 1 ↔ (0.5…1.5]
+    const int iPhi = (corrPhi > 0.5F) ? 1 : 0;
+    m_blkLocCount[iEta * 2 + iPhi]++;               // atomic – thread‑safe
 }
 
 
@@ -3189,6 +3205,37 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
     }
 
   }
+    
+    /* ─────────────────────── block‑coordinate occupancy ─────────────── */
+    if (Verbosity() > 5)
+    {
+        static const char* kSlot[4] = {"(0,0)","(0,1)","(1,0)","(1,1)"};
+        std::uint64_t nTot = 0;
+        for (const auto& v : m_blkLocCount) nTot += v.load();
+
+        std::cout << '\n' << ANSI_BOLD
+                  << "╭───────────────────────────────╮\n"
+                  << "│  Local‑block occupancy (η,φ) │\n"
+                  << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
+                  << std::left << std::setw(8)  << "slot"
+                  << std::right<< std::setw(14) << "counts"
+                  << std::setw(12)              << "share\n"
+                  << "────────────────────────────────────────────\n";
+
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto v = m_blkLocCount[i].load();
+            std::cout << std::left << std::setw(8)  << kSlot[i]
+                      << std::right<< std::setw(14) << v
+                      << std::setw(11) << (nTot ? Form("%6.2f %%",
+                             100.0 * double(v) / double(nTot)) : "  n/a")
+                      << '\n';
+        }
+        std::cout << "────────────────────────────────────────────\n"
+                  << std::left << std::setw(8)  << "TOTAL"
+                  << std::right<< std::setw(14) << nTot << "\n";
+    }
+
 
   return 0;
 }

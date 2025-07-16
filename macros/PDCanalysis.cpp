@@ -3774,14 +3774,14 @@ void PDCanalysis()
         }
     }
 
-    /* ----- produce all plots ----------------------------------------------------- */
-    /* ‘binMode’ (or whatever local/argument name you use) is already in scope */
-    MakeDeltaPhiPlots(eEdges, binMode, phiView,
-                      "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
-
-    MakeDeltaEtaPlots(eEdges, binMode,
-                      etaGlobal, etaVz,
-                      "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+//    /* ----- produce all plots ----------------------------------------------------- */
+//    /* ‘binMode’ (or whatever local/argument name you use) is already in scope */
+//    MakeDeltaPhiPlots(eEdges, binMode, phiView,
+//                      "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+//
+//    MakeDeltaEtaPlots(eEdges, binMode,
+//                      etaGlobal, etaVz,
+//                      "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
 
     
   const char* out2DDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots";

@@ -236,7 +236,13 @@ submit_data_condor() {
     vecho() { (( VERBOSE )) && echo "$@"; }
 
     # ----------------  global‑cap logic (old behaviour unchanged) ----------
-    [[ "$runMode" == "condor" && "$limitSwitch" == "firstTen" ]] && jobLimit=$MAX_JOBS_DATA
+    if [[ "$runMode" == "condor" ]]; then
+    if [[ "$limitSwitch" == "firstTen" ]]; then
+        jobLimit=$MAX_JOBS_DATA
+    elif [[ "$limitSwitch" =~ ^[0-9]+$ ]]; then
+        jobLimit=$limitSwitch          # user-supplied numeric limit
+    fi
+fi
 
     mkdir -p "$LOG_DIR"/{stdout,error} "$CONDOR_LISTFILES_DIR"
 

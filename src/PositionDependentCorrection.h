@@ -352,6 +352,7 @@ class PositionDependentCorrection : public SubsysReco
                               bool                       fillGlobal = true );
 
 
+  std::array<std::atomic<std::uint64_t>,4> m_blkLocCount {{0,0,0,0}};
   float m_bValsPhi[N_Ebins]{};
   float m_bValsEta[N_Ebins]{};
   std::vector<double> m_bScan;
