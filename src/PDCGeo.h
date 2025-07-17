@@ -93,22 +93,21 @@ foldOnce(float u) noexcept
  *  Periodic = false ➜ η   (coarse index clamps)
  * ===============================================================*/
 template<bool Periodic>
-inline constexpr void
-foldAndStep(float& loc, int& coarse, int nCoarse)
+inline constexpr void foldAndStep(float& loc, int& coarse, int nCoarse)
 {
-    if (loc > -0.5F && loc < 1.5F) return;          // nothing to do
+    if (loc > -0.5F && loc <= 1.5F) return;          // inside → nothing to do
 
-    const bool crossedLeft = (loc < -0.5F);
+    const bool rightOverflow = (loc > 1.5F);         // legacy criterion
 
     loc = std::fmod(loc + 2.F, 2.F);
-    if (loc >= 1.5F) loc -= 2.F;
+    if (loc > 1.5F) { loc -= 2.F; }                  // bring to (‑0.5 … +1.5]
 
-    coarse += crossedLeft ? -1 : +1;
+    if (rightOverflow)                               // ⇦ only this direction
+        ++coarse;
 
-    if constexpr (Periodic)                        // φ-wrap
+    if constexpr (Periodic)                          // φ wrap‑around
     {
-        if (coarse < 0)               coarse += nCoarse;
-        else if (coarse >= nCoarse)   coarse -= nCoarse;
+        if (coarse >= nCoarse) coarse -= nCoarse;
     }
 }
 

@@ -2077,10 +2077,8 @@ void PositionDependentCorrection::fillBlockCoordinateHistograms(
         {
             auto e       = PDC::Geo::undoAshAndReindex<false>(corrEta,
                                                               blkEtaCoarse, bEta);
-            corrEta      = PDC::Geo::foldOnce(
-                               PDC::Geo::eta::undoAsh(e.loc, bEta,
-                                                      PDC::Geo::kDEtaPerFine));
-            blkEtaCoarse = e.blk;
+            corrEta      = PDC::Geo::foldOnce(e.loc);   // single, correct undo
+            blkEtaCoarse = e.blk;                       // keep index coherent
         }
     }
 
