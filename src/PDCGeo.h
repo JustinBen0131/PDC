@@ -368,16 +368,19 @@ computeLocal(const IntVec& towerEta,
     float phiFine = static_cast<float>(sumEphi / scan.sumE);  // may be <0 or >256
     phiFine = std::fmod(phiFine + Nphi, Nphi);                // wrap to [0,256)
     
-    /* ── 3) Coarse indices + local offsets  (centre-of-tower origin) ─ */
-    const float etaFineC = etaFine - 0.5F;            // shift down by ½ fine-bin
-    float       phiFineC = phiFine - 0.5F;            // idem for φ
-    if (phiFineC < 0.0F) phiFineC += static_cast<float>(Nphi);  // wrap to [0,256)
+    // ── 3) Coarse indices + local offsets  ───────────────────────────
+    const float etaFineC = etaFine;
+    float       phiFineC = phiFine;
+    if (phiFineC < 0.0F) phiFineC += Nphi;
 
-    LocalCoord c;
+    /* create result object before first use */
+    LocalCoord c{};
+
     c.blkEta = static_cast<int>(std::floor(etaFineC / kFinePerBlock));
     c.blkPhi = static_cast<int>(std::floor(phiFineC / kFinePerBlock));
-    c.locEta = etaFineC - c.blkEta * kFinePerBlock;
-    c.locPhi = phiFineC - c.blkPhi * kFinePerBlock;
+
+    c.locEta = (etaFine - c.blkEta * kFinePerBlock) - 0.5F;
+    c.locPhi = (phiFine - c.blkPhi * kFinePerBlock) - 0.5F;
 
     /* ── 4) Canonical symmetric fold (exactly once per axis) ───────── */
     foldAndStep<false>(c.locEta, c.blkEta, kCoarseEtaBins);
