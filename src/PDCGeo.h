@@ -1,48 +1,22 @@
 /***************************************************************************************************
  *  PDCGeo.h  –  header‑only, zero‑overhead geometry helpers for the sPHENIX EMCal
  *
- *  Rationale
- *  =========
- *  Precise photon reconstruction in the sPHENIX EMCal requires
- *  corrections that are *local* to a 2×2 “super‑tower” block and *global* in η/φ.  This file
- *  encapsulates the purely geometrical parts of that task:
+ *  Strictly legacy‑compatible implementation
+ *  -----------------------------------------
+ *  •  Local 2×2‑block mathematics is an exact, header‑only port of the original
+ *     getBlockCord / do*BlockCorr code – bit‑for‑bit identical results.
+ *  •  All *global* helpers (blockToGlobal, fineEtaIdx, …) and Ash inverses are
+ *     preserved from the modern version and remain constexpr.
  *
- *    1.  **Symmetric folding helpers** (`foldOnce`, `foldAndStep`) that map any local coordinate
- *        into the canonical range (‑0.5 … +1.5] while keeping the *coarse* block index consistent.
- *
- *    2.  **Ash distortion** tools (`phi::undoAsh`, `eta::undoAsh`) – the analytical inverse of the
- *        “Ash‑b” radial electric‑field distortion in drift chambers.  For φ we additionally apply a
- *        small edge fix (needed right at the barrel seams), whereas for η the plain inverse is
- *        sufficient.
- *
- *    3.  **Block‑to‑global converters** that turn a (coarse‑block index, local offset) pair into
- *        global η or φ, optionally corrected by a *run‑time* offset functor (used for the measured
- *        rigid barrel tilt).
- *
- *    4.  **Fine‑index helpers** – map the same (blk,loc) pair to the EMCal’s native 256 × 96 tower
- *        grid, taking care of periodicity in φ and hard clamping in η.
- *
- *    5.  **Local coordinate toolkit** (`computeLocal`) – a *single‑pass* tower scanner that
- *        computes   ΣE, ΣE·η, ΣE·φ   and returns both the block address **and** the folded local
- *        offsets.  This fully replaces legacy getBlockCord + getAvg{Eta,‑Phi}.
- *
- *  Design choices
- *  --------------
- *  •  **Header‑only & constexpr** – all helpers are inlined, so there is zero binary overhead.
- *  •  **No external state** – the code depends solely on its arguments.  Global parameters such as
- *     tower pitch, detector size, … are compile‑time constants defined up‑front.
- *  •  **C++17‑only** – uses nothing beyond language / STL facilities available in C++17 (the sPHENIX
- *     default).  ROOT is needed only for `TVector2::Phi_mpi_pi`.
- *
- *  Public interface (stable)
- *  -------------------------
- *      •  foldOnce(u)
- *      •  phi::undoAsh(u,b)
- *      •  eta::undoAsh(u,b[,pitch])
- *      •  phi::blockToGlobal(blk,loc[,offsetFn])
- *      •  eta::blockToGlobal(blk,loc[,offsetFn])
- *      •  finePhiIdx(blk,loc) / fineEtaIdx(blk,loc)
- *      •  struct LocalCoord  +  computeLocal(twrEta,twrPhi,twrE)
+ *  Public interface
+ *  ----------------
+ *      •  foldOnce(u)                             – symmetric single fold
+ *      •  foldAndStep(loc,blk)                    – fold + coarse‑index bookkeeping
+ *      •  phi::undoAsh / eta::undoAsh             – analytical Ash‑inverse
+ *      •  phi::blockToGlobal / eta::blockToGlobal – (blk,loc) → η / φ
+ *      •  finePhiIdx / fineEtaIdx                 – tower‑grid indices
+ *      •  LocalCoord  +  computeLocal()           – legacy‑accurate block coord
+ *      •  doPhiBlockCorr / doEtaBlockCorr         – exact distortion correction
  ***************************************************************************************************/
 #ifndef PDC_GEO_H
 #define PDC_GEO_H   1
@@ -51,80 +25,61 @@
 #include <cmath>        // fabs, sinh, asinh, copysign, fmod, …
 #include <algorithm>    // clamp, max_element
 #include <limits>       // quiet_NaN
-#include <type_traits>  // std::true_type / std::false_type
+#include <type_traits>  // true_type / false_type
 #include <vector>
 #include <TVector2.h>   // TVector2::Phi_mpi_pi
 
 namespace PDC::Geo
 {
 /* ═══════════════════════════════════════════════════════════════════════
- *  1.  Global detector constants
- *      – fixed for the sPHENIX EMCal barrel (CEMC).
+ *  1.  Global detector constants (sPHENIX barrel, fixed)
  * ═════════════════════════════════════════════════════════════════════ */
-inline constexpr int   kFinePerBlock   = 2;          ///< #fine towers per coarse block side
-inline constexpr int   kFinePhiBins    = 256;        ///< Full EMCal barrel in φ
-inline constexpr int   kFineEtaBins    =  96;        ///< Barrel height in η
+inline constexpr int   kFinePerBlock   = 2;            ///< side of a 2×2 super‑tower
+inline constexpr int   kFinePhiBins    = 256;          ///< full barrel in φ
+inline constexpr int   kFineEtaBins    =  96;          ///< barrel height in η
 inline constexpr int   kCoarsePhiBins  = kFinePhiBins / kFinePerBlock;   ///< 128
 inline constexpr int   kCoarseEtaBins  = kFineEtaBins / kFinePerBlock;   ///<  48
-inline constexpr float kRadPerFine     = 2.F * static_cast<float>(M_PI) / kFinePhiBins; ///< Δφ per fine tower
-inline constexpr float kEtaMin         = -1.1F;      ///< Centre of η‑row 0
+inline constexpr float kRadPerFine     = 2.F * static_cast<float>(M_PI) / kFinePhiBins;
+inline constexpr float kEtaMin         = -1.1F;        ///< centre of η‑row 0
 inline constexpr float kDEtaPerFine    =  2.2F / kFineEtaBins;           ///< Δη per fine tower
 
 /* ═══════════════════════════════════════════════════════════════════════
  *  2.  Low‑level helpers
  * ═════════════════════════════════════════════════════════════════════ */
-/** Symmetric fold of a *local* coordinate
- *  Maps any value into (‑0.5 … +1.5], preserving relative ordering.
- *  This is the canonical range used throughout the clusteriser (legacy),
- *  hence we keep it as the public contract. */
 [[nodiscard]] inline constexpr float
 foldOnce(float u) noexcept
 {
     if (u <= -0.5F || u > 1.5F)
     {
-        u = std::fmod(u + 2.F, 2.F);        // bring into 0 … <2
-        if (u > 1.5F) u -= 2.F;             // final range  (‑0.5 , +1.5]
+        u = std::fmod(u + 2.F, 2.F);          // 0 … <2
+        if (u > 1.5F) u -= 2.F;               // −0.5 … +1.5]
     }
     return u;
 }
-/* ===============================================================
- *  foldAndStep  –  single symmetric fold + coarse-index bookkeeping
- *  Periodic = true  ➜ φ   (coarse index wraps)
- *  Periodic = false ➜ η   (coarse index clamps)
- * ===============================================================*/
-template<bool Periodic>
-inline constexpr void foldAndStep(float& loc, int& coarse, int nCoarse)
-{
-    if (loc > -0.5F && loc <= 1.5F) return;          // inside → nothing to do
 
-    const bool rightOverflow = (loc > 1.5F);         // legacy criterion
+/* fold + coarse‑index bookkeeping */
+template<bool Periodic>
+inline constexpr void
+foldAndStep(float& loc, int& coarse, int nCoarse) noexcept
+{
+    if (loc > -0.5F && loc <= 1.5F) return;   // already canonical
+
+    const bool rightOverflow = (loc > 1.5F);
 
     loc = std::fmod(loc + 2.F, 2.F);
-    if (loc > 1.5F) { loc -= 2.F; }                  // bring to (‑0.5 … +1.5]
+    if (loc > 1.5F) loc -= 2.F;
 
-    if (rightOverflow)                               // ⇦ only this direction
-        ++coarse;
+    if (rightOverflow) ++coarse;
 
-    if constexpr (Periodic)                          // φ wrap‑around
-    {
+    if constexpr (Periodic)                  // φ wrap
         if (coarse >= nCoarse) coarse -= nCoarse;
-    }
 }
 
-/* --  POD returned by undoAshAndReindex -------------------------------- */
-template<bool Periodic>
-struct CorrOut { float loc; int blk; };
-
-
 /* ═══════════════════════════════════════════════════════════════════════
- *  3.  Ash‑distortion inverse
- *
- *  undoAshGeneric  →   measured  ↦  true
+ *  3.  Analytical Ash‑inverse (unchanged modern version)
  * ═════════════════════════════════════════════════════════════════════ */
 namespace _impl
 {
-    /* Small φ edge correction to smoothly glue the two halves of the barrel
-     * together.  Tuned on simulation, negligible in the central region. */
     struct PhiEdgeFix
     {
         [[nodiscard]] static constexpr float apply(float corr, float b) noexcept
@@ -135,58 +90,50 @@ namespace _impl
             return corr - A * std::sin(s) * (1.F - 0.25F * std::cos(s));
         }
     };
-    /* No edge correction needed for η */
     struct NoEdgeFix
     {
-        [[nodiscard]] static constexpr float apply(float corr, float) noexcept
-        { return corr; }
+        [[nodiscard]] static constexpr float apply(float c, float) noexcept
+        { return c; }
     };
 
-    /* Generic inverse – edge policy selected at compile time */
     template<class EdgePolicy>
     [[nodiscard]] inline constexpr float
-    undoAshGeneric(float loc, float b,
-                   float towerPitch = 1.F)              // φ: pitch=1, η: pitch≈Δη
+    undoAshGeneric(float loc, float b, float pitch = 1.F)
     {
-        if (std::fabs(b) < 1e-9F) return loc * towerPitch;   // b≈0 → identity
+        if (std::fabs(b) < 1e-9F) return loc * pitch;
         loc = foldOnce(loc);
 
-        const bool  right = (loc > 0.5F);                   // right half‑tower
-        const float xMeas = right ? loc - 1.F : loc;        // map to (‑0.5 … +0.5]
+        const bool  right = (loc > 0.5F);
+        const float xMeas = right ? loc - 1.F : loc;
 
-        const double S    = std::sinh(1. / (2. * b));
-        float xTrue       = static_cast<float>(b * std::asinh(2. * S * xMeas));
+        const double S = std::sinh(1. / (2. * b));
+        float xTrue    = static_cast<float>(b * std::asinh(2. * S * xMeas));
 
-        float corr = (right ? xTrue + 1.F : xTrue) * towerPitch;
+        float corr = (right ? xTrue + 1.F : xTrue) * pitch;
         corr       = EdgePolicy::apply(corr, b);
 
-        /* Guard: keep within barrel (rarely needed) */
         if (std::fabs(corr) > 1.6F)
             corr = std::copysign(1.6F, corr);
         return corr;
     }
 } // namespace _impl
 
-/* Public wrappers – nothing fancy */
 namespace phi
 {
     [[nodiscard]] inline constexpr float
     undoAsh(float loc, float b) noexcept
     { return _impl::undoAshGeneric<_impl::PhiEdgeFix>(loc, b); }
 }
-
 namespace eta
 {
     [[nodiscard]] inline constexpr float
-    undoAsh(float loc, float b, float towerPitch = 1.F) noexcept
-    { return _impl::undoAshGeneric<_impl::NoEdgeFix>(loc, b, towerPitch); }
+    undoAsh(float loc, float b, float pitch = 1.F) noexcept
+    { return _impl::undoAshGeneric<_impl::NoEdgeFix>(loc, b, pitch); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- *  5.  (blk,loc) → global helpers
- *
- *  Converts a *coarse* block index plus *local* offset into a detector‑
- *  fixed global coordinate.
+ *  4.  Global (blk,loc) → η / φ converters  & fine‑index helpers
+ *      – unchanged modern code
  * ═════════════════════════════════════════════════════════════════════ */
 namespace _impl
 {
@@ -202,23 +149,20 @@ namespace _impl
             if (blk < 0 || blk >= kCoarsePhiBins || !std::isfinite(loc))
                 return std::numeric_limits<float>::quiet_NaN();
 
-            const float fine = static_cast<float>(blk) * kFinePerBlock
-                               + loc + 0.5F;
+            const float fine = static_cast<float>(blk) * kFinePerBlock + loc + 0.5F;
             return TVector2::Phi_mpi_pi(fine * kRadPerFine + off());
         }
-        else    // η
+        else
         {
             if (blk < 0 || blk >= kCoarseEtaBins || !std::isfinite(loc))
                 return std::numeric_limits<float>::quiet_NaN();
 
-            const float fine = static_cast<float>(blk) * kFinePerBlock
-                               + loc + 0.5F;
+            const float fine = static_cast<float>(blk) * kFinePerBlock + loc + 0.5F;
             return kEtaMin + fine * kDEtaPerFine + off();
         }
     }
 } // namespace _impl
 
-/* Thin, user‑friendly wrappers */
 namespace phi
 {
     template<class OffsetProvider = decltype([](){return 0.F;})>
@@ -227,7 +171,6 @@ namespace phi
                   const OffsetProvider& off = [](){return 0.F;}) noexcept
     { return _impl::blockToGlobalGeneric<true>(blk, loc, off); }
 }
-
 namespace eta
 {
     template<class OffsetProvider = decltype([](){return 0.F;})>
@@ -237,12 +180,7 @@ namespace eta
     { return _impl::blockToGlobalGeneric<false>(blk, loc, off); }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
- *  6.  Fine‑index helpers
- *
- *  Return the *tower‑grid* index corresponding to (blk,loc).  φ wraps,
- *  η clamps at the physical ends of the barrel.
- * ═════════════════════════════════════════════════════════════════════ */
+/* tower‑grid index helpers */
 template<int Nfine, bool Periodic>
 [[nodiscard]] inline constexpr int
 fineIdx(int blk, float loc) noexcept
@@ -256,142 +194,181 @@ fineIdx(int blk, float loc) noexcept
         return idx;
     }
     else
-    {
         return std::clamp(idx, 0, Nfine - 1);
-    }
 }
-[[nodiscard]] inline constexpr int
-finePhiIdx(int blk, float loc) noexcept
-{ return fineIdx<kFinePhiBins, true >(blk, loc); }
-
-[[nodiscard]] inline constexpr int
-fineEtaIdx(int blk, float loc) noexcept
-{ return fineIdx<kFineEtaBins, false>(blk, loc); }
+[[nodiscard]] inline constexpr int finePhiIdx(int b,float l) noexcept
+{ return fineIdx<kFinePhiBins,true >(b,l); }
+[[nodiscard]] inline constexpr int fineEtaIdx(int b,float l) noexcept
+{ return fineIdx<kFineEtaBins,false>(b,l); }
 
 /* ═══════════════════════════════════════════════════════════════════════
- *  7.  Local 2×2-block coordinate toolkit
+ *  5.  Legacy‑accurate local 2×2‑block mathematics
  * ═════════════════════════════════════════════════════════════════════ */
 struct LocalCoord
 {
-    int   blkEta  = 0;          ///< coarse η index  (0 … 47)
-    int   blkPhi  = 0;          ///< coarse φ index  (0 … 127)
-    float locEta  = 0.F;        ///< local η in (-0.5 … +1.5]
-    float locPhi  = 0.F;        ///< local φ in (-0.5 … +1.5]
+    int   blkEta  = 0;   ///< coarse η index  (0 … 47)
+    int   blkPhi  = 0;   ///< coarse φ index  (0 … 127)
+    float locEta  = 0.F; ///< local η in (−0.5 … +1.5]
+    float locPhi  = 0.F; ///< local φ in (−0.5 … +1.5]
+};
+
+/* energy‑weighted ⟨η⟩ (0 … <96) */
+template<class IntVec,class FloatVec>
+[[nodiscard]] inline float
+getAvgEta(const IntVec& eta,const FloatVec& E)
+{
+    const std::size_t nT = eta.size();
+    if (nT == 0 || nT != E.size()) return 0.F;
+    if (nT == 1) return static_cast<float>(eta[0]);
+
+    double sumE=0., sumEeta=0.;
+    for (std::size_t i=0;i<nT;++i){ sumE+=E[i]; sumEeta+=E[i]*eta[i]; }
+    return (sumE<1e-9)?0.F:static_cast<float>(sumEeta/sumE);
+}
+
+/* energy‑weighted ⟨φ⟩ (0 … <256) */
+template<class IntVec,class FloatVec>
+[[nodiscard]] inline float
+getAvgPhi(const IntVec& phi,const FloatVec& E)
+{
+    constexpr int   Nphi=kFinePhiBins;
+    constexpr float Half=Nphi/2.F;
+
+    const std::size_t nT=phi.size();
+    if (nT==0||nT!=E.size()) return 0.F;
+
+    std::size_t iRef=0;
+    for (std::size_t i=1;i<nT;++i) if (E[i]>E[iRef]) iRef=i;
+    const int ref=phi[iRef];
+
+    double sumE=0., sumEphi=0.;
+    for (std::size_t i=0;i<nT;++i)
+    {
+        int p=phi[i];
+        int d=p-ref;
+        if (d<-Half) p+=Nphi;
+        if (d> Half) p-=Nphi;
+        sumE   +=E[i];
+        sumEphi+=E[i]*p;
+    }
+    if (sumE<1e-12) return 0.F;
+    return static_cast<float>(std::fmod(sumEphi/sumE + Nphi, Nphi));
+}
+
+/* computeLocal  –  verbatim port of legacy getBlockCord */
+template<class IntVec,class FloatVec>
+[[nodiscard]] inline LocalCoord
+computeLocal(const IntVec& twrEta,
+             const IntVec& twrPhi,
+             const FloatVec& twrE)
+{
+    constexpr int FinePerBlock=kFinePerBlock;   // 2
+    constexpr int NcoarsePhi  =kCoarsePhiBins;  // 128
+
+    const std::size_t nT=twrE.size();
+    if (nT==0||twrEta.size()!=nT||twrPhi.size()!=nT) return {};
+
+    const float etaCoG=getAvgEta(twrEta,twrE);  // 0 … <96
+    const float phiCoG=getAvgPhi(twrPhi,twrE);  // 0 … <256
+
+    int blkEta=static_cast<int>(std::floor(etaCoG))/FinePerBlock; // 0 … 47
+    int blkPhi=static_cast<int>(std::floor(phiCoG))/FinePerBlock; // 0 … 127
+
+    float locEta=etaCoG-blkEta*FinePerBlock;
+    float locPhi=phiCoG-blkPhi*FinePerBlock;
+
+    auto fold=[&](float& loc,int& coarse,bool isPhi)
+    {
+        if (loc<=-0.5F||loc>1.5F)
+        {
+            loc=std::fmod(loc+2.F,2.F);
+            if (loc>1.5F){ loc-=2.F; ++coarse; }
+            if (isPhi&&coarse==NcoarsePhi) coarse=0;
+        }
+    };
+    fold(locEta,blkEta,false);
+    fold(locPhi,blkPhi,true );
+
+    return {blkEta,blkPhi,locEta,locPhi};
+}
+
+/* legacy block‑distortion inverses */
+[[nodiscard]] inline float
+doPhiBlockCorr(float localPhi,float b)
+{
+    if (std::fabs(b)<1e-9F) return localPhi;
+    if (localPhi<=-0.5F||localPhi>1.5F)
+        localPhi=std::fmod(localPhi+2.F,2.F);
+
+    const float Xmeas=(localPhi<0.5F)?localPhi:localPhi-1.F;
+    const double S   =std::sinh(1.0/(2.0*b));
+    const float Xtrue=static_cast<float>(b*std::asinh(2.0*S*Xmeas));
+    float corr       =(localPhi<0.5F)?Xtrue:Xtrue+1.F;
+
+    if (corr<=-0.5F||corr>1.5F){
+        corr=std::fmod(corr+2.F,2.F);
+        if (corr>1.5F) corr-=2.F;
+    }
+    return corr;
+}
+
+[[nodiscard]] inline float
+doEtaBlockCorr(float localEta,float b,float dEtaTower=1.F)
+{
+    if (std::fabs(b)<1e-9F) return localEta;
+    if (localEta<=-0.5F||localEta>1.5F)
+        localEta=std::fmod(localEta+2.F,2.F);
+
+    const float Xmeas=(localEta<0.5F)?localEta:localEta-1.F;
+    const double S   =std::sinh(1.0/(2.0*b));
+    const float Xtrue=static_cast<float>(b*std::asinh(2.0*S*Xmeas));
+    float corr       =(localEta<0.5F)?Xtrue:Xtrue+1.F;
+
+    if (corr<=-0.5F||corr>1.5F){
+        corr=std::fmod(corr+2.F,2.F);
+        if (corr>1.5F) corr-=2.F;
+    }
+    corr*=dEtaTower;
+    if (std::fabs(corr)>1.6F) corr=std::copysign(1.6F,corr);
+    return corr;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Compatibility shim – analytical Ash inverse **plus**               *
+ *  coarse‑index bookkeeping exactly as getBlockCord used to do        *
+ * ------------------------------------------------------------------ */
+template<bool Periodic>
+struct CorrOut          // tiny POD returned to the caller
+{
+    float loc;          // folded local coordinate  (-0.5 … +1.5]
+    int   blk;          // updated coarse‑block index
 };
 
 template<bool Periodic>
 [[nodiscard]] inline constexpr CorrOut<Periodic>
-undoAshAndReindex(float locIn, int blkIn, float b) noexcept
+undoAshAndReindex(float locIn,        // original local coord
+                  int   blkIn,        // original coarse index
+                  float b) noexcept   // Ash parameter
 {
-    float loc;
-    if constexpr (Periodic)
-        loc = PDC::Geo::phi::undoAsh(locIn, b);   // φ variant
-    else
-        loc = PDC::Geo::eta::undoAsh(locIn, b);   // η variant
+    /* 1) analytical inverse (periodic ⇔ φ) */
+    float loc = Periodic
+                  ? phi::undoAsh(locIn, b)
+                  : eta::undoAsh(locIn, b);
 
+    /* 2) keep (blk,loc) pair self‑consistent */
     int blk = blkIn;
-
     if (loc <= -0.5F) { loc += 2.F; --blk; }
-    if (loc >  +1.5F) { loc -= 2.F; ++blk; }
+    if (loc >  1.5F) { loc -= 2.F; ++blk; }
 
-    if constexpr (Periodic)                       // φ-wrap
+    /* 3) φ wraps, η clamps */
+    if constexpr (Periodic)
     {
         if (blk < 0)               blk += kCoarsePhiBins;
         if (blk >= kCoarsePhiBins) blk -= kCoarsePhiBins;
     }
-    return {loc, blk};
+    return { foldOnce(loc), blk };
 }
 
-
-namespace _impl
-{
-    /* Internal helper – accumulate ΣE, ΣE·η and find lead-φ tower */
-    struct ScanOut
-    {
-        double sumE      = 0.0;
-        double sumEeta   = 0.0;
-        int    refPhiBin = 0;        ///< fine-bin with the highest E
-        double refE      = 0.0;
-    };
-
-    template<class IntVec, class FloatVec>
-    [[nodiscard]] inline constexpr ScanOut
-    scanTowers(const IntVec& eta, const IntVec& phi, const FloatVec& E) noexcept
-    {
-        ScanOut out{};
-        const std::size_t nT = E.size();
-        for (std::size_t i = 0; i < nT; ++i)
-        {
-            const double Ei = E[i];
-            out.sumE    += Ei;
-            out.sumEeta += Ei * (eta[i] + 0.5F);       // tower-centre η
-
-            if (Ei > out.refE) { out.refE = Ei; out.refPhiBin = phi[i]; }
-        }
-        return out;
-    }
-} // namespace _impl
-
-
-
-/** Compute the *canonical* local coordinate of a tower cluster. */
-template<class IntVec, class FloatVec>
-[[nodiscard]] inline LocalCoord
-computeLocal(const IntVec& towerEta,
-             const IntVec& towerPhi,
-             const FloatVec& towerE) noexcept
-{
-    /* ── 0) Quick validation ───────────────────────────────────────── */
-    const std::size_t nT = towerE.size();
-    if (nT == 0 || towerEta.size() != nT || towerPhi.size() != nT)
-        return {};                                // invalid → zero-init
-
-    /* ── 1) ΣE, ΣE·η and lead-φ tower (single pass) ───────────────── */
-    const auto scan = _impl::scanTowers(towerEta, towerPhi, towerE);
-    if (scan.sumE < 1e-12) return {};            // all towers zero
-
-    const float etaFine = static_cast<float>(scan.sumEeta / scan.sumE);  // 0 … 96
-
-    /* ── 2) φ from the lead (highest-E) fine tower only ────────────── */
-    /* ── 2) energy‑weighted φ centroid with one wrap around ref tower ─ */
-    constexpr int  Nphi      = kFinePhiBins;
-    constexpr float HalfSpan = Nphi / 2.F;
-    double sumEphi = 0.0;
-    for (std::size_t i = 0; i < nT; ++i)
-    {
-        int   phi = towerPhi[i];
-        int   d   = phi - scan.refPhiBin;
-        if (d < -HalfSpan) phi += Nphi;      // unwrap left
-        if (d >  HalfSpan) phi -= Nphi;      // unwrap right
-        sumEphi += towerE[i] * (phi + 0.5F);
-    }
-    float phiFine = static_cast<float>(sumEphi / scan.sumE);  // may be <0 or >256
-    phiFine = std::fmod(phiFine + Nphi, Nphi);                // wrap to [0,256)
-    
-    // ── 3) Coarse indices + local offsets  ───────────────────────────
-    const float etaFineC = etaFine;
-    float       phiFineC = phiFine;
-    if (phiFineC < 0.0F) phiFineC += Nphi;
-
-    /* create result object before first use */
-    LocalCoord c{};
-
-    c.blkEta = static_cast<int>(std::floor(etaFineC / kFinePerBlock));
-    c.blkPhi = static_cast<int>(std::floor(phiFineC / kFinePerBlock));
-
-    c.locEta = (etaFine - c.blkEta * kFinePerBlock) - 0.5F;
-    c.locPhi = (phiFine - c.blkPhi * kFinePerBlock) - 0.5F;
-
-    /* ── 4) Canonical symmetric fold (exactly once per axis) ───────── */
-    foldAndStep<false>(c.locEta, c.blkEta, kCoarseEtaBins);
-    foldAndStep< true >(c.locPhi, c.blkPhi, kCoarsePhiBins);
-
-    /* Final hard clamp in η (defensive – should never trigger) */
-    if      (c.blkEta < 0)               { c.blkEta = 0;                   c.locEta = -0.499F; }
-    else if (c.blkEta >= kCoarseEtaBins) { c.blkEta = kCoarseEtaBins - 1;  c.locEta =  1.499F; }
-
-    return c;
-}
 
 } // namespace PDC::Geo
 #endif /* PDC_GEO_H */

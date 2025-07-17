@@ -2062,10 +2062,11 @@ void PositionDependentCorrection::fillBlockCoordinateHistograms(
         const float bPhi = m_bValsPhi[iEbin];
         if (bPhi > 1e-9F)
         {
-            auto p       = PDC::Geo::undoAshAndReindex<true>(corrPhi,
-                                                             blkPhiCoarse, bPhi);
-            corrPhi      = PDC::Geo::foldOnce(p.loc);   // safety fold
-            blkPhiCoarse = p.blk;                       // keep index in sync
+            auto p        = PDC::Geo::undoAshAndReindex<true>(corrPhi,
+                                                              blkPhiCoarse,
+                                                              bPhi);
+            corrPhi       = p.loc;      // folded, legacy‑exact
+            blkPhiCoarse  = p.blk;      // keep index coherent
         }
     }
 
@@ -2075,10 +2076,11 @@ void PositionDependentCorrection::fillBlockCoordinateHistograms(
         const float bEta = m_bValsEta[iEbin];
         if (bEta > 1e-9F)
         {
-            auto e       = PDC::Geo::undoAshAndReindex<false>(corrEta,
-                                                              blkEtaCoarse, bEta);
-            corrEta      = PDC::Geo::foldOnce(e.loc);   // single, correct undo
-            blkEtaCoarse = e.blk;                       // keep index coherent
+            auto e        = PDC::Geo::undoAshAndReindex<false>(corrEta,
+                                                               blkEtaCoarse,
+                                                               bEta);
+            corrEta       = e.loc;
+            blkEtaCoarse  = e.blk;
         }
     }
 
