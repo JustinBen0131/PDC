@@ -7,17 +7,11 @@
 #include <map>
 #include <calotrigger/TriggerAnalyzer.h>
 #include <calobase/RawCluster.h>
-#include <calobase/RawClusterContainer.h>   // ← gives access to ConstIterator
 #include <cmath>
 #include <TString.h>
 // CLHEP types appear in inline code inside the header
 #include <CLHEP/Vector/ThreeVector.h>   // Hep3Vector
-#include <functional>
-#include <atomic>
-#include <TH3F.h>
-#include "PDCGeo.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRec.h"
-#include "PDCGeo.h"
 
 class Fun4AllHistoManager;
 class PHCompositeNode;
@@ -30,7 +24,6 @@ class TTree;
 class TH1;
 class TH1F;
 class TH3;
-class TH3F;
 class TH2;
 class TH2F;
 class TF1;
@@ -49,15 +42,11 @@ class PositionDependentCorrection : public SubsysReco
   PositionDependentCorrection(const std::string &name = "PositionDependentCorrection",
                               const std::string &fname = "MyNtuple.root");
   virtual ~PositionDependentCorrection();
-  void bookCommonHistograms(const std::function<std::string(int)>& makeLabel);
-  void bookSimulationHistograms(const std::function<std::string(int)>& makeLabel);
   int Init(PHCompositeNode *);
   int process_event(PHCompositeNode *);
   int End(PHCompositeNode *);
 
-  void setIsSimulation(bool flag)   { m_isSimulation = flag; }
-  bool isSimulation()         const { return m_isSimulation; }
-  void setMassFitsDone(bool flag = true) { m_massFitsDone = flag; }
+  void setIsSimulation(bool sim) { isSimulation = sim; }
     
   int process_g4hits(PHCompositeNode *);
   int process_g4cells(PHCompositeNode *);
@@ -71,6 +60,8 @@ class PositionDependentCorrection : public SubsysReco
   void set_timing_cut_width(const int &t) { _range = t; }
   void set_vertex_cut(const float &v)     { _vz = v; }
   void apply_vertex_cut(bool Vtx_cut)     { m_vtxCut = Vtx_cut; }
+
+  float getWeight(int ieta, float pt);
 
   TF1* fitHistogram(TH1* h);
   void fitEtaSlices(const std::string& infile,
@@ -91,50 +82,8 @@ class PositionDependentCorrection : public SubsysReco
     
   void setBinningMode(EBinningMode mode) { m_binningMode = mode; }
   EBinningMode getBinningMode() const    { return m_binningMode; }
-  static uint64_t getVerbosityLevel() { return s_verbosityLevel.load(); }
-
-  static inline float doPhiBlockCorr(float u, float b)
-  { return PDC::Geo::phi::undoAsh(u, b); }
-
-  static inline float doEtaBlockCorr(float u, float b, float d = 1.f)
-  { return PDC::Geo::eta::undoAsh(u, b, d); }
-
-  inline float convertBlockToGlobalPhi(int blk, float loc) const
-  {
-      /* honour run‑time offset if it was measured */
-      struct Off { const PositionDependentCorrection* self; float operator()() const { return self->m_hasOffset ? self->m_phi0Offset : 0.F; } };
-      return PDC::Geo::phi::blockToGlobal(blk, loc, Off{this});
-  }
-
-  inline float convertBlockToGlobalEta(int blk, float loc) const
-  {
-      struct Off { const PositionDependentCorrection* self; float operator()() const { return self->m_hasEtaOffset ? self->m_eta0Offset : 0.F; } };
-      return PDC::Geo::eta::blockToGlobal(blk, loc, Off{this});
-  }
-
-  /* --------------------------------------------------------------------
-   * 2) fine‑index helpers (unchanged public signature)
-   * -------------------------------------------------------------------- */
-  static inline int finePhiIndex(int blk, float loc)
-  { return PDC::Geo::finePhiIdx(blk, loc); }
-
-  static inline int fineEtaIndex(int blk, float loc)
-  { return PDC::Geo::fineEtaIdx(blk, loc); }
     
  protected:
-  /*! Current verbosity that static helpers can consult.                     *
-    *  It is updated for every instance in the constructor.                   */
-  static std::atomic<uint64_t> s_verbosityLevel;
-  /** Measure the rigid φ–offset (barrel tilt) once per job.
-    *
-    *  – Uses `m_geometry`, fills `m_phi0Offset`, sets `m_hasOffset`.
-    *  – Returns *true* on success, *false* if the geometry container is empty.
-  */
-  bool computeRigidPhiOffset();
-  float m_eta0Offset {0.f};
-  bool  m_hasEtaOffset {false};
-  bool  computeRigidEtaOffset();
-    
   // --------------------------------------------------------------------
   // 2) Method prototypes that reference RawClusterContainer, etc.
   // --------------------------------------------------------------------
@@ -160,74 +109,41 @@ class PositionDependentCorrection : public SubsysReco
                     float nClus_ptCut,
                     float clus_chisq_cut,
                     int &nClusContainer);
+    
+  float doPhiBlockCorr(float localPhi, float bphi);
+  float doEtaBlockCorr(float localEta, float bEta,  float dEtaTower = 1.f);
+    
+  float convertBlockToGlobalPhi(int block_phi_bin, float localPhi);
+  float convertBlockToGlobalEta(int block_eta_bin, float localEta);
 
-  // ───────────────────────────────────────────────────────────────
-  // Forward Ash distortion  ( true  →  measured )
-  //
-  //   PDC::Geo::phi::undoAsh() converts   measured → true
-  //   therefore,  true → measured  is obtained with  (‑b).
-  //   The sign flip is the only difference.
-  //
-  //   • keeps all folding & edge fixes identical to the library
-  //   • zero duplicate maintenance burden
-  // ───────────────────────────────────────────────────────────────
-  inline float
-  doAshShift(float localPhi, float b)  // header unchanged
-  {
-        // direct call into the constexpr helper – *no* extra branches
-        return PDC::Geo::phi::undoAsh(localPhi, -b);
-  }
+  float  phiAtShowerDepth( float  energy,
+                             double rFront,
+                             double zFront,
+                             float  phiFront,
+                             int    ix,          ///< lead-tower fine φ-index
+                             int    iy ) const;  ///< lead-tower fine η-index
 
+  double xAtShowerDepth ( float  energy,
+                             double rFront,
+                             double zFront,
+                             float  phiFront,
+                             int    ix,
+                             int    iy ) const;
+    
+  float  etaAtShowerDepth( float  energy,
+                             double rFront,
+                             double zFront,
+                             float  phiFront,
+                             int    ix,
+                             int    iy,
+                             float  vtx_z ) const;   // 7-parameter, const
+    
+
+  float doAshShift(float localPhi, float bVal);
   float doLogWeightCoord(const std::vector<int>& towerphis,
                            const std::vector<float>& towerenergies,
                            float w0);
-    
 
-  void fillBlockCoordinateHistograms(const std::pair<float,float>& blkCoord,
-                                       int   blkEtaCoarse,
-                                       int   blkPhiCoarse,
-                                       float clusE,
-                                       int   iEbin,
-                                       std::size_t nTowers);
-
-  void processSimulationTruthMatches(
-        RawCluster*                     clus1,
-        const TLorentzVector&           photon1,
-        int                             lt_eta,
-        int                             lt_phi,
-        const std::pair<float,float>&   blkCoord,
-        int                             blkEtaCoarse,
-        int                             blkPhiCoarse,
-        const std::vector<int>&         towerPhis,
-        const std::vector<float>&       towerEs,
-        float                           vtx_z,
-        const std::vector<TLorentzVector>& truth_photons,
-        const std::vector<TLorentzVector>& truth_meson_photons,
-        bool&                           match1,
-        TLorentzVector&                 ph1_trEtaPhi);
-    
-    
- void processClusterPairs(
-          RawClusterContainer*               clusterContainer,
-          RawClusterContainer::ConstIterator cIt1,
-          const CLHEP::Hep3Vector&           vertex,
-          const TLorentzVector&              photon1,
-          float                              clusE,
-          int                                lt_eta,
-          int                                lt_phi,
-          int                                blkEtaCoarse,
-          int                                blkPhiCoarse,
-          const std::pair<float,float>&      blkCoord,
-          float                              maxAlpha,
-          float                              ptMaxCut,
-          float                              pt2ClusCut,
-          float                              pi0ptcut,
-          float                              weight,
-          bool                               match1,
-          const TLorentzVector&              ph1_trEtaPhi,
-          const std::vector<TLorentzVector>& truth_meson_photons,
-          bool                               isSimulation);              // << NEW
-    
   void finalClusterLoop(PHCompositeNode* topNode,
                         RawClusterContainer* clusterContainer,
                         float vtx_z,
@@ -253,28 +169,45 @@ class PositionDependentCorrection : public SubsysReco
         const std::vector<float>& tower_energies
   );
     
+  void fillAshLogDy( RawCluster*                     cluster,
+                       const TLorentzVector&           recoPhoton,
+                       const TLorentzVector&           truthPhoton,
+                       const std::pair<float,float>&   blockCord,
+                       int                             blockEtaBin,
+                       const std::vector<int>&         tower_etas,
+                       const std::vector<float>&       tower_energies );
 
     
+  void fillDPhiRawAndCorrected( RawCluster*            cluster,
+                                  const TLorentzVector&  recoPhoton,
+                                  const TLorentzVector&  truthPhoton,
+                                  const std::pair<float,float>& blkCoord,
+                                  int   blockPhiBin,
+                                  float rawDelPhi /* unused – kept for call-site compatibility */ );
+
+  void fillDEtaRawAndCorrected( RawCluster* cluster,
+                                  const TLorentzVector& recoPhoton,
+                                  const TLorentzVector& truthPhoton,
+                                  const std::pair<float,float>& blockCord,
+                                  int  blockEtaBin,
+                                  float vtx_z );
   int  getEnergySlice(float E) const;
     
+  float getAvgEta(const std::vector<int> &toweretas,
+                    const std::vector<float> &towerenergies);
+  float getAvgPhi(const std::vector<int> &towerphis,
+                    const std::vector<float> &towerenergies);
+
+  std::pair<float,float> getBlockCord(const std::vector<int>&   towerEtas,
+                                          const std::vector<int>&   towerPhis,
+                                          const std::vector<float>& towerEs,
+                                          int&                      blkPhiOut,
+                                          int&                      blkEtaOut);
   // --------------------------------------------------------------------
   // 3) Data members
   // --------------------------------------------------------------------
   std::string detector;
-  /* ----------------------------------------------------------------
-   *   –  m_vzTightCut  … “physics” histograms (default 10 cm)
-   *   –  m_vzSliceMax  … upper edge of the vzEdge table   (30 cm)
-   * -------------------------------------------------------------- */
-  float m_vzTightCut {10.f};
-  float m_vzSliceMax {30.f};
-  /// steer the tight cut from a macro if desired
-  void setTightVzCut(float cm) { m_vzTightCut = std::fabs(cm); }
-    
-  static constexpr std::array<float,7> vzEdge = { 0, 5, 10, 15, 20, 25, 30};
-  static constexpr int N_VzBins = vzEdge.size() - 1;
-
   std::string outfilename;
-  bool m_isSimulation = false;      ///< true = MC, false = real data
   int Getpeaktime(TH1 *h);
   Fun4AllHistoManager *hm = nullptr;
   TFile *outfile = nullptr;
@@ -318,41 +251,17 @@ class PositionDependentCorrection : public SubsysReco
       return hi;
   }();
     
-  /* ---------- π0‑mass‑window (pass‑2 helper) ------------------------------ */
-  static constexpr int kMaxEBins = N_Ebins;
-  struct MassWindow { float mu{0.f}; float sigma{0.f}; };
+  void fillDPhiClusterizerCP( RawCluster*            cluster,
+                                const TLorentzVector&  truthPhoton,
+                                TH1F*                  cpRawHistArr  [N_Ebins], // renamed
+                                TH1F*                  cpCorrHistArr [N_Ebins]  // renamed
+                              );
 
-  bool        m_massFitsDone {false};                // external flag
-  MassWindow  m_winRaw [kMaxEBins] {};               // RAW  (unused for now)
-  MassWindow  m_winCorr[kMaxEBins] {};               // CORR (unused for now)
-
-  /* ---------------- helper loaders --------------------------------------- */
-  bool loadBValues          (const std::string& path);   // b‑parameters
-  bool loadMassWindowTable  (const std::string& path);   // μ/σ table
-    
-  /* 5-way residual helpers (Δφ / Δη) -- NEW */
-  void fillDPhiAllVariants( RawCluster*                cluster,
-                              const TLorentzVector&      recoPhoton,
-                              const TLorentzVector&      truthPhoton,
-                              const std::pair<float,float>& blkCoord,
-                              int                        blockPhiBin,
-                              float                      vtx_z,
-                              TH1F*                      cpRawHistArr [N_Ebins],
-                              TH1F*                      cpCorrHistArr[N_Ebins] );
-
-  void fillDEtaAllVariants( RawCluster*                cluster,
-                              const TLorentzVector&      recoPhoton,
-                              const TLorentzVector&      truthPhoton,
-                              const std::pair<float,float>& blkCoord,
-                              int                        blockEtaBin,
-                              int                        blockPhiBin,
-                              float                      vtx_z,
-                              TH1F*                      cpRawHistArr [N_Ebins],
-                              TH1F*                      cpCorrHistArr[N_Ebins],
-                              bool                       fillGlobal = true );
-
-
-  std::array<std::atomic<std::uint64_t>,4> m_blkLocCount {{0,0,0,0}};
+  void fillDEtaClusterizerCP( RawCluster*            cluster,
+                                const TLorentzVector&  truthPhoton,
+                                TH1F*                  cpRawHistArr  [N_Ebins],
+                                TH1F*                  cpCorrHistArr [N_Ebins],
+                                float                  vtx_z );
   float m_bValsPhi[N_Ebins]{};
   float m_bValsEta[N_Ebins]{};
   std::vector<double> m_bScan;
@@ -371,42 +280,11 @@ class PositionDependentCorrection : public SubsysReco
     
   TH1F* h_eta_diff_cpRaw_E     [N_Ebins]{};
   TH1F* h_eta_diff_cpCorr_E    [N_Ebins]{};
-  TH1F* h_eta_diff_cpBcorr_E   [N_Ebins] {};
-    
-  TH1F* h_eta_diff_raw_E_vz     [N_Ebins][N_VzBins] {};
-  TH1F* h_eta_diff_corrected_E_vz[N_Ebins][N_VzBins]{};
-
-  TH1F* h_eta_diff_cpRaw_E_vz   [N_Ebins][N_VzBins]{};
-  TH1F* h_eta_diff_cpCorr_E_vz  [N_Ebins][N_VzBins]{};
-  TH1F* h_eta_diff_cpBcorr_E_vz [N_Ebins][N_VzBins]{};
     
   // –– NEW –– global tallies (initialised to zero in ctor)
   mutable std::atomic<std::uint64_t> m_nWinRAW   {0};
   mutable std::atomic<std::uint64_t> m_nWinCP    {0};
   mutable std::atomic<std::uint64_t> m_nWinBCorr {0};
-    
-  mutable std::atomic<std::uint64_t> m_nWinRAW_Eta   {0};
-  mutable std::atomic<std::uint64_t> m_nWinCP_Eta    {0};
-  mutable std::atomic<std::uint64_t> m_nWinBCorr_Eta {0};
-    
- /* 5‑way Δφ win‑counters */
-  std::atomic<std::uint64_t> m_phiWinCLUSraw   {0};
-  std::atomic<std::uint64_t> m_phiWinCLUScp    {0};
-  std::atomic<std::uint64_t> m_phiWinCLUSbcorr {0};
-  std::atomic<std::uint64_t> m_phiWinPDCraw    {0};
-  std::atomic<std::uint64_t> m_phiWinPDCcorr   {0};
-
-  std::atomic<std::uint64_t> m_etaWinCLUSraw   {0};
-  std::atomic<std::uint64_t> m_etaWinCLUScp    {0};
-  std::atomic<std::uint64_t> m_etaWinCLUSbcorr {0};
-  std::atomic<std::uint64_t> m_etaWinPDCraw    {0};
-  std::atomic<std::uint64_t> m_etaWinPDCcorr   {0};
-    
-    
-  /* optional numerical‑anomaly monitors */
-  std::atomic<std::uint64_t> g_nanPhi {0};
-  std::atomic<std::uint64_t> g_nanEta {0};
-  std::atomic<std::uint64_t> g_nCorrPhiRight {0};  
     
   TProfile* pr_phi_vs_blockcoord = nullptr;
   TH2* h_emcal_mbd_correlation = nullptr;
@@ -514,10 +392,6 @@ class PositionDependentCorrection : public SubsysReco
   TH3* h_delEta_e_eta;
   TH3* h_delR_e_eta;
   TH3* h_delPhi_e_phi;
-  TH2F* h_mE_raw  {nullptr};
-  TH2F* h_mE_corr {nullptr};
-  TH3F* h_m_blk_raw  {nullptr};
-  TH3F* h_m_blk_corr {nullptr};
   TProfile* pr_eta_shower;
   TProfile* pr_phi_shower;
   TH2* h_vert_xy;
@@ -535,20 +409,11 @@ class PositionDependentCorrection : public SubsysReco
   TH1* h_block_eta;
   TH1* h_clus_E_size;
   TH1* h_block_bin;
-
+  bool isSimulation = false;
     
-  inline int getVzSlice(float vz) const
-  {
-        for (int i = 0; i < N_VzBins; ++i)
-            if (vz >= vzEdge[i] && vz < vzEdge[i + 1]) return i;
-        return -1;
-  }
-
+    
   std::map<std::string, std::string> triggerNameMap = {
-        {"MBD N&S >= 1",          "MBD_NandS_geq_1"}
-//        {"Photon 3 GeV + MBD NS >= 1","Photon_3_GeV_plus_MBD_NS_geq_1"},
-//        {"Photon 4 GeV + MBD NS >= 1","Photon_4_GeV_plus_MBD_NS_geq_1"},
-//        {"Photon 5 GeV + MBD NS >= 1","Photon_5_GeV_plus_MBD_NS_geq_1"}
+    {"MBD N&S >= 1", "MBD_NandS_geq_1"}
   };
   std::map<int, std::string>* activeTriggerNameMap = nullptr;
 
