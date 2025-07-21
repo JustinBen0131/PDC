@@ -1126,129 +1126,7 @@ void PositionDependentCorrection::fillTruthInfo(
   }
 }
 
-/*==========================================================================*
- *  φ-direction                                                             *
- *==========================================================================*/
-float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float b)
-{
-  /* —————————————————— banner —————————————————— */
-  if (Verbosity() > 0)
-    std::cout << ANSI_BOLD << "[doPhiBlockCorr] ENTER  "
-              << "localPhi = " << localPhi << " ,  b = " << b
-              << ANSI_RESET << '\n';
 
-  /* (0) nothing to undo when |b| ≈ 0 */
-  if (std::fabs(b) < 1e-9f) {                        // quick exit
-    if (Verbosity() > 0) std::cout << "  b≈0 → return unchanged\n";
-    return localPhi;
-  }
-
-  /* (1) single fold into (-0.5 … +1.5] */
-  if (localPhi <= -0.5f || localPhi > 1.5f) {
-    if (Verbosity() > 1) std::cout << "  fold: " << localPhi << " → ";
-    localPhi = std::fmod(localPhi + 2.f, 2.f);
-    if (Verbosity() > 1) std::cout << localPhi << '\n';
-  }
-
-  /* (2) map to (-0.5 … +0.5] */
-  const float Xmeas = (localPhi < 0.5f) ? localPhi : localPhi - 1.f;
-  if (Verbosity() > 1) std::cout << "  Xmeas = " << Xmeas << '\n';
-
-  /* (3) analytic inverse  ———  asinh! */
-  const double S = std::sinh(1.0 / (2.0 * b));          // sinh(1/2b)
-  if (Verbosity() > 1) std::cout << "  S = sinh(1/2b) = " << S << '\n';
-
-  const float Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
-  if (Verbosity() > 1) std::cout << "  Xtrue = " << Xtrue << '\n';
-
-  /* (4) shift back to (-0.5 … +1.5] */
-  float corrected = (localPhi < 0.5f) ? Xtrue : Xtrue + 1.f;
-  if (Verbosity() > 1)
-    std::cout << "  corrected (pre-wrap) = " << corrected << '\n';
-
-  /* (5) safety fold */
-  if (corrected <= -0.5f || corrected > 1.5f) {
-    corrected = std::fmod(corrected + 2.f, 2.f);
-    if (corrected > 1.5f) corrected -= 2.f;
-    if (Verbosity() > 1)
-      std::cout << "  corrected (post-wrap) = " << corrected << '\n';
-  }
-
-  if (Verbosity() > 0)
-    std::cout << ANSI_GREEN << "[doPhiBlockCorr] EXIT  → "
-              << corrected << " (rad-fraction)"
-              << ANSI_RESET << "\n\n";
-
-  return corrected;
-}
-
-/*==========================================================================*
- *  η-direction                                *
- *==========================================================================*/
-float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
-                                                  float  b,
-                                                  float  dEtaTower /* = 1.f */)
-{
-  if (Verbosity() > 0)
-    std::cout << ANSI_BOLD << "[doEtaBlockCorr] ENTER  "
-              << "ηloc=" << localEta << "  b=" << b
-              << ANSI_RESET << '\n';
-
-  if (std::fabs(b) < 1e-9f)                         // nothing to undo
-  {
-    if (Verbosity() > 0) std::cout << "  b≈0 → return unchanged\n";
-    return localEta;
-  }
-  /* ------------------------------------------------------------------ *
-   * 1) fold once into (‑0.5 … +1.5]                                    *
-   * ------------------------------------------------------------------ */
-  if (localEta <= -0.5f || localEta > 1.5f)
-    localEta = std::fmod(localEta + 2.f, 2.f);
-
-  if (!std::isfinite(localEta))
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED << "  ηloc not finite → NaN\n" << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-  /* ------------------------------------------------------------------ *
-   * 2) map measured coordinate to centre‑of‑gravity frame              *
-   * ------------------------------------------------------------------ */
-  const float Xmeas = (localEta < 0.5f) ? localEta : localEta - 1.f;
-
-  /* ------------------------------------------------------------------ *
-   * 3) analytic inverse of forward Ash‑distortion                      *
-   *    (identical to φ)                                                *
-   * ------------------------------------------------------------------ */
-  const double  S     = std::sinh( 1.0 / (2.0 * b) );
-  const float   Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
-
-  /* ------------------------------------------------------------------ *
-   * 4) add back integer tower pitch                                    *
-   * ------------------------------------------------------------------ */
-  float corrected = (localEta < 0.5f) ? Xtrue : Xtrue + 1.f;
-
-  /* ------------------------------------------------------------------ *
-   * 5) safety fold & physical edge guard                               *
-   * ------------------------------------------------------------------ */
-  if (corrected <= -0.5f || corrected > 1.5f)
-  {
-    corrected = std::fmod(corrected + 2.f, 2.f);
-    if (corrected > 1.5f) corrected -= 2.f;
-  }
-  /* If a caller supplied a non‑unity tower pitch (rare) apply it now */
-  corrected *= dEtaTower;
-
-  /* keep clusters inside the barrel acceptance (η ≈ ±1.1) */
-  if (std::fabs(corrected) > 1.6f)      // 2×2 block edge + margin
-    corrected = std::copysign(1.6f, corrected);
-
-  if (Verbosity() > 0)
-    std::cout << ANSI_GREEN << "[doEtaBlockCorr] EXIT → "
-              << corrected << ANSI_RESET << "\n\n";
-
-  return corrected;
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 RawTowerGeomContainer* PositionDependentCorrection::checkTowerGeometry(PHCompositeNode* topNode)
@@ -1373,203 +1251,6 @@ int PositionDependentCorrection::countClusters(
     std::cout << "PositionDependentCorrection::countClusters - END" << std::endl << std::endl;
   }
   return nClusCount;
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//  convertBlockToGlobalPhi – (blk,loc) → absolute EMCAL φ in (−π , +π]
-// ----------------------------------------------------------------------------
-//  • Accepts any real local coordinate; performs **exactly one** fold into
-//    the canonical domain (−0.5 … +1.5] without ever touching the coarse index.
-//  • Returns NaN if the coarse index is illegal or if the folded local
-//    coordinate is still out of bounds (should never happen).
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-float
-PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
-                                                     float localPhi)
-{
-  constexpr int   kFinePerBlock   = 2;                       // 2 fine bins
-  constexpr int   kNCoarseBlocks  = 128;                     // 256 / 2
-  constexpr int   kNTowerBins     = 256;                     // total fine
-  constexpr float kRadPerBin      = 2.0f * static_cast<float>(M_PI) / kNTowerBins;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalPhi] ENTER\n"
-              << "    ▸ block_phi_bin = " << block_phi_bin
-              << "  ,  localPhi(raw) = " << localPhi
-              << ANSI_RESET << '\n';
-  }
-
-  /* ─── sanity on coarse index ─────────────────────────────────────────── */
-  if (block_phi_bin < 0 || block_phi_bin >= kNCoarseBlocks)
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED
-                << "  ✘ coarse index outside 0…" << kNCoarseBlocks-1
-                << "   → return NaN\n" << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /* ─── single, non-destructive fold of the local coordinate ───────────── */
-  if (localPhi <= -0.5f || localPhi > 1.5f)
-  {
-    localPhi = std::fmod(localPhi + 2.0f, 2.0f);   // (0 … 2)
-    if (Verbosity() > 0)
-      std::cout << ANSI_YELLOW
-                << "    • localPhi out of band – folded once to "
-                << localPhi << ANSI_RESET << '\n';
-  }
-
-  if (!std::isfinite(localPhi) ||
-      localPhi <= -0.5f || localPhi > 1.5f)
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED
-                << "  ✘ localPhi still invalid – return NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /* ─── fine-bin centre of the requested tower ─────────────────────────── */
-  const float fullPhiIndex =
-        static_cast<float>(block_phi_bin) * kFinePerBlock +  // coarse origin
-        localPhi +                                           // intra-block
-        0.5f;                                                // centre of fine bin
-
-  if (Verbosity() > 1)
-    std::cout << "    ▸ fullPhiIndex = " << fullPhiIndex
-              << "   (coarse*2 + local + 0.5)\n";
-
-  /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
-  float globalPhi = fullPhiIndex * kRadPerBin;  // ideal grid
-  if (m_hasOffset) globalPhi += m_phi0Offset;   // shift to real detector
-  globalPhi = TVector2::Phi_mpi_pi(globalPhi);
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_GREEN
-              << "    ▸ OUTPUT  global φ = " << globalPhi << " rad\n"
-              << ANSI_RESET
-              << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalPhi] EXIT\n"
-              << ANSI_RESET << '\n';
-  }
-  return globalPhi;
-}
-
-/**********************************************************************
- *  convertBlockToGlobalEta – ultra-safe version
- *  ---------------------------------------------------------------
- *  • Maps a local block-η coordinate to the absolute tower pseudorapidity.
- *  • Performs exactly one symmetric fold of the local coordinate.
- *  • Any illegal input immediately returns NaN *and* prints a red error.
- *********************************************************************/
-float
-PositionDependentCorrection::convertBlockToGlobalEta(int   block_eta_bin,
-                                                     float localEta)
-{
-  /*──────────────  compile-time constants  ──────────────*/
-  constexpr int   kFinePerBlock   = 2;               // 2 fine η-towers / block
-  constexpr int   kNFineEtaBins   = 96;              // full barrel
-  constexpr int   kNCoarseBlocks  = kNFineEtaBins / kFinePerBlock; // 48
-  constexpr float kEtaMin         = -1.1f;           // centre of tower 0
-  constexpr float kDEtaPerFine    = 2.2f / 96.0f;    // ≈0.0229167 per fine bin
-
-  const bool v3 = (Verbosity() > 3);
-
-  /*──────────────  banner  ──────────────*/
-  if (v3)
-  {
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalEta]  ENTER\n"
-              << "      block_eta_bin = " << block_eta_bin
-              << "   |   localEta(raw) = " << localEta
-              << ANSI_RESET << '\n';
-  }
-
-  /*-------------------------------------------------------------------*
-   * 0)  Guard: coarse index in range                                   *
-   *-------------------------------------------------------------------*/
-  if (block_eta_bin < 0 || block_eta_bin >= kNCoarseBlocks)
-  {
-    if (v3)
-      std::cerr << ANSI_RED
-                << "  ✘ block_eta_bin outside valid range [0,"
-                << kNCoarseBlocks-1 << "] – returning NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /*-------------------------------------------------------------------*
-   * 1)  Guard: finite localEta                                         *
-   *-------------------------------------------------------------------*/
-  if (!std::isfinite(localEta))
-  {
-    if (v3)
-      std::cerr << ANSI_RED
-                << "  ✘ localEta is NaN/Inf – returning NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /*-------------------------------------------------------------------*
-   * 2)  One (and only one) symmetric fold into (-0.5 … +1.5]           *
-   *-------------------------------------------------------------------*/
-  if (localEta <= -0.5f || localEta > 1.5f)
-  {
-    const float before = localEta;
-    localEta = std::fmod(localEta + 2.0f, 2.0f);   // → (0 … 2]
-    if (localEta > 1.5f) localEta -= 2.0f;         // → (-0.5 … +1.5]
-    if (v3)
-      std::cout << ANSI_YELLOW
-                << "    • localEta folded once: " << before
-                << "  →  " << localEta
-                << ANSI_RESET << '\n';
-  }
-
-  /*-------------------------------------------------------------------*
-   * 3)  Post-fold validity check                                       *
-   *-------------------------------------------------------------------*/
-  if (localEta <= -0.5f || localEta > 1.5f)
-  {
-    if (v3)
-      std::cerr << ANSI_RED
-                << "  ✘ localEta still outside (-0.5,1.5] after fold – NaN\n"
-                << ANSI_RESET;
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-
-  /*-------------------------------------------------------------------*
-   * 4)  Compute fine-tower index (centre of tower)                     *
-   *-------------------------------------------------------------------*/
-  const float fullEtaIndex =
-        static_cast<float>(block_eta_bin) * kFinePerBlock   // coarse origin
-      + localEta                                            // intra-block
-      + 0.5f;                                               // centre shift
-
-  if (v3)
-    std::cout << "      fullEtaIndex = " << fullEtaIndex
-              << "   (coarse*2 + local + 0.5)\n";
-
-  /*-------------------------------------------------------------------*
-   * 5)  Linear index → pseudorapidity                                 *
-   *-------------------------------------------------------------------*/
-  const float globalEta = kEtaMin + fullEtaIndex * kDEtaPerFine;
-
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_GREEN
-              << "    ➜ global η = " << globalEta
-              << ANSI_RESET << '\n';
-  }
-
-  if (v3)
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalEta]  EXIT\n"
-              << ANSI_RESET << '\n';
-
-  return globalEta;
 }
 
 
@@ -2182,8 +1863,7 @@ void PositionDependentCorrection::fillDEtaAllVariants(
       const float etaFront =
           convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
       /* fine‑η index inside the barrel : blk*2  +  {0,1} */
-      const int iyFine =
-          blkEtaCoarse * 2 + int(std::floor(blkCoord.first + 0.5F));
+      const int iyFine = blk*2 + (loc > 0.5F ? 1 : 0);
 
     const float etaSD =
         front2ShowerEta(m_bemcRec, eReco,
@@ -2221,11 +1901,28 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                             etaFront, phiFrontRaw,
                             vtxZ);
         rec[4] = {"PDC-CORR", loc, etaSD};
+          
+        if (vb > 4)
+        {
+            std::cout << "  ▶ DEBUG: pre-SD values"
+                      << "   blkEta(raw)="   << blkEtaCoarse
+                      << "   blkEta(corr)="  << blk
+                      << "   locRaw="        << blkCoord.first
+                      << "   locCorr="       << loc
+                      << "   iyFineRaw="
+                      << blkEtaCoarse * 2 + int(std::floor(blkCoord.first + 0.5F))
+                      << "   iyFineCorr="    << iyFine
+                      << "   etaFront(raw)="
+                      << convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first)
+                      << "   etaFront(corr)="
+                      << convertBlockToGlobalEta(blk, loc)
+                      << '\n';
+         }
       }
       else
         rec[4] = {"PDC-CORR", blkCoord.first, rec[3].eta};
   }
-
+    
   /* ───────────────── residuals + histogramming ───────────────────── */
   for (auto& r : rec)
   {
@@ -2237,6 +1934,22 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                 << "  η_SD=" << r.eta
                 << "  Δη="   << r.d << '\n';
   }
+    /* ── book‑keeping: |Δη| outside ±0.04 ───────────────────────────── */
+    for (int i = 0; i < 5; ++i)
+      if (std::fabs(rec[i].d) > 0.04f)
+      {
+        switch (i)
+        {
+          case 0: ++m_etaOutCLUSraw;   break;
+          case 1: ++m_etaOutCLUScp;    break;
+          case 2: ++m_etaOutCLUSbcorr; break;
+          case 3: ++m_etaOutPDCraw;    break;
+          case 4: ++m_etaOutPDCcorr;   break;
+        }
+        if (vb > 5)
+          std::cout << "    |Δη|>0.04  (" << rec[i].tag << ")  = "
+                    << rec[i].d << '\n';
+      }
 
 #define HFill(H,V)  do{ if((H)&&std::isfinite(V)) (H)->Fill(V); }while(0)
   if (fillGlobal)
@@ -2596,7 +2309,7 @@ void PositionDependentCorrection::finalClusterLoop(
 
     if (clusE < 0.1f)
     {
-      if (Verbosity() > 5)
+      if (Verbosity() > 11)
       {
         std::cout << "[DEBUG]  => Skipping cluster with E=" << clusE
                   << " (<0.1). \n";
@@ -2658,7 +2371,7 @@ void PositionDependentCorrection::finalClusterLoop(
 
     if (clusPt < pt1ClusCut || clusPt > ptMaxCut)
     {
-      if (Verbosity() > 5)
+      if (Verbosity() > 11)
       {
         std::cout << "[DEBUG]  => cluster #1 pT=" << clusPt
                   << " fails cut ( <" << pt1ClusCut << " or >" << ptMaxCut
@@ -3156,146 +2869,194 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 // ============================================================================
 int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 {
+  /* ───────────────────────────────────────── File handling ─────────── */
   if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] PositionDependentCorrection::End() - Entering End routine." << std::endl;
-  }
+    std::cout << "[DEBUG] PositionDependentCorrection::End() – entering\n";
 
-  // Check if 'outfile' is valid before writing
   if (outfile)
   {
-    // Move into the file directory
     outfile->cd();
     if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] Changed to output file directory. Now writing histograms..." << std::endl;
-    }
+      std::cout << "[DEBUG] Writing histograms to " << outfilename << " …\n";
 
-    // Write all objects to the file
     outfile->Write();
+
+    /* optional inventory printout ------------------------------------- */
     if (Verbosity() > 0)
     {
-      std::cout << "[DEBUG] Successfully wrote histograms to the output file: "
-                << outfilename << std::endl;
-      std::cout << "[DEBUG] Closing output file..." << std::endl;
-    }
-      
-    if (Verbosity() > 0)
-    {
-      std::cout << "\n[INFO] Listing all histograms in the output file:\n";
-      std::cout << std::left
-                  << std::setw(30) << "Histogram Name"
-                  << std::setw(10) << "Class"
-                  << std::setw(12) << "#Entries"
-                  << std::endl;
-      std::cout << "--------------------------------------------------------------\n";
+      std::cout << "\n[INFO] Histograms written – content overview\n"
+                << std::left << std::setw(30) << "Histogram"
+                << std::setw(14)              << "Type"
+                << std::setw(12)              << "#Entries\n"
+                << "────────────────────────────────────────────────────────\n";
 
-      outfile->cd();
+      TIter nextKey(gDirectory->GetListOfKeys());
+      while (TKey* key = static_cast<TKey*>(nextKey()))
+        if (TH1* h = dynamic_cast<TH1*>(key->ReadObj()))
+          std::cout << std::left << std::setw(30) << key->GetName()
+                    << std::setw(14)             << key->GetClassName()
+                    << std::right<< std::setw(12)<< (Long64_t)h->GetEntries()
+                    << '\n';
 
-      // Grab the list of all objects in this directory
-      TList* listKeys = gDirectory->GetListOfKeys();
-      if (listKeys)
-      {
-          TIter nextKey(listKeys);
-          TKey* key = nullptr;
-          while ((key = (TKey*)nextKey()))
-          {
-            const char* className = key->GetClassName();
-            const char* objName   = key->GetName();
-            TObject* obj = key->ReadObj();
-            if (!obj) continue;
-
-            TH1* h1 = dynamic_cast<TH1*>(obj);
-            if (h1)
-            {
-              std::cout << std::left
-                        << std::setw(30) << objName
-                        << std::setw(10) << className
-                        << std::setw(12) << (Long64_t)h1->GetEntries()
-                        << std::endl;
-            }
-          }
-        }
-        std::cout << "[INFO] Finished listing histograms.\n" << std::endl;
+      std::cout << "────────────────────────────────────────────────────────\n";
     }
 
     outfile->Close();
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] Output file closed. Deleting the outfile pointer now." << std::endl;
-    }
     delete outfile;
     outfile = nullptr;
+    if (Verbosity() > 0) std::cout << "[DEBUG] Output file closed.\n";
   }
-  else
+  else if (Verbosity() > 0)
+    std::cerr << "[ERROR] outfile pointer is null – nothing written!\n";
+
+  /* ──────────────────────────────────────── helper: % formatting ───── */
+  auto pct = [](std::uint64_t n, std::uint64_t d)->std::string
+             { return d ? Form("%6.1f %%", 100.*double(n)/double(d))
+                         : "   n/a "; };
+
+  /* ──────────────────────────────────────── 1) Δφ five-way table ───── */
+  const std::uint64_t nTotPhi =
+        m_phiWinCLUSraw + m_phiWinCLUScp + m_phiWinCLUSbcorr +
+        m_phiWinPDCraw  + m_phiWinPDCcorr;
+
+  if (Verbosity() > 0)
   {
-    if (Verbosity() > 0)
+    std::cout << '\n' << ANSI_BOLD
+              << "╭───────────────────────────────╮\n"
+              << "│        Δφ   –   FIVE-WAY      │\n"
+              << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
+              << std::left << std::setw(14) << "variant"
+              << std::right<< std::setw(12)<< "wins"
+              << std::setw(12)             << "share\n"
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "CLUS-RAW"
+              << std::right<< std::setw(12)<< m_phiWinCLUSraw
+              << std::setw(12)             << pct(m_phiWinCLUSraw,nTotPhi) << '\n'
+              << std::left << std::setw(14) << "CLUS-CP"
+              << std::right<< std::setw(12)<< m_phiWinCLUScp
+              << std::setw(12)             << pct(m_phiWinCLUScp ,nTotPhi) << '\n'
+              << std::left << std::setw(14) << "CLUS-BCORR"
+              << std::right<< std::setw(12)<< m_phiWinCLUSbcorr
+              << std::setw(12)             << pct(m_phiWinCLUSbcorr,nTotPhi)<< '\n'
+              << std::left << std::setw(14) << "PDC-RAW"
+              << std::right<< std::setw(12)<< m_phiWinPDCraw
+              << std::setw(12)             << pct(m_phiWinPDCraw ,nTotPhi) << '\n'
+              << std::left << std::setw(14) << "PDC-CORR"
+              << std::right<< std::setw(12)<< m_phiWinPDCcorr
+              << std::setw(12)             << pct(m_phiWinPDCcorr,nTotPhi)<< '\n'
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "TOTAL"
+              << std::right<< std::setw(12)<< nTotPhi << "\n";
+
+    /* quick verdict */
+    if (m_phiWinCLUScp)
     {
-      std::cerr << "[ERROR] 'outfile' pointer is null. No histograms could be written!" << std::endl;
+      const double rel = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScp);
+      std::cout << "BCORR / CP (φ) : " << std::fixed << std::setprecision(1)
+                << rel << " %  →  "
+                << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
+                << '\n';
     }
   }
 
-    // ---------- global performance summary ---------------------------------
-    if (Verbosity() > 0)
-    {
-      const std::uint64_t total = m_nWinRAW + m_nWinCP + m_nWinBCorr;
-      std::cout << "\n[PERFORMANCE SUMMARY]\n"
-                << "  Events analysed : " << total << '\n'
-                << "  │ best Δφ  RAW   : " << m_nWinRAW   << '\n'
-                << "  │ best Δφ  CP    : " << m_nWinCP    << '\n'
-                << "  │ best Δφ  BCORR : " << m_nWinBCorr << '\n'
-                << "  └─────────────────────────────────────\n";
-      if (m_nWinBCorr >= m_nWinCP)
-          std::cout << "  ➜  BCORR now matches or outperforms CP overall ✅\n";
-      else
-          std::cout << "  ➜  BCORR still behind CP — inspect damping/tuning ⚠️\n";
-    }
-    
+  /* ──────────────────────────────────────── 2) Δη five-way table ───── */
+  const std::uint64_t nTotEta5 =
+        m_etaWinCLUSraw + m_etaWinCLUScp + m_etaWinCLUSbcorr +
+        m_etaWinPDCraw  + m_etaWinPDCcorr;
+
   if (Verbosity() > 0)
   {
-    std::cout << "[DEBUG] PositionDependentCorrection::End() - Routine completed successfully." << std::endl;
+    std::cout << '\n' << ANSI_BOLD
+              << "╭───────────────────────────────╮\n"
+              << "│        Δη   –   FIVE-WAY      │\n"
+              << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
+              << std::left << std::setw(14) << "variant"
+              << std::right<< std::setw(12)<< "wins"
+              << std::setw(12)             << "share\n"
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "CLUS-RAW"
+              << std::right<< std::setw(12)<< m_etaWinCLUSraw
+              << std::setw(12)             << pct(m_etaWinCLUSraw,nTotEta5)<< '\n'
+              << std::left << std::setw(14) << "CLUS-CP"
+              << std::right<< std::setw(12)<< m_etaWinCLUScp
+              << std::setw(12)             << pct(m_etaWinCLUScp ,nTotEta5)<< '\n'
+              << std::left << std::setw(14) << "CLUS-BCORR"
+              << std::right<< std::setw(12)<< m_etaWinCLUSbcorr
+              << std::setw(12)             << pct(m_etaWinCLUSbcorr,nTotEta5)<< '\n'
+              << std::left << std::setw(14) << "PDC-RAW"
+              << std::right<< std::setw(12)<< m_etaWinPDCraw
+              << std::setw(12)             << pct(m_etaWinPDCraw ,nTotEta5)<< '\n'
+              << std::left << std::setw(14) << "PDC-CORR"
+              << std::right<< std::setw(12)<< m_etaWinPDCcorr
+              << std::setw(12)             << pct(m_etaWinPDCcorr,nTotEta5)<< '\n'
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "TOTAL"
+              << std::right<< std::setw(12)<< nTotEta5 << "\n";
+
+    if (m_etaWinCLUScp)
+    {
+      const double rel = 100.*double(m_etaWinCLUSbcorr)/double(m_etaWinCLUScp);
+      std::cout << "BCORR / CP (η) : " << std::fixed << std::setprecision(1)
+                << rel << " %  →  "
+                << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
+                << '\n';
+    }
+
   }
+    
+    /* ─────────────────────── block‑coordinate occupancy ─────────────── */
+    if (Verbosity() > 5)
+    {
+        static const char* kSlot[4] = {"(0,0)","(0,1)","(1,0)","(1,1)"};
+        std::uint64_t nTot = 0;
+        for (const auto& v : m_blkLocCount) nTot += v.load();
+
+        std::cout << '\n' << ANSI_BOLD
+                  << "╭───────────────────────────────╮\n"
+                  << "│  Local‑block occupancy (η,φ) │\n"
+                  << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
+                  << std::left << std::setw(8)  << "slot"
+                  << std::right<< std::setw(14) << "counts"
+                  << std::setw(12)              << "share\n"
+                  << "────────────────────────────────────────────\n";
+
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto v = m_blkLocCount[i].load();
+            std::cout << std::left << std::setw(8)  << kSlot[i]
+                      << std::right<< std::setw(14) << v
+                      << std::setw(11) << (nTot ? Form("%6.2f %%",
+                             100.0 * double(v) / double(nTot)) : "  n/a")
+                      << '\n';
+        }
+        std::cout << "────────────────────────────────────────────\n"
+                  << std::left << std::setw(8)  << "TOTAL"
+                  << std::right<< std::setw(14) << nTot << "\n";
+    }
+    /* ───────────────── Δη out‑of‑window summary ─────────────────── */
+    std::cout << '\n' << ANSI_BOLD
+              << "╭────────────────────────────────────────────╮\n"
+              << "│   Counts with |Δη| > 0.04 (all clusters)   │\n"
+              << "╰────────────────────────────────────────────╯"
+              << ANSI_RESET << '\n'
+              << std::left << std::setw(14) << "variant"
+              << std::right<< std::setw(12)<< "counts\n"
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "CLUS-RAW"
+              << std::right<< std::setw(12)<< m_etaOutCLUSraw   << '\n'
+              << std::left << std::setw(14) << "CLUS-CP"
+              << std::right<< std::setw(12)<< m_etaOutCLUScp    << '\n'
+              << std::left << std::setw(14) << "CLUS-BCORR"
+              << std::right<< std::setw(12)<< m_etaOutCLUSbcorr << '\n'
+              << std::left << std::setw(14) << "PDC-RAW"
+              << std::right<< std::setw(12)<< m_etaOutPDCraw    << '\n'
+              << std::left << std::setw(14) << "PDC-CORR"
+              << std::right<< std::setw(12)<< m_etaOutPDCcorr   << '\n'
+              << "────────────────────────────────────────────\n";
 
   return 0;
 }
 
-// ============================================================================
-float PositionDependentCorrection::getWeight(int ieta, float pt)
-{
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] getWeight() called with ieta=" << ieta << ", pt=" << pt << std::endl;
-  }
-  if (ieta < 0 || ieta > 95)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] ieta is out of valid range [0..95]. Returning 0." << std::endl;
-    }
-    return 0;
-  }
-  float val = h_pt_rw[ieta]->GetBinContent(h_pt_rw[ieta]->FindBin(pt));
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] Bin content for pt=" << pt
-              << " in ieta=" << ieta
-              << " is " << val << std::endl;
-  }
-  if (val == 0)
-  {
-    if (Verbosity() > 0)
-    {
-      std::cout << "[DEBUG] Bin content is 0, returning 0 as weight." << std::endl;
-    }
-    return 0;
-  }
-  float result = 1 / val;
-  if (Verbosity() > 0)
-  {
-    std::cout << "[DEBUG] getWeight(): returning weight = " << result << std::endl;
-  }
-  return result;
-}
 
 // ============================================================================
 //  getBlockCord – returns the cluster position *inside* one 2×2 coarse block
@@ -3536,4 +3297,325 @@ PositionDependentCorrection::getAvgPhi(const std::vector<int>   &towerPhis,
               << ANSI_CYAN << "[getAvgPhi] EXIT\n" << ANSI_RESET << '\n';
   }
   return static_cast<float>(phiAvg);
+}
+
+
+/*==========================================================================*
+ *  φ-direction                                                             *
+ *==========================================================================*/
+float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float b)
+{
+  /* —————————————————— banner —————————————————— */
+  if (Verbosity() > 0)
+    std::cout << ANSI_BOLD << "[doPhiBlockCorr] ENTER  "
+              << "localPhi = " << localPhi << " ,  b = " << b
+              << ANSI_RESET << '\n';
+
+  /* (0) nothing to undo when |b| ≈ 0 */
+  if (std::fabs(b) < 1e-9f) {                        // quick exit
+    if (Verbosity() > 0) std::cout << "  b≈0 → return unchanged\n";
+    return localPhi;
+  }
+
+  /* (1) single fold into (-0.5 … +1.5] */
+  if (localPhi <= -0.5f || localPhi > 1.5f) {
+    if (Verbosity() > 1) std::cout << "  fold: " << localPhi << " → ";
+    localPhi = std::fmod(localPhi + 2.f, 2.f);
+    if (Verbosity() > 1) std::cout << localPhi << '\n';
+  }
+
+  /* (2) map to (-0.5 … +0.5] */
+  const float Xmeas = (localPhi < 0.5f) ? localPhi : localPhi - 1.f;
+  if (Verbosity() > 1) std::cout << "  Xmeas = " << Xmeas << '\n';
+
+  /* (3) analytic inverse  ———  asinh! */
+  const double S = std::sinh(1.0 / (2.0 * b));          // sinh(1/2b)
+  if (Verbosity() > 1) std::cout << "  S = sinh(1/2b) = " << S << '\n';
+
+  const float Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
+  if (Verbosity() > 1) std::cout << "  Xtrue = " << Xtrue << '\n';
+
+  /* (4) shift back to (-0.5 … +1.5] */
+  float corrected = (localPhi < 0.5f) ? Xtrue : Xtrue + 1.f;
+  if (Verbosity() > 1)
+    std::cout << "  corrected (pre-wrap) = " << corrected << '\n';
+
+  /* (5) safety fold */
+  if (corrected <= -0.5f || corrected > 1.5f) {
+    corrected = std::fmod(corrected + 2.f, 2.f);
+    if (corrected > 1.5f) corrected -= 2.f;
+    if (Verbosity() > 1)
+      std::cout << "  corrected (post-wrap) = " << corrected << '\n';
+  }
+
+  if (Verbosity() > 0)
+    std::cout << ANSI_GREEN << "[doPhiBlockCorr] EXIT  → "
+              << corrected << " (rad-fraction)"
+              << ANSI_RESET << "\n\n";
+
+  return corrected;
+}
+
+/*==========================================================================*
+ *  η-direction                                *
+ *==========================================================================*/
+float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
+                                                  float  b,
+                                                  float  dEtaTower /* = 1.f */)
+{
+  if (Verbosity() > 0)
+    std::cout << ANSI_BOLD << "[doEtaBlockCorr] ENTER  "
+              << "ηloc=" << localEta << "  b=" << b
+              << ANSI_RESET << '\n';
+
+  if (std::fabs(b) < 1e-9f)                         // nothing to undo
+  {
+    if (Verbosity() > 0) std::cout << "  b≈0 → return unchanged\n";
+    return localEta;
+  }
+  /* ------------------------------------------------------------------ *
+   * 1) fold once into (‑0.5 … +1.5]                                    *
+   * ------------------------------------------------------------------ */
+  if (localEta <= -0.5f || localEta > 1.5f)
+    localEta = std::fmod(localEta + 2.f, 2.f);
+
+  if (!std::isfinite(localEta))
+  {
+    if (Verbosity() > 0)
+      std::cout << ANSI_RED << "  ηloc not finite → NaN\n" << ANSI_RESET;
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+  /* ------------------------------------------------------------------ *
+   * 2) map measured coordinate to centre‑of‑gravity frame              *
+   * ------------------------------------------------------------------ */
+  const float Xmeas = (localEta < 0.5f) ? localEta : localEta - 1.f;
+
+  /* ------------------------------------------------------------------ *
+   * 3) analytic inverse of forward Ash‑distortion                      *
+   *    (identical to φ)                                                *
+   * ------------------------------------------------------------------ */
+  const double  S     = std::sinh( 1.0 / (2.0 * b) );
+  const float   Xtrue = static_cast<float>( b * std::asinh( 2.0 * S * Xmeas ) );
+
+  /* ------------------------------------------------------------------ *
+   * 4) add back integer tower pitch                                    *
+   * ------------------------------------------------------------------ */
+  float corrected = (localEta < 0.5f) ? Xtrue : Xtrue + 1.f;
+
+  /* ------------------------------------------------------------------ *
+   * 5) safety fold & physical edge guard                               *
+   * ------------------------------------------------------------------ */
+  if (corrected <= -0.5f || corrected > 1.5f)
+  {
+    corrected = std::fmod(corrected + 2.f, 2.f);
+    if (corrected > 1.5f) corrected -= 2.f;
+  }
+  /* If a caller supplied a non‑unity tower pitch (rare) apply it now */
+  corrected *= dEtaTower;
+
+  /* keep clusters inside the barrel acceptance (η ≈ ±1.1) */
+  if (std::fabs(corrected) > 1.6f)      // 2×2 block edge + margin
+    corrected = std::copysign(1.6f, corrected);
+
+  if (Verbosity() > 0)
+    std::cout << ANSI_GREEN << "[doEtaBlockCorr] EXIT → "
+              << corrected << ANSI_RESET << "\n\n";
+
+  return corrected;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//  convertBlockToGlobalPhi – (blk,loc) → absolute EMCAL φ in (−π , +π]
+// ----------------------------------------------------------------------------
+//  • Accepts any real local coordinate; performs **exactly one** fold into
+//    the canonical domain (−0.5 … +1.5] without ever touching the coarse index.
+//  • Returns NaN if the coarse index is illegal or if the folded local
+//    coordinate is still out of bounds (should never happen).
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+float
+PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
+                                                     float localPhi)
+{
+  constexpr int   kFinePerBlock   = 2;                       // 2 fine bins
+  constexpr int   kNCoarseBlocks  = 128;                     // 256 / 2
+  constexpr int   kNTowerBins     = 256;                     // total fine
+  constexpr float kRadPerBin      = 2.0f * static_cast<float>(M_PI) / kNTowerBins;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << ANSI_BOLD << ANSI_CYAN
+              << "[convertBlockToGlobalPhi] ENTER\n"
+              << "    ▸ block_phi_bin = " << block_phi_bin
+              << "  ,  localPhi(raw) = " << localPhi
+              << ANSI_RESET << '\n';
+  }
+
+  /* ─── sanity on coarse index ─────────────────────────────────────────── */
+  if (block_phi_bin < 0 || block_phi_bin >= kNCoarseBlocks)
+  {
+    if (Verbosity() > 0)
+      std::cout << ANSI_RED
+                << "  ✘ coarse index outside 0…" << kNCoarseBlocks-1
+                << "   → return NaN\n" << ANSI_RESET;
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  /* ─── single, non-destructive fold of the local coordinate ───────────── */
+  if (localPhi <= -0.5f || localPhi > 1.5f)
+  {
+    localPhi = std::fmod(localPhi + 2.0f, 2.0f);   // (0 … 2)
+    if (Verbosity() > 0)
+      std::cout << ANSI_YELLOW
+                << "    • localPhi out of band – folded once to "
+                << localPhi << ANSI_RESET << '\n';
+  }
+
+  if (!std::isfinite(localPhi) ||
+      localPhi <= -0.5f || localPhi > 1.5f)
+  {
+    if (Verbosity() > 0)
+      std::cout << ANSI_RED
+                << "  ✘ localPhi still invalid – return NaN\n"
+                << ANSI_RESET;
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  /* ─── fine-bin centre of the requested tower ─────────────────────────── */
+  const float fullPhiIndex =
+        static_cast<float>(block_phi_bin) * kFinePerBlock +  // coarse origin
+        localPhi +                                           // intra-block
+        0.5f;                                                // centre of fine bin
+
+  if (Verbosity() > 1)
+    std::cout << "    ▸ fullPhiIndex = " << fullPhiIndex
+              << "   (coarse*2 + local + 0.5)\n";
+
+  /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
+  float globalPhi = fullPhiIndex * kRadPerBin;  // ideal grid
+  if (m_hasOffset) globalPhi += m_phi0Offset;   // shift to real detector
+  globalPhi = TVector2::Phi_mpi_pi(globalPhi);
+
+  if (Verbosity() > 0)
+  {
+    std::cout << ANSI_GREEN
+              << "    ▸ OUTPUT  global φ = " << globalPhi << " rad\n"
+              << ANSI_RESET
+              << ANSI_BOLD << ANSI_CYAN
+              << "[convertBlockToGlobalPhi] EXIT\n"
+              << ANSI_RESET << '\n';
+  }
+  return globalPhi;
+}
+
+/**********************************************************************
+ *  convertBlockToGlobalEta – ultra-safe version
+ *  ---------------------------------------------------------------
+ *  • Maps a local block-η coordinate to the absolute tower pseudorapidity.
+ *  • Performs exactly one symmetric fold of the local coordinate.
+ *  • Any illegal input immediately returns NaN *and* prints a red error.
+ *********************************************************************/
+float
+PositionDependentCorrection::convertBlockToGlobalEta(int   block_eta_bin,
+                                                     float localEta)
+{
+  /*──────────────  compile-time constants  ──────────────*/
+  constexpr int   kFinePerBlock   = 2;               // 2 fine η-towers / block
+  constexpr int   kNFineEtaBins   = 96;              // full barrel
+  constexpr int   kNCoarseBlocks  = kNFineEtaBins / kFinePerBlock; // 48
+  constexpr float kEtaMin         = -1.1f;           // centre of tower 0
+  constexpr float kDEtaPerFine    = 2.2f / 96.0f;    // ≈0.0229167 per fine bin
+
+  const bool v3 = (Verbosity() > 3);
+
+  /*──────────────  banner  ──────────────*/
+  if (v3)
+  {
+    std::cout << ANSI_BOLD << ANSI_CYAN
+              << "[convertBlockToGlobalEta]  ENTER\n"
+              << "      block_eta_bin = " << block_eta_bin
+              << "   |   localEta(raw) = " << localEta
+              << ANSI_RESET << '\n';
+  }
+
+  /*-------------------------------------------------------------------*
+   * 0)  Guard: coarse index in range                                   *
+   *-------------------------------------------------------------------*/
+  if (block_eta_bin < 0 || block_eta_bin >= kNCoarseBlocks)
+  {
+    if (v3)
+      std::cerr << ANSI_RED
+                << "  ✘ block_eta_bin outside valid range [0,"
+                << kNCoarseBlocks-1 << "] – returning NaN\n"
+                << ANSI_RESET;
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  /*-------------------------------------------------------------------*
+   * 1)  Guard: finite localEta                                         *
+   *-------------------------------------------------------------------*/
+  if (!std::isfinite(localEta))
+  {
+    if (v3)
+      std::cerr << ANSI_RED
+                << "  ✘ localEta is NaN/Inf – returning NaN\n"
+                << ANSI_RESET;
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  /*-------------------------------------------------------------------*
+   * 2)  One (and only one) symmetric fold into (-0.5 … +1.5]           *
+   *-------------------------------------------------------------------*/
+  if (localEta <= -0.5f || localEta > 1.5f)
+  {
+    const float before = localEta;
+    localEta = std::fmod(localEta + 2.0f, 2.0f);   // → (0 … 2]
+    if (localEta > 1.5f) localEta -= 2.0f;         // → (-0.5 … +1.5]
+    if (v3)
+      std::cout << ANSI_YELLOW
+                << "    • localEta folded once: " << before
+                << "  →  " << localEta
+                << ANSI_RESET << '\n';
+  }
+
+  /*-------------------------------------------------------------------*
+   * 3)  Post-fold validity check                                       *
+   *-------------------------------------------------------------------*/
+  if (localEta <= -0.5f || localEta > 1.5f)
+  {
+    if (v3)
+      std::cerr << ANSI_RED
+                << "  ✘ localEta still outside (-0.5,1.5] after fold – NaN\n"
+                << ANSI_RESET;
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  /*-------------------------------------------------------------------*
+   * 4)  Compute fine-tower index (centre of tower)                     *
+   *-------------------------------------------------------------------*/
+  const float fullEtaIndex =
+          static_cast<float>(block_eta_bin) * kFinePerBlock   // coarse origin
+        + localEta;                                           // intra‑block
+
+  if (v3)
+    std::cout << "      fullEtaIndex = " << fullEtaIndex
+              << "   (coarse*2 + local + 0.5)\n";
+
+  /*-------------------------------------------------------------------*
+   * 5)  Linear index → pseudorapidity                                 *
+   *-------------------------------------------------------------------*/
+  const float globalEta = kEtaMin + fullEtaIndex * kDEtaPerFine;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << ANSI_GREEN
+              << "    ➜ global η = " << globalEta
+              << ANSI_RESET << '\n';
+  }
+
+  if (v3)
+    std::cout << ANSI_BOLD << ANSI_CYAN
+              << "[convertBlockToGlobalEta]  EXIT\n"
+              << ANSI_RESET << '\n';
+
+  return globalEta;
 }

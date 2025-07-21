@@ -88,7 +88,6 @@ class PositionDependentCorrection : public SubsysReco
   /* ----------------------------------------------------------------
    *  Stand‑alone helpers that macros might call
    * -------------------------------------------------------------- */
-  float getWeight(int ieta, float pt);
   TF1*  fitHistogram(TH1* h);
   void  fitEtaSlices(const std::string& infile,
                      const std::string& fitOutFile,
@@ -275,6 +274,13 @@ class PositionDependentCorrection : public SubsysReco
   std::atomic<std::uint64_t> m_etaWinCLUSraw{0}, m_etaWinCLUScp{0},
                              m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
                              m_etaWinPDCcorr{0};
+    
+  /* Δη out‑of‑window counters (|Δη| > 0.04) */
+  std::atomic<std::uint64_t> m_etaOutCLUSraw   {0};
+  std::atomic<std::uint64_t> m_etaOutCLUScp    {0};
+  std::atomic<std::uint64_t> m_etaOutCLUSbcorr {0};
+  std::atomic<std::uint64_t> m_etaOutPDCraw    {0};
+  std::atomic<std::uint64_t> m_etaOutPDCcorr   {0};
 
   std::atomic<std::uint64_t> g_nanPhi{0}, g_nanEta{0}, g_nCorrPhiRight{0};
 
@@ -530,8 +536,8 @@ namespace PDC_detail
         auto tgeom              = geo->get_tower_geometry(tk);
         if (!tgeom) continue;
 
-        xTot += e * tgeom->get_center_x();
-        yTot += e * tgeom->get_center_y();
+        xTot += e * static_cast<double>(tgeom->get_binphi());   // use tower φ‑index (0…255)
+        yTot += e * static_cast<double>(tgeom->get_bineta());   // use tower η‑index (0…95)
         eTot += e;
       }
 
