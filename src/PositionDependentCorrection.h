@@ -1,5 +1,5 @@
 //  ════════════════════════════════════════════════════════════════════
-//  PositionDependentCorrection.h )
+//  PositionDependentCorrection.h
 //
 //  – Public interface and implementation details are **unchanged**.
 //  – Ready to replace the original header and compile without edits.
@@ -11,6 +11,7 @@
 /* =================================================================== *
  *  1.  Standard / sPHENIX includes                                     *
  * =================================================================== */
+#include <functional>
 #include <array>
 #include <cmath>
 #include <map>
@@ -22,9 +23,13 @@
 #include <calotrigger/TriggerAnalyzer.h>
 #include <calobase/RawCluster.h>
 #include <calobase/RawClusterContainer.h>
+#include <calobase/RawTowerDefs.h>
+#include <calobase/RawTowerGeom.h>
+#include <calobase/RawTowerGeomContainer.h>
 #include <TString.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRec.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
+
 
 /* =================================================================== *
  *  2.  Forward declarations (ROOT & sPHENIX)                           *
@@ -38,7 +43,7 @@ class RawCluster;
 
 /* ROOT */
 class TFile;  class TNtuple; class TTree;
-class TH1;    class TH1F;    class TH2;    class TH2F; class TH3;
+class TH1;    class TH1F;    class TH2;    class TH2F; class TH3;    class TH3F;
 class TF1;    class TProfile;class TProfile2D;
 class TLorentzVector; class TRandom3;
 
@@ -64,7 +69,7 @@ class PositionDependentCorrection : public SubsysReco
   /* ----------------------------------------------------------------
    *  Utility setters
    * -------------------------------------------------------------- */
-  void setIsSimulation(bool sim)              { isSimulation = sim; }
+  void setIsSimulation(bool sim)              { m_isSimulation = sim; }
   void Detector(const std::string& n)         { detector = n; }
   void set_timing_cut_width(int t)            { _range   = t; }
   void set_vertex_cut(float v)                { _vz      = v; }
@@ -149,6 +154,11 @@ class PositionDependentCorrection : public SubsysReco
   float doAshShift        (float localPhi,float bVal);
   float doLogWeightCoord  (const std::vector<int>& towerPhi,
                            const std::vector<float>& towerE,float w0);
+    
+  void  bookCommonHistograms      (const std::function<std::string(int)>& makeLabel);
+  void  bookSimulationHistograms  (const std::function<std::string(int)>& makeLabel);
+  bool  loadBValues               (const std::string& bFilePath);
+  bool  loadMassWindowTable       (const std::string& path);
 
   /* Driving loops */
   static constexpr int    N_Ebins = 8;
@@ -272,6 +282,25 @@ class PositionDependentCorrection : public SubsysReco
   TFile*               outfile{nullptr};
 
   /* --------------------  HISTOGRAM DECLARATIONS ------------------- */
+    
+  TH1F* h_phi_diff_raw_E        [N_Ebins]{};
+  TH1F* h_phi_diff_cpRaw_E      [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorr_E     [N_Ebins]{};
+  TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
+  TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
+
+  TH1F* h_eta_diff_raw_E        [N_Ebins]{};
+  TH1F* h_eta_diff_cpRaw_E      [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorr_E     [N_Ebins]{};
+  TH1F* h_eta_diff_cpBcorr_E    [N_Ebins]{};
+  TH1F* h_eta_diff_corrected_E  [N_Ebins]{};
+
+  TH1F* h_eta_diff_raw_E_vz        [N_Ebins][N_VzBins]{};
+  TH1F* h_eta_diff_corrected_E_vz  [N_Ebins][N_VzBins]{};
+  TH1F* h_eta_diff_cpRaw_E_vz      [N_Ebins][N_VzBins]{};
+  TH1F* h_eta_diff_cpCorr_E_vz     [N_Ebins][N_VzBins]{};
+  TH1F* h_eta_diff_cpBcorr_E_vz    [N_Ebins][N_VzBins]{};
+    
   TH1* h_tower_e{nullptr};
   TH1* h_clusE{nullptr};
   TH1* h_pt1{nullptr};
@@ -332,6 +361,21 @@ class PositionDependentCorrection : public SubsysReco
   TH2* h_cemc_etaphi_wQA{nullptr};
   TH2* h_hcalin_etaphi_wQA{nullptr};
   TH2* h_hcalout_etaphi_wQA{nullptr};
+    
+  TH1F*     h_InvMass{nullptr};
+  TH1F*     h_InvMass_w{nullptr};
+  TH1F*     h_InvMassMix{nullptr};
+
+  TH2F*     h_mE_raw{nullptr};
+  TH2F*     h_mE_corr{nullptr};
+  TH3F*     h_m_blk_raw{nullptr};
+  TH3F*     h_m_blk_corr{nullptr};
+
+  TH2F*     h_clusE_nTow{nullptr};
+  TProfile* pr_phi_vs_blockcoord{nullptr};
+
+  TH1F*     h_localPhi_corrected[N_Ebins]{};
+  TH1F*     h_localEta_corrected[N_Ebins]{};
 
   TH1* h_totalzdc_e{nullptr};
   TH1* h_delR_recTrth{nullptr};
@@ -460,9 +504,47 @@ namespace PDC_detail
     return std::asinh((zSD-vtxZ)/std::hypot(xSD,ySD));
   }
 
+
   /* ---------- cluster centre of gravity --------------------------- */
-  bool clusterCentreOfGravity(const RawCluster*,RawTowerGeomContainer*,
-                              const BEmcRecCEMC*,float& x,float& y);
+  inline bool clusterCentreOfGravity(const RawCluster* cluster,
+                                       RawTowerGeomContainer* geo,
+                                       const BEmcRecCEMC* /*rec*/,
+                                       float& x, float& y)
+  {
+      if (!cluster || !geo)
+      {
+        x = y = 0.0f;
+        return false;
+      }
+
+      double eTot = 0.0;
+      double xTot = 0.0;
+      double yTot = 0.0;
+
+      RawCluster::TowerConstRange towers = cluster->get_towers();
+      for (auto it = towers.first; it != towers.second; ++it)
+      {
+        RawTowerDefs::keytype tk = it->first;
+        const double e          = it->second;
+        auto tgeom              = geo->get_tower_geometry(tk);
+        if (!tgeom) continue;
+
+        xTot += e * tgeom->get_center_x();
+        yTot += e * tgeom->get_center_y();
+        eTot += e;
+      }
+
+      if (eTot <= 0.0)
+      {
+        x = y = 0.0f;
+        return false;
+      }
+
+      x = static_cast<float>(xTot / eTot);
+      y = static_cast<float>(yTot / eTot);
+      return true;
+  }
+
 
   /* ---------- light‑weight records for Δη/Δφ bookkeeping ---------- */
   struct PhiRec { const char* tag; float loc; float phi; float d{0.f}; };

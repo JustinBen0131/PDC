@@ -67,6 +67,8 @@
 #include <g4main/PHG4TruthInfoContainer.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
 
+using namespace PDC_detail;
+
 constexpr const char* ANSI_BOLD  = "\033[1m";
 constexpr const char* ANSI_RESET = "\033[0m";
 constexpr const char* ANSI_GREEN = "\033[32m";
@@ -82,9 +84,9 @@ namespace CLHEP { class Hep3Vector; }
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
                                                          const std::string &filename)
   : SubsysReco(name)
+  , m_isSimulation(false)          // << initialise first
   , detector("HCALIN")
   , outfilename(filename)
-  , m_isSimulation(false)
   , g4hitntuple(nullptr)
   , g4cellntuple(nullptr)
   , towerntuple(nullptr)
@@ -2299,6 +2301,7 @@ void PositionDependentCorrection::fillDEtaAllVariants(
 // Helper • loop over ALL “other” clusters, build π0 candidates, apply cuts
 //         and fill (reco + truth) histograms.
 //
+//
 //    – Always fill h_mE_raw / h_mE_corr  (input for pass‑1 μ/σ fits)
 //    – If m_massFitsDone==true apply slice‑specific μ±3σ window
 //      and populate the block–space maps h_m_blk_raw / h_m_blk_corr.
@@ -2385,7 +2388,7 @@ void PositionDependentCorrection::processClusterPairs(
     const TLorentzVector pi0Reco   = photon1 + photon2;
     const TLorentzVector pi0TruthK = ph1_trEtaPhi + ph2_trEtaPhi;
 
-    if (isSimulation && pi0Reco.Pt() < pi0ptcut)         continue;
+    if (m_isSimulation && pi0Reco.Pt() < pi0ptcut)       continue;
 
     // ----------------------------------------------------------------------
     // 4)  Energy‑slice index (use **leading‑γ** energy!)
@@ -2528,7 +2531,6 @@ void PositionDependentCorrection::finalClusterLoop(
 
   // Will hold booleans to see if first/second matched to meson photons
   bool match1 = false;
-  bool match2 = false;
 
   if (Verbosity() > 0)
   {
@@ -2871,24 +2873,26 @@ void PositionDependentCorrection::finalClusterLoop(
       std::cout << "[DEBUG] => Starting INNER loop for cluster pairs.\n";
     }
 
-    processClusterPairs(clusterContainer,   // all clusters (incl. clus1)
-                          cIt1,               // iterator to the "first" cluster
-                          vertex,             // 0,0,vtx_z
-                          photon1,            // TLorentzVector of clus1
-                          clusE,              // energy of clus1
-                          lt_eta, lt_phi,     // lead‑tower indices
-                          blkEtaCoarse,
-                          blkPhiCoarse,
-                          blkCoord,           // raw local (ηloc , φloc)
-                          maxAlpha,
-                          ptMaxCut,
-                          pt2ClusCut,
-                          pi0ptcut,
-                          weight,
-                          match1,
-                          ph1_trEtaPhi,
-                          truth_meson_photons,
-                          isSimulation);      // class data member
+    processClusterPairs(clusterContainer,
+                            cIt1,
+                            vertex,
+                            photon1,
+                            clusE,
+                            lt_eta, lt_phi,
+                            blkEtaCoarse,
+                            blkPhiCoarse,
+                            blkCoord,
+                            maxAlpha,
+                            ptMaxCut,
+                            pt2ClusCut,
+                            pi0ptcut,
+                            weight,
+                            match1,
+                            ph1_trEtaPhi,
+                            truth_meson_photons,
+                            m_isSimulation);
+
+
 
   } // end cluster1 loop
 
