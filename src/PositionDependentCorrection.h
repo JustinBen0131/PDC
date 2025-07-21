@@ -53,7 +53,7 @@ class TLorentzVector; class TRandom3;
 class PositionDependentCorrection : public SubsysReco
 {
  public:
-  static std::atomic<std::uint64_t> s_verbosityLevel;
+  inline static std::atomic<std::uint64_t> s_verbosityLevel{0};
   static uint64_t getVerbosityLevel() { return s_verbosityLevel.load(); }
   /* ----------------------------------------------------------------
    *  Constructors, destructors, Fun4All hooks
@@ -74,6 +74,7 @@ class PositionDependentCorrection : public SubsysReco
   void set_timing_cut_width(int t)            { _range   = t; }
   void set_vertex_cut(float v)                { _vz      = v; }
   void apply_vertex_cut(bool on=true)         { m_vtxCut = on; }
+  void setMassFitsDone(bool done) { m_massFitsDone = done; }
 
   void UseSurveyGeometry(bool v=true)         { m_useSurveyGeometry = v; }
 
