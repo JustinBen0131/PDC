@@ -1889,17 +1889,16 @@ void PositionDependentCorrection::fillDEtaAllVariants(
         if (blk < 0) blk += kCoarseEtaBins;
         if (blk >= kCoarseEtaBins) blk -= kCoarseEtaBins;
 
-        /* translate to detector coordinates */
         const float etaFront =
-            convertBlockToGlobalEta(blk, loc);
+              convertBlockToGlobalEta(blk, loc);
         const int iyFine =
-            blk * 2 + int(std::floor(loc + 0.5F));
+              blk * 2 + int(std::floor(loc + 0.5F));   // exact half‑tower rule
 
         const float etaSD =
-            front2ShowerEta(m_bemcRec, eReco,
-                            rFront, ixFine, iyFine,
-                            etaFront, phiFrontRaw,
-                            vtxZ);
+              front2ShowerEta(m_bemcRec, eReco,
+                              rFront, ixFine, iyFine,
+                              etaFront, phiFrontRaw,
+                              vtxZ);
         rec[4] = {"PDC-CORR", loc, etaSD};
           
         if (vb > 4)
