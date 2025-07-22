@@ -251,7 +251,7 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
   pdc->setIsSimulation(isSimulation);
-  pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
+  pdc->UseSurveyGeometry(false);      // load barrel-tilt from CDB (recommended)
   /*------------------------------------------------------------
       2)  π0-mass-window support
     ------------------------------------------------------------*/
@@ -264,7 +264,7 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
 
-  pdc->Verbosity(0);                 // 0 = silent → raise for debugging
+  pdc->Verbosity(10);                 // 0 = silent → raise for debugging
 
   // Finally register the module with Fun4All
   se->registerSubsystem(pdc);
