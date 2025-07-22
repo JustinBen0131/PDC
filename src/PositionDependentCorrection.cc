@@ -1825,7 +1825,6 @@ void PositionDependentCorrection::fillDEtaAllVariants(
   if (!tgLead) return;
 
   const double rFront = tgLead->get_center_radius();
-  const int    ixFine = tgLead->get_binphi();
 
   const float phiFrontRaw =
         convertBlockToGlobalPhi(blkPhiCoarse, blkCoord.second);
@@ -1863,13 +1862,18 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     const float etaFront =
           convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
       
-    const int iyFine = blkEtaCoarse * 2 + int(std::floor(blkCoord.first + 0.5F));
+    /* fine‑index of the block coordinate **in φ as well** */
+    const int ixFineBlk =
+            blkPhiCoarse * 2 + int(std::floor(blkCoord.second + 0.5F));
+    const int iyFine =
+            blkEtaCoarse * 2 + int(std::floor(blkCoord.first  + 0.5F));
 
     const float etaSD =
-        front2ShowerEta(m_bemcRec, eReco,
-                        rFront, ixFine, iyFine,
-                        etaFront, phiFrontRaw,
-                        vtxZ);
+          front2ShowerEta(m_bemcRec, eReco,
+                          rFront, ixFineBlk, iyFine,      // use block‑consistent ix
+                          etaFront, phiFrontRaw,
+                          vtxZ);
+
     rec[3] = {"PDC-RAW", blkCoord.first, etaSD};
   }
 
@@ -1891,14 +1895,17 @@ void PositionDependentCorrection::fillDEtaAllVariants(
 
         const float etaFront =
               convertBlockToGlobalEta(blk, loc);
+        const int ixFineBlk =
+                blkPhiCoarse * 2 + int(std::floor(blkCoord.second + 0.5F));
         const int iyFine =
-              blk * 2 + int(std::floor(loc + 0.5F));   // exact half‑tower rule
+                blk * 2 + int(std::floor(loc + 0.5F));
 
         const float etaSD =
               front2ShowerEta(m_bemcRec, eReco,
-                              rFront, ixFine, iyFine,
+                              rFront, ixFineBlk, iyFine,
                               etaFront, phiFrontRaw,
                               vtxZ);
+
         rec[4] = {"PDC-CORR", loc, etaSD};
           
         if (vb > 4)
