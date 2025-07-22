@@ -1860,10 +1860,10 @@ void PositionDependentCorrection::fillDEtaAllVariants(
 
   // 4) PDC‑RAW
   {
-      const float etaFront =
+    const float etaFront =
           convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
-      /* fine‑η index inside the barrel : blk*2  +  {0,1} */
-      const int iyFine = blk*2 + (loc > 0.5F ? 1 : 0);
+      
+    const int iyFine = blkEtaCoarse * 2 + int(std::floor(blkCoord.first + 0.5F));
 
     const float etaSD =
         front2ShowerEta(m_bemcRec, eReco,
@@ -3004,35 +3004,6 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 
   }
     
-    /* ─────────────────────── block‑coordinate occupancy ─────────────── */
-    if (Verbosity() > 5)
-    {
-        static const char* kSlot[4] = {"(0,0)","(0,1)","(1,0)","(1,1)"};
-        std::uint64_t nTot = 0;
-        for (const auto& v : m_blkLocCount) nTot += v.load();
-
-        std::cout << '\n' << ANSI_BOLD
-                  << "╭───────────────────────────────╮\n"
-                  << "│  Local‑block occupancy (η,φ) │\n"
-                  << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
-                  << std::left << std::setw(8)  << "slot"
-                  << std::right<< std::setw(14) << "counts"
-                  << std::setw(12)              << "share\n"
-                  << "────────────────────────────────────────────\n";
-
-        for (int i = 0; i < 4; ++i)
-        {
-            const auto v = m_blkLocCount[i].load();
-            std::cout << std::left << std::setw(8)  << kSlot[i]
-                      << std::right<< std::setw(14) << v
-                      << std::setw(11) << (nTot ? Form("%6.2f %%",
-                             100.0 * double(v) / double(nTot)) : "  n/a")
-                      << '\n';
-        }
-        std::cout << "────────────────────────────────────────────\n"
-                  << std::left << std::setw(8)  << "TOTAL"
-                  << std::right<< std::setw(14) << nTot << "\n";
-    }
     /* ───────────────── Δη out‑of‑window summary ─────────────────── */
     std::cout << '\n' << ANSI_BOLD
               << "╭────────────────────────────────────────────╮\n"
@@ -3593,8 +3564,9 @@ PositionDependentCorrection::convertBlockToGlobalEta(int   block_eta_bin,
    * 4)  Compute fine-tower index (centre of tower)                     *
    *-------------------------------------------------------------------*/
   const float fullEtaIndex =
-          static_cast<float>(block_eta_bin) * kFinePerBlock   // coarse origin
-        + localEta;                                           // intra‑block
+            static_cast<float>(block_eta_bin) * kFinePerBlock   // coarse origin
+          + localEta                                            // intra‑block
+          + 0.5f;                                               // ▲ centre shift
 
   if (v3)
     std::cout << "      fullEtaIndex = " << fullEtaIndex

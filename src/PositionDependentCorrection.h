@@ -499,17 +499,25 @@ namespace PDC_detail
   }
 
   /* ---------- front‑face η → shower‑depth η ------------------------ */
-  inline float front2ShowerEta(BEmcRecCEMC* rec,float eReco,double rF,
-                               int ix,int iy,float etaF,float phiF,float vtxZ)
-  {
-    const double thetaF = 2*std::atan(std::exp(-etaF));
-    const double zF     = rF/std::tan(thetaF);
-    float xSD,ySD,zSD;
-    rec->CorrectShowerDepth(ix,iy,eReco,
-                            rF*std::cos(phiF),rF*std::sin(phiF),zF,
-                            xSD,ySD,zSD);
-    return std::asinh((zSD-vtxZ)/std::hypot(xSD,ySD));
-  }
+inline float front2ShowerEta(BEmcRecCEMC* rec,
+                              float eReco,double rF,
+                              int ix,int iy,float etaF,float phiF,float vtxZ)
+{
+    /* front‑face polar angle of the block centre */
+    const double thetaF = 2.0 * std::atan(std::exp(-etaF));
+
+    /* place the synthetic front‑face point at the *same* z‑vertex */
+    const double zF = vtxZ + rF / std::tan(thetaF);          // ► vertex‑aware
+
+    float xSD , ySD , zSD ;
+    rec->CorrectShowerDepth(ix, iy, eReco,
+                            rF * std::cos(phiF),
+                            rF * std::sin(phiF),
+                            zF,
+                            xSD , ySD , zSD);
+
+    return std::asinh( (zSD - vtxZ) / std::hypot(xSD , ySD) );
+}
 
 
   /* ---------- cluster centre of gravity --------------------------- */
