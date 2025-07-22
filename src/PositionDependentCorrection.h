@@ -500,24 +500,29 @@ namespace PDC_detail
 
   /* ---------- front‑face η → shower‑depth η ------------------------ */
   inline float front2ShowerEta(BEmcRecCEMC* rec,
-                              float eReco,double rF,
-                              int ix,int iy,float etaF,float phiF,float vtxZ)
+                              float eReco,double /*rF*/,
+                              int ix,int iy,float /*etaF*/,float /*phiF*/,float vtxZ)
   {
-     /* front‑face polar angle of the block centre */
-     const double thetaF = 2.0 * std::atan(std::exp(-etaF));
+     /* 1)   fetch the *real* tower geometry of (ix , iy)              */
+     TowerGeom geom;
+     rec->GetTowerGeometry(ix , iy , geom);
 
-     /* place the synthetic front‑face point at the *same* z‑vertex */
-     const double zF = vtxZ + rF / std::tan(thetaF);          // ► vertex‑aware
+     const double xF = geom.Xcenter;            // tower front face ≈ centre
+     const double yF = geom.Ycenter;
+     const double zF = geom.Zcenter;
 
+     /* 2)   propagate to shower depth with the correct slope row      */
      float xSD , ySD , zSD ;
-     rec->CorrectShowerDepth(ix, iy, eReco,
-                            rF * std::cos(phiF),
-                            rF * std::sin(phiF),
-                            zF,
-                            xSD , ySD , zSD);
+     rec->CorrectShowerDepth(ix , iy , eReco ,
+                             static_cast<float>(xF) ,
+                             static_cast<float>(yF) ,
+                             static_cast<float>(zF) ,
+                             xSD , ySD , zSD);
 
+     /* 3)   return η at shower depth, vertex‑aware                    */
      return std::asinh( (zSD - vtxZ) / std::hypot(xSD , ySD) );
   }
+
 
 
   /* ---------- cluster centre of gravity --------------------------- */
