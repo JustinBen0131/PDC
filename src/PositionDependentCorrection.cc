@@ -1638,6 +1638,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
   if (!tgLead) return;
 
   const double rFront = tgLead->get_center_radius();
+  (void) rFront;          //  add the cast on its own line
   const double zFront = tgLead->get_center_z();
   const int    ixFine = tgLead->get_binphi();
   const int    iyFine = tgLead->get_bineta();
@@ -1682,13 +1683,43 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
   //---------------- (4) PDC‑RAW  -------------------------------------
   {
-    const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse,
-                                                   blkCoord.second);
-    const float phiSD    = front2ShowerPhi(m_bemcRec, eReco,
-                                           rFront, zFront,
-                                           phiFront,
-                                           ixFine, iyFine);
-    rec[3] = {"PDC-RAW", blkCoord.second, phiSD};
+      const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse,
+                                                     blkCoord.second);
+
+      /* geometry of the tower that actually contains (blkPhiCoarse , blkCoord) */
+      const int  ixFineBlk = blkPhiCoarse * 2
+                           + int(std::floor(blkCoord.second + 0.5F));
+      const int  iyFineBlk = tgLead->get_bineta();          // same η row as lead
+      RawTowerDefs::keytype keyBlk =
+              RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
+                                           iyFineBlk,   // η‑index FIRST
+                                           ixFineBlk);  // φ‑index SECOND
+      const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
+
+      /* guard against missing geometry */
+      if (!geomBlk)
+      {
+        if (vb > 0)
+          std::cerr << ANSI_RED
+                    << "  ✘ geometry lookup failed for (iphi="
+                    << ixFineBlk << ", ieta=" << iyFineBlk
+                    << ") – skipping PDC‑RAW φ point\n"
+                    << ANSI_RESET;
+        rec[3] = {"PDC-RAW", blkCoord.second,
+                  std::numeric_limits<float>::quiet_NaN()};
+      }
+      else
+      {
+        const double rFrontBlk = geomBlk->get_center_radius();
+        const double zFrontBlk = geomBlk->get_center_z();
+
+        const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
+                                            rFrontBlk , zFrontBlk ,
+                                            phiFront,
+                                            ixFineBlk , iyFineBlk);
+
+        rec[3] = {"PDC-RAW", blkCoord.second, phiSD};
+      }
   }
 
   //---------------- (5) PDC‑CORR -------------------------------------
@@ -1709,12 +1740,40 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         if (blk < 0) blk += kCoarsePhiBins;
         if (blk >= kCoarsePhiBins) blk -= kCoarsePhiBins;
 
-        /* global φ at shower depth */
         const float phiFront = convertBlockToGlobalPhi(blk, loc);
-        const float phiSD    = front2ShowerPhi(m_bemcRec, eReco,
-                                               rFront, zFront,
-                                               phiFront, ixFine, iyFine);
-        rec[4] = {"PDC-CORR", loc, phiSD};
+
+        const int  ixFineBlk = blk * 2 + int(std::floor(loc + 0.5F));
+        const int  iyFineBlk = tgLead->get_bineta();
+        RawTowerDefs::keytype keyBlk =
+                  RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
+                                               iyFineBlk,   // η‑index FIRST
+                                               ixFineBlk);  // φ‑index SECOND
+        const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
+
+        if (!geomBlk)
+          {
+            if (vb > 0)
+              std::cerr << ANSI_RED
+                        << "  ✘ geometry lookup failed for (iphi="
+                        << ixFineBlk << ", ieta=" << iyFineBlk
+                        << ") – skipping PDC‑CORR φ point\n"
+                        << ANSI_RESET;
+            rec[4] = {"PDC-CORR", loc,
+                      std::numeric_limits<float>::quiet_NaN()};
+        }
+        else
+        {
+            const double rFrontBlk = geomBlk->get_center_radius();
+            const double zFrontBlk = geomBlk->get_center_z();
+
+            const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
+                                                rFrontBlk , zFrontBlk ,
+                                                phiFront,
+                                                ixFineBlk , iyFineBlk);
+
+            rec[4] = {"PDC-CORR", loc, phiSD};
+        }
+
       }
       else
         rec[4] = {"PDC-CORR", blkCoord.second, rec[3].phi};
@@ -1761,20 +1820,37 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     case 2: ++m_nWinBCorr; break;
   }
 
-  /* ── H) per‑event verbose table (verbosity ≥ 2) ─────────────────── */
-  if (vb >= 2)
-  {
-    std::cout << "  ── Δφ summary table ────────────────────────────────\n"
-              << "  tag         loc      φ_SD(rad)   Δφ(rad)   |Δφ|\n";
-    for (const auto& r : rec)
-      std::cout << std::setw(10)<<r.tag<<"  "
-                << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
-                << std::setw(11)<<r.phi<<"  "
-                << std::setw(9)<<r.d<<"  "
-                << std::setw(7)<<std::fabs(r.d)<<"\n";
-    std::cout << "  WINNER: " << rec[best5].tag << '\n'
-              << "  ────────────────────────────────────────────────\n";
-  }
+    if (vb >= 2)
+    {
+      /* ──────────────────────────────────────────────────────────────── *
+       *  Diagnostic summary: shows absolute |Δφ| *and* the gain/loss   *
+       *  versus the CLUS‑RAW baseline to spotlight which branch helped *
+       * ──────────────────────────────────────────────────────────────── */
+      std::cout << "  ── Δφ summary table ────────────────────────────────\n"
+                << "  tag         loc      φ_SD(rad)   Δφ(rad)   |Δφ|   Δ|Δφ| vs RAW\n";
+
+      const float absRaw = std::fabs(rec[0].d);   // baseline = CLUS‑RAW
+
+      for (const auto& r : rec)
+      {
+        const float gain = absRaw - std::fabs(r.d);      // + ⇒ improvement
+        std::cout << std::setw(10)<<r.tag<<"  "
+                  << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
+                  << std::setw(11)<<r.phi<<"  "
+                  << std::setw(9)<<r.d<<"  "
+                  << std::setw(7)<<std::fabs(r.d)<<"  "
+                  << std::setw(11)<<std::showpos<<std::fixed<<std::setprecision(3)
+                  << gain << std::noshowpos << '\n';
+      }
+
+      std::cout << "  WINNER: " << rec[best5].tag
+                << "   (|Δφ| improved by "
+                << std::fixed<<std::setprecision(3)
+                << absRaw - std::fabs(rec[best5].d)
+                << " rad vs CLUS‑RAW)\n"
+                << "  ────────────────────────────────────────────────\n";
+    }
+
 }
 
 
@@ -1825,6 +1901,7 @@ void PositionDependentCorrection::fillDEtaAllVariants(
   if (!tgLead) return;
 
   const double rFront = tgLead->get_center_radius();
+  (void) rFront;          //  add the cast on its own line
 
   const float phiFrontRaw =
         convertBlockToGlobalPhi(blkPhiCoarse, blkCoord.second);
@@ -1868,13 +1945,35 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     const int iyFine =
             blkEtaCoarse * 2 + int(std::floor(blkCoord.first  + 0.5F));
 
-    const float etaSD =
-          front2ShowerEta(m_bemcRec, eReco,
-                          rFront, ixFineBlk, iyFine,      // use block‑consistent ix
-                          etaFront, phiFrontRaw,
-                          vtxZ);
+    RawTowerDefs::keytype keyBlkEta =
+              RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
+                                           iyFine,       // η‑index
+                                           ixFineBlk);   // φ‑index
+    const auto* geomBlkEta = m_geometry->get_tower_geometry(keyBlkEta);
 
-    rec[3] = {"PDC-RAW", blkCoord.first, etaSD};
+    if (!geomBlkEta)
+    {
+        if (vb > 0)
+          std::cerr << ANSI_RED
+                    << "  ✘ geometry lookup failed for (iphi="
+                    << ixFineBlk << ", ieta=" << iyFine
+                    << ") – skipping PDC‑RAW η point\n"
+                    << ANSI_RESET;
+        rec[3] = {"PDC-RAW", blkCoord.first,
+                  std::numeric_limits<float>::quiet_NaN()};
+    }
+    else
+    {
+        const double rFrontBlk = geomBlkEta->get_center_radius();
+
+        const float etaSD = front2ShowerEta(m_bemcRec, eReco,
+                                            rFrontBlk , ixFineBlk , iyFine ,
+                                            etaFront , phiFrontRaw ,
+                                            vtxZ);
+
+        rec[3] = {"PDC-RAW", blkCoord.first, etaSD};
+    }
+
   }
 
   // 5) PDC‑CORR
@@ -1900,13 +1999,35 @@ void PositionDependentCorrection::fillDEtaAllVariants(
         const int iyFine =
                 blk * 2 + int(std::floor(loc + 0.5F));
 
-        const float etaSD =
-              front2ShowerEta(m_bemcRec, eReco,
-                              rFront, ixFineBlk, iyFine,
-                              etaFront, phiFrontRaw,
-                              vtxZ);
+          RawTowerDefs::keytype keyBlkEta =
+                  RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
+                                               iyFine,       // η‑index
+                                               ixFineBlk);   // φ‑index
+        const auto* geomBlkEta = m_geometry->get_tower_geometry(keyBlkEta);
 
-        rec[4] = {"PDC-CORR", loc, etaSD};
+        if (!geomBlkEta)
+        {
+            if (vb > 0)
+              std::cerr << ANSI_RED
+                        << "  ✘ geometry lookup failed for (iphi="
+                        << ixFineBlk << ", ieta=" << iyFine
+                        << ") – skipping PDC‑CORR η point\n"
+                        << ANSI_RESET;
+            rec[4] = {"PDC-CORR", loc,
+                      std::numeric_limits<float>::quiet_NaN()};
+        }
+        else
+        {
+            const double rFrontBlk = geomBlkEta->get_center_radius();
+
+            const float etaSD = front2ShowerEta(m_bemcRec, eReco,
+                                                rFrontBlk , ixFineBlk , iyFine ,
+                                                etaFront , phiFrontRaw ,
+                                                vtxZ);
+
+            rec[4] = {"PDC-CORR", loc, etaSD};
+        }
+
           
         if (vb > 4)
         {
@@ -1996,20 +2117,37 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     case 2: ++m_nWinBCorr_Eta; break;
   }
 
-  /* ───────────────── per‑event verbose table (verbosity ≥ 2) ─────── */
-  if (vb >= 2)
-  {
-    std::cout << "  ── Δη summary table (|z|="<<std::fabs(vtxZ)<<" cm) ─────\n"
-              << "  tag         loc      η_SD       Δη        |Δη|\n";
-    for (const auto& r : rec)
-      std::cout << std::setw(10)<<r.tag<<"  "
-                << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
-                << std::setw(10)<<r.eta<<"  "
-                << std::setw(10)<<r.d<<"  "
-                << std::setw(7)<<std::fabs(r.d)<<"\n";
-    std::cout << "  WINNER: " << rec[best5].tag << '\n'
-              << "  ────────────────────────────────────────────────\n";
-  }
+    if (vb >= 2)
+    {
+      /* ──────────────────────────────────────────────────────────────── *
+       *  Diagnostic summary: shows absolute |Δη| and the change versus  *
+       *  CLUS‑RAW.  Helpful to pin‑point why PDC‑CORR may under‑perform *
+       * ──────────────────────────────────────────────────────────────── */
+      std::cout << "  ── Δη summary table (|z|="<<std::fabs(vtxZ)<<" cm) ─────\n"
+                << "  tag         loc      η_SD       Δη        |Δη|   Δ|Δη| vs RAW\n";
+
+      const float absRaw = std::fabs(rec[0].d);   // baseline
+
+      for (const auto& r : rec)
+      {
+        const float gain = absRaw - std::fabs(r.d);
+        std::cout << std::setw(10)<<r.tag<<"  "
+                  << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
+                  << std::setw(10)<<r.eta<<"  "
+                  << std::setw(10)<<r.d<<"  "
+                  << std::setw(7)<<std::fabs(r.d)<<"  "
+                  << std::setw(11)<<std::showpos<<std::fixed<<std::setprecision(3)
+                  << gain << std::noshowpos << '\n';
+      }
+
+      std::cout << "  WINNER: " << rec[best5].tag
+                << "   (|Δη| improved by "
+                << std::fixed<<std::setprecision(3)
+                << absRaw - std::fabs(rec[best5].d)
+                << " vs CLUS‑RAW)\n"
+                << "  ────────────────────────────────────────────────\n";
+    }
+
 }
 
 
@@ -3458,7 +3596,7 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
   }
 
   /* ─── fine-bin centre of the requested tower ─────────────────────────── */
-  const float fullPhiIndex =
+  float fullPhiIndex =
         static_cast<float>(block_phi_bin) * kFinePerBlock +  // coarse origin
         localPhi +                                           // intra-block
         0.5f;                                                // centre of fine bin
@@ -3466,6 +3604,16 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
   if (Verbosity() > 1)
     std::cout << "    ▸ fullPhiIndex = " << fullPhiIndex
               << "   (coarse*2 + local + 0.5)\n";
+    
+  /* --- residual φ‑bias inside an 8‑tower module (same as CorrectPosition) --- */
+  {
+      int  mod8   = static_cast<int>(fullPhiIndex) / 8;           // module #
+      float x8    = fullPhiIndex - mod8 * 8.0f - 4.0f;            // −4 … +4
+      float dBias = 0.10f * x8 / 4.0f;                            // default factors
+      if (std::fabs(x8) > 3.3f) dBias = 0.0f;                     // edge guard
+      fullPhiIndex -= dBias;                                      // apply bias‑undo
+  }
+
 
   /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
   float globalPhi = fullPhiIndex * kRadPerBin;  // ideal grid
