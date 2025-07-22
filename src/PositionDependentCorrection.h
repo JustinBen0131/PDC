@@ -498,35 +498,112 @@ namespace PDC_detail
     return std::atan2(ySD,xSD);
   }
 
-  /* ---------- front‑face η → shower‑depth η ------------------------ */
-  inline float front2ShowerEta(BEmcRecCEMC* rec,
-                           float  eReco,
-                           double /*rF*/,
-                           int    ix,            // fine φ‑index of tower
-                           int    iy,            // fine η‑index of tower
-                           float  /*etaF*/,
-                           float  /*phiF*/,
-                           float  vtxZ)
-  {
-     /* 1)   fetch the *real* tower geometry of (ix , iy)              */
-     TowerGeom geom;
-     rec->GetTowerGeometry(ix , iy , geom);
 
-     const double xF = geom.Xcenter;            // tower front face ≈ centre
-     const double yF = geom.Ycenter;
-     const double zF = geom.Zcenter;
+    inline float front2ShowerEta(BEmcRecCEMC* rec,
+                                 float        eReco,     // cluster E [GeV]
+                                 double       /*unused*/,// legacy rFront
+                                 int          ix,        // tower φ index
+                                 int          iy,        // tower η index
+                                 float        etaF,      // desired η at front
+                                 float        /*phiF*/,
+                                 float        vtxZ)      // vertex-z [cm]
+    {
+      std::cout << "\033[1;36m"  // bold-cyan
+                << "[front2ShowerEta] ENTER  ix=" << ix
+                << "  iy=" << iy << "  etaF=" << etaF
+                << "  E=" << eReco << " GeV"
+                << "\033[0m\n";
 
-     /* 2)   propagate to shower depth with the correct slope row      */
-     float xSD , ySD , zSD ;
-    rec->CorrectShowerDepth(ix , iy , eReco ,
-                           static_cast<float>(xF) ,
-                           static_cast<float>(yF) ,
-                           static_cast<float>(zF) ,
-                           xSD , ySD , zSD);
+      /* ---------- sanity ------------------------------------------------ */
+      if (!rec)
+      {
+        std::cerr << "\033[31m"   // red
+                  << "  ✘ NULL BEmcRecCEMC pointer – NaN\n\033[0m";
+        return std::numeric_limits<float>::quiet_NaN();
+      }
 
-     /* 3)   return η at shower depth, vertex‑aware                    */
-     return std::asinh( (zSD - vtxZ) / std::hypot(xSD , ySD) );
-  }
+      TowerGeom g{};
+      if (!rec->GetTowerGeometry(ix, iy, g))
+      {
+        std::cerr << "\033[31m"
+                  << "  ✘ geometry lookup failed for tower(ix=" << ix
+                  << ", iy=" << iy << ") – NaN\n\033[0m";
+        return std::numeric_limits<float>::quiet_NaN();
+      }
+
+      /* ---------- STEP 1 : raw Δz at front face ------------------------ */
+      const double xF   = g.Xcenter;
+      const double yF   = g.Ycenter;
+      const double zC   = g.Zcenter;                // tower-centre z
+      const double rC   = std::hypot(xF, yF);       // radius at centre
+      const double etaC = std::asinh(zC / rC);
+
+      const double zF_raw = rC * std::sinh(etaF);   // wanted z at front
+      const double dZ_raw = zF_raw - zC;
+
+      std::cout << "  ── STEP 1 ────────────────────────────────────────────\n"
+                << "     rC = " << rC   << " cm\n"
+                << "     zC = " << zC   << " cm   (ηC = " << etaC << ")\n"
+                << "     zF* (target) = " << zF_raw << " cm\n"
+                << "     dZ_raw = " << dZ_raw << " cm\n";
+
+      /* ---------- STEP 2 : trial spline walk --------------------------- */
+      float xSD0{}, ySD0{}, zSD0{};
+      rec->CorrectShowerDepth(ix, iy, eReco,
+                              static_cast<float>(xF),
+                              static_cast<float>(yF),
+                              static_cast<float>(zC + dZ_raw),
+                              xSD0, ySD0, zSD0);
+
+      const double rSD   = std::hypot(xSD0, ySD0);
+      const double etaSD0 = std::asinh((zSD0 - vtxZ) / rSD);
+
+      std::cout << "  ── STEP 2 ────────────────────────────────────────────\n"
+                << "     (trial) xSD0=" << xSD0
+                << "  ySD0=" << ySD0
+                << "  zSD0=" << zSD0 << '\n'
+                << "     rSD  = " << rSD << " cm\n"
+                << "     ηSD0 = " << etaSD0 << '\n';
+
+      if (!std::isfinite(rSD) || rSD == 0.0)
+      {
+        std::cerr << "\033[31m"
+                  << "  ✘ non-finite rSD after trial transport – NaN\n\033[0m";
+        return std::numeric_limits<float>::quiet_NaN();
+      }
+
+      /* ---------- STEP 3 : scale factor for Δz ------------------------- */
+      const double scale = (rSD * std::cosh(etaSD0)) /
+                           (rC  * std::cosh(etaC));   // ≤1 at |η|→1.1
+      const double dZ = dZ_raw * scale;
+
+      std::cout << "  ── STEP 3 ────────────────────────────────────────────\n"
+                << "     scale = " << scale << '\n'
+                << "     dZ_final = " << dZ << " cm\n";
+
+      /* ---------- STEP 4 : final spline walk --------------------------- */
+      float xSD{}, ySD{}, zSD{};
+      rec->CorrectShowerDepth(ix, iy, eReco,
+                              static_cast<float>(xF),
+                              static_cast<float>(yF),
+                              static_cast<float>(zC + dZ),
+                              xSD, ySD, zSD);
+
+      const double etaSD = std::asinh((zSD - vtxZ) /
+                                      std::hypot(xSD, ySD));
+
+      std::cout << "  ── STEP 4 ────────────────────────────────────────────\n"
+                << "     (final) xSD=" << xSD
+                << "  ySD=" << ySD
+                << "  zSD=" << zSD << '\n'
+                << "     ηSD = " << etaSD << '\n';
+
+      std::cout << "\033[32m"    // green
+                << "[front2ShowerEta] EXIT  →  "
+                << etaSD << "\033[0m\n\n";
+
+      return static_cast<float>(etaSD);
+    }
 
 
   /* ---------- cluster centre of gravity --------------------------- */

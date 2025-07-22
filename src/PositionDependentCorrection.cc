@@ -3633,115 +3633,174 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
 }
 
 /**********************************************************************
- *  convertBlockToGlobalEta – ultra-safe version
- *  ---------------------------------------------------------------
- *  • Maps a local block-η coordinate to the absolute tower pseudorapidity.
- *  • Performs exactly one symmetric fold of the local coordinate.
- *  • Any illegal input immediately returns NaN *and* prints a red error.
+ * convertBlockToGlobalEta – diagnostic edition
+ * ---------------------------------------------------------------
+ * • Maps a (coarse-η block, local-η) pair to the tower-centre η
+ *   in the lab frame, with one-fold logic identical to the
+ *   production routine.
+ * • Every decision point prints a line when Verbosity() ≥ 4.
+ * • On *any* fatal condition the function returns NaN and
+ *   prints a highlighted error banner (Verbosity() ≥ 1).
  *********************************************************************/
 float
 PositionDependentCorrection::convertBlockToGlobalEta(int   block_eta_bin,
-                                                     float localEta)
+                                                     float localEta)  // local ∈ (-∞,∞)
 {
-  /*──────────────  compile-time constants  ──────────────*/
-  constexpr int   kFinePerBlock   = 2;               // 2 fine η-towers / block
-  constexpr int   kNFineEtaBins   = 96;              // full barrel
-  constexpr int   kNCoarseBlocks  = kNFineEtaBins / kFinePerBlock; // 48
-  constexpr float kEtaMin         = -1.1f;           // centre of tower 0
-  constexpr float kDEtaPerFine    = 2.2f / 96.0f;    // ≈0.0229167 per fine bin
+  /* ───────────── compile-time constants ───────────── */
+  constexpr int   kFinePerBlock   = 2;                 // 2 fine η-towers / coarse block
+  constexpr int   kNFineEtaBins   = 96;                // full barrel
+  constexpr int   kNCoarseBlocks  = kNFineEtaBins / kFinePerBlock;           // 48
+  constexpr float kEtaMin         = -1.1f;             // η centre of iyFine = 0
+  constexpr float kDEtaPerFine    = 2.2f / 96.0f;      // ≈ 0.0229167 per fine tower
 
-  const bool v3 = (Verbosity() > 3);
+  const unsigned vb = Verbosity();
 
-  /*──────────────  banner  ──────────────*/
-  if (v3)
+  auto printHdr = [&](const char* tag)
   {
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalEta]  ENTER\n"
-              << "      block_eta_bin = " << block_eta_bin
-              << "   |   localEta(raw) = " << localEta
-              << ANSI_RESET << '\n';
-  }
+    if (vb > 3)
+      std::cout << ANSI_BOLD << ANSI_CYAN
+                << "[η-X-MAP] " << tag << ANSI_RESET << '\n';
+  };
 
-  /*-------------------------------------------------------------------*
-   * 0)  Guard: coarse index in range                                   *
-   *-------------------------------------------------------------------*/
+  printHdr("ENTER");
+
+  /* ================================================================
+   * 0)  Parameter sanity
+   * ============================================================ */
   if (block_eta_bin < 0 || block_eta_bin >= kNCoarseBlocks)
   {
-    if (v3)
+    if (vb)
       std::cerr << ANSI_RED
-                << "  ✘ block_eta_bin outside valid range [0,"
-                << kNCoarseBlocks-1 << "] – returning NaN\n"
+                << "[η-X-MAP]  ERROR: coarse-η index (" << block_eta_bin
+                << ") outside [0," << kNCoarseBlocks-1 << "] – returning NaN\n"
                 << ANSI_RESET;
     return std::numeric_limits<float>::quiet_NaN();
   }
 
-  /*-------------------------------------------------------------------*
-   * 1)  Guard: finite localEta                                         *
-   *-------------------------------------------------------------------*/
   if (!std::isfinite(localEta))
   {
-    if (v3)
+    if (vb)
       std::cerr << ANSI_RED
-                << "  ✘ localEta is NaN/Inf – returning NaN\n"
+                << "[η-X-MAP]  ERROR: localEta is NaN/Inf – returning NaN\n"
                 << ANSI_RESET;
     return std::numeric_limits<float>::quiet_NaN();
   }
 
-  /*-------------------------------------------------------------------*
-   * 2)  One (and only one) symmetric fold into (-0.5 … +1.5]           *
-   *-------------------------------------------------------------------*/
+  /* ================================================================
+   * 1)  Single symmetric fold of the *local* coordinate
+   * ============================================================ */
+  if (vb > 4)
+    std::cout << "  » raw localEta = " << localEta << '\n';
+
   if (localEta <= -0.5f || localEta > 1.5f)
   {
     const float before = localEta;
-    localEta = std::fmod(localEta + 2.0f, 2.0f);   // → (0 … 2]
-    if (localEta > 1.5f) localEta -= 2.0f;         // → (-0.5 … +1.5]
-    if (v3)
+    localEta = std::fmod(localEta + 2.0f, 2.0f);          // (0 … 2]
+    if (localEta > 1.5f) localEta -= 2.0f;                // (-0.5 … +1.5]
+
+    if (vb > 3)
       std::cout << ANSI_YELLOW
-                << "    • localEta folded once: " << before
-                << "  →  " << localEta
+                << "  • one-fold applied: " << before << " → " << localEta
                 << ANSI_RESET << '\n';
   }
 
-  /*-------------------------------------------------------------------*
-   * 3)  Post-fold validity check                                       *
-   *-------------------------------------------------------------------*/
   if (localEta <= -0.5f || localEta > 1.5f)
   {
-    if (v3)
+    if (vb)
       std::cerr << ANSI_RED
-                << "  ✘ localEta still outside (-0.5,1.5] after fold – NaN\n"
+                << "[η-X-MAP]  ERROR: localEta still outside (-0.5,1.5] after fold – NaN\n"
                 << ANSI_RESET;
     return std::numeric_limits<float>::quiet_NaN();
   }
 
-  /*-------------------------------------------------------------------*
-   * 4)  Compute fine-tower index (centre of tower)                     *
-   *-------------------------------------------------------------------*/
-  const float fullEtaIndex =
-            static_cast<float>(block_eta_bin) * kFinePerBlock   // coarse origin
-          + localEta                                            // intra‑block
-          + 0.5f;                                               // ▲ centre shift
+  /* ================================================================
+   * 2)  Determine the **fine** tower index (integer 0…95)
+   * ============================================================ */
+  const int iyFine =
+        block_eta_bin * kFinePerBlock +
+        static_cast<int>(std::floor(localEta + 0.5f));     // nearest fine tower
 
-  if (v3)
-    std::cout << "      fullEtaIndex = " << fullEtaIndex
-              << "   (coarse*2 + local + 0.5)\n";
+  if (vb > 4)
+    std::cout << "  » iyFine (tower row) = " << iyFine << '\n';
 
-  /*-------------------------------------------------------------------*
-   * 5)  Linear index → pseudorapidity                                 *
-   *-------------------------------------------------------------------*/
-  const float globalEta = kEtaMin + fullEtaIndex * kDEtaPerFine;
-
-  if (Verbosity() > 0)
+  if (iyFine < 0 || iyFine >= kNFineEtaBins)
   {
-    std::cout << ANSI_GREEN
-              << "    ➜ global η = " << globalEta
-              << ANSI_RESET << '\n';
+    if (vb)
+      std::cerr << ANSI_RED
+                << "[η-X-MAP]  ERROR: computed iyFine=" << iyFine
+                << " outside [0," << kNFineEtaBins-1 << "] – NaN\n"
+                << ANSI_RESET;
+    return std::numeric_limits<float>::quiet_NaN();
   }
 
-  if (v3)
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[convertBlockToGlobalEta]  EXIT\n"
-              << ANSI_RESET << '\n';
+  /* ================================================================
+   * 3)  Try to get tower-centre geometry (detailed mode)
+   * ============================================================ */
+  const RawTowerDefs::keytype key =
+        RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iyFine, /*iphi=*/0);
 
-  return globalEta;
+  const RawTowerGeom* tg = m_geometry ? m_geometry->get_tower_geometry(key) : nullptr;
+
+  if (!tg)
+  {
+    if (vb > 2)
+      std::cout << ANSI_RED
+                << "  • geometry not available – falling back to linear η grid\n"
+                << ANSI_RESET;
+    const float fullEtaIndex =
+          static_cast<float>(block_eta_bin) * kFinePerBlock + localEta + 0.5f;
+    const float etaFallback = kEtaMin + fullEtaIndex * kDEtaPerFine;
+
+    if (vb > 2)
+      std::cout << "  » fallback η  = " << etaFallback << '\n';
+
+    printHdr("EXIT (fallback)");
+    return etaFallback;
+  }
+
+  /* ================================================================
+   * 4)  Projective-aware interpolation *inside* the physical tower
+   * ============================================================ */
+  const double rC   = std::hypot(tg->get_center_x(), tg->get_center_y());
+  const double zC   = tg->get_center_z();
+  const double etaC = std::asinh(zC / rC);
+
+  if (vb > 4)
+    std::cout << "  » tower-centre ηC = " << etaC << '\n';
+
+  /* signed offset: (+) towards higher iy, (-) towards lower iy        */
+  const double offsetFine =
+        localEta - ((localEta < 0.5f) ? 0.0 : 1.0);   // now in (-0.5, +0.5]
+
+  /* —— measure actual η-pitch from neighbouring rows ———————— */
+  const auto fetchEta = [&](int iy) -> double
+  {
+    const auto* t = m_geometry->get_tower_geometry(
+          RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iy, 0));
+    return t ? std::asinh(t->get_center_z() /
+                          std::hypot(t->get_center_x(), t->get_center_y()))
+             : std::numeric_limits<double>::quiet_NaN();
+  };
+
+  double etaUp = fetchEta(std::min(iyFine + 1, kNFineEtaBins - 1));
+  double etaDn = fetchEta(std::max(iyFine - 1, 0));
+
+  double etaPitch = (std::isfinite(etaUp) && std::isfinite(etaDn))
+                      ? 0.5 * (etaUp - etaDn)
+                      : kDEtaPerFine;
+
+  if (vb > 4)
+    std::cout << "  » η-pitch = " << etaPitch << '\n';
+
+  /* ================================================================
+   * 5)  Final global η
+   * ============================================================ */
+  const double globalEta = etaC + offsetFine * etaPitch;
+
+  if (vb > 2)
+    std::cout << ANSI_GREEN
+              << "  » global η = " << globalEta << ANSI_RESET << '\n';
+
+  printHdr("EXIT (OK)");
+  return static_cast<float>(globalEta);
 }
