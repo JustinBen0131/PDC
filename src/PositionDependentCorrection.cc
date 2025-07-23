@@ -1811,6 +1811,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     case 3: ++m_phiWinPDCraw;    break;
     case 4: ++m_phiWinPDCcorr;   break;
   }
+  ++m_phiWinByE[best5][iE];
 
   int best3 = 0; for (int i=1;i<3;++i)
     if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
@@ -1926,9 +1927,32 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     float loc = yCG;
     if (bEta > 1e-9F)
     {
-      const int   iy0 = int(yCG + .5F);
-      const float off = yCG - iy0;
-      loc = iy0 + doEtaBlockCorr(off, bEta);
+        const int   iy0 = int(yCG + 0.5F);
+        const float off = yCG - iy0;
+
+        /* physical η‑pitch of this tower row (centre‑to‑centre) */
+        const int iyUp = std::min(iy0 + 1, 95);           // stay inside 0…95
+        const int iyDn = std::max(iy0 - 1, 0);
+
+        const RawTowerGeom* gU = m_geometry->get_tower_geometry(
+                RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
+                                             iyUp, blkPhiCoarse * 2));
+        const RawTowerGeom* gD = m_geometry->get_tower_geometry(
+                RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
+                                             iyDn, blkPhiCoarse * 2));
+
+        float dEtaPitch = 2.2f / 96.0f;                   // safe default
+        if (gU && gD)                                     // use real pitch if possible
+        {
+            const float etaU = std::asinh(gU->get_center_z() /
+                                          gU->get_center_radius());
+            const float etaD = std::asinh(gD->get_center_z() /
+                                          gD->get_center_radius());
+            dEtaPitch = 0.5f * (etaU - etaD);
+        }
+
+        loc = iy0 + doEtaBlockCorr(off, bEta, dEtaPitch);
+
     }
     rec[2] = {"CLUS-BCORR", loc,
         cg2ShowerEta(m_bemcRec, eReco, xCG,  loc, vtxZ)}; // consistent pair
@@ -1981,11 +2005,18 @@ void PositionDependentCorrection::fillDEtaAllVariants(
       const float bEta = m_bValsEta[iE];
       if (isFitDoneForEta && bEta > 1e-9F)
       {
-        /* undo Ash distortion in η */
-        float loc = doEtaBlockCorr(blkCoord.first, bEta);
+        int   blk = blkEtaCoarse;   // start from raw coarse index
 
-        /* re‑fold once so that (loc,blk) stay consistent */
-        int blk = blkEtaCoarse;                       // start value
+        float dEtaPitchBlk =
+                    0.5f * ( convertBlockToGlobalEta(blk ,  1.5f) -
+                             convertBlockToGlobalEta(blk , -0.5f) );
+
+        if (!std::isfinite(dEtaPitchBlk) || dEtaPitchBlk <= 0.0f)
+              dEtaPitchBlk = 2.2f / 96.0f;       // fallback for edge rows
+
+
+        float loc = doEtaBlockCorr(blkCoord.first, bEta, dEtaPitchBlk);
+
         while (loc <= -0.5F) { loc += 2.F; --blk; }
         while (loc >   1.5F) { loc -= 2.F; ++blk; }
         constexpr int kCoarseEtaBins = 48;            // 96 fine /2
@@ -2108,6 +2139,7 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     case 3: ++m_etaWinPDCraw;    break;
     case 4: ++m_etaWinPDCcorr;   break;
   }
+    ++m_etaWinByE[best5][iE];
 
   int best3 = 0; for(int i=1;i<3;++i)
     if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
@@ -3148,26 +3180,68 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 
   }
     
-    /* ───────────────── Δη out‑of‑window summary ─────────────────── */
-    std::cout << '\n' << ANSI_BOLD
-              << "╭────────────────────────────────────────────╮\n"
-              << "│   Counts with |Δη| > 0.04 (all clusters)   │\n"
-              << "╰────────────────────────────────────────────╯"
-              << ANSI_RESET << '\n'
-              << std::left << std::setw(14) << "variant"
-              << std::right<< std::setw(12)<< "counts\n"
-              << "────────────────────────────────────────────\n"
-              << std::left << std::setw(14) << "CLUS-RAW"
-              << std::right<< std::setw(12)<< m_etaOutCLUSraw   << '\n'
-              << std::left << std::setw(14) << "CLUS-CP"
-              << std::right<< std::setw(12)<< m_etaOutCLUScp    << '\n'
-              << std::left << std::setw(14) << "CLUS-BCORR"
-              << std::right<< std::setw(12)<< m_etaOutCLUSbcorr << '\n'
-              << std::left << std::setw(14) << "PDC-RAW"
-              << std::right<< std::setw(12)<< m_etaOutPDCraw    << '\n'
-              << std::left << std::setw(14) << "PDC-CORR"
-              << std::right<< std::setw(12)<< m_etaOutPDCcorr   << '\n'
-              << "────────────────────────────────────────────\n";
+    /* ───────────────── energy‑dependent winner overview ────────────── */
+    if (Verbosity() > 5)
+    {
+      const char* flav[5] = {"CLUS‑RAW","CLUS‑CP","CLUS‑BCORR",
+                             "PDC‑RAW","PDC‑CORR"};
+
+      std::cout << '\n' << ANSI_BOLD
+                << "╭──────────────────────────────────────────────────────────╮\n"
+                << "│          ENERGY‑SLICED  Δφ   &   Δη   WINNERS            │\n"
+                << "╰──────────────────────────────────────────────────────────╯"
+                << ANSI_RESET << '\n';
+
+      for (int ie = 0; ie < N_Ebins; ++ie)
+      {
+        std::uint64_t totPhi = 0, totEta = 0;
+        for (int f=0; f<5; ++f)
+        { totPhi += m_phiWinByE[f][ie];  totEta += m_etaWinByE[f][ie]; }
+
+        std::cout << ANSI_BOLD << "  • E‑slice " << ie << ANSI_RESET
+                  << "   (entries: Δφ=" << totPhi << ", Δη=" << totEta << ")\n";
+
+        std::cout << std::left << std::setw(14) << "variant"
+                  << std::right<< std::setw(12)<< "Δφ wins"
+                  << std::setw(10)             << "%"
+                  << std::setw(12)             << "Δη wins"
+                  << std::setw(10)             << "%\n"
+                  << "  ───────────────────────────────────────────────────────\n";
+
+        for (int f=0; f<5; ++f)
+          std::cout << std::left << std::setw(14) << flav[f]
+                    << std::right<< std::setw(12)<< m_phiWinByE[f][ie]
+                    << std::setw(10)             << pct(m_phiWinByE[f][ie], totPhi)
+                    << std::setw(12)             << m_etaWinByE[f][ie]
+                    << std::setw(10)             << pct(m_etaWinByE[f][ie],  totEta)
+                    << '\n';
+
+        std::cout << "  ───────────────────────────────────────────────────────\n";
+      }
+    }
+
+//    
+//    /* ───────────────── Δη out‑of‑window summary ─────────────────── */
+//    std::cout << '\n' << ANSI_BOLD
+//              << "╭────────────────────────────────────────────╮\n"
+//              << "│   Counts with |Δη| > 0.04 (all clusters)   │\n"
+//              << "╰────────────────────────────────────────────╯"
+//              << ANSI_RESET << '\n'
+//              << std::left << std::setw(14) << "variant"
+//              << std::right<< std::setw(12)<< "counts\n"
+//              << "────────────────────────────────────────────\n"
+//              << std::left << std::setw(14) << "CLUS-RAW"
+//              << std::right<< std::setw(12)<< m_etaOutCLUSraw   << '\n'
+//              << std::left << std::setw(14) << "CLUS-CP"
+//              << std::right<< std::setw(12)<< m_etaOutCLUScp    << '\n'
+//              << std::left << std::setw(14) << "CLUS-BCORR"
+//              << std::right<< std::setw(12)<< m_etaOutCLUSbcorr << '\n'
+//              << std::left << std::setw(14) << "PDC-RAW"
+//              << std::right<< std::setw(12)<< m_etaOutPDCraw    << '\n'
+//              << std::left << std::setw(14) << "PDC-CORR"
+//              << std::right<< std::setw(12)<< m_etaOutPDCcorr   << '\n'
+//              << "────────────────────────────────────────────\n";
+    
 
   return 0;
 }
@@ -3483,6 +3557,7 @@ float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
               << "ηloc=" << localEta << "  b=" << b
               << ANSI_RESET << '\n';
 
+  (void) dEtaTower;
   if (std::fabs(b) < 1e-9f)                         // nothing to undo
   {
     if (Verbosity() > 0) std::cout << "  b≈0 → return unchanged\n";
@@ -3525,8 +3600,8 @@ float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
     corrected = std::fmod(corrected + 2.f, 2.f);
     if (corrected > 1.5f) corrected -= 2.f;
   }
-  /* If a caller supplied a non‑unity tower pitch (rare) apply it now */
-  corrected *= dEtaTower;
+//  /* If a caller supplied a non‑unity tower pitch (rare) apply it now */
+//  corrected *= dEtaTower;
 
   /* keep clusters inside the barrel acceptance (η ≈ ±1.1) */
   if (std::fabs(corrected) > 1.6f)      // 2×2 block edge + margin

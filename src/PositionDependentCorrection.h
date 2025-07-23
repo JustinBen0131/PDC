@@ -281,6 +281,9 @@ class PositionDependentCorrection : public SubsysReco
   std::atomic<std::uint64_t> m_etaOutCLUSbcorr {0};
   std::atomic<std::uint64_t> m_etaOutPDCraw    {0};
   std::atomic<std::uint64_t> m_etaOutPDCcorr   {0};
+    // winner counters per flavour per E‑slice
+    std::array<std::array<std::uint64_t, N_Ebins>, 5> m_phiWinByE{{}};
+    std::array<std::array<std::uint64_t, N_Ebins>, 5> m_etaWinByE{{}};
 
   std::atomic<std::uint64_t> g_nanPhi{0}, g_nanEta{0}, g_nCorrPhiRight{0};
 
@@ -508,101 +511,27 @@ namespace PDC_detail
                                  float        /*phiF*/,
                                  float        vtxZ)      // vertex-z [cm]
     {
-      std::cout << "\033[1;36m"  // bold-cyan
-                << "[front2ShowerEta] ENTER  ix=" << ix
-                << "  iy=" << iy << "  etaF=" << etaF
-                << "  E=" << eReco << " GeV"
-                << "\033[0m\n";
+        // --- geometry lookup -------------------------------------------------
+        TowerGeom g{};
+        if (!rec || !rec->GetTowerGeometry(ix, iy, g))
+            return std::numeric_limits<float>::quiet_NaN();
 
-      /* ---------- sanity ------------------------------------------------ */
-      if (!rec)
-      {
-        std::cerr << "\033[31m"   // red
-                  << "  ✘ NULL BEmcRecCEMC pointer – NaN\n\033[0m";
-        return std::numeric_limits<float>::quiet_NaN();
-      }
+        const double rC = std::hypot(g.Xcenter, g.Ycenter);
+        const double xF = g.Xcenter;
+        const double yF = g.Ycenter;
+        const double zF = rC * std::sinh(etaF);           // z on front face that yields ηF
 
-      TowerGeom g{};
-      if (!rec->GetTowerGeometry(ix, iy, g))
-      {
-        std::cerr << "\033[31m"
-                  << "  ✘ geometry lookup failed for tower(ix=" << ix
-                  << ", iy=" << iy << ") – NaN\n\033[0m";
-        return std::numeric_limits<float>::quiet_NaN();
-      }
+        // --- one‑shot transport to shower depth ------------------------------
+        float xSD{}, ySD{}, zSD{};
+        rec->CorrectShowerDepth(ix, iy, eReco,
+                                static_cast<float>(xF),
+                                static_cast<float>(yF),
+                                static_cast<float>(zF),
+                                xSD, ySD, zSD);
 
-      /* ---------- STEP 1 : raw Δz at front face ------------------------ */
-      const double xF   = g.Xcenter;
-      const double yF   = g.Ycenter;
-      const double zC   = g.Zcenter;                // tower-centre z
-      const double rC   = std::hypot(xF, yF);       // radius at centre
-      const double etaC = std::asinh(zC / rC);
-
-      const double zF_raw = rC * std::sinh(etaF);   // wanted z at front
-      const double dZ_raw = zF_raw - zC;
-
-      std::cout << "  ── STEP 1 ────────────────────────────────────────────\n"
-                << "     rC = " << rC   << " cm\n"
-                << "     zC = " << zC   << " cm   (ηC = " << etaC << ")\n"
-                << "     zF* (target) = " << zF_raw << " cm\n"
-                << "     dZ_raw = " << dZ_raw << " cm\n";
-
-      /* ---------- STEP 2 : trial spline walk --------------------------- */
-      float xSD0{}, ySD0{}, zSD0{};
-      rec->CorrectShowerDepth(ix, iy, eReco,
-                              static_cast<float>(xF),
-                              static_cast<float>(yF),
-                              static_cast<float>(zC + dZ_raw),
-                              xSD0, ySD0, zSD0);
-
-      const double rSD   = std::hypot(xSD0, ySD0);
-      const double etaSD0 = std::asinh((zSD0 - vtxZ) / rSD);
-
-      std::cout << "  ── STEP 2 ────────────────────────────────────────────\n"
-                << "     (trial) xSD0=" << xSD0
-                << "  ySD0=" << ySD0
-                << "  zSD0=" << zSD0 << '\n'
-                << "     rSD  = " << rSD << " cm\n"
-                << "     ηSD0 = " << etaSD0 << '\n';
-
-      if (!std::isfinite(rSD) || rSD == 0.0)
-      {
-        std::cerr << "\033[31m"
-                  << "  ✘ non-finite rSD after trial transport – NaN\n\033[0m";
-        return std::numeric_limits<float>::quiet_NaN();
-      }
-
-      /* ---------- STEP 3 : scale factor for Δz ------------------------- */
-      const double scale = (rSD * std::cosh(etaSD0)) /
-                           (rC  * std::cosh(etaC));   // ≤1 at |η|→1.1
-      const double dZ = dZ_raw * scale;
-
-      std::cout << "  ── STEP 3 ────────────────────────────────────────────\n"
-                << "     scale = " << scale << '\n'
-                << "     dZ_final = " << dZ << " cm\n";
-
-      /* ---------- STEP 4 : final spline walk --------------------------- */
-      float xSD{}, ySD{}, zSD{};
-      rec->CorrectShowerDepth(ix, iy, eReco,
-                              static_cast<float>(xF),
-                              static_cast<float>(yF),
-                              static_cast<float>(zC + dZ),
-                              xSD, ySD, zSD);
-
-      const double etaSD = std::asinh((zSD - vtxZ) /
-                                      std::hypot(xSD, ySD));
-
-      std::cout << "  ── STEP 4 ────────────────────────────────────────────\n"
-                << "     (final) xSD=" << xSD
-                << "  ySD=" << ySD
-                << "  zSD=" << zSD << '\n'
-                << "     ηSD = " << etaSD << '\n';
-
-      std::cout << "\033[32m"    // green
-                << "[front2ShowerEta] EXIT  →  "
-                << etaSD << "\033[0m\n\n";
-
-      return static_cast<float>(etaSD);
+        // --- finished: global η after depth spline + saw‑tooth ---------------
+        return std::asinh((zSD - vtxZ) /
+                          std::hypot(xSD, ySD));
     }
 
 

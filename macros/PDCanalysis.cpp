@@ -2138,7 +2138,7 @@ constexpr std::array<const char*,5> kLab{
 // ─────────────────────────────────────────────────────────────────────────────
 //  Generic legend helper – one definition for all canvases
 // ─────────────────────────────────────────────────────────────────────────────
-struct LegendPos   { double x1{0.20}, y1{0.67}, x2{0.80}, y2{0.90}; };
+struct LegendPos   { double x1{0.16}, y1{0.67}, x2{0.45}, y2{0.90}; };
 
 inline TLegend*
 addVariantLegend(const std::vector<int>& shown,
@@ -2233,15 +2233,27 @@ SliceResult drawSlice(const std::array<std::vector<TH1F*>,5>& h,
         if(!h[v][iE]) continue;
         auto* hh  = cloneAndNormPdf(h[v][iE], v);
         out.fit[v]= robustGaussianFit(hh);
-        out.yMax  = std::max(out.yMax, hh->GetMaximum());
+        double localMax = 0.0;
+        for (int b = 1; b <= hh->GetNbinsX(); ++b) {
+            const double y = hh->GetBinContent(b) + hh->GetBinError(b);
+            if (y > localMax) localMax = y;
+        }
+        out.yMax = std::max(out.yMax, localMax);
 
         hh->SetTitle(Form("%s  [%g, %g)  GeV", deltaSym,
                           eEdge.first, eEdge.second));
-        hh->GetXaxis()->SetTitle(Form("%s = reco − truth  [rad]", deltaSym));
+        hh->GetXaxis()->SetTitle(Form("%s = reco #minus truth  [rad]", deltaSym));
         hh->GetYaxis()->SetTitle("Probability density");
         hh->GetYaxis()->SetRangeUser(0,1.25*out.yMax);
         hh->Draw( (v==shown.front()) ? "E" : "E SAME" );
     }
+    const double ymax = 1.10 * out.yMax;       // 10 % head‑room
+    for (auto *pr : *cSlice.GetListOfPrimitives()) {
+        if (auto *h = dynamic_cast<TH1*>(pr))
+            h->GetYaxis()->SetRangeUser(0., ymax);
+    }
+    cSlice.Modified();     // force pad to recompute axes
+    cSlice.Update();
 
     addVariantLegend(shown, LegendPos{});
     return out;
@@ -2464,8 +2476,8 @@ void makeResidualPlots(const std::vector<std::pair<double,double>>& eEdges,
      *                        “…/deltaEta”  →  Δη
      * ------------------------------------------------------------------ */
     const bool  isPhi     = (outDir.find("deltaPhi") != std::string::npos);
-    const char* deltaSym  = isPhi ? "Δφ"       : "Δη";
-    const char* fileStem  = isPhi ? "DeltaPhi" : "DeltaEta";
+    const char* deltaSym = isPhi ? "#Delta#phi" : "#Delta#eta";
+    const char* fileStem = isPhi ? "DeltaPhi"   : "DeltaEta";
 
     // ─── containers for summary graphs ─────────────────────────────────
     const int N_E = static_cast<int>(eEdges.size());
@@ -2482,6 +2494,9 @@ void makeResidualPlots(const std::vector<std::pair<double,double>>& eEdges,
 
     for(int iE=0;iE<N_E;++iE)
     {
+        // -------------------------------------------------------------
+        // 1) overlaid slice (unchanged)
+        // -------------------------------------------------------------
         eCtr.push_back(0.5*(eEdges[iE].first+eEdges[iE].second));
 
         const auto res = drawSlice(h,iE,variantsToPlot,eEdges[iE],
@@ -2489,10 +2504,85 @@ void makeResidualPlots(const std::vector<std::pair<double,double>>& eEdges,
         cSlice.SaveAs(Form("%s/%s_%02d.png",sliceDir.c_str(),fileStem,iE));
         cSlice.Clear();
 
+        // collect fit results for the summary graphs
         for(int v:variantsToPlot){
             MU[v].push_back(res.fit[v].mu );  dMU[v].push_back(res.fit[v].dmu);
             SG[v].push_back(res.fit[v].sg );  dSG[v].push_back(res.fit[v].dsg);
         }
+
+        // -------------------------------------------------------------
+        // 2) NEW: individual components in the same colours
+        //      one sub‑folder per energy‑bin
+        // -------------------------------------------------------------
+        const std::string gridDir =
+              Form("%s/%s_%02d_components", sliceDir.c_str(), fileStem, iE);
+        ensureDir(gridDir);
+
+        TCanvas cGrid("cGrid","components_grid",1200,800);
+        cGrid.Divide(3,2,0,0);          // 3 columns × 2 rows
+
+        std::array<FitRes,5> fitVar{};  // remember fit results
+        int padIdx = 1;
+
+        for(int v : variantsToPlot)
+        {
+            if(!h[v][iE]) { ++padIdx; continue; }
+
+            cGrid.cd(padIdx++);
+
+            auto*   hh = cloneAndNormPdf(h[v][iE], v);
+            fitVar[v] = robustGaussianFit(hh);
+
+            // dynamic y‑range that includes the error bars
+            double localMax = 0.0;
+            for(int b=1;b<=hh->GetNbinsX();++b){
+                const double y = hh->GetBinContent(b) + hh->GetBinError(b);
+                if(y>localMax) localMax = y;
+            }
+
+            hh->SetTitle(kLab[v]);
+            hh->GetXaxis()->SetTitle(
+                   Form("%s = reco #minus truth  [rad]", deltaSym));
+            hh->GetYaxis()->SetTitle("Probability density");
+            hh->GetYaxis()->SetRangeUser(0,1.10*localMax);
+            hh->Draw("E");
+
+            // annotate energy‑bin
+            TLatex txt;
+            txt.SetNDC(); txt.SetTextFont(42);
+            txt.SetTextSize(0.035); txt.SetTextAlign(13);
+            txt.SetTextColor(kCol[v]);
+            txt.DrawLatex(0.15,0.86,
+                Form("[%.1f, %.1f) GeV",
+                     eEdges[iE].first, eEdges[iE].second));
+        }
+
+        // ---------- summary pad (bottom‑right) ------------------------
+        cGrid.cd(6);
+        gPad->SetLeftMargin(0.02); gPad->SetRightMargin(0.02);
+        gPad->SetTopMargin(0.02);  gPad->SetBottomMargin(0.02);
+        gPad->Clear();
+
+        TLatex info;
+        info.SetNDC(); info.SetTextFont(42);
+        info.SetTextSize(0.032); info.SetTextAlign(13);
+
+        double yPos = 0.92, dy = 0.14;
+        for(int v : variantsToPlot)
+        {
+            info.SetTextColor(kCol[v]);
+            info.DrawLatex(0.045, yPos,
+                Form("%s :  #mu = %.3g #pm %.3g   #sigma = %.3g #pm %.3g",
+                     kLab[v],
+                     fitVar[v].mu,  fitVar[v].dmu,
+                     fitVar[v].sg,  fitVar[v].dsg));
+            yPos -= dy;
+        }
+
+        cGrid.SaveAs(
+            Form("%s/%s_%02d_grid.png",
+                 gridDir.c_str(), fileStem, iE));
+        cGrid.Close();
     }
 
     // ─── μ & σ summary ────────────────────────────────────────────────
