@@ -1792,6 +1792,11 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  φ_SD=" << r.phi
                 << "  Δφ="   << r.d << '\n';
   }
+ //rec[0] -->Clusterizer tower2global NO CP
+ //rec[1] --> Clusterizer CP with tower2global
+ //rec[2] --> nrg dep b corr with tower2global
+ //rec[3] --> PDC global conv no corr
+ //rec[4] --> PDC global conv w PDC corr
 
 #define HFill(H,V)  do{ if((H)&&std::isfinite(V)) (H)->Fill(V); }while(0)
   HFill(hRAW [iE], rec[0].d);
@@ -2109,6 +2114,12 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                     << rec[i].d << '\n';
       }
 
+    //rec[0] -->Clusterizer tower2global NO CP
+    //rec[1] --> Clusterizer CP with tower2global
+    //rec[2] --> nrg dep b corr with tower2global
+    //rec[3] --> PDC global conv no corr
+    //rec[4] --> PDC global conv w PDC corr
+    
 #define HFill(H,V)  do{ if((H)&&std::isfinite(V)) (H)->Fill(V); }while(0)
   if (fillGlobal)
   {
@@ -2121,11 +2132,11 @@ void PositionDependentCorrection::fillDEtaAllVariants(
   const int iVz = getVzSlice(std::fabs(vtxZ));
   if (iVz >= 0 && iVz < N_VzBins)
   {
-    HFill(h_eta_diff_raw_E_vz     [iE][iVz], rec[0].d);
+    HFill(h_eta_diff_cpRaw_E_vz   [iE][iVz], rec[0].d);
+    HFill(h_eta_diff_cpCorr_E_vz  [iE][iVz], rec[1].d);
+    HFill(h_eta_diff_cpBcorr_E_vz [iE][iVz], rec[2].d);
+    HFill(h_eta_diff_raw_E_vz     [iE][iVz], rec[3].d);
     HFill(h_eta_diff_corrected_E_vz[iE][iVz], rec[4].d);
-    HFill(h_eta_diff_cpRaw_E_vz   [iE][iVz], rec[1].d - rec[0].d);
-    HFill(h_eta_diff_cpCorr_E_vz  [iE][iVz], rec[1].d - rec[4].d);
-    HFill(h_eta_diff_cpBcorr_E_vz [iE][iVz], rec[1].d - rec[2].d);
   }
 #undef  HFill
 
@@ -2582,10 +2593,11 @@ void PositionDependentCorrection::finalClusterLoop(
 
 
     constexpr double kFillW = 1.0;      // weight per fill
-    h3_cluster_block_cord_E->Fill(blkCoord.first,   // η-coord   (x-axis)
-                                      blkCoord.second,  // φ-coord   (y-axis)
-                                      clusE,             // energy    (z-axis)
-                                      kFillW);
+    if (fillGlobal)                       // store only when |z_vtx| ≤ 10 cm
+          h3_cluster_block_cord_E->Fill(blkCoord.first,
+                                        blkCoord.second,
+                                        clusE,
+                                        kFillW);
 
     if (Verbosity() > 0)
     {
@@ -2621,7 +2633,9 @@ void PositionDependentCorrection::finalClusterLoop(
       if (bEta > 1e-9f) corrEta = doEtaBlockCorr(rawEta, bEta);
     }
 
-    h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
+    if (fillGlobal)                       // store only when |z_vtx| ≤ 10 cm
+          h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
+
 
     if (Verbosity() > 3)
     {
@@ -2703,18 +2717,19 @@ void PositionDependentCorrection::finalClusterLoop(
                        blkCoord, blkPhiCoarse,
                        towerPhis, towerEs);
 
-        /* ---------- NEW: five‑flavour Δφ / Δη bookkeeping ---------- */
-        fillDPhiAllVariants(
-            clus1,
-            photon1,                          // reco photon
-            trPhoton,                         // truth photon
-            blkCoord,                         // (ηloc , φloc)
-            blkPhiCoarse,                     // coarse φ index
-            vtx_z,                            // vertex z (only wrapped through)
-            h_phi_diff_raw_E,                 // “raw” per‑slice hists  (Δφ(CLUS‑RAW))
-            h_phi_diff_cpRaw_E                // “CP”  per‑slice hists  (Δφ(CLUS‑CP))
-        );
-
+        if (fillGlobal)          // apply the  |z_vtx| ≤ 10 cm  cut
+        {
+            fillDPhiAllVariants(
+                clus1,
+                photon1,                       // reco photon
+                trPhoton,                      // truth photon
+                blkCoord,                      // (ηloc , φloc)
+                blkPhiCoarse,                  // coarse φ index
+                vtx_z,                         // vertex‑z (only wrapped through)
+                h_phi_diff_raw_E,              // Δφ(CLUS‑RAW)  → truth
+                h_phi_diff_cpRaw_E             // Δφ(CLUS‑CP)   → truth
+            );
+        }
         fillDEtaAllVariants(
             clus1,
             photon1,
@@ -2762,24 +2777,25 @@ void PositionDependentCorrection::finalClusterLoop(
       std::cout << "[DEBUG] => Starting INNER loop for cluster pairs.\n";
     }
 
-    processClusterPairs(clusterContainer,
-                            cIt1,
-                            vertex,
-                            photon1,
-                            clusE,
-                            lt_eta, lt_phi,
-                            blkEtaCoarse,
-                            blkPhiCoarse,
-                            blkCoord,
-                            maxAlpha,
-                            ptMaxCut,
-                            pt2ClusCut,
-                            pi0ptcut,
-                            weight,
-                            match1,
-                            ph1_trEtaPhi,
-                            truth_meson_photons,
-                            m_isSimulation);
+    if (fillGlobal)
+        processClusterPairs(clusterContainer,
+                                cIt1,
+                                vertex,
+                                photon1,
+                                clusE,
+                                lt_eta, lt_phi,
+                                blkEtaCoarse,
+                                blkPhiCoarse,
+                                blkCoord,
+                                maxAlpha,
+                                ptMaxCut,
+                                pt2ClusCut,
+                                pi0ptcut,
+                                weight,
+                                match1,
+                                ph1_trEtaPhi,
+                                truth_meson_photons,
+                                m_isSimulation);
 
 
 

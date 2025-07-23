@@ -2492,6 +2492,19 @@ void makeResidualPlots(const std::vector<std::pair<double,double>>& eEdges,
     const std::string sliceDir = outDir + "/" + deltaSym + "_slices";
     ensureDir(sliceDir);
 
+    /* optional z‑vertex label, e.g.  "|z_{vtx}| ∈ [0, 5) cm" */
+    std::string vtxLabel;
+    {
+        const std::string probe = "/vertexDependent/vz";
+        auto pos = outDir.find(probe);
+        if(pos != std::string::npos){
+            std::string tag = outDir.substr(pos + probe.size());  // "0_5"
+            float vzLo = 0.f, vzHi = 0.f;
+            if(std::sscanf(tag.c_str(),"%f_%f",&vzLo,&vzHi) == 2){
+                vtxLabel = Form("|z_{vtx}| #in [%.0f, %.0f) cm", vzLo, vzHi);
+            }
+        }
+    }
     for(int iE=0;iE<N_E;++iE)
     {
         // -------------------------------------------------------------
@@ -2501,6 +2514,15 @@ void makeResidualPlots(const std::vector<std::pair<double,double>>& eEdges,
 
         const auto res = drawSlice(h,iE,variantsToPlot,eEdges[iE],
                                    cSlice,deltaSym);
+
+        if(!vtxLabel.empty()){
+            cSlice.cd();
+            TLatex tz;
+            tz.SetNDC(); tz.SetTextFont(42); tz.SetTextSize(0.028);
+            tz.SetTextAlign(11);               // left‑top corner
+            tz.DrawLatex(0.19,0.9, vtxLabel.c_str());
+        }
+
         cSlice.SaveAs(Form("%s/%s_%02d.png",sliceDir.c_str(),fileStem,iE));
         cSlice.Clear();
 
@@ -2555,6 +2577,8 @@ void makeResidualPlots(const std::vector<std::pair<double,double>>& eEdges,
             txt.DrawLatex(0.15,0.86,
                 Form("[%.1f, %.1f) GeV",
                      eEdges[iE].first, eEdges[iE].second));
+            if(!vtxLabel.empty())
+                txt.DrawLatex(0.15,0.78, vtxLabel.c_str());
         }
 
         // ---------- summary pad (bottom‑right) ------------------------
