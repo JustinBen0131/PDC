@@ -2726,8 +2726,8 @@ void PositionDependentCorrection::finalClusterLoop(
                 blkCoord,                      // (ηloc , φloc)
                 blkPhiCoarse,                  // coarse φ index
                 vtx_z,                         // vertex‑z (only wrapped through)
-                h_phi_diff_raw_E,              // Δφ(CLUS‑RAW)  → truth
-                h_phi_diff_cpCorr_E             // Δφ(CLUS‑CP)   → truth
+                h_phi_diff_cpRaw_E,            // Δφ(CLUS‑RAW)  → truth
+                h_phi_diff_cpCorr_E            // Δφ(CLUS‑CP)   → truth
             );
         }
         
@@ -2739,8 +2739,8 @@ void PositionDependentCorrection::finalClusterLoop(
             blkEtaCoarse,
             blkPhiCoarse,
             vtx_z,
-            h_eta_diff_raw_E,
-            h_eta_diff_cpCorr_E,
+            h_eta_diff_cpRaw_E,            // Δη(CLUS‑RAW)  → truth
+            h_eta_diff_cpCorr_E,           // Δη(CLUS‑CP)   → truth
             fillGlobal
         );
 
