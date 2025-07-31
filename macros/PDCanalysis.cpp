@@ -2209,6 +2209,8 @@ inline TH1F* cloneAndNormPdf(const TH1F* src, int v)
     return h;
 }
 
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  One‑slice overlay
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2645,22 +2647,468 @@ void makeResidualPlots(const std::vector<std::pair<double,double>>& eEdges,
 } // end anonymous namespace
 
 // ============================================================================
-//  PUBLIC WRAPPERS  (φ and η)
+//  PUBLIC WRAPPERS  (φ, η  and combined φ + η)  ––– VERBOSE / DEBUG EDITION
 // ============================================================================
 
-/** φ residuals (global only) */
+// ————————————————————————————————————————————————————————————————
+//  Helpers & state needed for the combined plots
+// ————————————————————————————————————————————————————————————————
+namespace
+{
+    //-------------------------------------------------------------------
+    //  Utility: coloured banner to make log‑messages stand out
+    //-------------------------------------------------------------------
+    inline void dbgBanner(const std::string& head,
+                          const std::string& msg,
+                          char fill = '=')
+    {
+        const std::size_t W = 78;
+        std::string line(W, fill);
+        std::cout << "\n" << line << "\n"
+                  << "[" << head << "] " << msg << "\n"
+                  << line << "\n";
+    }
+
+    //-------------------------------------------------------------------
+    //  Global scratch storage – filled by MakeDeltaPhiPlots(…)
+    //-------------------------------------------------------------------
+    static std::vector<std::pair<double,double>>     gEdgePhi;
+    static std::array<std::vector<TH1F*>,5>          gHPhiGlobal{};
+    static EBinningMode                              gBinModePhi  = EBinningMode::kRange;
+    static std::vector<int>                          gVariantsPhi = {0,1,2,3,4};
+
+    //-------------------------------------------------------------------
+    //  Sanity helper: check that vectors are well‑formed
+    //-------------------------------------------------------------------
+    bool checkViewIntegrity(const std::array<std::vector<TH1F*>,5>& view,
+                            const char* tag)
+    {
+        bool ok = true;
+        for (int v = 0; v < 5; ++v)
+        {
+            for (std::size_t i = 0; i < view[v].size(); ++i)
+            {
+                if (!view[v][i])
+                {
+                    std::cerr << "[WARN] <" << tag << ">  v=" << v
+                              << "  iE=" << i << "  → nullptr histogram\n";
+                    ok = false;
+                }
+            }
+        }
+        return ok;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    //  Produce Δη + Δφ overlays
+    //    • one PNG per energy slice   (unchanged)
+    //    • one 2×4 “table” per variant (NEW)
+    // ─────────────────────────────────────────────────────────────────────────────
+    void makeCombinedDeltaEtaPhiPlots(
+            const std::vector<std::pair<double,double>>& eEdges,
+            EBinningMode                                 /*binMode*/,
+            const std::array<std::vector<TH1F*>,5>&      hEta,
+            const std::array<std::vector<TH1F*>,5>&      hPhi,
+            const char*                                  outDir,
+            const std::vector<int>&                      variantsToPlot)
+    {
+        dbgBanner("makeCombinedDeltaEtaPhiPlots",
+                  Form("Entering – eEdges=%zu  outDir=%s", eEdges.size(), outDir));
+
+        if (eEdges.empty()) {
+            std::cerr << "[ERROR] eEdges vector is empty – nothing to plot.\n";
+            return;
+        }
+
+        checkViewIntegrity(hEta,"η‑view");
+        checkViewIntegrity(hPhi,"φ‑view");
+        ensureDir(outDir);
+
+        const char* fileStem = "DeltaEtaPhi";
+
+        // ─────────────────────────────────────────────────────────────────
+        //  PART 1 – per‑energy‑slice grids  (same as before)
+        // ─────────────────────────────────────────────────────────────────
+        for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+        {
+            TCanvas cGrid(Form("cGrid_%zu", iE), "combined_eta_phi", 1200, 800);
+            cGrid.Divide(3, 2, 0, 0);                      // 3 × 2 layout
+
+            int padIdx = 1;
+            for (int v : variantsToPlot)
+            {
+                if (!hEta[v][iE] || !hPhi[v][iE]) { ++padIdx; continue; }
+                cGrid.cd(padIdx++);
+
+                // ------------------------------------------------------------------
+                // 1) draw the two PDFs
+                // ------------------------------------------------------------------
+                auto* hEtaPDF = cloneAndNormPdf(hEta[v][iE], v);
+                auto* hPhiPDF = cloneAndNormPdf(hPhi[v][iE], v);
+                hPhiPDF->SetMarkerStyle(kMk[v] + 4);      // open symbol for Δφ
+                hPhiPDF->SetLineStyle(2);                 // dashed line for Δφ
+
+                const double yMax = 1.10 *
+                    std::max(hEtaPDF->GetMaximum(), hPhiPDF->GetMaximum());
+
+                hEtaPDF->SetTitle("");                    // we handle labels manually
+                hEtaPDF->GetXaxis()->SetTitle("#Delta  [rad]");
+                hEtaPDF->GetYaxis()->SetTitle("Probability density");
+                hEtaPDF->GetYaxis()->SetRangeUser(0., yMax);
+
+                hEtaPDF->Draw("E");                       // first:  Δη
+                hPhiPDF->Draw("E SAME");                  // then:   Δφ
+
+                // ------------------------------------------------------------------
+                // 2) statistical numbers (robust Gaussian fit)
+                // ------------------------------------------------------------------
+                const FitRes fEta = robustGaussianFit(hEta[v][iE]);
+                const FitRes fPhi = robustGaussianFit(hPhi[v][iE]);
+
+                // ------------------------------------------------------------------
+                // 3) legend  (top‑left corner)
+                // ------------------------------------------------------------------
+                TLegend leg(0.12, 0.78, 0.40, 0.92);      // x1,y1,x2,y2  (NDC)
+                leg.SetBorderSize(0);  leg.SetFillStyle(0);  leg.SetTextSize(0.03);
+                leg.AddEntry(hEtaPDF, "#Delta#eta", "lep");
+                leg.AddEntry(hPhiPDF, "#Delta#phi", "lep");
+                leg.Draw();
+
+                // ------------------------------------------------------------------
+                // 4) Gaussian μ ± σ  – displayed just below the legend
+                // ------------------------------------------------------------------
+                TLatex stats;  stats.SetNDC();  stats.SetTextSize(0.025);  stats.SetTextAlign(11);
+                stats.DrawLatex(0.12, 0.70,
+                    Form("#Delta#eta : %.2g #pm %.2g", fEta.mu, fEta.sg));
+                stats.DrawLatex(0.12, 0.63,
+                    Form("#Delta#phi : %.2g #pm %.2g", fPhi.mu, fPhi.sg));
+
+                // ------------------------------------------------------------------
+                // 5) energy‑range label  (top‑right corner)
+                // ------------------------------------------------------------------
+                TLatex eLab;  eLab.SetNDC();  eLab.SetTextSize(0.03);  eLab.SetTextAlign(33);
+                eLab.DrawLatex(0.88, 0.92,
+                    Form("[%.0f, %.0f)  GeV",
+                         eEdges[iE].first, eEdges[iE].second));
+            }
+
+            cGrid.cd(6);  gPad->Clear();
+            cGrid.SaveAs(Form("%s/%s_%02zu_grid.png", outDir, fileStem, iE));
+            cGrid.Close();
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        //  PART 2 – per‑variant 2×4 tables  (NEW)
+        // ─────────────────────────────────────────────────────────────────
+        const int nCol = 4, nRow = 2, maxPads = nCol * nRow;
+
+        for (int v : variantsToPlot)
+        {
+            // create folder “…/combinedDeltaEtaPhi/<variant>/”
+            std::string vName  = kLab[v];                  // human‑readable label
+            for (char& c : vName)                          // sanitise for FS path
+                if (!std::isalnum(static_cast<unsigned char>(c))) c = '_';
+
+            std::string vDir = std::string(outDir) + "/" + vName;
+            ensureDir(vDir);
+
+            TCanvas cTab(Form("cTab_%d", v), kLab[v], 1600, 900);
+            cTab.SetTopMargin(0.12);           // gives the title room to breathe
+            cTab.Divide(nCol, nRow, 0, 0);
+
+            int pad = 1;
+            for (std::size_t iE = 0; iE < eEdges.size() && pad <= maxPads; ++iE)
+            {
+                if (!hEta[v][iE] || !hPhi[v][iE]) continue;
+
+                cTab.cd(pad++);                      // go to next pad
+
+                // ────────────────────────────────────────────────
+                // 1) prepare & draw the PDFs
+                // ────────────────────────────────────────────────
+                auto* hEtaPDF = cloneAndNormPdf(hEta[v][iE], v);
+                auto* hPhiPDF = cloneAndNormPdf(hPhi[v][iE], v);
+                hPhiPDF->SetMarkerStyle(kMk[v] + 4);       // open symbol for Δφ
+                hPhiPDF->SetLineStyle(2);                  // dashed line for Δφ
+
+                const double yMax = 1.10 *
+                    std::max(hEtaPDF->GetMaximum(), hPhiPDF->GetMaximum());
+
+                hEtaPDF->SetTitle("");                     // we write labels manually
+                // ─── X axis ──────────────────────────────────────────────────────────
+                hEtaPDF->GetXaxis()->SetTitle("#Delta  [rad]");
+                TAxis* axX = hEtaPDF->GetXaxis();
+                axX->SetLabelSize(0.03);      // smaller tick‑label font
+                axX->SetTitleSize(0.035);     // keep title readable
+                axX->SetTitleOffset(1.2);     // lift title a bit
+                axX->SetNdivisions(505);      // 5 major ticks, no minor → avoids clutter
+
+                // ─── Y axis ──────────────────────────────────────────────────────────
+                hEtaPDF->GetYaxis()->SetTitle("Probability density");
+                TAxis* axY = hEtaPDF->GetYaxis();
+                axY->SetLabelSize(0.03);      // match Y‑axis label size to X
+                axY->SetTitleSize(0.035);
+                axY->SetTitleOffset(1.5);
+
+                hEtaPDF->GetYaxis()->SetRangeUser(0., yMax);
+
+                hEtaPDF->Draw("E");                        // first:  Δη
+                hPhiPDF->Draw("E SAME");                   // then:   Δφ
+
+                // ────────────────────────────────────────────────
+                // 2) statistics (robust Gaussian fit)
+                // ────────────────────────────────────────────────
+                const FitRes fEta = robustGaussianFit(hEta[v][iE]);
+                const FitRes fPhi = robustGaussianFit(hPhi[v][iE]);
+
+                // ────────────────────────────────────────────────
+                // 3) legend   (upper‑left) – x‑position adapts to pad margin
+                //     • solid symbol  →  Δη
+                //     • open  symbol  →  Δφ
+                // ────────────────────────────────────────────────
+                const double xLeft   = gPad->GetLeftMargin() + 0.04;   // stay clear of Y‑axis
+                const double legW    = 0.28;                           // fixed legend width
+                const double yTop    = 0.92;
+                const double yBottom = 0.78;
+
+                auto* leg = new TLegend(xLeft, yBottom, xLeft + legW, yTop);
+                leg->SetBorderSize(0);
+                leg->SetFillStyle(0);
+                leg->SetTextSize(0.03);
+
+                /* create dummy markers that carry the exact style we used */
+                auto* mEta = new TMarker(0, 0, kMk[v]);       // solid symbol = Δη
+                mEta->SetMarkerColor(kCol[v]);
+                mEta->SetMarkerSize(1.2);
+
+                auto* mPhi = new TMarker(0, 0, kMk[v] + 4);   // open symbol  = Δφ
+                mPhi->SetMarkerColor(kCol[v]);
+                mPhi->SetMarkerSize(1.2);
+
+                leg->AddEntry(mEta, "#Delta#eta", "p");
+                leg->AddEntry(mPhi, "#Delta#phi", "p");
+                leg->Draw();      // the pad now owns the legend – it will stay until SaveAs
+
+
+                // ────────────────────────────────────────────────
+                // 4) μ ± σ numbers just below the legend – same x anchor
+                // ────────────────────────────────────────────────
+                TLatex stats;  stats.SetNDC();  stats.SetTextSize(0.038);  stats.SetTextAlign(11);
+                stats.DrawLatex(xLeft, 0.70,
+                    Form("#Delta#eta : %.2g #pm %.2g", fEta.mu, fEta.sg));
+                stats.DrawLatex(xLeft, 0.63,
+                    Form("#Delta#phi : %.2g #pm %.2g", fPhi.mu, fPhi.sg));
+
+                // ────────────────────────────────────────────────
+                // 5) energy‑range label   (upper‑right)
+                // ────────────────────────────────────────────────
+                TLatex eLab;  eLab.SetNDC();  eLab.SetTextSize(0.04);  eLab.SetTextAlign(33);
+                eLab.DrawLatex(0.88, 0.92,
+                    Form("[%.0f, %.0f) GeV",
+                         eEdges[iE].first, eEdges[iE].second));
+
+            }
+
+            // big title on the canvas
+            cTab.cd(0);
+            TLatex head; head.SetNDC(); head.SetTextSize(0.042);
+            head.SetTextAlign(22);
+            head.DrawLatex(0.5,0.97, kLab[v]);
+
+            cTab.SaveAs(Form("%s/%s_%s.png",
+                             vDir.c_str(), fileStem, vName.c_str()));
+            cTab.Close();
+        }
+
+        std::cout << "[makeCombinedDeltaEtaPhiPlots] FINISHED – output dir: "
+                  << outDir << '\n';
+    }
+
+} // namespace (anonymous, verbose)
+
+// ————————————————————————————————————————————————————————————————
+//  φ residuals (global only) – now verbose
+// ————————————————————————————————————————————————————————————————
 inline void MakeDeltaPhiPlots(const std::vector<std::pair<double,double>>& eEdges,
                               EBinningMode                                binMode,
                               const std::array<std::vector<TH1F*>,5>&    hPhi,
                               const char*                                 outDir,
                               const std::vector<int>& variantsToPlot = {0,1,2,3,4})
 {
-  const std::string dir = std::string(outDir)+"/deltaPhi";
-  ensureDir(dir);
-  makeResidualPlots(eEdges,binMode,hPhi,dir.c_str(),variantsToPlot);
+    dbgBanner("MakeDeltaPhiPlots","Entering");
+
+    std::cout << "  * energy slices  : " << eEdges.size() << '\n'
+              << "  * variants       : ";
+    for (int v : variantsToPlot) std::cout << v << ' ';
+    std::cout << '\n';
+
+    // Cache global φ information for the later η‑call
+    gEdgePhi     = eEdges;
+    gHPhiGlobal  = hPhi;
+    gBinModePhi  = binMode;
+    gVariantsPhi = variantsToPlot;
+
+    const std::string dir = std::string(outDir)+"/deltaPhi";
+    ensureDir(dir);
+
+    makeResidualPlots(eEdges, binMode, hPhi, dir.c_str(), variantsToPlot);
+
+    dbgBanner("MakeDeltaPhiPlots","Done");
 }
 
-/** η residuals – global + |z_vtx| resolved */
+// ─────────────────────────────────────────────────────────────────────────────
+//   per‑variant 2×4 tables that overlay the six |z_vtx| Δη slices
+//      • one sub‑folder  “…/deltaEta/vertexDependent/<variant>/”
+//      • file name       “DeltaEta_VtxSlices_<variant>.png”
+// ─────────────────────────────────────────────────────────────────────────────
+void makeEtaVertexTables(const std::vector<std::pair<double,double>>&               eEdges,
+                         const std::array<std::vector<std::vector<TH1F*>>,5>&       hEtaVz,
+                         const char*                                                outDir,     // “…/deltaEta/vertexDependent”
+                         const std::vector<int>&                                    variantsToPlot = {0,1,2,3,4})
+{
+    /* canvas geometry */
+    constexpr int nCol = 4, nRow = 2, maxPads = nCol * nRow;
+
+    /* vertex‑bin edges */
+    static constexpr std::array<float,7> vzEdge = {0,5,10,15,20,25,30};
+    constexpr int N_Vz = vzEdge.size() - 1;
+
+    /* colours / markers for each vertex slice */
+    static constexpr std::array<Color_t,6> kVzCol =
+        { kRed+1, kOrange+1, kYellow+2, kGreen+2, kAzure+2, kViolet+1 };
+    static constexpr std::array<Style_t,6> kVzMk  = { 20, 21, 22, 23, 29, 33 };
+
+    /* iterate over reconstruction variants */
+    for (int v : variantsToPlot)
+    {
+        /* sanitise variant name for file‑system usage */
+        std::string vName = kLab[v];
+        for (char& c : vName)
+            if (!std::isalnum(static_cast<unsigned char>(c))) c = '_';
+
+        const std::string vDir = std::string(outDir) + "/" + vName;
+        ensureDir(vDir);
+
+        TCanvas cTab(Form("cEtaVzTab_%d", v), kLab[v], 1600, 900);
+        cTab.SetTopMargin(0.12);                 // breathing room for title
+        cTab.Divide(nCol, nRow, 0, 0);
+
+        int pad = 1;
+        for (std::size_t iE = 0; iE < eEdges.size() && pad <= maxPads; ++iE)
+        {
+            /* skip if no vertex histograms exist for this energy bin */
+            bool haveSlice = false;
+            for (int iVz = 0; iVz < N_Vz && !haveSlice; ++iVz)
+                if (iVz < (int)hEtaVz[v][iE].size() && hEtaVz[v][iE][iVz])
+                    haveSlice = true;
+            if (!haveSlice) continue;
+
+            cTab.cd(pad++);
+
+            /* containers for later summary table */
+            std::array<FitRes,6> fitInfo{};   // one per vz slice
+            std::array<bool,   6> sliceUsed{}; sliceUsed.fill(false);
+
+            double yMax = 0.0;
+            TLegend* leg = new TLegend(0.14, 0.72, 0.46, 0.92);
+            leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.026);
+
+            /* overlay all vertex slices for this energy bin */
+            for (int iVz = 0; iVz < N_Vz; ++iVz)
+            {
+                if (iVz >= (int)hEtaVz[v][iE].size()) continue;
+                TH1F* src = hEtaVz[v][iE][iVz];
+                if (!src || src->Integral() == 0) continue;
+
+                auto* h = cloneAndNormPdf(src, v);       // colour replaced below
+                h->SetMarkerColor(kVzCol[iVz]);
+                h->SetLineColor  (kVzCol[iVz]);
+                h->SetMarkerStyle(kVzMk[iVz]);
+                h->SetMarkerSize(0.9);
+
+                yMax = std::max(yMax, h->GetMaximum() * 1.15);
+
+                if (leg->GetNRows() == 0)
+                {
+                    h->SetTitle(Form("Δη  [%.0f, %.0f) GeV",
+                                     eEdges[iE].first, eEdges[iE].second));
+                    h->GetXaxis()->SetTitle("#Delta#eta  [rad]");
+                    h->GetYaxis()->SetTitle("Probability density");
+                    h->Draw("E");
+                }
+                else
+                    h->Draw("E SAME");
+
+                /* robust Gaussian fit */
+                const FitRes fr = robustGaussianFit(src);
+                fitInfo[iVz]   = fr;
+                sliceUsed[iVz] = true;
+
+                leg->AddEntry(h,
+                    Form("[%.0f, %.0f) cm", vzEdge[iVz], vzEdge[iVz+1]),
+                    "lep");
+            }
+
+            /* fix y‑range on all primitives */
+            gPad->Update();
+            for (auto* obj : *gPad->GetListOfPrimitives())
+                if (auto* h = dynamic_cast<TH1*>(obj))
+                    h->GetYaxis()->SetRangeUser(0., yMax);
+
+            leg->Draw();
+
+            /* energy‑range label (top‑right) */
+            TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.035); eLab.SetTextAlign(33);
+            eLab.DrawLatex(0.88, 0.92,
+                Form("[%.0f, %.0f) GeV", eEdges[iE].first, eEdges[iE].second));
+
+            /* μ | σ | z table (bottom‑right) */
+            TLatex tbl; tbl.SetNDC(); tbl.SetTextSize(0.028); tbl.SetTextAlign(13);
+
+            const double xCol1 = 0.62;   // μ column
+            const double xCol2 = 0.72;   // σ column
+            const double xCol3 = 0.83;   // z‑range column
+            double yRow   = 0.38;
+
+            tbl.DrawLatex(xCol1, yRow, "#mu");
+            tbl.DrawLatex(xCol2, yRow, "#sigma");
+            tbl.DrawLatex(xCol3, yRow, "z [cm]");
+            yRow -= 0.05;
+
+            for (int iVz = 0; iVz < N_Vz; ++iVz)
+            {
+                if (!sliceUsed[iVz]) continue;
+
+                tbl.SetTextColor(kVzCol[iVz]);
+                tbl.DrawLatex(xCol1, yRow,
+                              Form("%.2g", fitInfo[iVz].mu));
+                tbl.DrawLatex(xCol2, yRow,
+                              Form("%.2g", fitInfo[iVz].sg));
+                tbl.DrawLatex(xCol3, yRow,
+                              Form("%.0f–%.0f", vzEdge[iVz], vzEdge[iVz+1]));
+                yRow -= 0.05;
+            }
+            tbl.SetTextColor(kBlack);   // restore colour for safety
+        }
+
+        /* canvas‑level title */
+        cTab.cd(0);
+        TLatex head; head.SetNDC(); head.SetTextAlign(22);
+        head.SetTextSize(0.045);
+        head.DrawLatex(0.5, 0.975, kLab[v]);
+
+        /* write PNG */
+        cTab.SaveAs(Form("%s/DeltaEta_VtxSlices_%s.png",
+                         vDir.c_str(), vName.c_str()));
+        cTab.Close();
+    }
+}
+
+
+
+// ————————————————————————————————————————————————————————————————
+//  η residuals – global + |z_vtx| resolved, plus φ + η overlay – verbose
+// ————————————————————————————————————————————————————————————————
 inline void MakeDeltaEtaPlots(
         const std::vector<std::pair<double,double>>&               eEdges,
         EBinningMode                                               binMode,
@@ -2669,37 +3117,86 @@ inline void MakeDeltaEtaPlots(
         const char*                                                outDir,
         const std::vector<int>& variantsToPlot = {0,1,2,3,4})
 {
-  //---------------------------------------------------------------------------
-  // 1) global mix of all vertices
-  //---------------------------------------------------------------------------
-  const std::string etaDir = std::string(outDir)+"/deltaEta";
-  ensureDir(etaDir);
-  makeResidualPlots(eEdges, binMode, hEtaGlobal, etaDir.c_str(),
-                      variantsToPlot);
+    dbgBanner("MakeDeltaEtaPlots","Entering");
 
+    //-------------------------------------------------------------------
+    // 1) global Δη
+    //-------------------------------------------------------------------
+    const std::string etaDir = std::string(outDir)+"/deltaEta";
+    ensureDir(etaDir);
 
-  //---------------------------------------------------------------------------
-  // 2) vertex‑dependent slices
-  //---------------------------------------------------------------------------
-  static constexpr std::array<float,7> vzEdge = { 0,5,10,15,20,25,30 };
-  constexpr int N_Vz = vzEdge.size()-1;
+    std::cout << "[Info] Calling makeResidualPlots for global Δη\n";
+    makeResidualPlots(eEdges, binMode, hEtaGlobal,
+                      etaDir.c_str(), variantsToPlot);
 
-  for(int iVz=0;iVz<N_Vz;++iVz)
-  {
-    // gather 5×N_E view for this vz‑bin
-    std::array<std::vector<TH1F*>,5> view{};
-    for(int v=0;v<5;++v){
-      view[v].resize(eEdges.size(),nullptr);
-      for(size_t iE=0;iE<eEdges.size();++iE)
-        if(iVz<(int)hEtaVz[v][iE].size()) view[v][iE]=hEtaVz[v][iE][iVz];
+    //-------------------------------------------------------------------
+    // 2) φ + η combined
+    //-------------------------------------------------------------------
+    if (!gHPhiGlobal.empty())
+    {
+        std::cout << "[Info] gHPhiGlobal is populated – building combined plots.\n";
+
+        // quick integrity check
+        if (gEdgePhi.size() != eEdges.size())
+        {
+            std::cerr << "[WARN] Number of φ energy slices ("
+                      << gEdgePhi.size()
+                      << ") ≠ η energy slices (" << eEdges.size()
+                      << ").  Proceeding with min size.\n";
+        }
+
+        const std::string comboDir =
+            std::string(outDir)+"/combinedDeltaEtaPhi";
+
+        makeCombinedDeltaEtaPhiPlots(eEdges, binMode,
+                                     hEtaGlobal, gHPhiGlobal,
+                                     comboDir.c_str(), variantsToPlot);
+    }
+    else
+    {
+        std::cerr << "[WARN] gHPhiGlobal is empty – combined φ+η plots skipped.\n";
     }
 
-    const std::string tag = Form("vz%.0f_%.0f",vzEdge[iVz],vzEdge[iVz+1]);
-    const std::string dir = etaDir+"/vertexDependent/"+tag;
-    ensureDir(dir);
+    //-------------------------------------------------------------------
+    // 3) vertex‑dependent Δη slices
+    //-------------------------------------------------------------------
+    static constexpr std::array<float,7> vzEdge = {0,5,10,15,20,25,30};
+    constexpr int N_Vz = vzEdge.size() - 1;
 
-    makeResidualPlots(eEdges,binMode,view,dir.c_str(),variantsToPlot);
-  }
+    std::cout << "[Info] Producing vertex‑dependent Δη plots (N_Vz="
+              << N_Vz << ")\n";
+
+    for (int iVz = 0; iVz < N_Vz; ++iVz)
+    {
+        std::array<std::vector<TH1F*>,5> view{};   // [variant][iE]
+
+        for (int v = 0; v < 5; ++v)
+        {
+            view[v].resize(eEdges.size(), nullptr);
+            for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+            {
+                if (iVz < (int)hEtaVz[v][iE].size())
+                    view[v][iE] = hEtaVz[v][iE][iVz];
+            }
+        }
+
+        const std::string tag =
+            Form("vz%.0f_%.0f", vzEdge[iVz], vzEdge[iVz+1]);
+        const std::string dir = etaDir + "/vertexDependent/" + tag;
+        ensureDir(dir);
+
+        std::cout << "  • Vz‑bin " << tag
+                  << "  → calling makeResidualPlots\n";
+
+        makeResidualPlots(eEdges, binMode, view,
+                          dir.c_str(), variantsToPlot);
+    }
+
+    // ─── summary tables: Δη over all |z_vtx| slices, per variant ───
+    makeEtaVertexTables(eEdges, hEtaVz,
+                        (etaDir + "/vertexDependent").c_str(),
+                        variantsToPlot);
+    dbgBanner("MakeDeltaEtaPlots","Done");
 }
 
 
