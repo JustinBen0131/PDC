@@ -1654,10 +1654,12 @@ void PositionDependentCorrection::fillDPhiAllVariants(
   const float phiTruth = TVector2::Phi_mpi_pi(truthPhoton.Phi());
 
   //---------------- (1) CLUS‑RAW -------------------------------------
+  m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_RAW);
   rec[0] = {"CLUS-RAW", xCG,
-            cg2GlobalPhi(m_bemcRec, eReco, xCG, yCG)};
+              cg2GlobalPhi(m_bemcRec, eReco, xCG, yCG)};
 
   //---------------- (2) CLUS‑CP  -------------------------------------
+  m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP);
   float xCP = xCG, yCP = yCG;
   m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
   rec[1] = {"CLUS-CP", xCP,
@@ -1677,8 +1679,9 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       while (locB < -0.5F)     locB += nX;
       while (locB >= nX-.5F)   locB -= nX;
     }
+    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_BCORR);
     rec[2] = {"CLUS-BCORR", locB,
-        cg2GlobalPhi(m_bemcRec, eReco,  locB, yCG)};
+                cg2GlobalPhi(m_bemcRec, eReco, locB, yCG)};
   }
 
   //---------------- (4) PDC‑RAW  -------------------------------------
@@ -1712,6 +1715,8 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       {
         const double rFrontBlk = geomBlk->get_center_radius();
         const double zFrontBlk = geomBlk->get_center_z();
+          
+        m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::PDC_RAW);
 
         const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
                                             rFrontBlk , zFrontBlk ,
@@ -1766,6 +1771,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
             const double rFrontBlk = geomBlk->get_center_radius();
             const double zFrontBlk = geomBlk->get_center_z();
 
+            m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::PDC_CORR);
             const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
                                                 rFrontBlk , zFrontBlk ,
                                                 phiFront,

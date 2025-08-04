@@ -1,0 +1,72 @@
+
+>>> ENERGY SLICE 0   [2,4) GeV
+  v=0  η entries=13534  φ entries=13534
+  v=1  η entries=13534  φ entries=13534
+  v=2  η entries=13534  φ entries=13534
+  v=3  η entries=13534  φ entries=13534
+  v=4  η entries=13534  φ entries=13534
+
+>>> ENERGY SLICE 1   [4,6) GeV
+  v=0  η entries=14077  φ entries=14077
+  v=1  η entries=14077  φ entries=14077
+  v=2  η entries=14077  φ entries=14077
+  v=3  η entries=14077  φ entries=14077
+  v=4  η entries=14077  φ entries=14077
+
+>>> ENERGY SLICE 2   [6,8) GeV
+  v=0  η entries=15056  φ entries=15056
+  v=1  η entries=15056  φ entries=15056
+  v=2  η entries=15056  φ entries=15056
+  v=3  η entries=15056  φ entries=15056
+  v=4  η entries=15056  φ entries=15056
+
+>>> ENERGY SLICE 3   [8,10) GeV
+  v=0  η entries=15569  φ entries=15569
+  v=1  η entries=15569  φ entries=15569
+  v=2  η entries=15569  φ entries=15569
+  v=3  η entries=15569  φ entries=15569
+  v=4  η entries=15569  φ entries=15569
+
+>>> ENERGY SLICE 4   [10,12) GeV
+  v=0  η entries=15710  φ entries=15710
+  v=1  η entries=15710  φ entries=15710
+  v=2  η entries=15710  φ entries=15710
+  v=3  η entries=15710  φ entries=15710
+  v=4  η entries=15710  φ entries=15710
+
+>>> ENERGY SLICE 5   [12,15) GeV
+  v=0  η entries=23513  φ entries=23513
+  v=1  η entries=23513  φ entries=23513
+  v=2  η entries=23513  φ entries=23513
+  v=3  η entries=23513  φ entries=23513
+  v=4  η entries=23513  φ entries=23513
+
+>>> ENERGY SLICE 6   [15,20) GeV
+  v=0  η entries=38953  φ entries=38953
+  v=1  η entries=38953  φ entries=38953
+  v=2  η entries=38953  φ entries=38953
+  v=3  η entries=38953  φ entries=38953
+  v=4  η entries=38953  φ entries=38953
+
+>>> ENERGY SLICE 7   [20,30) GeV
+  v=0  η entries=78145  φ entries=78145
+  v=1  η entries=78145  φ entries=78145
+  v=2  η entries=78145  φ entries=78145
+  v=3  η entries=78145  φ entries=78145
+  v=4  η entries=78145  φ entries=78145
+
+>>> ENERGY SLICE 0   [2,4) GeV
+
+>>> ENERGY SLICE 1   [4,6) GeV
+
+>>> ENERGY SLICE 2   [6,8) GeV
+
+>>> ENERGY SLICE 3   [8,10) GeV
+
+>>> ENERGY SLICE 4   [10,12) GeV
+
+>>> ENERGY SLICE 5   [12,15) GeV
+
+>>> ENERGY SLICE 6   [15,20) GeV
+
+>>> ENERGY SLICE 7   [20,30) GeV

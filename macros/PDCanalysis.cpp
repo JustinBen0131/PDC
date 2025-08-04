@@ -2431,30 +2431,46 @@ void drawMuVsLnE(const std::string&                 baseDir,
     std::ofstream fout(baseDir + std::string("/") + fileStem + "_MuVsLogE_fit.txt");
     fout<<"# variant   p0(rad)   p1(rad)\n"<<std::scientific<<std::setprecision(6);
 
-    TLegend lg(0.16,0.75,0.90,0.90); lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.02);
+    TLegend lg(0.16,0.75,0.90,0.90);
+    lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.02);
 
-    std::vector<double> ex(eCtr.size(),0.);
-    for(int v:shown)
+    std::vector<double> ex(eCtr.size(), 0.);
+    for (int v : shown)
     {
-        auto* g=new TGraphErrors((int)eCtr.size(), lnE.data(), MU[v].data(),
-                                 ex.data(), dMU[v].data());
-        g->SetMarkerStyle(kMk[v]); g->SetMarkerColor(kCol[v]);
-        g->SetLineColor(kCol[v]);  g->SetMarkerSize(1.1);
+        auto* g = new TGraphErrors((int)eCtr.size(), lnE.data(), MU[v].data(),
+                                   ex.data(), dMU[v].data());
+        g->SetMarkerStyle(kMk[v]);
+        g->SetMarkerColor(kCol[v]);
+        g->SetLineColor  (kCol[v]);
+        g->SetMarkerSize(1.1);
         g->Draw("P SAME");
 
-        TF1 f("f","pol1",xLo,xHi);
-        f.SetLineColor(kCol[v]); f.SetLineStyle(2); f.SetLineWidth(2);
-        g->Fit(&f,"Q");
+        TF1 f("f", "pol1", xLo, xHi);
+        f.SetLineColor (kCol[v]);
+        f.SetLineStyle (2);
+        f.SetLineWidth (2);
+        g->Fit(&f, "Q");
         f.Draw("SAME");
 
-        fout<<std::left<<std::setw(28)<<kLab[v]
-            <<f.GetParameter(0)<<"   "<<f.GetParameter(1)<<'\n';
+        fout << std::left << std::setw(28) << kLab[v]
+             << f.GetParameter(0) << "   " << f.GetParameter(1) << '\n';
 
-        auto* mk=new TMarker(0,0,kMk[v]); mk->SetMarkerColor(kCol[v]);
-        lg.AddEntry(mk,Form("%s  (a=%.2e, b=%.2e)",kLab[v],
-                    f.GetParameter(0),f.GetParameter(1)),"p");
+        auto* mk = new TMarker(0, 0, kMk[v]);
+        mk->SetMarkerColor(kCol[v]);
+        lg.AddEntry(mk,
+                    Form("%s  (a=%.2e, b=%.2e)", kLab[v],
+                         f.GetParameter(0), f.GetParameter(1)),
+                    "p");
     }
     addVariantLegend(shown, LegendPos{}, nullptr, 0.02);
+
+    /* ------------------------------------------
+     *  finally write the PNG next to the *.txt
+     * ------------------------------------------ */
+    const std::string outPng =
+        baseDir + std::string("/") + fileStem + std::string("_MuVsLogE.png");
+    c.SaveAs(outPng.c_str());
+    c.Close();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2727,7 +2743,7 @@ namespace
         const char* fileStem = "DeltaEtaPhi";
 
         // ─────────────────────────────────────────────────────────────────
-        //  PART 1 – per‑energy‑slice grids  (same as before)
+        //  PART 1 – per‑energy‑slice grids  (fixed legend & labels)
         // ─────────────────────────────────────────────────────────────────
         for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
         {
@@ -2740,62 +2756,121 @@ namespace
                 if (!hEta[v][iE] || !hPhi[v][iE]) { ++padIdx; continue; }
                 cGrid.cd(padIdx++);
 
-                // ------------------------------------------------------------------
+                // ───────────────────────────────────────────────────
                 // 1) draw the two PDFs
-                // ------------------------------------------------------------------
+                // ───────────────────────────────────────────────────
                 auto* hEtaPDF = cloneAndNormPdf(hEta[v][iE], v);
                 auto* hPhiPDF = cloneAndNormPdf(hPhi[v][iE], v);
-                hPhiPDF->SetMarkerStyle(kMk[v] + 4);      // open symbol for Δφ
-                hPhiPDF->SetLineStyle(2);                 // dashed line for Δφ
+                hPhiPDF->SetMarkerStyle(kMk[v] + 4);   // open symbol for Δφ
+                hPhiPDF->SetLineStyle(2);              // dashed line for Δφ
 
                 const double yMax = 1.10 *
                     std::max(hEtaPDF->GetMaximum(), hPhiPDF->GetMaximum());
 
-                hEtaPDF->SetTitle("");                    // we handle labels manually
+                hEtaPDF->SetTitle("");                 // labels are added manually
                 hEtaPDF->GetXaxis()->SetTitle("#Delta  [rad]");
                 hEtaPDF->GetYaxis()->SetTitle("Probability density");
                 hEtaPDF->GetYaxis()->SetRangeUser(0., yMax);
 
-                hEtaPDF->Draw("E");                       // first:  Δη
-                hPhiPDF->Draw("E SAME");                  // then:   Δφ
+                hEtaPDF->Draw("E");                    // first:  Δη
+                hPhiPDF->Draw("E SAME");               // then:   Δφ
 
-                // ------------------------------------------------------------------
+                // ───────────────────────────────────────────────────
                 // 2) statistical numbers (robust Gaussian fit)
-                // ------------------------------------------------------------------
+                // ───────────────────────────────────────────────────
                 const FitRes fEta = robustGaussianFit(hEta[v][iE]);
                 const FitRes fPhi = robustGaussianFit(hPhi[v][iE]);
 
-                // ------------------------------------------------------------------
-                // 3) legend  (top‑left corner)
-                // ------------------------------------------------------------------
-                TLegend leg(0.12, 0.78, 0.40, 0.92);      // x1,y1,x2,y2  (NDC)
-                leg.SetBorderSize(0);  leg.SetFillStyle(0);  leg.SetTextSize(0.03);
-                leg.AddEntry(hEtaPDF, "#Delta#eta", "lep");
-                leg.AddEntry(hPhiPDF, "#Delta#phi", "lep");
-                leg.Draw();
+                // anchor for all TLatex / legend in pad coordinates
+                const double xLeft = gPad->GetLeftMargin() + 0.04;
 
-                // ------------------------------------------------------------------
-                // 4) Gaussian μ ± σ  – displayed just below the legend
-                // ------------------------------------------------------------------
-                TLatex stats;  stats.SetNDC();  stats.SetTextSize(0.025);  stats.SetTextAlign(11);
-                stats.DrawLatex(0.12, 0.70,
+                // ───────────────────────────────────────────────────
+                // 3) legend (bottom‑right) – tells which marker is which residual
+                //     • solid  =  Δη
+                //     • open   =  Δφ
+                // ───────────────────────────────────────────────────
+                const double padR   = 1.0 - gPad->GetRightMargin() - 0.02;  // 2 % in from pad edge
+                const double legW   = 0.26;                                 // legend width
+                const double xLegL  = padR - legW;                          // left x of legend
+
+                /*  keep the legend safely above the pad’s bottom‑margin:
+                    0.28 works for both the top row (small margin) and the bottom
+                    row (large margin required for X–axis labels).                   */
+                const double yLegB  = 0.28;                 // bottom y of legend
+                const double yLegT  = yLegB + 0.16;         // ~16 % tall
+
+                auto *leg = new TLegend(xLegL, yLegB, padR, yLegT);
+                leg->SetBorderSize(0);          // no frame
+                leg->SetFillStyle(0);           // transparent
+                leg->SetTextSize(0.03);
+
+                // dummy markers that mimic the real styles
+                auto *mEta = new TMarker(0, 0, kMk[v]);     // solid   – Δη
+                mEta->SetMarkerColor(kCol[v]); mEta->SetMarkerSize(1.1);
+
+                auto *mPhi = new TMarker(0, 0, kMk[v] + 4); // open    – Δφ
+                mPhi->SetMarkerColor(kCol[v]); mPhi->SetMarkerSize(1.1);
+
+                leg->AddEntry(mEta, "#Delta#eta", "p");
+                leg->AddEntry(mPhi, "#Delta#phi", "p");
+                leg->Draw("same");              // keep inside pad’s primitive list
+
+                gPad->Modified();               // guarantee proper layout
+
+                // ───────────────────────────────────────────────────
+                // 4) variant label – coloured, just below the legend
+                // ───────────────────────────────────────────────────
+                TLatex vLab;  vLab.SetNDC();  vLab.SetTextColor(kCol[v]);
+                vLab.SetTextSize(0.034);  vLab.SetTextAlign(11);
+                vLab.DrawLatex(xLeft, 0.71, kLab[v]);
+
+                // ───────────────────────────────────────────────────
+                // 5) Gaussian μ ± σ (same x‑anchor as legend)
+                // ───────────────────────────────────────────────────
+                TLatex stats;  stats.SetNDC();  stats.SetTextSize(0.035);
+                stats.SetTextAlign(11);
+                stats.DrawLatex(xLeft, 0.64,
                     Form("#Delta#eta : %.2g #pm %.2g", fEta.mu, fEta.sg));
-                stats.DrawLatex(0.12, 0.63,
+                stats.DrawLatex(xLeft, 0.58,
                     Form("#Delta#phi : %.2g #pm %.2g", fPhi.mu, fPhi.sg));
 
-                // ------------------------------------------------------------------
-                // 5) energy‑range label  (top‑right corner)
-                // ------------------------------------------------------------------
-                TLatex eLab;  eLab.SetNDC();  eLab.SetTextSize(0.03);  eLab.SetTextAlign(33);
+                // ───────────────────────────────────────────────────
+                // 6) energy‑range label (upper‑right corner)
+                // ───────────────────────────────────────────────────
+                TLatex eLab;  eLab.SetNDC();  eLab.SetTextSize(0.04);
+                eLab.SetTextAlign(33);
                 eLab.DrawLatex(0.88, 0.92,
-                    Form("[%.0f, %.0f)  GeV",
+                    Form("[%.0f, %.0f) GeV",
                          eEdges[iE].first, eEdges[iE].second));
+
+                // ------------------------------------------------------------------
+                // 6)  save this pad as an **individual PNG**
+                //       <outDir>/<variant>/<fileStem>_<variant>_E<slice>.png
+                //      (define the variant‑specific folder locally)
+                // ------------------------------------------------------------------
+                std::string vNameLocal = kLab[v];                    // human‑readable label
+                for (char& c : vNameLocal)                           // sanitise for file‑system
+                    if (!std::isalnum(static_cast<unsigned char>(c))) c = '_';
+
+                std::string vDirLocal = std::string(outDir) + "/" + vNameLocal;
+                ensureDir(vDirLocal);                                // create if missing
+
+                gPad->Modified();                                    // finalise layout
+                gPad->Update();
+                gPad->SaveAs(Form("%s/%s_%s_E%02zu.png",
+                                  vDirLocal.c_str(),                 // …/variant/…
+                                  fileStem,                          // e.g. DeltaEtaPhi
+                                  vNameLocal.c_str(),                // sanitised variant label
+                                  iE));                              // energy‑slice index
             }
 
-            cGrid.cd(6);  gPad->Clear();
+            cGrid.cd(6);               // sixth pad kept blank
+            gPad->Clear();
+
             cGrid.SaveAs(Form("%s/%s_%02zu_grid.png", outDir, fileStem, iE));
             cGrid.Close();
         }
+
 
         // ─────────────────────────────────────────────────────────────────
         //  PART 2 – per‑variant 2×4 tables  (NEW)
@@ -2909,15 +2984,120 @@ namespace
 
             }
 
-            // big title on the canvas
+            /* ------------------------------------------------------------------
+             *  (A)  finish the 2×4 “component” table  – identical to old code
+             * ------------------------------------------------------------------ */
             cTab.cd(0);
             TLatex head; head.SetNDC(); head.SetTextSize(0.042);
             head.SetTextAlign(22);
             head.DrawLatex(0.5,0.97, kLab[v]);
-
             cTab.SaveAs(Form("%s/%s_%s.png",
                              vDir.c_str(), fileStem, vName.c_str()));
             cTab.Close();
+
+            /* ------------------------------------------------------------------
+             *  (B)  NEW –  μ(E)  &  σ(E)  summary for this *single* variant
+             *        – top pad:  μ vs E (Δη solid, Δφ open)
+             *        – bottom :  σ vs E (same symbols, dashed for φ)
+             * ------------------------------------------------------------------ */
+
+            /* gather the per–slice fit results that we just produced */
+            std::vector<double>  eCtr, muEta, dmuEta, sgEta, dsgEta,
+                                 muPhi, dmuPhi, sgPhi, dsgPhi;
+            for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+            {
+                if (!hEta[v][iE] || !hPhi[v][iE]) continue;
+
+                const double eMid = 0.5 * (eEdges[iE].first + eEdges[iE].second);
+
+                const FitRes fEta = robustGaussianFit(hEta[v][iE]);
+                const FitRes fPhi = robustGaussianFit(hPhi[v][iE]);
+
+                eCtr .push_back(eMid);
+
+                muEta.push_back(fEta.mu);  dmuEta.push_back(fEta.dmu);
+                sgEta.push_back(fEta.sg);  dsgEta.push_back(fEta.dsg);
+
+                muPhi.push_back(fPhi.mu);  dmuPhi.push_back(fPhi.dmu);
+                sgPhi.push_back(fPhi.sg);  dsgPhi.push_back(fPhi.dsg);
+            }
+
+            if (eCtr.empty())   // nothing to draw → skip
+                continue;
+
+            /* ---------- cosmetics shared by both pads ------------------- */
+            const double xMin = 0.0;
+            const double xMax = eCtr.back() +
+                                0.5*(eEdges.back().second - eEdges.back().first);
+            std::vector<double> ex(eCtr.size(), 0.0);
+
+            /* ---------- create the canvas -------------------------------- */
+            TCanvas cVS(Form("cVS_%d", v), "mu_sigma_vs_E", 900, 800);
+            cVS.Divide(1, 2, 0, 0);
+
+            /* ===== top pad :  μ(E) ====================================== */
+            cVS.cd(1);
+            gPad->SetLeftMargin(0.15);  gPad->SetBottomMargin(0.04);
+
+            const double muLo = std::min( *std::min_element(muEta.begin(), muEta.end()),
+                                          *std::min_element(muPhi.begin(), muPhi.end()) );
+            const double muHi = std::max( *std::max_element(muEta.begin(), muEta.end()),
+                                          *std::max_element(muPhi.begin(), muPhi.end()) );
+            const double padMu = 0.10 * (muHi - muLo);
+
+            TH1F frU("frU",";E_{ctr}  [GeV];#mu  [rad]",1,xMin,xMax);
+            frU.SetMinimum(muLo - padMu);  frU.SetMaximum(muHi + padMu);
+            frU.Draw("AXIS");
+
+            TGraphErrors gMuEta(eCtr.size(), eCtr.data(), muEta.data(),
+                                ex.data(), dmuEta.data());
+            gMuEta.SetMarkerStyle(kMk[v]);       gMuEta.SetMarkerColor(kCol[v]);
+            gMuEta.SetLineColor  (kCol[v]);      gMuEta.Draw("P SAME");
+
+            TGraphErrors gMuPhi(eCtr.size(), eCtr.data(), muPhi.data(),
+                                ex.data(), dmuPhi.data());
+            gMuPhi.SetMarkerStyle(kMk[v]+4);     gMuPhi.SetMarkerColor(kCol[v]);
+            gMuPhi.SetLineColor  (kCol[v]);      gMuPhi.SetLineStyle(2);
+            gMuPhi.Draw("P SAME");
+
+            TLegend legU(0.18,0.75,0.40,0.88);
+            legU.SetBorderSize(0);  legU.SetFillStyle(0); legU.SetTextSize(0.03);
+            legU.AddEntry(&gMuEta,"#Delta#eta","p");
+            legU.AddEntry(&gMuPhi,"#Delta#phi","p");
+            legU.Draw();
+
+            /* ===== bottom pad :  σ(E) =================================== */
+            cVS.cd(2);
+            gPad->SetLeftMargin(0.15);  gPad->SetTopMargin(0.06);
+
+            const double sgHi = std::max( *std::max_element(sgEta.begin(), sgEta.end()),
+                                          *std::max_element(sgPhi.begin(), sgPhi.end()) );
+
+            TH1F frL("frL",";E_{ctr}  [GeV];#sigma  [rad]",1,xMin,xMax);
+            frL.SetMinimum(0.0);           frL.SetMaximum(1.15 * sgHi);
+            frL.Draw("AXIS");
+
+            TGraphErrors gSgEta(eCtr.size(), eCtr.data(), sgEta.data(),
+                                ex.data(), dsgEta.data());
+            gSgEta.SetMarkerStyle(kMk[v]);       gSgEta.SetMarkerColor(kCol[v]);
+            gSgEta.SetLineColor  (kCol[v]);      gSgEta.Draw("P SAME");
+
+            TGraphErrors gSgPhi(eCtr.size(), eCtr.data(), sgPhi.data(),
+                                ex.data(), dsgPhi.data());
+            gSgPhi.SetMarkerStyle(kMk[v]+4);     gSgPhi.SetMarkerColor(kCol[v]);
+            gSgPhi.SetLineColor  (kCol[v]);      gSgPhi.SetLineStyle(2);
+            gSgPhi.Draw("P SAME");
+
+            TLegend legL(0.18,0.75,0.40,0.88);
+            legL.SetBorderSize(0);  legL.SetFillStyle(0); legL.SetTextSize(0.03);
+            legL.AddEntry(&gSgEta,"#Delta#eta","p");
+            legL.AddEntry(&gSgPhi,"#Delta#phi","p");
+            legL.Draw();
+
+            /* ---------- write PNG into the *same* variant directory ------ */
+            cVS.SaveAs(Form("%s/%s_%s_MuSigmaVsE.png",
+                            vDir.c_str(), fileStem, vName.c_str()));
+            cVS.Close();
         }
 
         std::cout << "[makeCombinedDeltaEtaPhiPlots] FINISHED – output dir: "
@@ -2973,10 +3153,10 @@ void makeEtaVertexTables(const std::vector<std::pair<double,double>>&           
     static constexpr std::array<float,7> vzEdge = {0,5,10,15,20,25,30};
     constexpr int N_Vz = vzEdge.size() - 1;
 
-    /* colours / markers for each vertex slice */
+    /* colours for each vertex slice (all markers are style 20) */
     static constexpr std::array<Color_t,6> kVzCol =
         { kRed+1, kOrange+1, kYellow+2, kGreen+2, kAzure+2, kViolet+1 };
-    static constexpr std::array<Style_t,6> kVzMk  = { 20, 21, 22, 23, 29, 33 };
+    static constexpr std::array<Style_t,6> kVzMk  = { 20,20,20,20,20,20 };
 
     /* iterate over reconstruction variants */
     for (int v : variantsToPlot)
@@ -3003,15 +3183,20 @@ void makeEtaVertexTables(const std::vector<std::pair<double,double>>&           
                     haveSlice = true;
             if (!haveSlice) continue;
 
-            cTab.cd(pad++);
+            int curPad = pad++;          // remember pad index before increment
+            cTab.cd(curPad);
 
             /* containers for later summary table */
             std::array<FitRes,6> fitInfo{};   // one per vz slice
             std::array<bool,   6> sliceUsed{}; sliceUsed.fill(false);
 
             double yMax = 0.0;
-            TLegend* leg = new TLegend(0.14, 0.72, 0.46, 0.92);
-            leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.026);
+
+            /* legend position: push right by pad’s left margin */
+            const double xLeg1 = gPad->GetLeftMargin() + 0.05;
+            const double xLeg2 = xLeg1 + 0.26;
+            TLegend* leg = new TLegend(xLeg1, 0.73, xLeg2, 0.93);
+            leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.03);
 
             /* overlay all vertex slices for this energy bin */
             for (int iVz = 0; iVz < N_Vz; ++iVz)
@@ -3058,52 +3243,438 @@ void makeEtaVertexTables(const std::vector<std::pair<double,double>>&           
             leg->Draw();
 
             /* energy‑range label (top‑right) */
-            TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.035); eLab.SetTextAlign(33);
+            TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.037); eLab.SetTextAlign(33);
             eLab.DrawLatex(0.88, 0.92,
                 Form("[%.0f, %.0f) GeV", eEdges[iE].first, eEdges[iE].second));
 
-            /* μ | σ | z table (bottom‑right) */
-            TLatex tbl; tbl.SetNDC(); tbl.SetTextSize(0.028); tbl.SetTextAlign(13);
+            /* decide table Y‑start: raise in bottom row to avoid clipping */
+            const int rowIdx = (curPad-1) / nCol;     // 0 = top, 1 = bottom
+            double yRow = (rowIdx == 0 ? 0.40 : 0.50);
 
-            const double xCol1 = 0.62;   // μ column
-            const double xCol2 = 0.72;   // σ column
-            const double xCol3 = 0.83;   // z‑range column
-            double yRow   = 0.38;
+            /* μ | σ | z  table – now bottom‑left, smaller font, proper ROOT underline */
+            const double xTbl1 = gPad->GetLeftMargin() + 0.04;   // μ column
+            const double xTbl2 = xTbl1 + 0.12;                   // σ column
+            const double xTbl3 = xTbl2 + 0.14;                   // z column
 
-            tbl.DrawLatex(xCol1, yRow, "#mu");
-            tbl.DrawLatex(xCol2, yRow, "#sigma");
-            tbl.DrawLatex(xCol3, yRow, "z [cm]");
-            yRow -= 0.05;
+            TLatex tbl; tbl.SetNDC(); tbl.SetTextAlign(13);
+
+            /* column headers – escape the blank in “z [cm]” with \,   */
+            tbl.SetTextSize(0.032);
+            /* underline works only if you **turn on TeX-style parsing first**   */
+            tbl.SetTextFont(132);               // Helvetica-like, TeX parser ON
+
+            tbl.DrawLatex(xTbl1, yRow, "#mu");
+            tbl.DrawLatex(xTbl2, yRow, "#sigma");
+            tbl.DrawLatex(xTbl3, yRow, "z\\,[cm]");   // escaped thin-space
+
+            tbl.SetTextSize(0.026);           // body of the table a bit smaller
+            yRow -= 0.050;                    // first data row
 
             for (int iVz = 0; iVz < N_Vz; ++iVz)
             {
                 if (!sliceUsed[iVz]) continue;
 
                 tbl.SetTextColor(kVzCol[iVz]);
-                tbl.DrawLatex(xCol1, yRow,
-                              Form("%.2g", fitInfo[iVz].mu));
-                tbl.DrawLatex(xCol2, yRow,
-                              Form("%.2g", fitInfo[iVz].sg));
-                tbl.DrawLatex(xCol3, yRow,
-                              Form("%.0f–%.0f", vzEdge[iVz], vzEdge[iVz+1]));
-                yRow -= 0.05;
+                tbl.DrawLatex(xTbl1, yRow, Form("%.2g", fitInfo[iVz].mu));
+                tbl.DrawLatex(xTbl2, yRow, Form("%.2g", fitInfo[iVz].sg));
+                tbl.DrawLatex(xTbl3, yRow, Form("%.0f-%.0f", vzEdge[iVz], vzEdge[iVz+1])); // ASCII hyphen
+                yRow -= 0.045;                // tight but safe vertical spacing
             }
-            tbl.SetTextColor(kBlack);   // restore colour for safety
+            tbl.SetTextColor(kBlack);         // restore default colour
+
+            // ───────────────────────────────────────────────────────────
+            //  NEW — write this overlay (one energy‑bin) as its own PNG
+            //      • file lives in the same <variant> directory
+            //      • file name: “DeltaEta_VtxSlices_<variant>_E<slice>.png”
+            // ───────────────────────────────────────────────────────────
+            gPad->Modified();                       // finalise layout
+            gPad->Update();
+            gPad->SaveAs(Form("%s/DeltaEta_VtxSlices_%s_E%02zu.png",
+                               vDir.c_str(),        // “…/deltaEta/vertexDependent/<variant>/”
+                               vName.c_str(),       // sanitised variant label
+                               iE));                // energy‑slice index
         }
 
         /* canvas‑level title */
         cTab.cd(0);
         TLatex head; head.SetNDC(); head.SetTextAlign(22);
-        head.SetTextSize(0.045);
+        head.SetTextSize(0.052);
         head.DrawLatex(0.5, 0.975, kLab[v]);
 
-        /* write PNG */
+        /* write PNG for the full 6‑slice table */
         cTab.SaveAs(Form("%s/DeltaEta_VtxSlices_%s.png",
                          vDir.c_str(), vName.c_str()));
         cTab.Close();
-    }
-}
 
+        // ───────────────────────────────────────────────────────────────
+        //  NEW ➊  ––  per‑vertex‑slice μ(E) & σ(E) summary
+        //             • top pad  : μ vs E
+        //             • bottom   : σ vs E
+        //             • six curves = six |z_vtx| bins (kVzCol colours)
+        //             • output    : “…/DeltaEta_Vtx_MuSigmaVsE_<variant>.png”
+        // ───────────────────────────────────────────────────────────────
+        {
+            /* accumulate centre‑of‑energy and fit results */
+            std::vector<double> eCtr;  eCtr.reserve(eEdges.size());
+            std::array<std::vector<double>,6> MUvz, dMUvz, SGvz, dSGvz;
+
+            for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+            {
+                const double eMid = 0.5 * (eEdges[iE].first + eEdges[iE].second);
+                eCtr.push_back(eMid);
+
+                /* ensure all slices have a slot for this energy */
+                for (int iVz = 0; iVz < N_Vz; ++iVz) {
+                    MUvz[iVz].push_back(0.0);  dMUvz[iVz].push_back(0.0);
+                    SGvz[iVz].push_back(0.0);  dSGvz[iVz].push_back(0.0);
+                }
+
+                if (iE >= hEtaVz[v].size()) continue;
+                for (int iVz = 0; iVz < N_Vz; ++iVz)
+                {
+                    if (iVz >= (int)hEtaVz[v][iE].size()) continue;
+                    TH1F* src = hEtaVz[v][iE][iVz];
+                    if (!src || src->Integral() == 0)     continue;
+
+                    const FitRes fr = robustGaussianFit(src);
+                    MUvz[iVz].back()  = fr.mu;  dMUvz[iVz].back() = fr.dmu;
+                    SGvz[iVz].back()  = fr.sg;  dSGvz[iVz].back() = fr.dsg;
+                }
+            }
+
+            /* prepare canvas */
+            TCanvas cMS(Form("cVtxMuSig_%d", v), "vtx_mu_sigma", 900, 800);
+            cMS.Divide(1, 2, 0, 0);
+            std::vector<double> ex(eCtr.size(), 0.0);
+
+            // ---------- μ pad --------------------------------------------------
+            cMS.cd(1);
+            gPad->SetLeftMargin(0.15);
+            gPad->SetRightMargin(0.06);
+            gPad->SetBottomMargin(0.04);
+
+            double muMin =  1e30, muMax = -1e30;
+            for (int iVz = 0; iVz < N_Vz; ++iVz)
+                for (std::size_t j = 0; j < MUvz[iVz].size(); ++j) {
+                    muMin = std::min(muMin, MUvz[iVz][j] - dMUvz[iVz][j]);
+                    muMax = std::max(muMax, MUvz[iVz][j] + dMUvz[iVz][j]);
+                }
+            const double xMax = eCtr.back() +
+                                0.5 * (eEdges.back().second - eEdges.back().first);
+
+            TH1F frU("frU",";E_{ctr}  [GeV];#mu  [rad]",1,0.0,xMax);
+            frU.SetMinimum(muMin - 0.05*(muMax-muMin));
+            frU.SetMaximum(muMax + 0.05*(muMax-muMin));
+            frU.Draw("AXIS");
+
+            /* dashed reference line at μ = 0 */
+            TLine ref0(0.0, 0.0, xMax, 0.0);
+            ref0.SetLineStyle(2); ref0.Draw("same");
+
+            /* draw curves */
+            for (int iVz = 0; iVz < N_Vz; ++iVz) {
+                auto* g = new TGraphErrors((int)eCtr.size(),
+                                           eCtr.data(), MUvz[iVz].data(),
+                                           ex.data(),  dMUvz[iVz].data());
+                g->SetMarkerColor(kVzCol[iVz]);
+                g->SetLineColor  (kVzCol[iVz]);
+                g->SetMarkerStyle(kVzMk[iVz]);
+                g->SetMarkerSize(1.1);
+                g->Draw("P SAME");
+            }
+
+            /* legend – top‑right of upper pad only */
+            TLegend legU(0.70, 0.6, 0.92, 0.9);
+            legU.SetBorderSize(0);
+            legU.SetFillStyle(0);
+            legU.SetTextSize(0.035);
+            for (int iVz = 0; iVz < N_Vz; ++iVz) {
+                auto* m = new TMarker(0,0,kVzMk[iVz]); m->SetMarkerColor(kVzCol[iVz]);
+                legU.AddEntry(m,Form("[%.0f, %.0f) cm", vzEdge[iVz], vzEdge[iVz+1]),"p");
+            }
+            legU.Draw();
+
+            // ---------- σ pad --------------------------------------------------
+            cMS.cd(2);
+            gPad->SetLeftMargin(0.15);
+            gPad->SetRightMargin(0.06);
+            gPad->SetTopMargin(0.06);
+            gPad->SetBottomMargin(0.35);
+
+            double sgMax = -1e30;
+            for (int iVz = 0; iVz < N_Vz; ++iVz)
+                for (double vsg : SGvz[iVz]) sgMax = std::max(sgMax, vsg);
+
+            TH1F frL("frL",";E_{ctr}  [GeV];#sigma  [rad]",1,0.0,xMax);
+            frL.SetMinimum(0.0);                     // start exactly at σ = 0
+            frL.SetMaximum(sgMax * 1.05);            // 5 % head‑room
+            frL.Draw("AXIS");
+
+            for (int iVz = 0; iVz < N_Vz; ++iVz) {
+                auto* g = new TGraphErrors((int)eCtr.size(),
+                                           eCtr.data(), SGvz[iVz].data(),
+                                           ex.data(),  dSGvz[iVz].data());
+                g->SetMarkerColor(kVzCol[iVz]);
+                g->SetLineColor  (kVzCol[iVz]);
+                g->SetMarkerStyle(kVzMk[iVz]);
+                g->SetMarkerSize(1.1);
+                g->Draw("P SAME");
+            }
+
+            /* save canvas */
+            cMS.SaveAs(Form("%s/DeltaEta_Vtx_MuSigmaVsE_%s.png",
+                            vDir.c_str(), vName.c_str()));
+            cMS.Close();
+        }
+    }   // ————— end of per‑variant loop ———————————————————————————
+
+
+
+    // ─────────────────────────────────────────────────────────────────
+    //  “condensed” summary – one canvas **per energy slice**
+    //      • layout: 4 rows × 2 columns  (max 8 variants shown)
+    //      • overlays **only** the first (iVz = 0) and last
+    //        (iVz = N_Vz – 1) |z_vtx| bins
+    //      • output dir:  “…/vertexDependent/vertexCondensedSummary/”
+    // ─────────────────────────────────────────────────────────────────
+    const std::string summaryDir =
+        std::string(outDir) + "/vertexCondensedSummary";
+    ensureDir(summaryDir);
+
+    constexpr int nColC   = 2, nRowC = 3, maxPadsC = nColC * nRowC;
+    const std::array<int,2> pickVz = {0, N_Vz-1};          // low & high slices
+
+    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+    {
+        /* roomier square canvas – 2400 × 2400 px */
+        TCanvas cSum(Form("cEtaCond_%zu", iE), "condensed_eta_vtx",
+                     2400, 2400);
+
+        /* slim global margins – pads fill almost the entire canvas */
+        cSum.SetTopMargin   (0.06);
+        cSum.SetBottomMargin(0.04);
+        cSum.SetLeftMargin  (0.02);
+        cSum.SetRightMargin (0.02);
+
+        /* divide into 3 rows × 2 columns, tiny 0.5 % gutters */
+        cSum.Divide(nColC, nRowC, 0.005, 0.005);
+
+        /* give every pad sane internal margins */
+        for (int ip = 1; ip <= maxPadsC; ++ip) {
+            cSum.cd(ip);
+            gPad->SetLeftMargin  (0.12);
+            gPad->SetRightMargin (0.04);
+            gPad->SetTopMargin   (0.08);
+            gPad->SetBottomMargin(0.12);
+        }
+
+
+        int padC = 1;
+        for (int v : variantsToPlot)
+        {
+            if (padC > maxPadsC) break;            // only 8 pads available
+            if (iE >= hEtaVz[v].size()) continue;
+
+            cSum.cd(padC++);
+
+            double ymax = 0.0;
+            std::array<FitRes,2> fr{};
+            auto* l = new TLegend(0.65, 0.25, 0.88, 0.4);
+            l->SetBorderSize(0);  l->SetFillStyle(0);  l->SetTextSize(0.042);
+
+            for (int k = 0; k < 2; ++k)
+            {
+                int iVz = pickVz[k];
+                if (iVz >= (int)hEtaVz[v][iE].size()) continue;
+                TH1F* src = hEtaVz[v][iE][iVz];
+                if (!src || src->Integral()==0)    continue;
+
+                auto* h = cloneAndNormPdf(src, v);          // recolour
+                h->SetMarkerColor(kCol[v]);                 // colour = variant
+                h->SetLineColor  (kCol[v]);
+                h->SetMarkerStyle( k==0 ? 20   /* filled */   // low‑|z_vtx|
+                                    : 24 ); /* open */        // high‑|z_vtx|
+                h->SetMarkerSize(1.0);
+
+                ymax = std::max(ymax, h->GetMaximum()*1.15);
+
+                if (k==0) {
+                    h->SetTitle("");                        // custom labels below
+                    h->GetXaxis()->SetTitle("#Delta#eta  [rad]");
+                    h->GetYaxis()->SetTitle("Probability density");
+                    h->Draw("E");
+                } else
+                    h->Draw("E SAME");
+
+                fr[k] = robustGaussianFit(src);
+                l->AddEntry(h,
+                            Form("[%.0f, %.0f) cm", vzEdge[iVz], vzEdge[iVz+1]),
+                            "p");
+            }
+
+            gPad->Update();
+            for (auto* o : *gPad->GetListOfPrimitives())
+                if (auto* h = dynamic_cast<TH1*>(o))
+                    h->GetYaxis()->SetRangeUser(0., ymax);
+
+            l->Draw();
+
+            // variant label (colour‑coded)
+            TLatex vtxt; vtxt.SetNDC(); vtxt.SetTextColor(kCol[v]);
+            vtxt.SetTextSize(0.045); vtxt.SetTextAlign(11);
+            vtxt.DrawLatex(gPad->GetLeftMargin()+0.04, 0.85, kLab[v]);
+
+            // energy‑range label (upper‑right)
+            TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.045); eLab.SetTextAlign(33);
+            eLab.DrawLatex(0.88, 0.87,
+                Form("[%.0f, %.0f) GeV", eEdges[iE].first, eEdges[iE].second));
+
+            // μ / σ table (bottom‑left)
+            TLatex t; t.SetNDC(); t.SetTextFont(132); t.SetTextAlign(13);
+            t.SetTextSize(0.035);
+
+            const double x0 = gPad->GetLeftMargin() + 0.04;
+            double y0 = 0.30;
+            for (int k = 0; k < 2; ++k)
+            {
+                int iVz = pickVz[k];
+                t.SetTextColor(kVzCol[iVz]);
+                t.DrawLatex(x0, y0,
+                    Form("#mu=%.2g  #sigma=%.2g  z:%g-%g",
+                         fr[k].mu, fr[k].sg,
+                         vzEdge[iVz], vzEdge[iVz+1]));
+                y0 -= 0.05;
+            }
+            t.SetTextColor(kBlack);
+        }
+
+        cSum.SaveAs(Form("%s/DeltaEta_Condensed_E%02zu.png",
+                         summaryDir.c_str(), iE));
+        cSum.Close();
+    }
+    
+    // ─────────────────────────────────────────────────────────────────
+    //  global matrix summary
+    //      rows    → flavour variants      (up to 5, one per row)
+    //      columns → the five lowest E‑bins
+    //      every cell: overlay low‑|z_vtx| (filled)  +
+    //                              high‑|z_vtx| (open)
+    // ─────────────────────────────────────────────────────────────────
+    /* show only the 3 lowest‑E slices → wider pads */
+    const std::size_t nEPlot = std::min<std::size_t>(3, eEdges.size());
+    const int nColM = static_cast<int>(nEPlot);                  // 3 columns
+    const int nRowM = static_cast<int>(variantsToPlot.size());   // 5 rows
+
+    const std::string mDir =
+        std::string(outDir) + "/vertexCondensedSummary";
+    ensureDir(mDir);
+
+    /* wide landscape canvas – 4500 px × 3000 px */
+    TCanvas cMat("cEtaVzMatrix", "eta_vtx_matrix", 4500, 3000);
+    cMat.SetTopMargin   (0.03);
+    cMat.SetBottomMargin(0.03);
+    cMat.SetLeftMargin  (0.02);
+    cMat.SetRightMargin (0.02);
+
+    /* 3 cols × 5 rows, 0.8 % gutters */
+    cMat.Divide(nColM, nRowM, 0.008, 0.008);
+
+    /* iterate:   outer → variant row,   inner → energy‑bin column */
+    int padMat = 1;
+    for (int r = 0; r < nRowM; ++r)
+    {
+        const int v = variantsToPlot[r];
+
+        for (std::size_t c = 0; c < nEPlot; ++c, ++padMat)
+        {
+            cMat.cd(padMat);
+
+            /* skip pad completely if no histograms exist */
+            if (c >= hEtaVz[v].size() ||
+                hEtaVz[v][c].empty()     ||
+                (!hEtaVz[v][c][0] && !hEtaVz[v][c].back()) )
+            {
+                continue;
+            }
+
+            double ymax = 0.0;
+            std::array<FitRes,2> fr{};
+
+            /* pad‑local legend (bottom‑right of each cell) */
+            auto* leg = new TLegend(0.7, 0.22, 0.88, 0.42);
+            leg->SetBorderSize(0);  leg->SetFillStyle(0);  leg->SetTextSize(0.055);
+
+            /* loop over the two chosen |z_vtx| slices: low (filled) & high (open) */
+            for (int k = 0; k < 2; ++k)
+            {
+                const int iVz = (k == 0 ? 0 : N_Vz-1);
+                if (iVz >= (int)hEtaVz[v][c].size()) continue;
+                TH1F* src = hEtaVz[v][c][iVz];
+                if (!src || src->Integral() == 0)  continue;
+
+                auto* h = cloneAndNormPdf(src, v);
+                h->SetMarkerColor(kCol[v]);   h->SetLineColor(kCol[v]);
+                h->SetMarkerStyle( k==0 ? 20 : 24 );   // filled / open
+                h->SetMarkerSize(1.2);
+
+                ymax = std::max(ymax, h->GetMaximum()*1.15);
+
+                if (k == 0) {
+                    /* first slice draws axes */
+                    h->SetTitle("");
+                    h->GetXaxis()->SetTitle("#Delta#eta  [rad]");
+                    h->GetYaxis()->SetTitle("Probability density");
+                    h->Draw("E");
+                } else
+                    h->Draw("E SAME");
+
+                fr[k] = robustGaussianFit(src);
+                leg->AddEntry(h,
+                              Form("[%.0f, %.0f) cm", vzEdge[iVz], vzEdge[iVz+1]),
+                              "p");
+            }
+
+            /* harmonise Y‑range */
+            gPad->Update();
+            for (auto* o : *gPad->GetListOfPrimitives())
+                if (auto* h = dynamic_cast<TH1*>(o))
+                    h->GetYaxis()->SetRangeUser(0., ymax);
+
+            leg->Draw();
+
+            /* variant label – colour‑coded, left‑top inside pad */
+            TLatex vLab; vLab.SetNDC(); vLab.SetTextColor(kCol[v]);
+            vLab.SetTextSize(0.055); vLab.SetTextAlign(11);
+            vLab.DrawLatex(gPad->GetLeftMargin()+0.03, 0.86, kLab[v]);
+
+            /* energy‑bin label – right‑top */
+            TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.055); eLab.SetTextAlign(33);
+            eLab.DrawLatex(0.91, 0.88,
+                Form("[%.0f, %.0f) GeV", eEdges[c].first, eEdges[c].second));
+
+            /* μ / σ table – bottom‑left */
+            TLatex tbl; tbl.SetNDC(); tbl.SetTextFont(132); tbl.SetTextAlign(13);
+            tbl.SetTextSize(0.052);
+
+            double ytbl = 0.33;
+            for (int k = 0; k < 2; ++k)
+            {
+                int iVz = (k == 0 ? 0 : N_Vz-1);
+                tbl.SetTextColor(k == 0 ? kCol[v] : kCol[v]);
+                tbl.DrawLatex(gPad->GetLeftMargin()+0.04, ytbl,
+                    Form("#mu=%.2g  #sigma=%.2g  z:%g-%g",
+                         fr[k].mu, fr[k].sg,
+                         vzEdge[iVz], vzEdge[iVz+1]));
+                ytbl -= 0.06;
+            }
+            tbl.SetTextColor(kBlack);
+        }
+    }
+
+    /* save matrix PNG */
+    cMat.SaveAs(Form("%s/DeltaEta_Vtx_Matrix.png", mDir.c_str()));
+    cMat.Close();
+}
 
 
 // ————————————————————————————————————————————————————————————————
