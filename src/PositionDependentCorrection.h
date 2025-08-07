@@ -75,7 +75,7 @@ class PositionDependentCorrection : public SubsysReco
   void set_vertex_cut(float v)                { _vz      = v; }
   void apply_vertex_cut(bool on=true)         { m_vtxCut = on; }
   void setMassFitsDone(bool done) { m_massFitsDone = done; }
-
+  void UseSignedVz(bool v = true) { m_useSignedVz = v; }
   void UseSurveyGeometry(bool v=true)         { m_useSurveyGeometry = v; }
 
   enum class EBinningMode { kRange , kDiscrete };
@@ -105,20 +105,44 @@ class PositionDependentCorrection : public SubsysReco
    *  PROTECTED section  – internal algorithms & data                *
    * ****************************************************************/
  protected:
-  /* --------------------  vertex‑Z binning ------------------------ */
-  float m_vzTightCut {10.f};   ///< default |z| ≤ 10 cm for “physics” hists
-  float m_vzSliceMax {30.f};   ///< upper edge of the vzEdge table
+    /* --------------------  vertex‑Z binning ------------------------
+     *
+     *  – m_vzTightCut      : 10 cm “physics” cut
+     *  – vzEdge            : |z| table extended to 150 cm
+     *  – getVzSlice()      : absolute‑|z| index          0 … N_VzBins‑1
+     *  – getVzSliceSigned(): signed   index (+z first)   0 … 2*N_VzBins‑1
+     * -------------------------------------------------------------- */
+  float m_vzTightCut { 10.f };                 ///< |z| ≤ 10 cm
 
-  static constexpr std::array<float,7> vzEdge = {0,5,10,15,20,25,30};
-  static constexpr int N_VzBins = vzEdge.size() - 1;
+  static constexpr std::array<float,19> vzEdge = {
+         0.f,  5.f, 10.f, 15.f, 20.f, 25.f, 30.f,
+        40.f, 50.f, 60.f, 70.f, 80.f, 90.f,
+       100.f,110.f,120.f,130.f,140.f,150.f
+    };
+  static constexpr int   N_VzBins       = vzEdge.size() - 1;
+  static constexpr int   N_VzBinsSigned = 2 * N_VzBins;
 
-  inline int getVzSlice(float absVz) const
-  {
-    for (int i=0;i<N_VzBins;++i)
-      if (absVz >= vzEdge[i] && absVz < vzEdge[i+1]) return i;
-    return -1;
-  }
+  float m_vzSliceMax { vzEdge.back() };        ///< == 150 cm
 
+  inline int getVzSlice(float absVz) const     /* 0 … N_VzBins‑1  (|z|) */
+    {
+      for (int i = 0; i < N_VzBins; ++i)
+        if (absVz >= vzEdge[i] && absVz < vzEdge[i + 1]) return i;
+      return -1;
+    }
+
+  inline int getVzSliceSigned(float vtxZ) const/* 0 … 2*N_VzBins‑1 (±z) */
+    {
+      const float absVz = std::fabs(vtxZ);
+      for (int i = 0; i < N_VzBins; ++i)
+        if (absVz >= vzEdge[i] && absVz < vzEdge[i + 1])
+          return (vtxZ >= 0.f) ? i : i + N_VzBins;
+      return -1;
+    }
+
+  /* user can switch signed histograms on/off at runtime */
+  bool m_useSignedVz {false};
+    
   /* --------------------  major functional helpers ---------------- */
   float retrieveVertexZ(PHCompositeNode*);
 
@@ -178,9 +202,10 @@ class PositionDependentCorrection : public SubsysReco
                     const std::vector<float>& tower_energies);
 
   void fillDPhiAllVariants(RawCluster*,const TLorentzVector&,
-                           const TLorentzVector&,const std::pair<float,float>&,
-                           int blkPhiCoarse,float vtx_z,
-                           TH1F* hRAW[N_Ebins],TH1F* hCP[N_Ebins]);
+                             const TLorentzVector&,const std::pair<float,float>&,
+                             int blkPhiCoarse,float vtxZ,      /* ← named now */
+                             TH1F* hRAW[N_Ebins],TH1F* hCP[N_Ebins],
+                             bool fillGlobal);
 
   void fillDEtaAllVariants(RawCluster*,const TLorentzVector&,
                            const TLorentzVector&,const std::pair<float,float>&,
@@ -298,6 +323,20 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpCorr_E     [N_Ebins]{};
   TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
+    
+  /* |z|‑sliced and signed‑z φ histograms */
+  TH1F* h_phi_diff_raw_E_vz        [N_Ebins][N_VzBins]{};
+  TH1F* h_phi_diff_corrected_E_vz  [N_Ebins][N_VzBins]{};
+  TH1F* h_phi_diff_cpRaw_E_vz      [N_Ebins][N_VzBins]{};
+  TH1F* h_phi_diff_cpCorr_E_vz     [N_Ebins][N_VzBins]{};
+  TH1F* h_phi_diff_cpBcorr_E_vz    [N_Ebins][N_VzBins]{};
+
+  TH1F* h_phi_diff_raw_E_vzsgn        [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_phi_diff_corrected_E_vzsgn  [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_phi_diff_cpRaw_E_vzsgn      [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_phi_diff_cpCorr_E_vzsgn     [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_phi_diff_cpBcorr_E_vzsgn    [N_Ebins][N_VzBinsSigned]{};
+
 
   TH1F* h_eta_diff_raw_E        [N_Ebins]{};
   TH1F* h_eta_diff_cpRaw_E      [N_Ebins]{};
@@ -310,6 +349,12 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_eta_diff_cpRaw_E_vz      [N_Ebins][N_VzBins]{};
   TH1F* h_eta_diff_cpCorr_E_vz     [N_Ebins][N_VzBins]{};
   TH1F* h_eta_diff_cpBcorr_E_vz    [N_Ebins][N_VzBins]{};
+
+  TH1F* h_eta_diff_raw_E_vzsgn        [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_eta_diff_corrected_E_vzsgn  [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_eta_diff_cpRaw_E_vzsgn      [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_eta_diff_cpCorr_E_vzsgn     [N_Ebins][N_VzBinsSigned]{};
+  TH1F* h_eta_diff_cpBcorr_E_vzsgn    [N_Ebins][N_VzBinsSigned]{};
     
   TH1* h_tower_e{nullptr};
   TH1* h_clusE{nullptr};

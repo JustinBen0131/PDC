@@ -1,6 +1,6 @@
 # variant   p0(rad)   p1(rad)
-no corr, scratch            -6.697275e-06   1.602585e-06
-b(E) corr, scratch          -2.455117e-05   8.983106e-06
-no corr, cluster            1.039646e-05   -4.688017e-07
-CorrectPosition, cluster    -5.379326e-05   -4.354774e-06
-b(E) corr, cluster          -2.877040e-05   -6.483911e-06
+no corr, scratch            -5.954591e-06   1.404451e-06
+b(E) corr, scratch          -2.333632e-05   8.635584e-06
+no corr, cluster            1.934660e-05   -3.375353e-06
+CorrectPosition, cluster    -5.311973e-05   -4.608379e-06
+b(E) corr, cluster          -2.817369e-05   -6.684905e-06

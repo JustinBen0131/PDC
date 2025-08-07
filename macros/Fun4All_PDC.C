@@ -252,6 +252,7 @@ void Fun4All_PDC(int nevents = 0,
   pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
   pdc->setIsSimulation(isSimulation);
   pdc->UseSurveyGeometry(false);      // load barrel-tilt from CDB (recommended)
+  pdc->UseSignedVz(true);
   /*------------------------------------------------------------
       2)  π0-mass-window support
     ------------------------------------------------------------*/

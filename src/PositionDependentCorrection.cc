@@ -425,6 +425,86 @@ PositionDependentCorrection::bookSimulationHistograms
       hm->registerHisto(h_eta_diff_cpBcorr_E[i]);
 
       /* ------------------------------------------------------------------ *
+       * (IIa)  NEW  Δφ(E, vz) histograms – one loop over |z| slices
+       * ------------------------------------------------------------------ */
+      for (int iVz = 0; iVz < N_VzBins; ++iVz)
+        {
+          const float vzLo = vzEdge[iVz];
+          const float vzHi = vzEdge[iVz+1];
+          const std::string vzTag = Form("vz%.0f_%.0f", vzLo, vzHi);
+
+          h_phi_diff_raw_E_vz[i][iVz] = new TH1F(
+                Form("h_phi_diff_raw_%s_%s",  lab.c_str(), vzTag.c_str()),
+                Form("#Delta#phi raw;%.0f<E<%.0f GeV, %.0f<|z_{vtx}|<%.0f cm",
+                     eLo, eHi, vzLo, vzHi), 200, -0.1, 0.1);
+
+          h_phi_diff_corrected_E_vz[i][iVz] = new TH1F(
+                Form("h_phi_diff_corr_%s_%s", lab.c_str(), vzTag.c_str()),
+                Form("#Delta#phi corr;%.0f<E<%.0f GeV, %.0f<|z_{vtx}|<%.0f cm",
+                     eLo, eHi, vzLo, vzHi), 200, -0.1, 0.1);
+
+          /* CP variants */
+          h_phi_diff_cpRaw_E_vz [i][iVz] = new TH1F(
+                Form("h_phi_diff_cpRaw_%s_%s",  lab.c_str(), vzTag.c_str()),
+                "#Delta#phi RAW‑CP;#Delta#phi(rad);Counts", 200,-0.1,0.1);
+          h_phi_diff_cpCorr_E_vz[i][iVz] = new TH1F(
+                Form("h_phi_diff_cpCorr_%s_%s", lab.c_str(), vzTag.c_str()),
+                "#Delta#phi CP‑corr;#Delta#phi(rad);Counts",200,-0.1,0.1);
+          h_phi_diff_cpBcorr_E_vz[i][iVz] = new TH1F(
+                Form("h_phi_diff_cpBcorr_%s_%s", lab.c_str(), vzTag.c_str()),
+                "#Delta#phi BCORR;#Delta#phi(rad);Counts", 200,-0.1,0.1);
+
+          hm->registerHisto(h_phi_diff_raw_E_vz       [i][iVz]);
+          hm->registerHisto(h_phi_diff_corrected_E_vz [i][iVz]);
+          hm->registerHisto(h_phi_diff_cpRaw_E_vz     [i][iVz]);
+          hm->registerHisto(h_phi_diff_cpCorr_E_vz    [i][iVz]);
+          hm->registerHisto(h_phi_diff_cpBcorr_E_vz   [i][iVz]);
+        }
+
+        /* ---------- OPTIONAL signed‑z booking (north / south) ---------- */
+        if (m_useSignedVz)
+        {
+          for (int iVz = 0; iVz < N_VzBinsSigned; ++iVz)
+          {
+            const bool  isNorth = (iVz < N_VzBins);
+            const int   idxAbs  = isNorth ? iVz : iVz - N_VzBins;
+            const float vzLo = vzEdge[idxAbs];
+            const float vzHi = vzEdge[idxAbs+1];
+            const std::string vzTag = Form("%s_vz%s%.0f_%.0f",
+                                           lab.c_str(), isNorth?"P":"N",
+                                           vzLo, vzHi);
+
+            h_phi_diff_raw_E_vzsgn[i][iVz] = new TH1F(
+                  Form("h_phi_diff_raw_%s", vzTag.c_str()),
+                  Form("#Delta#phi raw;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
+                       eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
+                  200,-0.1,0.1);
+
+            h_phi_diff_corrected_E_vzsgn[i][iVz] = new TH1F(
+                  Form("h_phi_diff_corr_%s", vzTag.c_str()),
+                  Form("#Delta#phi corr;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
+                       eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
+                  200,-0.1,0.1);
+
+            h_phi_diff_cpRaw_E_vzsgn [i][iVz] = new TH1F(
+                  Form("h_phi_diff_cpRaw_%s",  vzTag.c_str()),
+                  "#Delta#phi RAW‑CP;#Delta#phi;Counts", 200,-0.1,0.1);
+            h_phi_diff_cpCorr_E_vzsgn[i][iVz] = new TH1F(
+                  Form("h_phi_diff_cpCorr_%s", vzTag.c_str()),
+                  "#Delta#phi CP‑corr;#Delta#phi;Counts",200,-0.1,0.1);
+            h_phi_diff_cpBcorr_E_vzsgn[i][iVz] = new TH1F(
+                  Form("h_phi_diff_cpBcorr_%s", vzTag.c_str()),
+                  "#Delta#phi BCORR;#Delta#phi;Counts", 200,-0.1,0.1);
+
+            hm->registerHisto(h_phi_diff_raw_E_vzsgn       [i][iVz]);
+            hm->registerHisto(h_phi_diff_corrected_E_vzsgn [i][iVz]);
+            hm->registerHisto(h_phi_diff_cpRaw_E_vzsgn     [i][iVz]);
+            hm->registerHisto(h_phi_diff_cpCorr_E_vzsgn    [i][iVz]);
+            hm->registerHisto(h_phi_diff_cpBcorr_E_vzsgn   [i][iVz]);
+          }
+      }
+        
+      /* ------------------------------------------------------------------ *
        * (II)  NEW  Δη(E, vz) histograms – one extra loop over vz slices
        * ------------------------------------------------------------------ */
       for (int iVz = 0; iVz < N_VzBins; ++iVz)
@@ -459,8 +539,53 @@ PositionDependentCorrection::bookSimulationHistograms
         hm->registerHisto(h_eta_diff_cpRaw_E_vz   [i][iVz]);
         hm->registerHisto(h_eta_diff_cpCorr_E_vz  [i][iVz]);
         hm->registerHisto(h_eta_diff_cpBcorr_E_vz [i][iVz]);
-      }
     }
+
+    /* ---------- OPTIONAL signed‑z booking (north / south) ---------- */
+    if (m_useSignedVz)
+    {
+          for (int iVz = 0; iVz < N_VzBinsSigned; ++iVz)
+          {
+            const bool  isNorth = (iVz < N_VzBins);
+            const int   idxAbs  =  isNorth ?  iVz : iVz - N_VzBins;
+            const float vzLo    = vzEdge[idxAbs];
+            const float vzHi    = vzEdge[idxAbs+1];
+            const std::string vzTag = Form("%s_vz%s%.0f_%.0f",
+                                           lab.c_str(),
+                                           isNorth ? "P" : "N",
+                                           vzLo, vzHi);  // “P” = +z, “N” = –z
+
+            /* book once per slice */
+            h_eta_diff_raw_E_vzsgn[i][iVz] = new TH1F(
+                   Form("h_eta_diff_raw_%s", vzTag.c_str()),
+                   Form("#Delta#eta raw;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
+                        eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
+                   200, -0.1, 0.1);
+
+            h_eta_diff_corrected_E_vzsgn[i][iVz] = new TH1F(
+                   Form("h_eta_diff_corr_%s", vzTag.c_str()),
+                   Form("#Delta#eta corr;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
+                        eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
+                   200, -0.1, 0.1);
+
+            h_eta_diff_cpRaw_E_vzsgn  [i][iVz] = new TH1F(
+                   Form("h_eta_diff_cpRaw_%s",  vzTag.c_str()),
+                   "#Delta#eta RAW‑CP;#Delta#eta;Counts", 200, -0.1, 0.1);
+            h_eta_diff_cpCorr_E_vzsgn [i][iVz] = new TH1F(
+                   Form("h_eta_diff_cpCorr_%s", vzTag.c_str()),
+                   "#Delta#eta CP‑corr;#Delta#eta;Counts", 200, -0.1, 0.1);
+            h_eta_diff_cpBcorr_E_vzsgn[i][iVz] = new TH1F(
+                   Form("h_eta_diff_cpBcorr_%s", vzTag.c_str()),
+                   "#Delta#eta BCORR;#Delta#eta;Counts", 200, -0.1, 0.1);
+
+            hm->registerHisto(h_eta_diff_raw_E_vzsgn       [i][iVz]);
+            hm->registerHisto(h_eta_diff_corrected_E_vzsgn [i][iVz]);
+            hm->registerHisto(h_eta_diff_cpRaw_E_vzsgn     [i][iVz]);
+            hm->registerHisto(h_eta_diff_cpCorr_E_vzsgn    [i][iVz]);
+            hm->registerHisto(h_eta_diff_cpBcorr_E_vzsgn   [i][iVz]);
+        } // signed‑vz loop
+     }   // if(m_useSignedVz)
+  }     // E‑slice loop
 
 
   /* Δy scan & log‑weight scan histograms – exactly as before */
@@ -1602,9 +1727,10 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         const TLorentzVector&         truthPhoton,
         const std::pair<float,float>& blkCoord,     // (ηloc , φloc)
         int                           blkPhiCoarse,
-        float                         /*vtx_z*/,
+        float                         vtxZ,
         TH1F*                         hRAW [N_Ebins],
-        TH1F*                         hCP  [N_Ebins] )
+        TH1F*                         hCP  [N_Ebins],
+        bool                          fillGlobal )
 {
   /* ── A) fast guards ───────────────────────────────────────────────── */
   if (!clus || !m_geometry || !m_bemcRec) return;
@@ -1805,12 +1931,36 @@ void PositionDependentCorrection::fillDPhiAllVariants(
  //rec[4] --> PDC global conv w PDC corr
 
 #define HFill(H,V)  do{ if((H)&&std::isfinite(V)) (H)->Fill(V); }while(0)
-  HFill(hRAW [iE], rec[0].d);
-  HFill(hCP  [iE], rec[1].d);
-  HFill(h_phi_diff_cpBcorr_E [iE], rec[2].d);
-  HFill(h_phi_diff_raw_E     [iE], rec[3].d);
-  HFill(h_phi_diff_corrected_E[iE], rec[4].d);
-#undef  HFill
+  if (fillGlobal) {
+        HFill(hRAW [iE], rec[0].d);
+        HFill(hCP  [iE], rec[1].d);
+        HFill(h_phi_diff_cpBcorr_E [iE], rec[2].d);
+        HFill(h_phi_diff_raw_E     [iE], rec[3].d);
+        HFill(h_phi_diff_corrected_E[iE], rec[4].d);
+  }
+  /* ---------- vertex‑resolved histogramming ---------- */
+  const float absVz   = std::fabs(vtxZ);
+  const int   iVzAbs  = getVzSlice(absVz);     // 0 … N_VzBins‑1 or −1
+  const int   iVzSgn  = getVzSliceSigned(vtxZ);// 0 … 2*N_VzBins‑1 or −1
+
+  if (iVzAbs >= 0)                             /* |z| slices */
+  {
+      HFill(h_phi_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
+      HFill(h_phi_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
+      HFill(h_phi_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
+      HFill(h_phi_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
+      HFill(h_phi_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
+  }
+
+  if (m_useSignedVz && iVzSgn >= 0)            /* +z / –z slices */
+  {
+      HFill(h_phi_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
+      HFill(h_phi_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
+      HFill(h_phi_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
+      HFill(h_phi_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
+      HFill(h_phi_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
+  }
+ #undef  HFill
 
   /* ── G) “winner” bookkeeping ────────────────────────────────────── */
   int best5 = 0; for (int i=1;i<5;++i)
@@ -2135,15 +2285,28 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     HFill(h_eta_diff_raw_E     [iE], rec[3].d);
     HFill(h_eta_diff_corrected_E[iE], rec[4].d);
   }
-  const int iVz = getVzSlice(std::fabs(vtxZ));
-  if (iVz >= 0 && iVz < N_VzBins)
-  {
-    HFill(h_eta_diff_cpRaw_E_vz   [iE][iVz], rec[0].d);
-    HFill(h_eta_diff_cpCorr_E_vz  [iE][iVz], rec[1].d);
-    HFill(h_eta_diff_cpBcorr_E_vz [iE][iVz], rec[2].d);
-    HFill(h_eta_diff_raw_E_vz     [iE][iVz], rec[3].d);
-    HFill(h_eta_diff_corrected_E_vz[iE][iVz], rec[4].d);
-  }
+    /* ---------- vertex‑resolved histogramming ---------- */
+    const float absVz   = std::fabs(vtxZ);
+    const int   iVzAbs  = getVzSlice(absVz);      // 0 … N_VzBins‑1 or −1
+    const int   iVzSgn  = getVzSliceSigned(vtxZ); // 0 … 2*N_VzBins‑1 or −1
+
+    if (iVzAbs >= 0)                              /* |z| slices */
+    {
+      HFill(h_eta_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
+      HFill(h_eta_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
+      HFill(h_eta_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
+      HFill(h_eta_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
+      HFill(h_eta_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
+    }
+
+    if (m_useSignedVz && iVzSgn >= 0)             /* +z / –z slices */
+    {
+      HFill(h_eta_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
+      HFill(h_eta_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
+      HFill(h_eta_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
+      HFill(h_eta_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
+      HFill(h_eta_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
+    }
 #undef  HFill
 
   /* ───────────────── winner bookkeeping ──────────────────────────── */
@@ -2723,19 +2886,17 @@ void PositionDependentCorrection::finalClusterLoop(
                        blkCoord, blkPhiCoarse,
                        towerPhis, towerEs);
 
-        if (fillGlobal)          // apply the  |z_vtx| ≤ 10 cm  cut
-        {
-            fillDPhiAllVariants(
-                clus1,
-                photon1,                       // reco photon
-                trPhoton,                      // truth photon
-                blkCoord,                      // (ηloc , φloc)
-                blkPhiCoarse,                  // coarse φ index
-                vtx_z,                         // vertex‑z (only wrapped through)
-                h_phi_diff_cpRaw_E,            // Δφ(CLUS‑RAW)  → truth
-                h_phi_diff_cpCorr_E            // Δφ(CLUS‑CP)   → truth
-            );
-        }
+        fillDPhiAllVariants(
+            clus1,
+            photon1,                       // reco photon
+            trPhoton,                      // truth photon
+            blkCoord,                      // (ηloc , φloc)
+            blkPhiCoarse,                  // coarse φ index
+            vtx_z,                         // vertex‑z (only wrapped through)
+            h_phi_diff_cpRaw_E,            // Δφ(CLUS‑RAW)  → truth
+            h_phi_diff_cpCorr_E,           // Δφ(CLUS‑CP)   → truth
+            fillGlobal                     // NEW: apply 10 cm cut inside
+        );
         
         fillDEtaAllVariants(
             clus1,
