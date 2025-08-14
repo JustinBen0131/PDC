@@ -357,8 +357,8 @@ PositionDependentCorrection::bookSimulationHistograms
        (I)  Per‑E‑slice histograms that existed before
        (II) NEW  Δη(E, vz) histograms
        ──────────────────────────────────────────────────────────────────── */
-    for (int i = 0; i < N_Ebins; ++i)
-    {
+  for (int i = 0; i < N_Ebins; ++i)
+  {
       const float        eLo = eEdge[i], eHi = eEdge[i+1];
       const std::string  lab = makeLabel(i);
 
