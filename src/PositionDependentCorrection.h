@@ -580,45 +580,67 @@ namespace PDC_detail
     }
 
 
-  /* ---------- cluster centre of gravity --------------------------- */
-  inline bool clusterCentreOfGravity(const RawCluster* cluster,
+    /* ---------- cluster centre of gravity (Momenta-equivalent) ------ */
+    inline bool clusterCentreOfGravity(const RawCluster* cluster,
                                        RawTowerGeomContainer* geo,
-                                       const BEmcRecCEMC* /*rec*/,
+                                       const BEmcRecCEMC* rec,
                                        float& x, float& y)
-  {
-      if (!cluster || !geo)
-      {
-        x = y = 0.0f;
-        return false;
-      }
+    {
+        if (!cluster || !geo || !rec)
+        {
+            x = y = 0.0f;
+            return false;
+        }
 
-      double eTot = 0.0;
-      double xTot = 0.0;
-      double yTot = 0.0;
+        // 1) Build the EmcModule hit list exactly like the clusterizer expects
+        std::vector<EmcModule> hitlist;
+        hitlist.reserve(std::distance(cluster->get_towers().first,
+                                      cluster->get_towers().second));
 
-      RawCluster::TowerConstRange towers = cluster->get_towers();
-      for (auto it = towers.first; it != towers.second; ++it)
-      {
-        RawTowerDefs::keytype tk = it->first;
-        const double e          = it->second;
-        auto tgeom              = geo->get_tower_geometry(tk);
-        if (!tgeom) continue;
+        const int Nx = rec->GetNx();    // width of the tower grid used for linear indexing
 
-        xTot += e * static_cast<double>(tgeom->get_binphi());   // use tower φ‑index (0…255)
-        yTot += e * static_cast<double>(tgeom->get_bineta());   // use tower η‑index (0…95)
-        eTot += e;
-      }
+        RawCluster::TowerConstRange towers = cluster->get_towers();
+        for (auto it = towers.first; it != towers.second; ++it)
+        {
+            const auto tk   = it->first;
+            const double e  = it->second;
+            const auto tg   = geo->get_tower_geometry(tk);
+            if (!tg) continue;
 
-      if (eTot <= 0.0)
-      {
-        x = y = 0.0f;
-        return false;
-      }
+            const int ix = tg->get_binphi();
+            const int iy = tg->get_bineta();
 
-      x = static_cast<float>(xTot / eTot);
-      y = static_cast<float>(yTot / eTot);
-      return true;
-  }
+            EmcModule m;
+            m.ich = iy * Nx + ix;               // linear index: ich = iy*fNx + ix
+            m.amp = static_cast<float>(e);      // tower energy
+            m.tof = 0.0f;                       // unused here
+            hitlist.push_back(m);
+        }
+
+        if (hitlist.empty())
+        {
+            x = y = 0.0f;
+            return false;
+        }
+
+        // 2) Call the clusterizer's CoG routine with its threshold and φ-wrapping logic
+        float E = 0.0f, px = 0.0f, py = 0.0f, pxx = 0.0f, pyy = 0.0f, pyx = 0.0f;
+
+        // If GetTowerThreshold() is non-const in your build, the const_cast below keeps this helper drop-in:
+        const float thr = const_cast<BEmcRecCEMC*>(rec)->GetTowerThreshold();
+
+        rec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, thr);
+        if (E <= 0.0f)
+        {
+            x = y = 0.0f;
+            return false;
+        }
+
+        // Momenta already adds back the max-tower indices and wraps φ to [-0.5, Nx-0.5)
+        x = px;   // φ-like tower coordinate (xC) in tower units
+        y = py;   // η-like tower coordinate (yC) in tower units
+        return true;
+    }
 
 
   /* ---------- light‑weight records for Δη/Δφ bookkeeping ---------- */
