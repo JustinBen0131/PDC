@@ -5666,38 +5666,27 @@ void makeLegoGifHD(TH3          *h1,                /* mandatory          */
  }
 
 
-// -----------------------------------------------------------------------------
-//  Δφ & Δη "playground" – first-bin zoom + all-bins table + μ/σ summary
-//  Also produces Δφ&Δη overlays (same canvas; legend; φ=red, η=blue)
-//  OUTPUT ROOT FOLDER:  /Users/patsfan753/Desktop/scratchPDC
-//
-//  Writes 9 PNGs:
-//
-//    (Δφ)  DeltaPhi_noCorrCluster_FirstBin.png
-//          DeltaPhi_noCorrCluster_AllBins_Table.png
-//          DeltaPhi_noCorrCluster_MeanSigmaVsE.png
-//
-//    (Δη)  DeltaEta_noCorrCluster_FirstBin.png
-//          DeltaEta_noCorrCluster_AllBins_Table.png
-//          DeltaEta_noCorrCluster_MeanSigmaVsE.png
-//
-//    (overlay φ&η)
-//          DeltaEtaPhi_noCorrCluster_FirstBin_Overlay.png
-//          DeltaEtaPhi_noCorrCluster_AllBins_Table_Overlay.png
-//          DeltaEtaPhi_noCorrCluster_MeanSigmaVsE_Overlay.png
-//
-//  You can tweak the x-range for *both* Δφ & Δη plots via xMin/xMax.
-// -----------------------------------------------------------------------------
+
 void MakeDeltaPhiEtaPlayground(
     const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
 {
+    // -------------------- global plot style & folders --------------------
     gStyle->SetOptStat(0);
     ensureDir(outDir);
 
-    // --- open input ---------------------------------------------------
+    const std::string dirOverlayNoCorr      = std::string(outDir) + "/etaPhiCompareNoCorrection";
+    const std::string dirSeparateNoCorr     = std::string(outDir) + "/seperatePhiEtaNoCorrection";
+    const std::string dirRawVsCorr          = std::string(outDir) + "/Clusterizer_RawVsCorr_EtaPhi";
+    const std::string dirScratchRawVsCorr   = std::string(outDir) + "/fromScratch_RawVsCorr_EtaPhi";
+    ensureDir(dirOverlayNoCorr.c_str());
+    ensureDir(dirSeparateNoCorr.c_str());
+    ensureDir(dirRawVsCorr.c_str());
+    ensureDir(dirScratchRawVsCorr.c_str());
+
+    // -------------------- input file --------------------
     std::cout << "[Playground] Opening: " << inFile << "\n";
     std::unique_ptr<TFile> fIn(TFile::Open(inFile,"READ"));
     if (!fIn || fIn->IsZombie()){
@@ -5705,7 +5694,7 @@ void MakeDeltaPhiEtaPlayground(
         return;
     }
 
-    // --- detect energy-binning tag (range vs disc), same logic as PDCanalysis
+    // -------------------- binning mode detection (as in PDCanalysis) --------------------
     EBinningMode binMode = EBinningMode::kRange;
     if (fIn->Get("h3_blockCoord_E_range") == nullptr &&
         fIn->Get("h3_blockCoord_E_disc")  != nullptr) {
@@ -5715,126 +5704,286 @@ void MakeDeltaPhiEtaPlayground(
         std::cout << "[Playground] Detected RANGE energy binning\n";
     }
 
-    // --- energy edges (same 8 slices you use) -------------------------
-    const std::vector<std::pair<double,double>> eEdges = {
-        {2.0,4.0},{4.0,6.0},{6.0,8.0},{8.0,10.0},
-        {10.0,12.0},{12.0,15.0},{15.0,20.0},{20.0,30.0}
-    };
-
-    // Build per-slice tag identical to PDCanalysis
+    std::vector<std::pair<double,double>> eEdges;
+    eEdges.reserve(N_E);
+    for (int i = 0; i < N_E; ++i)
+        eEdges.emplace_back(E_edges[i], E_edges[i+1]);
+    
+    // tag builder identical to PDCanalysis
     auto makeSliceTag = [binMode](std::size_t /*iE*/, const std::pair<double,double>& edge){
         return (binMode == EBinningMode::kRange)
                ? TString::Format("%.0f_%.0f", edge.first, edge.second)
                : TString::Format("E%.0f",     edge.first);
     };
 
-    // helper: force a Gaussian fit in [xMin, xMax] and return FitRes + TF1*
-    // scaleForCounts==true  → returned TF1 amplitude matches a *counts-per-bin* histogram
-    // nameHint is used to keep TF1 names unique across pads/canvases
+    // =====================================================================
+    //                      micro‑helpers
+    // =====================================================================
+
+    auto setPadMargins = [](double L=0.12,double R=0.04,double T=0.12,double B=0.12){
+        gPad->SetLeftMargin(L); gPad->SetRightMargin(R);
+        gPad->SetTopMargin(T);  gPad->SetBottomMargin(B);
+    };
+
+    auto cloneCountsHist = [](TH1F* h)->TH1F*{
+        if (!h) return nullptr;
+        auto* c = static_cast<TH1F*>(h->Clone());
+        c->SetDirectory(nullptr);
+        return c;
+    };
+
+    auto styleCountsHist = [](TH1F* h, Color_t col, Style_t mk=20, double msz=0.7){
+        if (!h) return;
+        h->SetMarkerStyle(mk);
+        h->SetMarkerColor(col);
+        h->SetLineColor  (col);
+        h->SetMarkerSize (msz);
+    };
+
+    auto computeYmaxCounts = [](const std::initializer_list<const TH1F*>& hh)->double{
+        double yMax = 0.0;
+        for (auto* h : hh){
+            if (!h) continue;
+            for (int b=1; b<=h->GetNbinsX(); ++b)
+                yMax = std::max(yMax, h->GetBinContent(b) + h->GetBinError(b));
+        }
+        return yMax;
+    };
+
+    auto drawNDCEnergy = [](double x, double y, double eLo, double eHi, double ts=0.040){
+        TLatex t; t.SetNDC(); t.SetTextSize(ts); t.SetTextAlign(33);
+        t.DrawLatex(x,y,Form("[%.0f, %.0f) GeV", eLo, eHi));
+    };
+
+    auto makeNDCLegend = [](double x1,double y1,double x2,double y2)->TLegend*{
+        auto* lg = new TLegend(x1,y1,x2,y2,"","NDC");
+        lg->SetBorderSize(0); lg->SetFillStyle(0); lg->SetTextSize(0.032);
+        return lg;
+    };
+
+    auto drawHeaderNDC = [](const char* txt, double y=0.975, double ts=0.045){
+        TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(ts);
+        h.DrawLatex(0.5, y, txt);
+    };
+
+    auto styleFit = [](TF1* f, Color_t col, int lw=2, int npx=400){
+        if (!f) return;
+        f->SetLineColor(col); f->SetLineWidth(lw); f->SetNpx(npx);
+    };
+
+    // =====================================================================
+    //                         data loaders + fitter
+    // =====================================================================
+
+    auto loadSet = [&](const char* hPat) -> std::vector<TH1F*>
+    {
+        std::vector<TH1F*> H(eEdges.size(), nullptr);
+        for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+        {
+            const TString tag = makeSliceTag(iE, eEdges[iE]);
+            TH1F* h = dynamic_cast<TH1F*>( fIn->Get(Form(hPat, tag.Data())) );
+            if (!h)
+                std::cerr << "[Playground][WARN] Missing hist for slice " << tag
+                          << " (" << hPat << ")\n";
+            H[iE] = h;
+        }
+        return H;
+    };
+
+    // ---- Peak-focused, bin-integrated & truncated Gaussian (unchanged semantics) ----
     auto fitGaussianInRange = [&](TH1* src, double lo, double hi,
                                   bool scaleForCounts=false,
                                   const char* nameHint="fPlayG")
                                   -> std::pair<FitRes, TF1*>
     {
-        if(!src || src->Integral()==0) return { FitRes{}, nullptr };
-
-        // normalised copy for stable initial parameters
-        std::unique_ptr<TH1> h(static_cast<TH1*>(src->Clone()));
-        h->SetDirectory(nullptr);
-        double n = h->Integral();
-        if (n>0) h->Scale(1.0/n);
-
-        // unique TF1 name to avoid ROOT collisions
-        static unsigned long uid = 0;
-        TString fname = Form("%s_%lu", nameHint, ++uid);
-
-        TF1* f = new TF1(fname, "gaus", lo, hi);
-        f->SetParameters(h->GetMaximum(), h->GetMean(), h->GetRMS());
-        auto r = h->Fit(f,"QNR0S");  // quiet, no draw, use range, keep result
-
         FitRes out{};
-        if (r.Get() && r->IsValid()){
-            out.mu = f->GetParameter(1);   out.dmu = f->GetParError(1);
-            out.sg = std::fabs(f->GetParameter(2)); out.dsg = f->GetParError(2);
-        } else {
-            out = robustGaussianFit(src);
-            f->SetParameters(h->GetMaximum(),
-                             out.mu,
-                             std::max(1e-6, out.sg));
-        }
+        if (!src || src->Integral() <= 0) return std::make_pair(out, nullptr);
 
-        // If overlaying on *counts* histograms, scale the PDF height → counts/bin
-        if (scaleForCounts){
-            const double bw    = src->GetXaxis()->GetBinWidth(1);
-            const double scale = src->Integral() * bw;  // counts per bin = pdf * N * binWidth
-            f->SetParameter(0, f->GetParameter(0) * scale);
+        const double hardLo = -0.02;
+        const double hardHi =  0.02;
+        const double fitLo  = hardLo;
+        const double fitHi  = hardHi;
+        if (fitLo >= fitHi) return std::make_pair(out, nullptr);
+
+        // --- range & binning in the *fit* window ---
+        TAxis* ax = src->GetXaxis();
+        const int nbin = ax->GetNbins();
+        const int iLo  = std::max(1, ax->FindFixBin(fitLo + 1e-9));
+        const int iHi  = std::min(nbin, ax->FindFixBin(fitHi - 1e-9));
+        if (iLo >= iHi) return std::make_pair(out, nullptr);
+        const int ibMid = std::max(1, std::min(nbin, (iLo+iHi)/2));
+        const double bw = ax->GetBinWidth(ibMid);
+
+        // --- seeds: mode (peak bin) and FWHM-based σ0 ---
+        int    iPk = iLo; double yPk = -1.0;
+        for (int i=iLo; i<=iHi; ++i) { const double y=src->GetBinContent(i); if (y>yPk){ yPk=y; iPk=i; } }
+        const double xPk  = ax->GetBinCenter(iPk);
+        const double A0   = std::max(yPk, 1.0);
+        const double mu0  = xPk;
+
+        const double half = 0.5*A0;
+        auto interpX = [&](int i1,int i2,double level){
+            const double x1=ax->GetBinCenter(i1), x2=ax->GetBinCenter(i2);
+            const double y1=src->GetBinContent(i1), y2=src->GetBinContent(i2);
+            if (std::fabs(y2-y1)<1e-12) return x1;
+            return x1 + (level-y1)*(x2-x1)/(y2-y1);
+        };
+        double xL = mu0 - 2.0*bw, xR = mu0 + 2.0*bw;
+        for (int i=iPk-1; i>=iLo; --i){ if (src->GetBinContent(i) <= half){ xL = interpX(i, i+1, half); break; } }
+        for (int i=iPk+1; i<=iHi; ++i){ if (src->GetBinContent(i) <= half){ xR = interpX(i-1, i, half); break; } }
+        const double sigmaFWHM = (xR>xL) ? (xR-xL)/2.354820045 : std::max(0.8*bw, src->GetRMS());
+
+        // core RMS around the mode
+        const double wCore = 0.010;
+        const double xCoreLo = std::max(fitLo, mu0 - wCore);
+        const double xCoreHi = std::min(fitHi, mu0 + wCore);
+        const int iCoreLo = std::max(1, ax->FindFixBin(xCoreLo + 1e-9));
+        const int iCoreHi = std::min(nbin, ax->FindFixBin(xCoreHi - 1e-9));
+
+        double wsum=0.0, xsum=0.0, x2sum=0.0;
+        for (int i=iCoreLo; i<=iCoreHi; ++i){
+            const double w = std::max(0.0, src->GetBinContent(i));
+            if (w<=0.0) continue;
+            const double x = ax->GetBinCenter(i);
+            wsum  += w; xsum += w*x; x2sum += w*x*x;
         }
-        return {out, f};
+        double sigmaCore = (wsum>0.0) ? std::sqrt(std::max(x2sum/wsum - std::pow(xsum/wsum,2), 0.0)) : sigmaFWHM;
+
+        double sigma0 = std::min(sigmaFWHM, sigmaCore);
+        sigma0 = std::max(sigma0, 0.8*bw);
+
+        const double minSig = std::max(0.45*bw, 1e-6);
+        const double maxSig = 0.25*(fitHi - fitLo);
+        sigma0              = std::min(std::max(sigma0, minSig), maxSig);
+
+        const double Nin = std::max(1.0, src->Integral(iLo, iHi));
+        const double N0  = Nin;
+
+        static unsigned long uid = 0;
+        TF1* f = new TF1(Form("%s_%lu", nameHint, ++uid),
+            [=](double* xx, double* pp){
+                const double N  = pp[0];
+                const double mu = pp[1];
+                const double sg = std::max(pp[2], 1e-12);
+                const double s2 = sg*std::sqrt(2.0);
+
+                const double xa = (xx[0]-0.5*bw - mu)/s2;
+                const double xb = (xx[0]+0.5*bw - mu)/s2;
+                const double num = TMath::Erf(xb) - TMath::Erf(xa);
+
+                const double a  = (fitLo - mu)/s2;
+                const double b  = (fitHi - mu)/s2;
+                double den = TMath::Erf(b) - TMath::Erf(a);
+                if (den < 1e-12) den = 1e-12;
+
+                return N * (num/den);  // pedestal 0
+            }, fitLo, fitHi, 3);
+
+        f->SetParNames("N","#mu","#sigma");
+        f->SetParameters(N0, mu0, sigma0);
+        f->SetParLimits(0, 0.0, 10.0*Nin);
+        f->SetParLimits(1, fitLo, fitHi);
+        f->SetParLimits(2, minSig, maxSig);
+        f->SetNpx(1200);
+
+        // pass 1: full window
+        f->SetRange(fitLo, fitHi);
+        TFitResultPtr r1 = src->Fit(f, "QLNR0S");
+
+        // focus the symmetric core via top-fraction threshold
+        const double SNR  = std::max(1.0, N0) / std::sqrt(std::max(N0, 1.0));
+        const double frac = std::clamp(0.40 + 0.30/(1.0 + SNR), 0.40, 0.65);
+        const double thr  = frac * std::max(1.0, src->GetBinContent(src->GetMaximumBin()));
+
+        int iPk2 = src->GetMaximumBin();
+        double mu0b = ax->GetBinCenter(iPk2);
+        double loCoreEdge = mu0b, hiCoreEdge = mu0b;
+        for (int i=iPk2; i>=iLo; --i){ if (src->GetBinContent(i) < thr){ loCoreEdge=ax->GetBinCenter(i); break; } loCoreEdge=ax->GetBinCenter(i); }
+        for (int i=iPk2; i<=iHi; ++i){ if (src->GetBinContent(i) < thr){ hiCoreEdge=ax->GetBinCenter(i); break; } hiCoreEdge=ax->GetBinCenter(i); }
+
+        loCoreEdge = std::max(fitLo, loCoreEdge);
+        hiCoreEdge = std::min(fitHi, hiCoreEdge);
+
+        double hwL = std::max(0.0, mu0b - loCoreEdge);
+        double hwR = std::max(0.0, hiCoreEdge - mu0b);
+        double hw  = std::max(0.8*bw, std::min(hwL, hwR));
+        double loCore = std::max(fitLo, mu0b - hw);
+        double hiCore = std::min(fitHi, mu0b + hw);
+
+        f->SetParLimits(2, minSig, maxSig);
+        f->SetParameter(2, std::min(std::max(f->GetParameter(2), minSig), maxSig));
+
+        // pass 2: core window
+        f->SetRange(loCore, hiCore);
+        TFitResultPtr r2 = src->Fit(f, "QLNR0S");
+
+        // pass 3: μ ± k·σ, capped by fraction of window
+        const double muF = f->GetParameter(1);
+        const double sgF = std::max(minSig, std::fabs(f->GetParameter(2)));
+        const double k   = 1.50;
+        const double spanCap = 0.45*(fitHi - fitLo);
+        const double span = std::min(spanCap, k*sgF);
+        const double loT = std::max(fitLo, muF - span);
+        const double hiT = std::min(fitHi, muF + span);
+        f->SetRange(loT, hiT);
+        TFitResultPtr r3 = src->Fit(f, "QLNR0S");
+
+        // report (σ deconvolved from bin width)
+        out.mu  = f->GetParameter(1);
+        out.dmu = f->GetParError(1);
+        const double sgFit  = std::fabs(f->GetParameter(2));
+        const double sgTrue = std::sqrt(std::max(sgFit*sgFit - (ax->GetBinWidth(ibMid)*ax->GetBinWidth(ibMid))/12.0, 1e-12));
+        out.sg  = sgTrue;
+        out.dsg = f->GetParError(2);
+
+        if (!scaleForCounts){
+            const double Nin = std::max(1.0, src->Integral(ax->FindFixBin(fitLo + 1e-9), ax->FindFixBin(fitHi - 1e-9)));
+            const double bw  = ax->GetBinWidth(ibMid);
+            f->SetParameter(0, f->GetParameter(0) / (Nin * bw)); // convert to PDF inside fit window
+        }
+        f->SetRange(fitLo, fitHi);
+        f->SetNpx(1200);
+        return std::make_pair(out, f);
     };
 
-    // ---------- loaders ----------
-    auto loadSet = [&](const char* hPat) {
-        std::vector<TH1F*> H(eEdges.size(), nullptr);
-        for (std::size_t iE=0; iE<eEdges.size(); ++iE){
-            const TString tag = makeSliceTag(iE, eEdges[iE]);
-            H[iE] = static_cast<TH1F*>( fIn->Get(Form(hPat, tag.Data())) );
-            if (!H[iE])
-                std::cerr << "[Playground][WARN] Missing hist for slice " << tag
-                          << " (" << hPat << ")\n";
-        }
-        return H;
-    };
-
-    // ---------- per‑residual producer (keeps your previous behavior) ----------
+    // =====================================================================
+    //                    per‑residual producer (keeps outputs)
+    // =====================================================================
     auto produceResidualSet = [&](const char* stem,          // "DeltaPhi" or "DeltaEta"
-                                  const char* hPat,          // "h_phi_diff_cpRaw_%s" or "h_eta_diff_cpRaw_%s"
-                                  const char* sym)           // "#Delta#phi" or "#Delta#eta"
+                                  const char* hPat,          // "h_phi_diff_cpRaw_%s" / "h_eta_diff_cpRaw_%s"
+                                  const char* sym)           // "#Delta#phi" / "#Delta#eta"
     {
-        const int v = 2;     // "no corr, cluster"
+        const int v = 2;     // "no corr, cluster" (for colors/markers in μ/σ plots)
         auto H = loadSet(hPat);
 
-        // --- PNG #1 : First-bin nice single plot (forced x-range, fit drawn)
+        // ---------- PNG #1 : First-bin single plot (counts, forced x-range, fit drawn)
         if (!H.empty() && H[0] && H[0]->Integral()>0)
         {
             TCanvas c1(Form("cPlay_%s_First",stem),
-                                   Form("%s first slice (Clusterizer Output, No Position Correction)",stem),1000,750);
-
+                       Form("%s first slice (Clusterizer Output, No Position Correction)",stem),1000,750);
             c1.SetLeftMargin(0.14); c1.SetRightMargin(0.06);
             c1.SetBottomMargin(0.13); c1.SetTopMargin(0.06);
 
-            TH1F* hh = static_cast<TH1F*>(H[0]->Clone());
-            hh->SetDirectory(nullptr);
+            TH1F* hh = cloneCountsHist(H[0]);
 
-            // color scheme to match overlays: phi=red, eta=blue
             const bool isPhi = (TString(stem) == "DeltaPhi");
             const int  col   = isPhi ? (kRed+1) : (kBlue+1);
 
             hh->SetTitle("");
-            hh->SetMarkerStyle(20);
-            hh->SetMarkerColor(col);
-            hh->SetLineColor(col);
-
+            styleCountsHist(hh, col, 20, 1.0);
             hh->GetXaxis()->SetTitle(Form("%s  [rad]", sym));
-            hh->GetYaxis()->SetTitle("Counts");           // true counts, not PDF
-            hh->GetYaxis()->SetTitleSize(0.040);          // a bit smaller
-            hh->GetYaxis()->SetTitleOffset(1.60);         // more spread from ticks
+            hh->GetYaxis()->SetTitle("Counts");
+            hh->GetYaxis()->SetTitleSize(0.040);
+            hh->GetYaxis()->SetTitleOffset(1.60);
             hh->GetXaxis()->SetRangeUser(xMin, xMax);
 
-            double yMax=0.0;
-            for (int b=1; b<=hh->GetNbinsX(); ++b){
-                double y = hh->GetBinContent(b) + hh->GetBinError(b);
-                if (y>yMax) yMax=y;
-            }
+            double yMax = computeYmaxCounts({hh});
             hh->GetYaxis()->SetRangeUser(0., 1.15*yMax);
             hh->Draw("E");
 
             auto [fr, fG] = fitGaussianInRange(H[0], xMin, xMax, true, Form("f_%s_first", stem));
-            if (fG){
-                fG->SetLineColor(col);     // match points
-                fG->SetLineWidth(2);
-                fG->SetNpx(600);
-                fG->Draw("SAME");
-            }
+            if (fG){ styleFit(fG, col, 2, 600); fG->Draw("SAME"); }
+
             TLatex t;  t.SetNDC(); t.SetTextFont(42);
             t.SetTextSize(0.040); t.SetTextAlign(13);
             t.DrawLatex(0.16, 0.92, Form("[%.0f, %.0f) GeV", eEdges.front().first, eEdges.front().second));
@@ -5847,7 +5996,7 @@ void MakeDeltaPhiEtaPlayground(
             ts.SetTextSize(0.035); ts.SetTextAlign(33);
             ts.DrawLatex(0.94, 0.86, Form("#mu = %.3g,   #sigma = %.3g", fr.mu, fr.sg));
 
-            std::string out1 = std::string(outDir) + "/" + stem + "_noCorrCluster_FirstBin.png";
+            std::string out1 = dirSeparateNoCorr + "/" + std::string(stem) + "_noCorrCluster_FirstBin.png";
             c1.SaveAs(out1.c_str());
             c1.Close();
             std::cout << "[Playground] Wrote " << out1 << "\n";
@@ -5857,77 +6006,71 @@ void MakeDeltaPhiEtaPlayground(
                       << " – skipped PNG #1.\n";
         }
 
-        // --- PNG #2 : 4×2 table (all energy bins, same x-range & fit)
+        // ---------- PNG #2 : 4×2 table (this residual only) ----------
         {
             const int nCol=4, nRow=2, maxPads=nCol*nRow;
-            TCanvas cT(Form("cPlay_%s_Table",stem),
-                                   Form("%s all slices (Clusterizer Output, No Position Correction)",stem),1600,900);
+            TCanvas cOT(Form("cPlay_%s_Table", stem),
+                        Form("%s – all slices (Clusterizer Output, No Position Correction)", sym),
+                        1600,900);
+            cOT.SetTopMargin(0.10);
+            cOT.Divide(nCol,nRow,0,0);
 
-            cT.SetTopMargin(0.10);
-            cT.Divide(nCol,nRow,0,0);
+            const bool isPhi = (TString(stem) == "DeltaPhi");
+            const int  col   = isPhi ? (kRed+1) : (kBlue+1);
 
             int pad=1;
             for (std::size_t iE=0; iE<eEdges.size() && pad<=maxPads; ++iE)
             {
                 if (!H[iE] || H[iE]->Integral()==0) { ++pad; continue; }
 
-                cT.cd(pad++);
-                gPad->SetLeftMargin(0.12); gPad->SetRightMargin(0.04);
-                gPad->SetTopMargin(0.12);  gPad->SetBottomMargin(0.12);
+                cOT.cd(pad++);
+                setPadMargins();
 
-                TH1F* hh = static_cast<TH1F*>(H[iE]->Clone());
-                hh->SetDirectory(nullptr);
+                TH1F* hC = cloneCountsHist(H[iE]);
+                styleCountsHist(hC, col, 20, 0.7);
 
-                // color scheme to match overlays: phi=red, eta=blue
-                const bool isPhi = (TString(stem) == "DeltaPhi");
-                const int  col   = isPhi ? (kRed+1) : (kBlue+1);
+                auto [fr, f] = fitGaussianInRange(H[iE], xMin, xMax, true, Form("f_%s_tbl_%zu", stem, iE));
 
-                hh->SetTitle("");
-                hh->SetMarkerStyle(20);
-                hh->SetMarkerColor(col);
-                hh->SetLineColor(col);
+                double yMax = computeYmaxCounts({hC});
+                hC->SetTitle("");
+                hC->GetXaxis()->SetTitle("#Delta  [rad]");
+                hC->GetYaxis()->SetTitle("Counts");
+                hC->GetXaxis()->SetRangeUser(xMin, xMax);
+                hC->GetYaxis()->SetRangeUser(0., 1.20*yMax);
+                hC->Draw("E");
 
-                hh->GetXaxis()->SetTitle(Form("%s  [rad]", sym));
-                hh->GetYaxis()->SetTitle("Counts");           // true counts, not PDF
-                hh->GetYaxis()->SetTitleSize(0.040);          // smaller label
-                hh->GetYaxis()->SetTitleOffset(1.60);         // more offset from ticks
-                hh->GetXaxis()->SetRangeUser(xMin, xMax);
+                if (f){ styleFit(f, col, 2, 400); f->Draw("SAME"); }
 
-                double yMax=0.0;
-                for (int b=1; b<=hh->GetNbinsX(); ++b){
-                    double y = hh->GetBinContent(b)+hh->GetBinError(b);
-                    if (y>yMax) yMax=y;
-                }
-                hh->GetYaxis()->SetRangeUser(0., 1.20*yMax);
-                hh->Draw("E");
+                // energy label
+                drawNDCEnergy(0.93, 0.70, eEdges[iE].first, eEdges[iE].second, 0.038);
 
-                auto [fr, fG] = fitGaussianInRange(H[iE], xMin, xMax, true, Form("f_%s_table_%zu", stem, iE));
+                // legend (NDC) — markers only (no error bars in legend)
+                TLegend* lg = makeNDCLegend(0.62,0.80,0.93,0.92);
+                lg->AddEntry(hC, sym, "p");
+                lg->Draw();
 
-                if (fG){
-                    fG->SetLineColor(col);     // match points
-                    fG->SetLineWidth(2);
-                    fG->SetNpx(400);
-                    fG->Draw("SAME");
-                }
+                // tiny stats at bottom-left of each pad
+                const double chi2 = f ? f->GetChisquare() : 0.0;
+                const double ndf  = f ? f->GetNDF()       : 0.0;
+                TLatex st; st.SetNDC(); st.SetTextFont(42);
+                st.SetTextSize(0.018);  // much smaller font
+                st.SetTextAlign(13);    // left-bottom anchor
+                st.DrawLatex(0.14, 0.12, Form("#mu=%.3g, #sigma=%.3g, #chi^{2}/NDF=%.2f",
+                                              fr.mu, fr.sg, (ndf>0 ? chi2/ndf : 0.0)));
 
-                TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.042); eLab.SetTextAlign(33);
-                eLab.DrawLatex(0.96, 0.92, Form("[%.0f, %.0f) GeV", eEdges[iE].first, eEdges[iE].second));
-
-                TLatex stats; stats.SetNDC(); stats.SetTextSize(0.036); stats.SetTextAlign(13);
-                stats.DrawLatex(0.14, 0.84, Form("#mu=%.3g, #sigma=%.3g", fr.mu, fr.sg));
+                gPad->Modified(); gPad->Update();
             }
 
-            cT.cd(0);
-            TLatex head; head.SetNDC(); head.SetTextAlign(22); head.SetTextSize(0.045);
-            head.DrawLatex(0.5, 0.975, Form("%s  -  Clusterizer Output, No Position Correction  (all energy bins)", sym));
+            cOT.cd(0);
+            drawHeaderNDC(Form("%s  -  Clusterizer Output, No Position Correction  (all energy bins)", sym), 0.975, 0.045);
 
-            std::string out2 = std::string(outDir) + "/" + stem + "_noCorrCluster_AllBins_Table.png";
-            cT.SaveAs(out2.c_str());
-            cT.Close();
-            std::cout << "[Playground] Wrote " << out2 << "\n";
+            std::string outOT = dirSeparateNoCorr + "/" + std::string(stem) + "_noCorrCluster_AllBins_Table.png";
+            cOT.SaveAs(outOT.c_str());
+            cOT.Close();
+            std::cout << "[Playground] Wrote " << outOT << "\n";
         }
 
-        // --- PNG #3 : μ(E) & σ(E) summary (forced‑range fits for consistency)
+        // ---------- PNG #3 : μ(E) & σ(E) summary ----------
         {
             std::vector<double> eCtr; eCtr.reserve(eEdges.size());
             std::vector<double> mu, dmu, sg, dsg;
@@ -5956,8 +6099,8 @@ void MakeDeltaPhiEtaPlayground(
                 std::vector<double> ex(eCtr.size(), 0.0);
 
                 TCanvas cS(Form("cPlay_%s_MuSig",stem),
-                                           Form("%s #mu/#sigma vs E (Clusterizer Output, No Position Correction)",sym),900,800);
-
+                           Form("%s #mu/#sigma vs E (Clusterizer Output, No Position Correction)",sym),
+                           900,800);
                 cS.Divide(1,2,0,0);
 
                 // μ(E)
@@ -5997,20 +6140,449 @@ void MakeDeltaPhiEtaPlayground(
                 TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.038);
                 h.DrawLatex(0.5,0.98,Form("%s  (Clusterizer Output, No Position Correction)  -  Gaussian #mu / #sigma vs E", sym));
 
-
-                std::string out3 = std::string(outDir) + "/" + stem + "_noCorrCluster_MeanSigmaVsE.png";
+                std::string out3 = dirSeparateNoCorr + "/" + std::string(stem) + "_noCorrCluster_MeanSigmaVsE.png";
                 cS.SaveAs(out3.c_str());
                 cS.Close();
                 std::cout << "[Playground] Wrote " << out3 << "\n";
             }
         }
 
-        return H;    // so we can build overlays later
+        return H;    // for overlays later
     };
 
-    // --- Do both residuals (keeps your 6 PNGs) -----------------------
+    // =====================================================================
+    //                    Produce Δφ and Δη sets (unchanged outputs)
+    // =====================================================================
     auto Hphi = produceResidualSet("DeltaPhi", "h_phi_diff_cpRaw_%s", "#Delta#phi");
     auto Heta = produceResidualSet("DeltaEta", "h_eta_diff_cpRaw_%s", "#Delta#eta");
+
+    // Corrected (CorrectPosition, cluster) sets
+    auto HphiCorr = loadSet("h_phi_diff_cpCorr_%s");
+    auto HetaCorr = loadSet("h_eta_diff_cpCorr_%s");
+
+    // -------------------- from-scratch (PDC) sets --------------------
+    // "no corr, scratch"  vs  "b(E) corr, scratch"
+    //   φ : h_phi_diff_raw_%s   vs  h_phi_diff_corr_%s
+    //   η : h_eta_diff_raw_%s   vs  h_eta_diff_corr_%s
+    auto HphiScratchRaw  = loadSet("h_phi_diff_raw_%s");
+    auto HphiScratchCorr = loadSet("h_phi_diff_corr_%s");
+    auto HetaScratchRaw  = loadSet("h_eta_diff_raw_%s");
+    auto HetaScratchCorr = loadSet("h_eta_diff_corr_%s");
+
+    // =====================================================================
+    //           helpers for overlays (first-bin, μ/σ two-series, four-series)
+    // =====================================================================
+
+    // ---- first-bin overlay (counts) for raw vs corr of the same residual ----
+    auto makeFirstBinVariantOverlay = [&](TH1F* hrefRaw, TH1F* hrefCorr,
+                                          Color_t col, const char* deltaSym,
+                                          const char* outPng)
+    {
+        if (!hrefRaw || !hrefCorr || hrefRaw->Integral()==0 || hrefCorr->Integral()==0) return;
+
+        TCanvas c(Form("cVar_%s", outPng), "variant first slice overlay", 1000, 750);
+        c.SetLeftMargin(0.14); c.SetRightMargin(0.06);
+        c.SetBottomMargin(0.13); c.SetTopMargin(0.06);
+
+        auto* hR = cloneCountsHist(hrefRaw);
+        auto* hC = cloneCountsHist(hrefCorr);
+
+        styleCountsHist(hR, col, 20, 1.0);
+        styleCountsHist(hC, col, 24, 1.0);
+
+        auto [frRaw,  fRaw ] = fitGaussianInRange(hrefRaw , xMin, xMax, true, "f_raw_first");
+        auto [frCorr, fCorr] = fitGaussianInRange(hrefCorr, xMin, xMax, true, "f_corr_first");
+
+        if (fRaw ) { fRaw ->SetLineColor(col); fRaw ->SetLineStyle(1); fRaw ->SetLineWidth(3); fRaw ->SetNpx(800); }
+        if (fCorr){ fCorr->SetLineColor(col); fCorr->SetLineStyle(2); fCorr->SetLineWidth(3); fCorr->SetNpx(800); }
+
+        double yMax = computeYmaxCounts({hR,hC});
+        const double fMaxRaw  = fRaw  ? fRaw ->GetMaximum(fRaw ->GetXmin(),  fRaw ->GetXmax())  : 0.0;
+        const double fMaxCorr = fCorr ? fCorr->GetMaximum(fCorr->GetXmin(), fCorr->GetXmax()) : 0.0;
+        yMax = std::max(yMax, std::max(fMaxRaw, fMaxCorr));
+
+        hR->SetTitle("");
+        hR->GetXaxis()->SetTitle("#Delta  [rad]");
+        hR->GetYaxis()->SetTitle("Counts");
+        hR->GetXaxis()->SetRangeUser(xMin, xMax);
+        hR->GetYaxis()->SetRangeUser(0., 1.20*yMax);
+        hR->Draw("E");
+        hC->Draw("E SAME");
+
+        if (fRaw ) fRaw ->Draw("SAME");
+        if (fCorr) fCorr->Draw("SAME");
+
+        c.Modified(); c.Update();
+
+        TLegend lg(0.8,0.78,0.93,0.9);
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.033);
+        lg.AddEntry(hR, "#Delta #phi without Correction", "p");
+        lg.AddEntry(hC, "#Delta #phi with Correction", "p");
+        lg.Draw();
+
+        TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.044); eLab.SetTextAlign(33);
+        eLab.DrawLatex(0.94,0.92,Form("[%.0f, %.0f) GeV", eEdges.front().first, eEdges.front().second));
+
+        TLatex st; st.SetNDC(); st.SetTextSize(0.032); st.SetTextAlign(31);
+        st.DrawLatex(0.94,0.18,Form("%s raw:  #mu=%.3g, #sigma=%.3g", deltaSym, frRaw.mu,  frRaw.sg));
+        st.DrawLatex(0.94,0.13,Form("%s corr: #mu=%.3g, #sigma=%.3g", deltaSym, frCorr.mu, frCorr.sg));
+
+        c.SaveAs(outPng);
+        c.Close();
+    };
+
+    // ---- μ/σ vs E overlay (two series: raw vs corr) ----
+    auto makeMuSigmaVariantOverlay = [&](const std::vector<TH1F*>& Vraw,
+                                         const std::vector<TH1F*>& Vcor,
+                                         Color_t col, Style_t mkRaw, Style_t mkCor,
+                                         const char* ymuTitle,
+                                         const char* outPng)
+    {
+        std::vector<double> eCtr, muR, dmuR, sgR, dsgR, muC, dmuC, sgC, dsgC;
+        for (std::size_t i=0;i<eEdges.size();++i){
+            if (!Vraw[i] || !Vcor[i] || Vraw[i]->Integral()==0 || Vcor[i]->Integral()==0) continue;
+            eCtr.push_back(0.5*(eEdges[i].first + eEdges[i].second));
+
+            auto [frR, fR] = fitGaussianInRange(Vraw[i], xMin, xMax);
+            auto [frC, fC] = fitGaussianInRange(Vcor[i], xMin, xMax);
+            if (fR) delete fR; if (fC) delete fC;
+
+            muR.push_back(frR.mu); dmuR.push_back(frR.dmu);
+            sgR.push_back(frR.sg); dsgR.push_back(frR.dsg);
+            muC.push_back(frC.mu); dmuC.push_back(frC.dmu);
+            sgC.push_back(frC.sg); dsgC.push_back(frC.dsg);
+        }
+        if (eCtr.empty()) return;
+
+        const double xAxisMin = 0.0;
+        const double xAxisMax = eCtr.back() + 0.5*(eEdges.back().second - eEdges.back().first);
+        std::vector<double> ex(eCtr.size(), 0.0);
+
+        TCanvas c("cVar_MuSig", "variant mu/sigma", 900, 800);
+        TPad *pTop = new TPad("pTop","pTop",0.0,0.38,1.0,1.0);
+        TPad *pBot = new TPad("pBot","pBot",0.0,0.00,1.0,0.34);
+        pTop->SetLeftMargin(0.15); pTop->SetRightMargin(0.05);
+        pTop->SetTopMargin(0.14);  pTop->SetBottomMargin(0.02);
+        pBot->SetLeftMargin(0.15); pBot->SetRightMargin(0.05);
+        pBot->SetTopMargin(0.04);  pBot->SetBottomMargin(0.16);
+        pTop->Draw(); pBot->Draw();
+
+        // μ(E)
+        pTop->cd();
+        double muLo=1e30, muHi=-1e30;
+        for (std::size_t i=0;i<muR.size();++i){
+            muLo = std::min(muLo, std::min(muR[i]-dmuR[i], muC[i]-dmuC[i]));
+            muHi = std::max(muHi, std::max(muR[i]+dmuR[i], muC[i]+dmuC[i]));
+        }
+        const double padMu = 0.25*(muHi-muLo);
+        TH1F frU("frU",Form(";E_{ctr}  [GeV];%s  [rad]", ymuTitle),1,xAxisMin,xAxisMax);
+        frU.SetMinimum(muLo - padMu);
+        frU.SetMaximum(muHi + padMu);
+        frU.GetXaxis()->SetLabelSize(0.0);
+        frU.GetXaxis()->SetTitleSize(0.0);
+        frU.GetXaxis()->SetTickLength(0.0);
+        frU.Draw("AXIS");
+        TLine l0(xAxisMin,0.0,xAxisMax,0.0); l0.SetLineStyle(2); l0.Draw();
+
+        TGraphErrors gMuR(eCtr.size(), eCtr.data(), muR.data(), ex.data(), dmuR.data());
+        gMuR.SetMarkerStyle(mkRaw); gMuR.SetMarkerColor(col); gMuR.SetLineColor(col); gMuR.SetMarkerSize(1.0);
+        gMuR.Draw("P SAME");
+        TGraphErrors gMuC(eCtr.size(), eCtr.data(), muC.data(), ex.data(), dmuC.data());
+        gMuC.SetMarkerStyle(mkCor); gMuC.SetMarkerColor(col); gMuC.SetLineColor(col); gMuC.SetMarkerSize(1.0);
+        gMuC.Draw("P SAME");
+
+        TLegend legU(0.72,0.75,0.93,0.92);
+        legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.035);
+        legU.AddEntry(&gMuR,"no corr, cluster","p");
+        legU.AddEntry(&gMuC,"CorrectPosition, cluster","p");
+        legU.Draw();
+
+        // σ(E)
+        pBot->cd();
+        double sgHi=-1e30; for (double s : sgR) sgHi = std::max(sgHi,s); for (double s : sgC) sgHi = std::max(sgHi,s);
+        TH1F frL("frL",";E_{ctr}  [GeV];#sigma  [rad]",1,xAxisMin,xAxisMax);
+        frL.SetMinimum(0.0); frL.SetMaximum(1.15*sgHi); frL.Draw("AXIS");
+
+        TGraphErrors gSgR(eCtr.size(), eCtr.data(), sgR.data(), ex.data(), dsgR.data());
+        gSgR.SetMarkerStyle(mkRaw); gSgR.SetMarkerColor(col); gSgR.SetLineColor(col); gSgR.SetMarkerSize(1.0);
+        gSgR.Draw("P SAME");
+        TGraphErrors gSgC(eCtr.size(), eCtr.data(), sgC.data(), ex.data(), dsgC.data());
+        gSgC.SetMarkerStyle(mkCor); gSgC.SetMarkerColor(col); gSgC.SetLineColor(col); gSgC.SetMarkerSize(1.0);
+        gSgC.Draw("P SAME");
+
+        // Header
+        c.cd();
+        TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.040);
+        h.DrawLatex(0.50,0.985,"no corr, cluster  vs  CorrectPosition, cluster  –  Gaussian #mu / #sigma vs E");
+
+        c.SaveAs(outPng);
+        c.Close();
+    };
+
+    // ---- labeled μ/σ vs E overlay (two series) for custom legends/headers ----
+    auto makeMuSigmaVariantOverlayWithLabels = [&](const std::vector<TH1F*>& Vraw,
+                                                   const std::vector<TH1F*>& Vcor,
+                                                   Color_t col, Style_t mkRaw, Style_t mkCor,
+                                                   const char* ymuTitle,
+                                                   const char* outPng,
+                                                   const char* labelRaw,
+                                                   const char* labelCorr,
+                                                   const char* headerText)
+    {
+        std::vector<double> eCtr, muR, dmuR, sgR, dsgR, muC, dmuC, sgC, dsgC;
+        for (std::size_t i=0;i<eEdges.size();++i){
+            if (!Vraw[i] || !Vcor[i] || Vraw[i]->Integral()==0 || Vcor[i]->Integral()==0) continue;
+            eCtr.push_back(0.5*(eEdges[i].first + eEdges[i].second));
+
+            auto [frR, fR] = fitGaussianInRange(Vraw[i], xMin, xMax);
+            auto [frC, fC] = fitGaussianInRange(Vcor[i], xMin, xMax);
+            if (fR) delete fR; if (fC) delete fC;
+
+            muR.push_back(frR.mu); dmuR.push_back(frR.dmu);
+            sgR.push_back(frR.sg); dsgR.push_back(frR.dsg);
+            muC.push_back(frC.mu); dmuC.push_back(frC.dmu);
+            sgC.push_back(frC.sg); dsgC.push_back(frC.dsg);
+        }
+        if (eCtr.empty()) return;
+
+        const double xAxisMin = 0.0;
+        const double xAxisMax = eCtr.back() + 0.5*(eEdges.back().second - eEdges.back().first);
+        std::vector<double> ex(eCtr.size(), 0.0);
+
+        TCanvas c("cVar_MuSig_lbl", "variant mu/sigma (labeled)", 900, 800);
+        TPad *pTop = new TPad("pTop_lbl","pTop_lbl",0.0,0.38,1.0,1.0);
+        TPad *pBot = new TPad("pBot_lbl","pBot_lbl",0.0,0.00,1.0,0.34);
+        pTop->SetLeftMargin(0.15); pTop->SetRightMargin(0.05);
+        pTop->SetTopMargin(0.14);  pTop->SetBottomMargin(0.02);
+        pBot->SetLeftMargin(0.15); pBot->SetRightMargin(0.05);
+        pBot->SetTopMargin(0.04);  pBot->SetBottomMargin(0.16);
+        pTop->Draw(); pBot->Draw();
+
+        // μ(E)
+        pTop->cd();
+        double muLo=1e30, muHi=-1e30;
+        for (std::size_t i=0;i<muR.size();++i){
+            muLo = std::min(muLo, std::min(muR[i]-dmuR[i], muC[i]-dmuC[i]));
+            muHi = std::max(muHi, std::max(muR[i]+dmuR[i], muC[i]+dmuC[i]));
+        }
+        const double padMu = 0.25*(muHi-muLo);
+        TH1F frU("frU",Form(";E_{ctr}  [GeV];%s  [rad]", ymuTitle),1,xAxisMin,xAxisMax);
+        frU.SetMinimum(muLo - padMu);
+        frU.SetMaximum(muHi + padMu);
+        frU.GetXaxis()->SetLabelSize(0.0);
+        frU.GetXaxis()->SetTitleSize(0.0);
+        frU.GetXaxis()->SetTickLength(0.0);
+        frU.Draw("AXIS");
+        TLine l0(xAxisMin,0.0,xAxisMax,0.0); l0.SetLineStyle(2); l0.Draw();
+
+        TGraphErrors gMuR(eCtr.size(), eCtr.data(), muR.data(), ex.data(), dmuR.data());
+        gMuR.SetMarkerStyle(mkRaw); gMuR.SetMarkerColor(col); gMuR.SetLineColor(col); gMuR.SetMarkerSize(1.0);
+        gMuR.Draw("P SAME");
+        TGraphErrors gMuC(eCtr.size(), eCtr.data(), muC.data(), ex.data(), dmuC.data());
+        gMuC.SetMarkerStyle(mkCor); gMuC.SetMarkerColor(col); gMuC.SetLineColor(col); gMuC.SetMarkerSize(1.0);
+        gMuC.Draw("P SAME");
+
+        TLegend legU(0.68,0.75,0.93,0.92);
+        legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.035);
+        legU.AddEntry(&gMuR,labelRaw,"p");
+        legU.AddEntry(&gMuC,labelCorr,"p");
+        legU.Draw();
+
+        // σ(E)
+        pBot->cd();
+        double sgHi=-1e30; for (double s : sgR) sgHi = std::max(sgHi,s); for (double s : sgC) sgHi = std::max(sgHi,s);
+        TH1F frL("frL",";E_{ctr}  [GeV];#sigma  [rad]",1,xAxisMin,xAxisMax);
+        frL.SetMinimum(0.0); frL.SetMaximum(1.15*sgHi); frL.Draw("AXIS");
+
+        TGraphErrors gSgR(eCtr.size(), eCtr.data(), sgR.data(), ex.data(), dsgR.data());
+        gSgR.SetMarkerStyle(mkRaw); gSgR.SetMarkerColor(col); gSgR.SetLineColor(col); gSgR.SetMarkerSize(1.0);
+        gSgR.Draw("P SAME");
+        TGraphErrors gSgC(eCtr.size(), eCtr.data(), sgC.data(), ex.data(), dsgC.data());
+        gSgC.SetMarkerStyle(mkCor); gSgC.SetMarkerColor(col); gSgC.SetLineColor(col); gSgC.SetMarkerSize(1.0);
+        gSgC.Draw("P SAME");
+
+        // Header
+        c.cd();
+        TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.040);
+        h.DrawLatex(0.50,0.985, headerText);
+
+        c.SaveAs(outPng);
+        c.Close();
+    };
+
+
+    // ---- μ/σ vs E overlay (four series: φ/η raw/corr) ----
+    auto makeMuSigmaFourSeriesOverlay = [&](const std::vector<TH1F*>& Praw,
+                                            const std::vector<TH1F*>& Pcorr,
+                                            const std::vector<TH1F*>& Eraw,
+                                            const std::vector<TH1F*>& Ecorr,
+                                            const char* outPng)
+    {
+        std::vector<double> eCtrP, muPR, dmuPR, sgPR, dsgPR, muPC, dmuPC, sgPC, dsgPC;
+        std::vector<double> eCtrE, muER, dmuER, sgER, dsgER, muEC, dmuEC, sgEC, dsgEC;
+
+        for (std::size_t i=0;i<eEdges.size();++i){
+            if (Praw[i] && Praw[i]->Integral()>0){
+                auto [fr, f] = fitGaussianInRange(Praw[i], xMin, xMax); if (f) delete f;
+                eCtrP.push_back(0.5*(eEdges[i].first + eEdges[i].second));
+                muPR.push_back(fr.mu); dmuPR.push_back(fr.dmu);
+                sgPR.push_back(fr.sg); dsgPR.push_back(fr.dsg);
+            }
+            if (Pcorr[i] && Pcorr[i]->Integral()>0 && Praw[i] && Praw[i]->Integral()>0){
+                auto [fr, f] = fitGaussianInRange(Pcorr[i], xMin, xMax); if (f) delete f;
+                muPC.push_back(fr.mu); dmuPC.push_back(fr.dmu);
+                sgPC.push_back(fr.sg); dsgPC.push_back(fr.dsg);
+            }
+
+            if (Eraw[i] && Eraw[i]->Integral()>0){
+                auto [fr, f] = fitGaussianInRange(Eraw[i], xMin, xMax); if (f) delete f;
+                eCtrE.push_back(0.5*(eEdges[i].first + eEdges[i].second));
+                muER.push_back(fr.mu); dmuER.push_back(fr.dmu);
+                sgER.push_back(fr.sg); dsgER.push_back(fr.dsg);
+            }
+            if (Ecorr[i] && Ecorr[i]->Integral()>0 && Eraw[i] && Eraw[i]->Integral()>0){
+                auto [fr, f] = fitGaussianInRange(Ecorr[i], xMin, xMax); if (f) delete f;
+                muEC.push_back(fr.mu); dmuEC.push_back(fr.dmu);
+                sgEC.push_back(fr.sg); dsgEC.push_back(fr.dsg);
+            }
+        }
+
+        if (eCtrP.empty() && eCtrE.empty()) return;
+
+        const double xAxisMin = 0.0;
+        const double xAxisMax = (eEdges.back().second + eEdges.back().first)*0.5 + 0.5*(eEdges.back().second - eEdges.back().first);
+        TCanvas c("cVar_MuSig4", "four series mu/sigma", 1000, 850);
+
+        TPad *pTop = new TPad("pTop4","pTop4",0.0,0.38,1.0,1.0);
+        TPad *pBot = new TPad("pBot4","pBot4",0.0,0.00,1.0,0.34);
+        pTop->SetLeftMargin(0.15); pTop->SetRightMargin(0.05);
+        pTop->SetTopMargin(0.14);  pTop->SetBottomMargin(0.02);
+        pBot->SetLeftMargin(0.15); pBot->SetRightMargin(0.05);
+        pBot->SetTopMargin(0.04);  pBot->SetBottomMargin(0.16);
+        pTop->Draw(); pBot->Draw();
+
+        // μ(E)
+        pTop->cd();
+        double muLo=1e30, muHi=-1e30;
+        auto upd = [&](const std::vector<double>& m, const std::vector<double>& dm){
+            for (std::size_t i=0;i<m.size();++i){ muLo = std::min(muLo, m[i]-dm[i]); muHi = std::max(muHi, m[i]+dm[i]); }
+        };
+        upd(muPR,dmuPR); upd(muPC,dmuPC); upd(muER,dmuER); upd(muEC,dmuEC);
+        const double padMu = 0.25*(muHi-muLo);
+        TH1F frU("frU",";E_{ctr}  [GeV];#mu  [rad]",1,xAxisMin,xAxisMax);
+        frU.SetMinimum(muLo - padMu); frU.SetMaximum(muHi + padMu);
+        frU.GetXaxis()->SetLabelSize(0.0); frU.GetXaxis()->SetTitleSize(0.0); frU.GetXaxis()->SetTickLength(0.0);
+        frU.Draw("AXIS");
+        TLine l0(xAxisMin,0.0,xAxisMax,0.0); l0.SetLineStyle(2); l0.Draw();
+
+        std::vector<double> exP(eCtrP.size(),0.0), exE(eCtrE.size(),0.0);
+        TGraphErrors gMuPR(eCtrP.size(), eCtrP.data(), muPR.data(), exP.data(), dmuPR.data());
+        gMuPR.SetMarkerStyle(20); gMuPR.SetMarkerColor(kRed+1);  gMuPR.SetLineColor(kRed+1);  gMuPR.Draw("P SAME");
+        TGraphErrors gMuPC(eCtrP.size(), eCtrP.data(), muPC.data(), exP.data(), dmuPC.data());
+        gMuPC.SetMarkerStyle(24); gMuPC.SetMarkerColor(kRed+1);  gMuPC.SetLineColor(kRed+1);  gMuPC.Draw("P SAME");
+        TGraphErrors gMuER(eCtrE.size(), eCtrE.data(), muER.data(), exE.data(), dmuER.data());
+        gMuER.SetMarkerStyle(20); gMuER.SetMarkerColor(kBlue+1); gMuER.SetLineColor(kBlue+1); gMuER.Draw("P SAME");
+        TGraphErrors gMuEC(eCtrE.size(), eCtrE.data(), muEC.data(), exE.data(), dmuEC.data());
+        gMuEC.SetMarkerStyle(24); gMuEC.SetMarkerColor(kBlue+1); gMuEC.SetLineColor(kBlue+1); gMuEC.Draw("P SAME");
+
+        TLegend legU(0.62,0.74,0.93,0.92);
+        legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.032);
+        legU.AddEntry(&gMuPR,"#Delta#phi no corr","p");
+        legU.AddEntry(&gMuPC,"#Delta#phi corrected","p");
+        legU.AddEntry(&gMuER,"#Delta#eta no corr","p");
+        legU.AddEntry(&gMuEC,"#Delta#eta corrected","p");
+        legU.Draw();
+
+        // σ(E)
+        pBot->cd();
+        double sgHi=-1e30;
+        auto upds = [&](const std::vector<double>& s){ for(double v: s) sgHi = std::max(sgHi, v); };
+        upds(sgPR); upds(sgPC); upds(sgER); upds(sgEC);
+        TH1F frL("frL",";E_{ctr}  [GeV];#sigma  [rad]",1,xAxisMin,xAxisMax);
+        frL.SetMinimum(0.0); frL.SetMaximum(1.15*sgHi); frL.Draw("AXIS");
+
+        TGraphErrors gSgPR(eCtrP.size(), eCtrP.data(), sgPR.data(), exP.data(), dsgPR.data());
+        gSgPR.SetMarkerStyle(20); gSgPR.SetMarkerColor(kRed+1);  gSgPR.SetLineColor(kRed+1);  gSgPR.Draw("P SAME");
+        TGraphErrors gSgPC(eCtrP.size(), eCtrP.data(), sgPC.data(), exP.data(), dsgPC.data());
+        gSgPC.SetMarkerStyle(24); gSgPC.SetMarkerColor(kRed+1);  gSgPC.SetLineColor(kRed+1);  gSgPC.Draw("P SAME");
+        TGraphErrors gSgER(eCtrE.size(), eCtrE.data(), sgER.data(), exE.data(), dsgER.data());
+        gSgER.SetMarkerStyle(20); gSgER.SetMarkerColor(kBlue+1); gSgER.SetLineColor(kBlue+1); gSgER.Draw("P SAME");
+        TGraphErrors gSgEC(eCtrE.size(), eCtrE.data(), sgEC.data(), exE.data(), dsgEC.data());
+        gSgEC.SetMarkerStyle(24); gSgEC.SetMarkerColor(kBlue+1); gSgEC.SetLineColor(kBlue+1); gSgEC.Draw("P SAME");
+
+        c.cd();
+        TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.040);
+        h.DrawLatex(0.50,0.985,"#Delta#phi / #Delta#eta  (no corr vs corrected)  –  Gaussian #mu / #sigma vs E");
+
+        c.SaveAs(outPng);
+        c.Close();
+    };
+
+    // =====================================================================
+    //                               PNGs
+    // =====================================================================
+
+    // --------------------- Clusterizer (existing) ---------------------
+    // First-bin overlays (COUNTS)
+    if (!Hphi.empty() && !HphiCorr.empty())
+        makeFirstBinVariantOverlay(Hphi[0], HphiCorr[0], kRed+1,  "#Delta#phi",
+            (dirRawVsCorr + "/DeltaPhi_cpRaw_vs_cpCorr_FirstBin_Overlay.png").c_str());
+
+    if (!Heta.empty() && !HetaCorr.empty())
+        makeFirstBinVariantOverlay(Heta[0], HetaCorr[0], kBlue+1, "#Delta#eta",
+            (dirRawVsCorr + "/DeltaEta_cpRaw_vs_cpCorr_FirstBin_Overlay.png").c_str());
+
+    // μ/σ vs E overlays per residual (two series)
+    if (!Hphi.empty() && !HphiCorr.empty())
+        makeMuSigmaVariantOverlay(Hphi, HphiCorr, kRed+1, 20, 24, "#mu",
+            (dirRawVsCorr + "/DeltaPhi_cpRaw_vs_cpCorr_MeanSigmaVsE_Overlay.png").c_str());
+
+    if (!Heta.empty() && !HetaCorr.empty())
+        makeMuSigmaVariantOverlay(Heta, HetaCorr, kBlue+1, 20, 24, "#mu",
+            (dirRawVsCorr + "/DeltaEta_cpRaw_vs_cpCorr_MeanSigmaVsE_Overlay.png").c_str());
+
+    // μ/σ vs E overlay for FOUR series (Δφ/Δη raw+corr)
+    if (!Hphi.empty() && !HphiCorr.empty() && !Heta.empty() && !HetaCorr.empty())
+        makeMuSigmaFourSeriesOverlay(Hphi, HphiCorr, Heta, HetaCorr,
+            (dirRawVsCorr + "/DeltaEtaPhi_cpRaw_vs_cpCorr_MeanSigmaVsE_Overlay_4Series.png").c_str());
+
+    // --------------------- From-scratch (NEW) ------------------------
+    // First-bin overlays (COUNTS) for PDC raw vs PDC corr
+    if (!HphiScratchRaw.empty() && !HphiScratchCorr.empty()
+        && HphiScratchRaw[0] && HphiScratchCorr[0]
+        && HphiScratchRaw[0]->Integral()>0 && HphiScratchCorr[0]->Integral()>0)
+        makeFirstBinVariantOverlay(HphiScratchRaw[0], HphiScratchCorr[0], kRed+1,  "#Delta#phi",
+            (dirScratchRawVsCorr + "/DeltaPhi_raw_vs_corr_FirstBin_Overlay.png").c_str());
+
+    if (!HetaScratchRaw.empty() && !HetaScratchCorr.empty()
+        && HetaScratchRaw[0] && HetaScratchCorr[0]
+        && HetaScratchRaw[0]->Integral()>0 && HetaScratchCorr[0]->Integral()>0)
+        makeFirstBinVariantOverlay(HetaScratchRaw[0], HetaScratchCorr[0], kBlue+1, "#Delta#eta",
+            (dirScratchRawVsCorr + "/DeltaEta_raw_vs_corr_FirstBin_Overlay.png").c_str());
+
+    // μ/σ vs E overlays per residual (two series), with custom labels:
+    //   "no corr, scratch"   vs   "b(E) corr, scratch"
+    if (!HphiScratchRaw.empty() && !HphiScratchCorr.empty())
+        makeMuSigmaVariantOverlayWithLabels(HphiScratchRaw, HphiScratchCorr,
+            kRed+1, 20, 24, "#mu",
+            (dirScratchRawVsCorr + "/DeltaPhi_raw_vs_corr_MeanSigmaVsE_Overlay.png").c_str(),
+            "no corr, scratch", "b(E) corr, scratch",
+            "no corr, scratch  vs  b(E) corr, scratch  –  Gaussian #mu / #sigma vs E");
+
+    if (!HetaScratchRaw.empty() && !HetaScratchCorr.empty())
+        makeMuSigmaVariantOverlayWithLabels(HetaScratchRaw, HetaScratchCorr,
+            kBlue+1, 20, 24, "#mu",
+            (dirScratchRawVsCorr + "/DeltaEta_raw_vs_corr_MeanSigmaVsE_Overlay.png").c_str(),
+            "no corr, scratch", "b(E) corr, scratch",
+            "no corr, scratch  vs  b(E) corr, scratch  –  Gaussian #mu / #sigma vs E");
+
+    // μ/σ vs E overlay for FOUR series (Δφ/Δη raw+corr, from-scratch)
+    if (!HphiScratchRaw.empty() && !HphiScratchCorr.empty()
+        && !HetaScratchRaw.empty() && !HetaScratchCorr.empty())
+        makeMuSigmaFourSeriesOverlay(HphiScratchRaw, HphiScratchCorr,
+                                     HetaScratchRaw, HetaScratchCorr,
+            (dirScratchRawVsCorr + "/DeltaEtaPhi_raw_vs_corr_MeanSigmaVsE_Overlay_4Series.png").c_str());
+
 
     // =================================================================
     //                   OVERLAYS  (φ=red, η=blue)
@@ -6024,60 +6596,58 @@ void MakeDeltaPhiEtaPlayground(
         cO1.SetLeftMargin(0.14); cO1.SetRightMargin(0.06);
         cO1.SetBottomMargin(0.13); cO1.SetTopMargin(0.06);
 
-        // normalised clones
-        auto* hP = static_cast<TH1F*>(Hphi[0]->Clone());  hP->SetDirectory(nullptr);
-        auto* hE = static_cast<TH1F*>(Heta[0]->Clone());  hE->SetDirectory(nullptr);
-        if (hP->Integral()>0) hP->Scale(1.0/hP->Integral());
-        if (hE->Integral()>0) hE->Scale(1.0/hE->Integral());
+        auto* hP = cloneCountsHist(Hphi[0]);
+        auto* hE = cloneCountsHist(Heta[0]);
 
-        // colours: φ=red, η=blue
-        hP->SetMarkerStyle(20); hP->SetMarkerColor(kRed+1);  hP->SetLineColor(kRed+1);
-        hE->SetMarkerStyle(20); hE->SetMarkerColor(kBlue+1); hE->SetLineColor(kBlue+1);
+        styleCountsHist(hP, kRed+1, 20, 1.0);
+        styleCountsHist(hE, kBlue+1,20, 1.0);
 
-        // axis and ranges
-        double yMax=0.0;
-        for (int b=1;b<=hP->GetNbinsX();++b)
-            yMax = std::max(yMax, hP->GetBinContent(b)+hP->GetBinError(b));
-        for (int b=1;b<=hE->GetNbinsX();++b)
-            yMax = std::max(yMax, hE->GetBinContent(b)+hE->GetBinError(b));
+        auto [frP, fP] = fitGaussianInRange(Hphi[0], xMin, xMax, true, "f_phi_overlay_first");
+        auto [frE, fE] = fitGaussianInRange(Heta[0], xMin, xMax, true, "f_eta_overlay_first");
+        if (fP){ styleFit(fP, kRed+1, 3, 800); }
+        if (fE){ styleFit(fE, kBlue+1,3, 800); }
+
+        double yMax = computeYmaxCounts({hP,hE});
+        const double fMaxP = fP ? fP->GetMaximum(fP->GetXmin(), fP->GetXmax()) : 0.0;
+        const double fMaxE = fE ? fE->GetMaximum(fE->GetXmin(), fE->GetXmax()) : 0.0;
+        yMax = std::max(yMax, std::max(fMaxP, fMaxE));
 
         hP->SetTitle("");
         hP->GetXaxis()->SetTitle("#Delta  [rad]");
-        hP->GetYaxis()->SetTitle("Probability density");
+        hP->GetYaxis()->SetTitle("Counts");
         hP->GetXaxis()->SetRangeUser(xMin,xMax);
-        hP->GetYaxis()->SetRangeUser(0.,1.15*yMax);
+        hP->GetYaxis()->SetRangeUser(0.,1.20*yMax);
         hP->Draw("E");
         hE->Draw("E SAME");
 
-        // fits in the same colours
-        auto [frP, fP] = fitGaussianInRange(Hphi[0], xMin, xMax, false, "f_phi_overlay_first");
-        auto [frE, fE] = fitGaussianInRange(Heta[0], xMin, xMax, false, "f_eta_overlay_first");
+        if (fP) fP->Draw("SAME");
+        if (fE) fE->Draw("SAME");
 
-        if (fP){ fP->SetLineColor(kRed+1);  fP->SetLineWidth(2); fP->SetNpx(600); fP->Draw("SAME"); }
-        if (fE){ fE->SetLineColor(kBlue+1); fE->SetLineWidth(2); fE->SetNpx(600); fE->Draw("SAME"); }
-
-        // legend & annotations (markers only; no horizontal error bars)
-        TLegend lg(0.82,0.78,0.93,0.92);
-        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.034);
+        TLegend lg(0.80,0.78,0.93,0.90);
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.033);
         lg.AddEntry(hP,"#Delta#phi","p");
         lg.AddEntry(hE,"#Delta#eta","p");
         lg.Draw();
 
-        // Top-right combined label: "Clusterizer Output, No Position Correction [a, b) GeV"
         TLatex tr; tr.SetNDC(); tr.SetTextFont(42);
-        tr.SetTextSize(0.032); tr.SetTextAlign(33); // right/top anchored
-        tr.DrawLatex(0.7,0.9,
+        tr.SetTextSize(0.03); tr.SetTextAlign(33);
+        tr.DrawLatex(0.65,0.9,
             Form("Clusterizer Output, No Position Correction  [%.0f, %.0f) GeV",
                  eEdges.front().first, eEdges.front().second));
 
-        // μ/σ text at bottom-right
+        const double chi2P = fP ? fP->GetChisquare() : 0.0;
+        const double ndfP  = fP ? fP->GetNDF()      : 0.0;
+        const double chi2E = fE ? fE->GetChisquare() : 0.0;
+        const double ndfE  = fE ? fE->GetNDF()      : 0.0;
+
         TLatex st; st.SetNDC(); st.SetTextFont(42);
-        st.SetTextSize(0.028); st.SetTextAlign(31); // right/bottom anchored
-        st.DrawLatex(0.4,0.25,Form("#Delta#phi: #mu=%.3g, #sigma=%.3g", frP.mu, frP.sg));
-        st.DrawLatex(0.4,0.2,Form("#Delta#eta: #mu=%.3g, #sigma=%.3g", frE.mu, frE.sg));
+        st.SetTextSize(0.026); st.SetTextAlign(13);
+        st.DrawLatex(0.59, 0.72, Form("#Delta#phi: #mu=%.3g, #sigma=%.3g, #chi^{2}/NDF=%.2f",
+                                      frP.mu, frP.sg, (ndfP>0 ? chi2P/ndfP : 0.0)));
+        st.DrawLatex(0.59, 0.67, Form("#Delta#eta: #mu=%.3g, #sigma=%.3g, #chi^{2}/NDF=%.2f",
+                                      frE.mu, frE.sg, (ndfE>0 ? chi2E/ndfE : 0.0)));
 
-
-        std::string outO1 = std::string(outDir) + "/DeltaEtaPhi_noCorrCluster_FirstBin_Overlay.png";
+        std::string outO1 = dirOverlayNoCorr + "/DeltaEtaPhi_noCorrCluster_FirstBin_Overlay.png";
         cO1.SaveAs(outO1.c_str());
         cO1.Close();
         std::cout << "[Playground] Wrote " << outO1 << "\n";
@@ -6085,7 +6655,7 @@ void MakeDeltaPhiEtaPlayground(
         std::cerr << "[Playground][WARN] First-bin overlay skipped (missing/empty hist).\n";
     }
 
-    // ---- Overlay #2 : 4×2 table (both residuals on each pad) --------
+    // ---- Overlay #2 : 4×2 table (both residuals on each pad) ----------
     {
         const int nCol=4, nRow=2, maxPads=nCol*nRow;
         TCanvas cOT("cPlay_Overlay_Table","DeltaEta/DeltaPhi overlay – all slices",1600,900);
@@ -6099,62 +6669,142 @@ void MakeDeltaPhiEtaPlayground(
                 Hphi[iE]->Integral()==0 || Heta[iE]->Integral()==0) { ++pad; continue; }
 
             cOT.cd(pad++);
-            gPad->SetLeftMargin(0.12); gPad->SetRightMargin(0.04);
-            gPad->SetTopMargin(0.12);  gPad->SetBottomMargin(0.12);
+            setPadMargins();
 
-            // normalised clones
-            auto* hP = static_cast<TH1F*>(Hphi[iE]->Clone());  hP->SetDirectory(nullptr);
-            auto* hE = static_cast<TH1F*>(Heta[iE]->Clone());  hE->SetDirectory(nullptr);
-            if (hP->Integral()>0) hP->Scale(1.0/hP->Integral());
-            if (hE->Integral()>0) hE->Scale(1.0/hE->Integral());
-            hP->SetMarkerStyle(20); hP->SetMarkerColor(kRed+1);  hP->SetLineColor(kRed+1);
-            hE->SetMarkerStyle(20); hE->SetMarkerColor(kBlue+1); hE->SetLineColor(kBlue+1);
+            auto* hP = cloneCountsHist(Hphi[iE]);
+            auto* hE = cloneCountsHist(Heta[iE]);
+            styleCountsHist(hP, kRed+1, 20, 0.7);
+            styleCountsHist(hE, kBlue+1,20, 0.7);
 
-            // y-range
-            double yMax=0.0;
-            for (int b=1;b<=hP->GetNbinsX();++b)
-                yMax = std::max(yMax, hP->GetBinContent(b)+hP->GetBinError(b));
-            for (int b=1;b<=hE->GetNbinsX();++b)
-                yMax = std::max(yMax, hE->GetBinContent(b)+hE->GetBinError(b));
+            auto [frP, fP] = fitGaussianInRange(Hphi[iE], xMin, xMax, true,  Form("f_phi_overlay_tbl_%zu", iE));
+            auto [frE, fE] = fitGaussianInRange(Heta[iE], xMin, xMax, true,  Form("f_eta_overlay_tbl_%zu", iE));
 
+            double yMax = computeYmaxCounts({hP,hE});
             hP->SetTitle("");
             hP->GetXaxis()->SetTitle("#Delta  [rad]");
-            hP->GetYaxis()->SetTitle("Probability density");
+            hP->GetYaxis()->SetTitle("Counts");
             hP->GetXaxis()->SetRangeUser(xMin, xMax);
             hP->GetYaxis()->SetRangeUser(0., 1.20*yMax);
             hP->Draw("E");
             hE->Draw("E SAME");
 
-            auto [frP, fP] = fitGaussianInRange(Hphi[iE], xMin, xMax, false, Form("f_phi_overlay_tbl_%zu", iE));
-            auto [frE, fE] = fitGaussianInRange(Heta[iE], xMin, xMax, false, Form("f_eta_overlay_tbl_%zu", iE));
-            if (fP){ fP->SetLineColor(kRed+1);  fP->SetLineWidth(2); fP->SetNpx(400); fP->Draw("SAME"); }
-            if (fE){ fE->SetLineColor(kBlue+1); fE->SetLineWidth(2); fE->SetNpx(400); fE->Draw("SAME"); }
+            if (fP){ styleFit(fP, kRed+1, 2, 400);  fP->Draw("SAME"); }
+            if (fE){ styleFit(fE, kBlue+1,2, 400);  fE->Draw("SAME"); }
 
-            TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.042); eLab.SetTextAlign(33);
-            eLab.DrawLatex(0.96, 0.92, Form("[%.0f, %.0f) GeV", eEdges[iE].first, eEdges[iE].second));
+            // energy label (NDC)
+            drawNDCEnergy(0.96, 0.92, eEdges[iE].first, eEdges[iE].second, 0.042);
 
-            // compact legend per pad
-            TLegend lg(0.62,0.74,0.93,0.92);
-            lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.032);
-            lg.AddEntry(hP,"#Delta#phi","lep");
-            lg.AddEntry(hE,"#Delta#eta","lep");
-            lg.Draw();
+            // legend (NDC) — markers only (no error bars in legend)
+            TLegend* lg = makeNDCLegend(0.8,0.76,0.9,0.86);
+            lg->AddEntry(hP,"#Delta#phi","p");
+            lg->AddEntry(hE,"#Delta#eta","p");
+            lg->Draw();
+
+            // tiny stats at bottom-left of each pad
+            const double chi2P = fP ? fP->GetChisquare() : 0.0;
+            const double ndfP  = fP ? fP->GetNDF()       : 0.0;
+            const double chi2E = fE ? fE->GetChisquare() : 0.0;
+            const double ndfE  = fE ? fE->GetNDF()       : 0.0;
+
+            TLatex st;
+            st.SetNDC();
+            st.SetTextFont(42);
+            st.SetTextSize(0.025);     // much smaller font
+            st.SetTextAlign(13);       // left-bottom anchored
+            st.DrawLatex(0.15, 0.86, Form("#Delta#phi: #mu=%.3g, #sigma=%.3g, #chi^{2}/NDF=%.2f",
+                                          frP.mu, frP.sg, (ndfP>0 ? chi2P/ndfP : 0.0)));
+            st.DrawLatex(0.15, 0.82, Form("#Delta#eta: #mu=%.3g, #sigma=%.3g, #chi^{2}/NDF=%.2f",
+                                          frE.mu, frE.sg, (ndfE>0 ? chi2E/ndfE : 0.0)));
+
+            gPad->Modified();
+            gPad->Update();
         }
 
         cOT.cd(0);
-        TLatex head; head.SetNDC(); head.SetTextAlign(22); head.SetTextSize(0.045);
-        head.DrawLatex(0.5, 0.975, "#Delta#phi (red)  &  #Delta#eta (blue)  -  Clusterizer Output, No Position Correction  (all energy bins)");
+        drawHeaderNDC("#Delta#phi & #Delta#eta  -  Clusterizer Output, No Position Correction  (all energy bins)", 0.975, 0.045);
 
-
-        std::string outOT = std::string(outDir) + "/DeltaEtaPhi_noCorrCluster_AllBins_Table_Overlay.png";
+        std::string outOT = dirOverlayNoCorr + "/DeltaEtaPhi_noCorrCluster_AllBins_Table_Overlay.png";
         cOT.SaveAs(outOT.c_str());
         cOT.Close();
         std::cout << "[Playground] Wrote " << outOT << "\n";
     }
 
+    // ---- Overlay #2b : 2×4 ratio table (Δφ/Δη per slice) ----------
+    {
+        const int nColR=2, nRowR=4, maxPadsR=nColR*nRowR;
+        TCanvas cRT("cPlay_Ratio_Table","#Delta#phi / #Delta#eta – ratio (no corr, cluster) – all slices",1600,900);
+        cRT.SetTopMargin(0.10);
+        cRT.Divide(nColR,nRowR,0,0);
+
+        int padR=1;
+        for (std::size_t iE=0; iE<eEdges.size() && padR<=maxPadsR; ++iE)
+        {
+            if (!Hphi[iE] || !Heta[iE] ||
+                Hphi[iE]->Integral()==0 || Heta[iE]->Integral()==0) { ++padR; continue; }
+
+            cRT.cd(padR++);
+            setPadMargins();
+
+            TH1F* hP = cloneCountsHist(Hphi[iE]);
+            TH1F* hE = cloneCountsHist(Heta[iE]);
+            if (!hP || !hE) continue;
+
+            // ensure proper error propagation (guard Sumw2 to avoid ROOT warnings)
+            if (hP->GetSumw2N() == 0) hP->Sumw2();
+            if (hE->GetSumw2N() == 0) hE->Sumw2();
+
+            // build ratio histogram
+            TH1F* hR = static_cast<TH1F*>(hP->Clone(Form("h_ratio_%zu", iE)));
+            hR->SetDirectory(nullptr);
+            hR->SetTitle("");
+            if (hR->GetSumw2N() == 0) hR->Sumw2();
+
+            hR->Divide(hE);
+
+            // style & axes
+            hR->SetMarkerStyle(20);
+            hR->SetMarkerSize(0.8);
+            hR->SetMarkerColor(kBlack);
+            hR->SetLineColor(kBlack);
+
+            hR->GetXaxis()->SetTitle("#Delta  [rad]");
+            hR->GetYaxis()->SetTitle("#Delta#phi / #Delta#eta");
+            hR->GetXaxis()->SetRangeUser(xMin, xMax);
+
+            double yMaxR = computeYmaxCounts({hR});
+            if (yMaxR <= 0.) yMaxR = 1.0;
+            hR->GetYaxis()->SetRangeUser(0., 1.20*yMaxR);
+            hR->Draw("E");
+
+            // reference line at ratio = 1
+            TLine l1(xMin, 1.0, xMax, 1.0);
+            l1.SetLineStyle(2);
+            l1.Draw();
+
+            // energy label (NDC)
+            drawNDCEnergy(0.96, 0.92, eEdges[iE].first, eEdges[iE].second, 0.042);
+
+            // legend (NDC)
+            TLegend* lgR = makeNDCLegend(0.70,0.78,0.93,0.90);
+            lgR->AddEntry(hR, "#Delta#phi / #Delta#eta", "p");
+            lgR->Draw();
+
+            gPad->Modified();
+            gPad->Update();
+        }
+
+        cRT.cd(0);
+        drawHeaderNDC("#Delta#phi / #Delta#eta  -  Clusterizer Output, No Position Correction  (ratio in each energy bin)", 0.975, 0.045);
+
+        std::string outRT = dirOverlayNoCorr + "/DeltaEtaPhi_noCorrCluster_AllBins_Table_Ratio.png";
+        cRT.SaveAs(outRT.c_str());
+        cRT.Close();
+        std::cout << "[Playground] Wrote " << outRT << "\n";
+    }
+
+
     // ---- Overlay #3 : μ(E) & σ(E) (both residuals on shared pads) ----
     {
-        // collect only slices where both histos exist & are non-empty
         std::vector<double> eCtr;
         std::vector<double> muP, dmuP, sgP, dsgP;  // phi
         std::vector<double> muE, dmuE, sgE, dsgE;  // eta
@@ -6184,26 +6834,20 @@ void MakeDeltaPhiEtaPlayground(
             const double xAxisMax = eCtr.back() + 0.5*(eEdges.back().second - eEdges.back().first);
             std::vector<double> ex(eCtr.size(), 0.0);
 
-            // Canvas with custom pad layout: give header room and make bottom panel shorter
             TCanvas cS("cPlay_Overlay_MuSig","DeltaEta/DeltaPhi overlay – #mu/#sigma vs E",900,800);
 
-            // Create two pads manually so we can control heights and margins
-            TPad* pTop = new TPad("pTop","pTop",0.0,0.38,1.0,1.0);   // taller top pad
-            TPad* pBot = new TPad("pBot","pBot",0.0,0.00,1.0,0.34);  // shorter bottom pad
+            TPad* pTop = new TPad("pTop","pTop",0.0,0.38,1.0,1.0);
+            TPad* pBot = new TPad("pBot","pBot",0.0,0.00,1.0,0.34);
             pTop->SetFillColor(0); pBot->SetFillColor(0);
             pTop->SetBorderMode(0); pBot->SetBorderMode(0);
-
-            // Equal left/right margins so x-axes align; extra top margin for header clearance
             pTop->SetLeftMargin(0.15); pTop->SetRightMargin(0.05);
-            pTop->SetTopMargin(0.14);  pTop->SetBottomMargin(0.02);  // hide x labels
+            pTop->SetTopMargin(0.14);  pTop->SetBottomMargin(0.02);
             pBot->SetLeftMargin(0.15); pBot->SetRightMargin(0.05);
-            pBot->SetTopMargin(0.04);  pBot->SetBottomMargin(0.16);  // show x labels clearly
-
+            pBot->SetTopMargin(0.04);  pBot->SetBottomMargin(0.16);
             pTop->Draw(); pBot->Draw();
 
-            // ----------------- μ(E) on the TOP pad -----------------
+            // μ(E)
             pTop->cd();
-
             double muLo=1e30, muHi=-1e30;
             for (std::size_t i=0;i<muP.size();++i){
                 muLo = std::min(muLo, std::min(muP[i]-dmuP[i], muE[i]-dmuE[i]));
@@ -6214,12 +6858,9 @@ void MakeDeltaPhiEtaPlayground(
             TH1F frU("frU",";E_{ctr}  [GeV];#mu  [rad]",1,xAxisMin,xAxisMax);
             frU.SetMinimum(muLo - padMu);
             frU.SetMaximum(muHi + padMu);
-
-            // Hide X numeric labels/title on the top pad; keep Y labels
             frU.GetXaxis()->SetLabelSize(0.0);
             frU.GetXaxis()->SetTitleSize(0.0);
             frU.GetXaxis()->SetTickLength(0.0);
-
             frU.Draw("AXIS");
             TLine l0(xAxisMin,0.0,xAxisMax,0.0); l0.SetLineStyle(2); l0.Draw();
 
@@ -6239,7 +6880,7 @@ void MakeDeltaPhiEtaPlayground(
             legU.AddEntry(&gMuE,"#Delta#eta","p");
             legU.Draw();
 
-            // ----------------- σ(E) on the BOTTOM pad -----------------
+            // σ(E)
             pBot->cd();
 
             double sgHi=-1e30;
@@ -6260,18 +6901,260 @@ void MakeDeltaPhiEtaPlayground(
             gSgE.SetLineColor  (kBlue+1); gSgE.SetMarkerSize(1.0);
             gSgE.Draw("P SAME");
 
-            // ----------------- Header on the canvas (extra space provided by pTop top margin) -----------------
+            // Header
             cS.cd();
             TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.038);
             h.DrawLatex(0.50,0.97,"#Delta#phi & #Delta#eta - Gaussian #mu / #sigma vs E, Clusterizer with No Position Correction");
 
-            std::string outOS = std::string(outDir) + "/DeltaEtaPhi_noCorrCluster_MeanSigmaVsE_Overlay.png";
+            std::string outOS = dirOverlayNoCorr + "/DeltaEtaPhi_noCorrCluster_MeanSigmaVsE_Overlay.png";
             cS.SaveAs(outOS.c_str());
             cS.Close();
             std::cout << "[Playground] Wrote " << outOS << "\n";
-
         } else {
             std::cerr << "[Playground][WARN] Overlay μ/σ summary skipped (no common non-empty slices).\n";
+        }
+    }
+
+    // ================================================================
+    //  Δφ variants – μ/σ vs E overlays + μ vs ln(E) fits (as before)
+    // ================================================================
+    {
+        const std::string dirPhiLog = std::string(outDir) + "/PhiLogFitSummary";
+        ensureDir(dirPhiLog.c_str());
+
+        const std::array<const char*,5> phiPat = {
+            "h_phi_diff_raw_%s",
+            "h_phi_diff_corr_%s",
+            "h_phi_diff_cpRaw_%s",
+            "h_phi_diff_cpCorr_%s",
+            "h_phi_diff_cpBcorr_%s"
+        };
+        const std::array<const char*,5> phiLab = {
+            "PDC raw",
+            "PDC corrected",
+            "no corr, cluster",
+            "CorrectPosition, cluster",
+            "b(E) corr, cluster"
+        };
+
+        std::array<std::vector<TH1F*>,5> PHI{};
+        for (int v=0; v<5; ++v) PHI[v] = loadSet(phiPat[v]);
+
+        std::vector<double> eCtr; eCtr.reserve(eEdges.size());
+        for (std::size_t iE=0; iE<eEdges.size(); ++iE)
+            eCtr.push_back(0.5*(eEdges[iE].first + eEdges[iE].second));
+
+        std::array<std::vector<double>,5> MU, dMU, SG, dSG;
+        std::vector<int> shown; shown.reserve(5);
+
+        for (int v=0; v<5; ++v) {
+            MU[v].reserve(eEdges.size());
+            dMU[v].reserve(eEdges.size());
+            SG[v].reserve(eEdges.size());
+            dSG[v].reserve(eEdges.size());
+
+            bool any = false;
+            for (std::size_t iE=0; iE<eEdges.size(); ++iE) {
+                if (!PHI[v][iE] || PHI[v][iE]->Integral()==0) {
+                    MU[v].push_back(0.0);  dMU[v].push_back(0.0);
+                    SG[v].push_back(0.0);  dSG[v].push_back(0.0);
+                    continue;
+                }
+                any = true;
+                auto [fr, f] = fitGaussianInRange(PHI[v][iE], xMin, xMax);
+                if (f) delete f;
+                MU[v].push_back(fr.mu);   dMU[v].push_back(fr.dmu);
+                SG[v].push_back(fr.sg);   dSG[v].push_back(fr.dsg);
+            }
+            if (any) shown.push_back(v);
+        }
+
+        // μ/σ vs E overlay (all available variants)
+        if (!shown.empty()) {
+            const double xMinE = 0.0;
+            const double xMaxE = eCtr.back() + 0.5*(eEdges.back().second - eEdges.back().first);
+            std::vector<double> ex(eCtr.size(), 0.0);
+
+            TCanvas c("cPhiVar_MuSig","DeltaPhi – variants μ/σ vs E",1000,850);
+            TPad* pTop = new TPad("pTop","pTop",0.0,0.38,1.0,1.0);
+            TPad* pBot = new TPad("pBot","pBot",0.0,0.00,1.0,0.34);
+            pTop->SetLeftMargin(0.15); pTop->SetRightMargin(0.05);
+            pTop->SetTopMargin(0.14);  pTop->SetBottomMargin(0.02);
+            pBot->SetLeftMargin(0.15); pBot->SetRightMargin(0.05);
+            pBot->SetTopMargin(0.04);  pBot->SetBottomMargin(0.16);
+            pTop->Draw(); pBot->Draw();
+
+            // Top pad: μ(E)
+            pTop->cd();
+            double muLo=1e30, muHi=-1e30;
+            for (int v : shown)
+                for (std::size_t i=0; i<MU[v].size(); ++i) {
+                    muLo = std::min(muLo, MU[v][i] - dMU[v][i]);
+                    muHi = std::max(muHi, MU[v][i] + dMU[v][i]);
+                }
+            const double padMu = 0.25*(muHi-muLo);
+            TH1F frU("frU",";E_{ctr}  [GeV];#mu  [rad]",1,xMinE,xMaxE);
+            frU.SetMinimum(muLo - padMu);
+            frU.SetMaximum(muHi + padMu);
+            frU.GetXaxis()->SetLabelSize(0.0);
+            frU.GetXaxis()->SetTitleSize(0.0);
+            frU.GetXaxis()->SetTickLength(0.0);
+            frU.Draw("AXIS");
+            TLine l0(xMinE,0.0,xMaxE,0.0); l0.SetLineStyle(2); l0.Draw();
+
+            TLegend legU(0.62,0.74,0.93,0.92);
+            legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.032);
+
+            std::vector<std::unique_ptr<TGraphErrors>> gMu;
+            for (int v : shown) {
+                auto g = std::make_unique<TGraphErrors>((int)eCtr.size(),
+                                                        eCtr.data(), MU[v].data(),
+                                                        ex.data(),   dMU[v].data());
+                g->SetMarkerStyle(kMk[v]);
+                g->SetMarkerColor(kCol[v]);
+                g->SetLineColor  (kCol[v]);
+                g->SetMarkerSize(1.0);
+                g->Draw("P SAME");
+                legU.AddEntry(g.get(), phiLab[v], "p");
+                gMu.emplace_back(std::move(g));
+            }
+            legU.Draw();
+
+            // Bottom pad: σ(E)
+            pBot->cd();
+            double sgHi = -1e30;
+            for (int v : shown) for (double s : SG[v]) sgHi = std::max(sgHi, s);
+            TH1F frL("frL",";E_{ctr}  [GeV];#sigma  [rad]",1,xMinE,xMaxE);
+            frL.SetMinimum(0.0); frL.SetMaximum(1.15*sgHi); frL.Draw("AXIS");
+
+            std::vector<std::unique_ptr<TGraphErrors>> gSg;
+            for (int v : shown) {
+                auto g = std::make_unique<TGraphErrors>((int)eCtr.size(),
+                                                        eCtr.data(), SG[v].data(),
+                                                        ex.data(),   dSG[v].data());
+                g->SetMarkerStyle(kMk[v]);
+                g->SetMarkerColor(kCol[v]);
+                g->SetLineColor  (kCol[v]);
+                g->SetMarkerSize(1.0);
+                g->Draw("P SAME");
+                gSg.emplace_back(std::move(g));
+            }
+
+            c.cd();
+            TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.040);
+            h.DrawLatex(0.50,0.985,"#Delta#phi  –  Gaussian #mu / #sigma vs E  (variants)");
+            c.SaveAs((dirPhiLog + "/DeltaPhi_MeanSigmaVsE_5Variants.png").c_str());
+            c.Close();
+        }
+
+        // μ vs ln(E) fits (all available variants)
+        if (eCtr.size() >= 2 && !shown.empty()) {
+            std::vector<double> lnE(eCtr.size());
+            std::transform(eCtr.begin(), eCtr.end(), lnE.begin(),
+                           [](double e){ return std::log(e); });
+
+            const double xLo = *std::min_element(lnE.begin(),lnE.end()) - 0.05;
+            const double xHi = *std::max_element(lnE.begin(),lnE.end()) + 0.05;
+
+            double yLo=1e30,yHi=-1e30;
+            for (int v : shown) {
+                yLo = std::min(yLo, *std::min_element(MU[v].begin(), MU[v].end()));
+                yHi = std::max(yHi, *std::max_element(MU[v].begin(), MU[v].end()));
+            }
+            const double pad=0.15*(yHi-yLo); yLo-=pad; yHi+=0.35*(yHi-yLo);
+
+            TCanvas c("cLnAll","μ vs lnE (Δφ variants)",900,640);
+            c.SetLeftMargin(0.15); c.SetRightMargin(0.06);
+
+            TH1F fr("",";ln E  [GeV];#mu  [rad]",1,xLo,xHi);
+            fr.SetMinimum(yLo); fr.SetMaximum(yHi); fr.Draw("AXIS");
+
+            std::ofstream fout(dirPhiLog + "/DeltaPhi_MuVsLogE_fit.txt");
+            fout << "# variant                         p0(rad)          p1(rad)\n";
+
+            std::vector<double> ex(eCtr.size(), 0.0);
+            TLegend lg(0.16,0.75,0.90,0.90);
+            lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.028);
+
+            for (int v : shown) {
+                auto* g = new TGraphErrors((int)eCtr.size(), lnE.data(), MU[v].data(),
+                                           ex.data(), dMU[v].data());
+                g->SetMarkerStyle(kMk[v]);
+                g->SetMarkerColor(kCol[v]);
+                g->SetLineColor  (kCol[v]);
+                g->SetMarkerSize(1.1);
+                g->Draw("P SAME");
+
+                TF1 f("f","pol1",xLo,xHi);
+                f.SetLineColor (kCol[v]);
+                f.SetLineStyle (2);
+                f.SetLineWidth (2);
+                g->Fit(&f,"Q");
+                f.Draw("SAME");
+
+                fout << Form("%-28s % .6e   % .6e\n",
+                             phiLab[v], f.GetParameter(0), f.GetParameter(1));
+
+                auto* mk = new TMarker(0, 0, kMk[v]);
+                mk->SetMarkerColor(kCol[v]);
+                lg.AddEntry(mk,
+                            Form("%s  (a=%.2e, b=%.2e)", phiLab[v],
+                                 f.GetParameter(0), f.GetParameter(1)),
+                            "p");
+            }
+            lg.Draw();
+
+            c.SaveAs((dirPhiLog + "/DeltaPhi_MuVsLogE_All.png").c_str());
+            c.Close();
+        }
+
+        // μ vs ln(E) – only two cluster variants (forced colors)
+        {
+            const int vA = 2; // "no corr, cluster"
+            const int vB = 3; // "CorrectPosition, cluster"
+            bool haveA=false, haveB=false;
+            for (auto* h : PHI[vA]) if (h && h->Integral()>0) { haveA=true; break; }
+            for (auto* h : PHI[vB]) if (h && h->Integral()>0) { haveB=true; break; }
+
+            if (haveA && haveB && eCtr.size()>=2) {
+                std::vector<double> lnE(eCtr.size());
+                std::transform(eCtr.begin(), eCtr.end(), lnE.begin(),
+                               [](double e){ return std::log(e); });
+
+                const double xLo = *std::min_element(lnE.begin(),lnE.end()) - 0.05;
+                const double xHi = *std::max_element(lnE.begin(),lnE.end()) + 0.05;
+
+                double yLo = std::min(*std::min_element(MU[vA].begin(), MU[vA].end()),
+                                      *std::min_element(MU[vB].begin(), MU[vB].end()));
+                double yHi = std::max(*std::max_element(MU[vA].begin(), MU[vA].end()),
+                                      *std::max_element(MU[vB].begin(), MU[vB].end()));
+                const double pad=0.15*(yHi-yLo); yLo-=pad; yHi+=0.35*(yHi-yLo);
+
+                TCanvas c("cLn2","μ vs lnE (cluster raw vs corr)",900,640);
+                c.SetLeftMargin(0.15); c.SetRightMargin(0.06);
+
+                TH1F fr("",";ln E  [GeV];#mu  [rad]",1,xLo,xHi);
+                fr.SetMinimum(yLo); fr.SetMaximum(yHi); fr.Draw("AXIS");
+
+                std::vector<double> ex(eCtr.size(), 0.0);
+
+                TGraphErrors gA((int)eCtr.size(), lnE.data(), MU[vA].data(), ex.data(), dMU[vA].data());
+                gA.SetMarkerStyle(20); gA.SetMarkerColor(kRed+1);  gA.SetLineColor(kRed+1);  gA.SetMarkerSize(1.1); gA.Draw("P SAME");
+                TGraphErrors gB((int)eCtr.size(), lnE.data(), MU[vB].data(), ex.data(), dMU[vB].data());
+                gB.SetMarkerStyle(20); gB.SetMarkerColor(kBlue+1); gB.SetLineColor(kBlue+1); gB.SetMarkerSize(1.1); gB.Draw("P SAME");
+
+                TF1 fA("fA","pol1",xLo,xHi); fA.SetLineColor(kRed+1);  fA.SetLineStyle(2); fA.SetLineWidth(2);  gA.Fit(&fA,"Q"); fA.Draw("SAME");
+                TF1 fB("fB","pol1",xLo,xHi); fB.SetLineColor(kBlue+1); fB.SetLineStyle(2); fB.SetLineWidth(2);  gB.Fit(&fB,"Q"); fB.Draw("SAME");
+
+                TLegend lg(0.16,0.78,0.90,0.90);
+                lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.030);
+                lg.AddEntry(&gA, "#Delta#phi  no corr, cluster",          "p");
+                lg.AddEntry(&gB, "#Delta#phi  CorrectPosition, cluster",   "p");
+                lg.Draw();
+
+                c.SaveAs((dirPhiLog + "/DeltaPhi_MuVsLogE_RawVsCorr.png").c_str());
+                c.Close();
+            }
         }
     }
 
@@ -6447,7 +7330,7 @@ void PDCanalysis()
   MakeDeltaPhiEtaPlayground(
         "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root",
         "/Users/patsfan753/Desktop/scratchPDC",
-        -0.04, 0.04
+        -0.035, 0.035
   );
     
 //  Plot2DBlockEtaPhi(hUnc3D, hCor3D, isFirstPass, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots");

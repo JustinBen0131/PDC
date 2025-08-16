@@ -1938,28 +1938,32 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         HFill(h_phi_diff_raw_E     [iE], rec[3].d);
         HFill(h_phi_diff_corrected_E[iE], rec[4].d);
   }
-  /* ---------- vertex‑resolved histogramming ---------- */
-  const float absVz   = std::fabs(vtxZ);
-  const int   iVzAbs  = getVzSlice(absVz);     // 0 … N_VzBins‑1 or −1
-  const int   iVzSgn  = getVzSliceSigned(vtxZ);// 0 … 2*N_VzBins‑1 or −1
+    /* ---------- vertex-resolved histogramming ---------- */
+    if (!skipVertexDep)
+    {
+        const float absVz   = std::fabs(vtxZ);
+        const int   iVzAbs  = getVzSlice(absVz);     // 0 … N_VzBins-1 or −1
+        const int   iVzSgn  = getVzSliceSigned(vtxZ);// 0 … 2*N_VzBins-1 or −1
 
-  if (iVzAbs >= 0)                             /* |z| slices */
-  {
-      HFill(h_phi_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
-      HFill(h_phi_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
-      HFill(h_phi_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
-      HFill(h_phi_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
-      HFill(h_phi_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
-  }
+        if (iVzAbs >= 0)                             /* |z| slices */
+        {
+            HFill(h_phi_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
+            HFill(h_phi_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
+            HFill(h_phi_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
+            HFill(h_phi_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
+            HFill(h_phi_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
+        }
 
-  if (m_useSignedVz && iVzSgn >= 0)            /* +z / –z slices */
-  {
-      HFill(h_phi_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
-      HFill(h_phi_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
-      HFill(h_phi_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
-      HFill(h_phi_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
-      HFill(h_phi_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
-  }
+        if (m_useSignedVz && iVzSgn >= 0)            /* +z / –z slices */
+        {
+            HFill(h_phi_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
+            HFill(h_phi_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
+            HFill(h_phi_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
+            HFill(h_phi_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
+            HFill(h_phi_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
+        }
+    }
+
  #undef  HFill
 
   /* ── G) “winner” bookkeeping ────────────────────────────────────── */
@@ -2285,28 +2289,32 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     HFill(h_eta_diff_raw_E     [iE], rec[3].d);
     HFill(h_eta_diff_corrected_E[iE], rec[4].d);
   }
-    /* ---------- vertex‑resolved histogramming ---------- */
-    const float absVz   = std::fabs(vtxZ);
-    const int   iVzAbs  = getVzSlice(absVz);      // 0 … N_VzBins‑1 or −1
-    const int   iVzSgn  = getVzSliceSigned(vtxZ); // 0 … 2*N_VzBins‑1 or −1
-
-    if (iVzAbs >= 0)                              /* |z| slices */
+    /* ---------- vertex-resolved histogramming ---------- */
+    if (!skipVertexDep)
     {
-      HFill(h_eta_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
-      HFill(h_eta_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
-      HFill(h_eta_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
-      HFill(h_eta_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
-      HFill(h_eta_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
+        const float absVz   = std::fabs(vtxZ);
+        const int   iVzAbs  = getVzSlice(absVz);      // 0 … N_VzBins-1 or −1
+        const int   iVzSgn  = getVzSliceSigned(vtxZ); // 0 … 2*N_VzBins-1 or −1
+
+        if (iVzAbs >= 0)                              /* |z| slices */
+        {
+            HFill(h_eta_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
+            HFill(h_eta_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
+            HFill(h_eta_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
+            HFill(h_eta_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
+            HFill(h_eta_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
+        }
+
+        if (m_useSignedVz && iVzSgn >= 0)             /* +z / –z slices */
+        {
+            HFill(h_eta_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
+            HFill(h_eta_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
+            HFill(h_eta_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
+            HFill(h_eta_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
+            HFill(h_eta_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
+        }
     }
 
-    if (m_useSignedVz && iVzSgn >= 0)             /* +z / –z slices */
-    {
-      HFill(h_eta_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
-      HFill(h_eta_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
-      HFill(h_eta_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
-      HFill(h_eta_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
-      HFill(h_eta_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
-    }
 #undef  HFill
 
   /* ───────────────── winner bookkeeping ──────────────────────────── */

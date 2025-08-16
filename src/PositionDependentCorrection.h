@@ -112,6 +112,7 @@ class PositionDependentCorrection : public SubsysReco
      *  – getVzSlice()      : absolute‑|z| index          0 … N_VzBins‑1
      *  – getVzSliceSigned(): signed   index (+z first)   0 … 2*N_VzBins‑1
      * -------------------------------------------------------------- */
+  bool skipVertexDep {true};
   float m_vzTightCut { 10.f };                 ///< |z| ≤ 10 cm
 
   static constexpr std::array<float,19> vzEdge = {
