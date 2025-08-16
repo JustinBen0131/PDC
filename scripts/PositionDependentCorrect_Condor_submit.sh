@@ -384,11 +384,11 @@ submit_sim_condor() {
       mkdir -p "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$LOG_DIR_LOG"
   }
 
-  # ─────────────── 1) FLEXIBLE CLI PARSING ────────────────────────────────
   local roundArg="firstRound"     # default slice keyword
   local execMode="condor"         # default execution mode
   local sampleN=""                # set only if user supplied a pure integer
   local checkOnly=false           # when true, only count inputs; no submission
+  local doAll=false               # when true, submit ALL pairs in one go
 
   for tok in "$@"; do
       case "$tok" in
@@ -397,6 +397,9 @@ submit_sim_condor() {
               ;;
           simOnly)
               execMode="condor"   # alias
+              ;;
+          doAll)
+              doAll=true          # submit ALL pairs in one submission
               ;;
           firstRound|secondRound|thirdRound|fourthRound|testSubmit|sample)
               roundArg="$tok"
@@ -442,14 +445,32 @@ submit_sim_condor() {
   echo "[INFO] offset=$offset   chunkSize=$chunkSize"
   echo "######################################################################"
 
-  # ─────────────── 3) CLEAN‑UP PRIOR TO SUBMISSION ────────────────────────
+  # ─────────────── 3) CLEAN-UP PRIOR TO SUBMISSION ────────────────────────
   if [[ "$execMode" == "condor" ]]; then
       if $wipe_outputs; then
           echo "[STEP] Removing previous ROOT outputs from $OUTDIR_SIM"
           [[ -d "$OUTDIR_SIM" ]] && find "$OUTDIR_SIM" -mindepth 1 -delete
       fi
-      echo "[STEP] Cleaning old Condor logs"
-      clean_logs
+
+      echo "[STEP] Cleaning old Condor logs (stdout, error, log) and recreating"
+      echo "[CLEAN] rm -rfv \"$LOG_DIR_OUT\" \"$LOG_DIR_ERR\" \"$LOG_DIR_LOG\""
+      rm -rfv "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$LOG_DIR_LOG" 2>/dev/null || true
+
+      echo "[CLEAN] mkdir -p \"$LOG_DIR_OUT\" \"$LOG_DIR_ERR\" \"$LOG_DIR_LOG\""
+      mkdir -p "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$LOG_DIR_LOG"
+
+      # also reset the listfiles staging dir used by submissions
+      echo "[CLEAN] rm -rfv \"$CONDOR_LISTFILES_DIR\" && mkdir -p \"$CONDOR_LISTFILES_DIR\""
+      rm -rfv "$CONDOR_LISTFILES_DIR" 2>/dev/null || true
+      mkdir -p "$CONDOR_LISTFILES_DIR"
+
+      # visible proof the directories exist and are empty
+      echo "[CLEAN] Post-cleanup directory state:"
+      ls -ld "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$LOG_DIR_LOG" "$CONDOR_LISTFILES_DIR"
+      for d in "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$LOG_DIR_LOG"; do
+          echo "[CLEAN] Contents of $d (should be empty):"
+          ls -la "$d"
+      done
   fi
 
   # ─────────────── 4) BUILD THE LIST OF (DST,G4) PAIRS ───────────────────
@@ -460,6 +481,13 @@ submit_sim_condor() {
 
   local maxN=${#simPairs[@]}
   (( offset < maxN )) || { echo "[WARN] Offset beyond list size – nothing to do."; return 0; }
+
+  if $doAll; then
+      echo "[INFO] doAll requested → overriding slice to submit ALL ${maxN} pairs in one submission."
+      offset=0
+      chunkSize=$maxN
+      wipe_outputs=true      # ensure first-round-style full reset semantics
+  fi
 
   local endIndex=$(( offset + chunkSize ))
   (( endIndex > maxN )) && endIndex=$maxN
@@ -485,7 +513,10 @@ submit_sim_condor() {
   echo "------------------------------------------------------------------"
   if [[ "$roundArg" == "firstRound" ]]; then
       mkdir -p "$TRACK_DIR"
+      echo "[TRACK] firstRound: removing any previous tracking file and recreating fresh one"
+      rm -f "$TRACK_FILE" 2>/dev/null || true
       printf "%s\n" "${simPairs[@]}" > "$TRACK_FILE"
+      sync
       echo "[TRACK] Initialized tracking file:"
   else
       if [[ ! -f "$TRACK_FILE" ]]; then
@@ -683,7 +714,7 @@ case "$MODE" in
     echo "===================================================================="
     echo "[INFO] Condor => sim only. round='$WHAT'"
     echo "===================================================================="
-    submit_sim_condor "$WHAT" "$3"      # pass optional count
+    submit_sim_condor "${@:2}"          # forward all args after MODE (e.g., condor firstRound doAll)
     exit 0
     ;;
 
