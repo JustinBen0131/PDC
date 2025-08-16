@@ -377,8 +377,11 @@ submit_sim_condor() {
   mkdir -p "$LOG_DIR_LOG" "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$CONDOR_LISTFILES_DIR"
 
   clean_logs() {
-      rm -vf "$LOG_DIR_LOG"/job.* "$LOG_DIR_OUT"/job.* "$LOG_DIR_ERR"/job.* \
-         2>/dev/null || true
+      echo "[CLEAN] Removing and recreating Condor log directories under: $LOG_BASE"
+      echo "[CLEAN] rm -rfv \"$LOG_DIR_OUT\" \"$LOG_DIR_ERR\" \"$LOG_DIR_LOG\""
+      rm -rfv "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$LOG_DIR_LOG" 2>/dev/null || true
+      echo "[CLEAN] mkdir -p \"$LOG_DIR_OUT\" \"$LOG_DIR_ERR\" \"$LOG_DIR_LOG\""
+      mkdir -p "$LOG_DIR_OUT" "$LOG_DIR_ERR" "$LOG_DIR_LOG"
   }
 
   # ─────────────── 1) FLEXIBLE CLI PARSING ────────────────────────────────

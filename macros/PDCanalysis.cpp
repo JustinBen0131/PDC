@@ -6176,7 +6176,17 @@ void MakeDeltaPhiEtaPlayground(
     // ---- first-bin overlay (counts) for raw vs corr of the same residual ----
     auto makeFirstBinVariantOverlay = [&](TH1F* hrefRaw, TH1F* hrefCorr,
                                           Color_t col, const char* deltaSym,
-                                          const char* outPng)
+                                          const char* outPng,
+                                          // legend box (defaults = old position)
+                                          double legX1 = 0.80, double legY1 = 0.78,
+                                          double legX2 = 0.93, double legY2 = 0.90,
+                                          // optional override header (nullptr -> draw old energy label top-right)
+                                          const char* headerOverride = nullptr,
+                                          double headerX = 0.94, double headerY = 0.92,
+                                          // μ/σ/χ²/NDF text block right-aligned coords (defaults = old low location)
+                                          double statsX = 0.94,
+                                          double statsYraw  = 0.18,
+                                          double statsYcorr = 0.13)
     {
         if (!hrefRaw || !hrefCorr || hrefRaw->Integral()==0 || hrefCorr->Integral()==0) return;
 
@@ -6214,22 +6224,43 @@ void MakeDeltaPhiEtaPlayground(
 
         c.Modified(); c.Update();
 
-        TLegend lg(0.8,0.78,0.93,0.9);
+        // Legend (position is now configurable)
+        TLegend lg(legX1, legY1, legX2, legY2);
         lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.033);
-        lg.AddEntry(hR, "#Delta #phi without Correction", "p");
-        lg.AddEntry(hC, "#Delta #phi with Correction", "p");
+        // Use the provided symbol for correct residual label (phi vs eta)
+        lg.AddEntry(hR, Form("%s without Correction", deltaSym), "p");
+        lg.AddEntry(hC, Form("%s with Correction",     deltaSym), "p");
         lg.Draw();
 
-        TLatex eLab; eLab.SetNDC(); eLab.SetTextSize(0.044); eLab.SetTextAlign(33);
-        eLab.DrawLatex(0.94,0.92,Form("[%.0f, %.0f) GeV", eEdges.front().first, eEdges.front().second));
+        // Header: either default energy tag (top-right) or an override (e.g., centered)
+        TLatex head; head.SetNDC(); head.SetTextSize(0.044);
+        if (headerOverride && headerOverride[0] != '\0') {
+            head.SetTextAlign(22);              // center
+            head.DrawLatex(headerX, headerY, headerOverride);
+        } else {
+            head.SetTextAlign(33);              // top-right
+            head.DrawLatex(headerX, headerY,
+                           Form("[%.0f, %.0f) GeV", eEdges.front().first, eEdges.front().second));
+        }
+
+        // μ, σ, and χ²/NDF — right-aligned at requested Y positions
+        const double chi2R = fRaw  ? fRaw ->GetChisquare() : 0.0;
+        const double ndfR  = fRaw  ? fRaw ->GetNDF()       : 0.0;
+        const double chi2C = fCorr ? fCorr->GetChisquare() : 0.0;
+        const double ndfC  = fCorr ? fCorr->GetNDF()       : 0.0;
 
         TLatex st; st.SetNDC(); st.SetTextSize(0.032); st.SetTextAlign(31);
-        st.DrawLatex(0.94,0.18,Form("%s raw:  #mu=%.3g, #sigma=%.3g", deltaSym, frRaw.mu,  frRaw.sg));
-        st.DrawLatex(0.94,0.13,Form("%s corr: #mu=%.3g, #sigma=%.3g", deltaSym, frCorr.mu, frCorr.sg));
+        st.DrawLatex(statsX, statsYraw,
+                     Form("%s raw:  #mu = %.3g,  #sigma = %.3g,  #chi^{2}/NDF = %.2f",
+                          deltaSym, frRaw.mu,  frRaw.sg,  (ndfR>0 ? chi2R/ndfR : 0.0)));
+        st.DrawLatex(statsX, statsYcorr,
+                     Form("%s corr: #mu = %.3g,  #sigma = %.3g,  #chi^{2}/NDF = %.2f",
+                          deltaSym, frCorr.mu, frCorr.sg, (ndfC>0 ? chi2C/ndfC : 0.0)));
 
         c.SaveAs(outPng);
         c.Close();
     };
+
 
     // ---- μ/σ vs E overlay (two series: raw vs corr) ----
     auto makeMuSigmaVariantOverlay = [&](const std::vector<TH1F*>& Vraw,
@@ -6523,14 +6554,33 @@ void MakeDeltaPhiEtaPlayground(
     // =====================================================================
 
     // --------------------- Clusterizer (existing) ---------------------
-    // First-bin overlays (COUNTS)
     if (!Hphi.empty() && !HphiCorr.empty())
-        makeFirstBinVariantOverlay(Hphi[0], HphiCorr[0], kRed+1,  "#Delta#phi",
-            (dirRawVsCorr + "/DeltaPhi_cpRaw_vs_cpCorr_FirstBin_Overlay.png").c_str());
+        makeFirstBinVariantOverlay(
+            Hphi[0], HphiCorr[0], kRed+1, "#Delta#phi",
+            (dirRawVsCorr + "/DeltaPhi_cpRaw_vs_cpCorr_FirstBin_Overlay.png").c_str(),
+            // legend box (shifted left)
+            0.62, 0.78, 0.85, 0.90,
+            // centered header override at (0.50, 0.88)
+            Form("Clusterizer with/without Position Correction, [%.0f, %.0f) GeV",
+                 eEdges.front().first, eEdges.front().second),
+            0.50, 0.88,
+            // μ/σ/χ² text block near top-right (moved up)
+            0.94, 0.84, 0.79
+        );
 
     if (!Heta.empty() && !HetaCorr.empty())
-        makeFirstBinVariantOverlay(Heta[0], HetaCorr[0], kBlue+1, "#Delta#eta",
-            (dirRawVsCorr + "/DeltaEta_cpRaw_vs_cpCorr_FirstBin_Overlay.png").c_str());
+        makeFirstBinVariantOverlay(
+            Heta[0], HetaCorr[0], kBlue+1, "#Delta#eta",
+            (dirRawVsCorr + "/DeltaEta_cpRaw_vs_cpCorr_FirstBin_Overlay.png").c_str(),
+            // legend box (shifted left)
+            0.62, 0.78, 0.85, 0.90,
+            // centered header override at (0.50, 0.88)
+            Form("Clusterizer with/without Position Correction, [%.0f, %.0f) GeV",
+                 eEdges.front().first, eEdges.front().second),
+            0.50, 0.88,
+            // μ/σ/χ² text block near top-right (moved up)
+            0.94, 0.84, 0.79
+        );
 
     // μ/σ vs E overlays per residual (two series)
     if (!Hphi.empty() && !HphiCorr.empty())
