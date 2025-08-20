@@ -5903,13 +5903,6 @@ void MakeDeltaPhiEtaPlayground(
     // Unified residual-panel drawer: single curve OR overlay
     // ---------------------------------------------------------------------
 
-
-    // Forward declarations so the fitter can be called before its definition.
-    // fitG is the full-argument implementation.
-    // fitGaussianInRange is a 3-arg convenience wrapper that uses default settings.
-    std::function<std::pair<FitRes, TF1*>(TH1*, double, double, bool, const char*)> fitG;
-    std::function<std::pair<FitRes, TF1*>(TH1*, double, double)> fitGaussianInRange;
-
     // Usage:
     //   std::vector<ResidualSpec> specs = {
     //     {h1, "#Delta#phi", kRed+1, 20, 1},
@@ -5955,21 +5948,6 @@ void MakeDeltaPhiEtaPlayground(
         }
         if (clones.empty()) return;
 
-        // Fit each curve (scaled for "Counts" plots)
-        std::vector<FitRes> FR(clones.size());
-        std::vector<TF1*>   FF(clones.size(), nullptr);
-
-        for (std::size_t i=0; i<clones.size(); ++i) {
-            auto [fr, f] = fitG(specs[i].h, xMin, xMax, true, Form("f_resid_%zu", i));
-            FR[i] = fr;  FF[i] = f;
-            if (f) {
-                f->SetLineColor(specs[i].col);
-                f->SetLineStyle(specs[i].ls);
-                f->SetLineWidth(3);
-                f->SetNpx(800);
-                yMax = std::max(yMax, f->GetMaximum(f->GetXmin(), f->GetXmax()));
-            }
-        }
         // Draw histograms
         TH1F* base = clones.front();
         base->SetTitle("");
@@ -5979,7 +5957,6 @@ void MakeDeltaPhiEtaPlayground(
         base->GetYaxis()->SetRangeUser(0.0, 1.20*yMax);
         base->Draw("E");
         for (std::size_t i=1; i<clones.size(); ++i) clones[i]->Draw("E SAME");
-        for (auto* f : FF) if (f) f->Draw("SAME");
 
         // Top-left: Plot name + energy
         TLatex head; head.SetNDC(); head.SetTextFont(42);
@@ -6002,24 +5979,20 @@ void MakeDeltaPhiEtaPlayground(
         st.SetTextAlign(33); st.SetTextSize(0.025 * textScale);
         st.SetTextColor(kBlack);
         double yStats = 0.78;
-        const double dy = 0.024 * textScale;         // vertical step between lines
+        const double dy = 0.028 * textScale;         // vertical step between lines
         const double padBetweenCurves = 0.018 * textScale; // extra gap after each curve block
 
-        for (std::size_t i=0; i<FR.size(); ++i) {
-            const double chi2 = FF[i] ? FF[i]->GetChisquare() : 0.0;
-            const double ndf  = FF[i] ? FF[i]->GetNDF()       : 0.0;
-            const double chi2ndf = (ndf > 0 ? chi2/ndf : 0.0);
+        for (std::size_t i=0; i<specs.size(); ++i) {
+            if (!specs[i].h || specs[i].h->Integral()==0) continue;
+            double m, me, r, re;
+            std::tie(m, me, r, re) = statsFromHistRange(specs[i].h, xMin, xMax);
 
-            // Line 1:           μ = X
-            st.DrawLatex(0.92, yStats, Form("  #mu = %.6g", FR[i].mu));
+            // Line 1: label + Mean ± err
+            st.DrawLatex(0.92, yStats, Form("%s:  #mu = %.6g #pm %.2g", specs[i].label, m, me));
             yStats -= dy;
 
-            // Line 2: label:    σ = Y
-            st.DrawLatex(0.92, yStats, Form("%s:  #sigma = %.6g", specs[i].label, FR[i].sg));
-            yStats -= dy;
-
-            // Line 3:           χ²/NDF = Z
-            st.DrawLatex(0.92, yStats, Form(" #chi^{2}/NDF = %.2f", chi2ndf));
+            // Line 2:        RMS ± err
+            st.DrawLatex(0.92, yStats, Form("       #sigma = %.6g #pm %.2g", r, re));
             yStats -= (dy + padBetweenCurves);
         }
         // Middle-left: nEvents per curve (always black text)
@@ -6054,237 +6027,6 @@ void MakeDeltaPhiEtaPlayground(
             H[iE] = h;
         }
         return H;
-    };
-
-    // ---- Peak-focused, bin-integrated & truncated Gaussian (unchanged semantics) ----
-    fitG = [&](TH1* src, double lo, double hi,
-               bool scaleForCounts,
-               const char* nameHint)
-               -> std::pair<FitRes, TF1*>
-    {
-        FitRes out{};
-        if (!src || src->Integral() <= 0) return std::make_pair(out, nullptr);
-
-        const double hardLo = -0.012;
-        const double hardHi =  0.012;
-        const double fitLo  = hardLo;
-        const double fitHi  = hardHi;
-        if (fitLo >= fitHi) return std::make_pair(out, nullptr);
-
-        // --- range & binning in the *fit* window ---
-        TAxis* ax = src->GetXaxis();
-        const int nbin = ax->GetNbins();
-        const int iLo  = std::max(1, ax->FindFixBin(fitLo + 1e-9));
-        const int iHi  = std::min(nbin, ax->FindFixBin(fitHi - 1e-9));
-        if (iLo >= iHi) return std::make_pair(out, nullptr);
-        const int ibMid = std::max(1, std::min(nbin, (iLo+iHi)/2));
-        const double bw = ax->GetBinWidth(ibMid);
-
-        // --- seeds: mode (peak bin) and FWHM-based σ0 ---
-        int    iPk = iLo; double yPk = -1.0;
-        for (int i=iLo; i<=iHi; ++i) { const double y=src->GetBinContent(i); if (y>yPk){ yPk=y; iPk=i; } }
-        const double xPk  = ax->GetBinCenter(iPk);
-        const double A0   = std::max(yPk, 1.0);
-        const double mu0  = xPk;
-
-        const double half = 0.5*A0;
-        auto interpX = [&](int i1,int i2,double level){
-            const double x1=ax->GetBinCenter(i1), x2=ax->GetBinCenter(i2);
-            const double y1=src->GetBinContent(i1), y2=src->GetBinContent(i2);
-            if (std::fabs(y2-y1)<1e-12) return x1;
-            return x1 + (level-y1)*(x2-x1)/(y2-y1);
-        };
-        double xL = mu0 - 2.0*bw, xR = mu0 + 2.0*bw;
-        for (int i=iPk-1; i>=iLo; --i){ if (src->GetBinContent(i) <= half){ xL = interpX(i, i+1, half); break; } }
-        for (int i=iPk+1; i<=iHi; ++i){ if (src->GetBinContent(i) <= half){ xR = interpX(i-1, i, half); break; } }
-        const double sigmaFWHM = (xR>xL) ? (xR-xL)/2.354820045 : std::max(0.8*bw, src->GetRMS());
-
-        // core RMS around the mode
-        const double wCore = 0.010;
-        const double xCoreLo = std::max(fitLo, mu0 - wCore);
-        const double xCoreHi = std::min(fitHi, mu0 + wCore);
-        const int iCoreLo = std::max(1, ax->FindFixBin(xCoreLo + 1e-9));
-        const int iCoreHi = std::min(nbin, ax->FindFixBin(xCoreHi - 1e-9));
-
-        double wsum=0.0, xsum=0.0, x2sum=0.0;
-        for (int i=iCoreLo; i<=iCoreHi; ++i){
-            const double w = std::max(0.0, src->GetBinContent(i));
-            if (w<=0.0) continue;
-            const double x = ax->GetBinCenter(i);
-            wsum  += w; xsum += w*x; x2sum += w*x*x;
-        }
-        double sigmaCore = (wsum>0.0) ? std::sqrt(std::max(x2sum/wsum - std::pow(xsum/wsum,2), 0.0)) : sigmaFWHM;
-
-        double sigma0 = std::min(sigmaFWHM, sigmaCore);
-        sigma0 = std::max(sigma0, 0.8*bw);
-
-        const double minSig = std::max(0.45*bw, 1e-6);
-        const double maxSig = 0.25*(fitHi - fitLo);
-        sigma0              = std::min(std::max(sigma0, minSig), maxSig);
-
-        const double Nin = std::max(1.0, src->Integral(iLo, iHi));
-        const double N0  = Nin;
-
-        static unsigned long uid = 0;
-        TF1* f = new TF1(Form("%s_%lu", nameHint, ++uid),
-            [=](double* xx, double* pp){
-                const double N  = pp[0];
-                const double mu = pp[1];
-                const double sg = std::max(pp[2], 1e-12);
-                const double s2 = sg*std::sqrt(2.0);
-
-                const double xa = (xx[0]-0.5*bw - mu)/s2;
-                const double xb = (xx[0]+0.5*bw - mu)/s2;
-                const double num = TMath::Erf(xb) - TMath::Erf(xa);
-
-                const double a  = (fitLo - mu)/s2;
-                const double b  = (fitHi - mu)/s2;
-                double den = TMath::Erf(b) - TMath::Erf(a);
-                if (den < 1e-12) den = 1e-12;
-
-                return N * (num/den);  // pedestal 0
-            }, fitLo, fitHi, 3);
-
-        f->SetParNames("N","#mu","#sigma");
-        f->SetParameters(N0, mu0, sigma0);
-        f->SetParLimits(0, 0.0, 10.0*Nin);
-        f->SetParLimits(1, fitLo, fitHi);
-        f->SetParLimits(2, minSig, maxSig);
-        f->SetNpx(1200);
-
-        // pass 1: full window
-        // --- auto-centering pre-pass around tallest bin to stabilize convergence ---
-        // Use the peak position (xPk) and a conservative span tied to sigma0 & bin width.
-        // This lets the minimizer "find" the peak even if the global window is off-center.
-        const double preSpanCap = 0.40 * (fitHi - fitLo);                // don't over-zoom
-        const double preSpan    = std::min(preSpanCap, std::max(3.0*sigma0, 6.0*bw));
-        const double preLo      = std::max(fitLo, xPk - preSpan);
-        const double preHi      = std::min(fitHi, xPk + preSpan);
-
-        // Re-seed around the peak before the global fit.
-        f->SetParameter(1, xPk);                 // μ starts at tallest-bin center
-        f->SetParameter(2, std::max(sigma0, bw)); // σ not smaller than a bin
-        f->SetRange(preLo, preHi);
-        TFitResultPtr r0 = src->Fit(f, "QLNR0S");
-
-        // pass 1: full window (now that μ,σ are centered and stable)
-        f->SetRange(fitLo, fitHi);
-        TFitResultPtr r1 = src->Fit(f, "QLNR0S");
-
-        // focus the symmetric core via top-fraction threshold
-        const double SNR  = std::max(1.0, N0) / std::sqrt(std::max(N0, 1.0));
-        const double frac = std::clamp(0.40 + 0.30/(1.0 + SNR), 0.40, 0.65);
-        const double thr  = frac * std::max(1.0, src->GetBinContent(src->GetMaximumBin()));
-
-        int iPk2 = src->GetMaximumBin();
-        double mu0b = ax->GetBinCenter(iPk2);
-        double loCoreEdge = mu0b, hiCoreEdge = mu0b;
-        for (int i=iPk2; i>=iLo; --i){ if (src->GetBinContent(i) < thr){ loCoreEdge=ax->GetBinCenter(i); break; } loCoreEdge=ax->GetBinCenter(i); }
-        for (int i=iPk2; i<=iHi; ++i){ if (src->GetBinContent(i) < thr){ hiCoreEdge=ax->GetBinCenter(i); break; } hiCoreEdge=ax->GetBinCenter(i); }
-
-        loCoreEdge = std::max(fitLo, loCoreEdge);
-        hiCoreEdge = std::min(fitHi, hiCoreEdge);
-
-        double hwL = std::max(0.0, mu0b - loCoreEdge);
-        double hwR = std::max(0.0, hiCoreEdge - mu0b);
-        double hw  = std::max(0.8*bw, std::min(hwL, hwR));
-        double loCore = std::max(fitLo, mu0b - hw);
-        double hiCore = std::min(fitHi, mu0b + hw);
-
-        f->SetParLimits(2, minSig, maxSig);
-        f->SetParameter(2, std::min(std::max(f->GetParameter(2), minSig), maxSig));
-
-        // pass 2: core window
-        f->SetRange(loCore, hiCore);
-        TFitResultPtr r2 = src->Fit(f, "QLNR0S");
-
-        // ---- Pass 3 (robust & asymmetric): let the fit breathe toward a long tail ----
-        const double muF    = f->GetParameter(1);
-        const double sgF    = std::max(minSig, std::fabs(f->GetParameter(2)));
-        const double spanCap = 0.48*(fitHi - fitLo); // allow a bit more headroom than before
-
-        // Estimate one-sided "34%-mass" widths around the peak from the histogram itself.
-        // For a pure Gaussian these are ~1σ; with a tail, the tail side becomes larger.
-        auto oneSidedWidth34 = [&](bool right)->double {
-            const int dir = right ? +1 : -1;
-            int i = ax->FindFixBin(mu0b);
-            double cum = 0.0;
-            const double target = 0.34 * Nin; // ~ one Gaussian sigma worth of area on a side
-            while (true) {
-                i += dir;
-                if (i < iLo || i > iHi) break;
-                const double y = std::max(0.0, src->GetBinContent(i));
-                cum += y;
-                if (cum >= target) {
-                    // Linear interpolation within this bin to locate the crossing
-                    const double over = cum - target;
-                    const double yThis = (y > 0.0) ? y : 1.0;
-                    const double frac = 1.0 - over / yThis;  // fraction of this bin to reach target
-                    const double xCross = ax->GetBinLowEdge(i) + frac * ax->GetBinWidth(i);
-                    return right ? (xCross - mu0b) : (mu0b - xCross);
-                }
-            }
-            return sgF; // fallback if not enough area on that side
-        };
-
-        double sigL = oneSidedWidth34(false);
-        double sigR = oneSidedWidth34(true);
-
-        // Guard rails
-        const double halfWin = 0.5*(fitHi - fitLo);
-        sigL = std::clamp(sigL, minSig, halfWin);
-        sigR = std::clamp(sigR, minSig, halfWin);
-
-        // If the right side is clearly longer, give it more room; otherwise behave like symmetric.
-        double kL = 1.6;
-        double kR = (sigR > 1.35 * sigL) ? 3.0 : 1.6;
-
-        // Never let the re-fit shrink compared to current σ estimate
-        kL = std::max(kL, sgF / std::max(sigL, 1e-12));
-        kR = std::max(kR, sgF / std::max(sigR, 1e-12));
-
-        const double spanL = std::min(spanCap, kL * sigL);
-        const double spanR = std::min(spanCap, kR * sigR);
-
-        double loT = std::max(fitLo, muF - spanL);
-        double hiT = std::min(fitHi, muF + spanR);
-
-        // If somehow too narrow, fall back to a slightly wider symmetric window
-        if (hiT - loT < 2.0 * minSig) {
-            loT = std::max(fitLo, muF - 1.2 * sgF);
-            hiT = std::min(fitHi, muF + 2.0 * sgF);
-        }
-
-        // Reseed σ toward the average of one-sided widths to keep the core from collapsing
-        f->SetParameter(1, muF);
-        f->SetParameter(2, std::max(sgF, 0.5 * (sigL + sigR)));
-
-        f->SetRange(loT, hiT);
-        TFitResultPtr r3 = src->Fit(f, "QLNR0S");
-
-        // report (σ deconvolved from bin width)
-        out.mu  = f->GetParameter(1);
-        out.dmu = f->GetParError(1);
-        const double sgFit  = std::fabs(f->GetParameter(2));
-        const double sgTrue = std::sqrt(std::max(sgFit*sgFit - (ax->GetBinWidth(ibMid)*ax->GetBinWidth(ibMid))/12.0, 1e-12));
-        out.sg  = sgTrue;
-        out.dsg = f->GetParError(2);
-
-        if (!scaleForCounts){
-            const double NinIn = std::max(1.0, src->Integral(ax->FindFixBin(fitLo + 1e-9), ax->FindFixBin(fitHi - 1e-9)));
-            const double bwMid = ax->GetBinWidth(ibMid);
-            f->SetParameter(0, f->GetParameter(0) / (NinIn * bwMid)); // convert to PDF inside fit window
-        }
-        f->SetRange(fitLo, fitHi);
-        f->SetNpx(1200);
-        return std::make_pair(out, f);
-    };
-
-    // 3-arg convenience wrapper (keeps old call sites working)
-    fitGaussianInRange = [&](TH1* src, double lo, double hi)
-                          -> std::pair<FitRes, TF1*>
-    {
-        return fitG(src, lo, hi, false, "fPlayG");
     };
 
     // =====================================================================
@@ -7195,7 +6937,7 @@ void MakeDeltaPhiEtaPlayground(
         makeMuSigmaFourSeriesOverlayFSvClus(HphiScratchRaw, Hphi,
                                             HetaScratchRaw, Heta,
             (dirFSvsClusNoCorr + "/DeltaEtaPhi_FSvsClus_MeanSigmaVsE_Overlay_4Series.png").c_str(),
-            "#Delta#phi / #Delta#eta  -  from scratch vs clusterizer  (No Position Correction)  -  Gaussian #mu / #sigma vs E");
+            "#Delta#phi / #Delta#eta  -  from scratch vs clusterizer  (No Position Correction)  -  Mean / RMS vs E");
 
 
     // Δφ — first‑bin overlay (counts), corrected
@@ -7325,7 +7067,8 @@ void MakeDeltaPhiEtaPlayground(
         makeMuSigmaFourSeriesOverlayFSvClus(HphiScratchCorr, HphiCorr,
                                             HetaScratchCorr, HetaCorr,
             (dirFSvsClusWithCorr + "/DeltaEtaPhi_FSvsClus_MeanSigmaVsE_Overlay_4Series.png").c_str(),
-            "#Delta#phi / #Delta#eta  -  from scratch vs clusterizer  (With Position Correction)  -  Gaussian #mu / #sigma vs E");
+            "#Delta#phi / #Delta#eta  -  from scratch vs clusterizer  (With Position Correction)  -  Mean / RMS vs E");
+
 
 
     // =====================================================================
@@ -7494,7 +7237,7 @@ void MakeDeltaPhiEtaPlayground(
             const double xAxisMax = eCtr.back() + 0.5*(eEdges.back().second - eEdges.back().first);
             std::vector<double> ex(eCtr.size(), 0.0);
 
-            TCanvas cS("cPlay_Overlay_MuSig","DeltaEta/DeltaPhi overlay – #mu/#sigma vs E",900,800);
+            TCanvas cS("cPlay_Overlay_MuSig","DeltaEta/DeltaPhi overlay – Mean / RMS vs E",900,800);
 
             TPad* pTop = new TPad("pTop","pTop",0.0,0.38,1.0,1.0);
             TPad* pBot = new TPad("pBot","pBot",0.0,0.00,1.0,0.34);
