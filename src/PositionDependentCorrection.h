@@ -519,21 +519,22 @@ namespace PDC_detail
   inline uint64_t vbLevel()
   { return PositionDependentCorrection::getVerbosityLevel(); }
 
-  /* ---------- CG‑frame → global φ ---------------------------------- */
-  inline float cg2GlobalPhi(BEmcRecCEMC* rec,
-                            float eReco,float xT,float yT)
-  {
-    float gx,gy,gz; rec->Tower2Global(eReco,xT,yT,gx,gy,gz);
-    return std::atan2(gy,gx);
-  }
+    inline float cg2GlobalPhi(BEmcRecCEMC* rec,
+                              float eReco,float xT,float yT)
+    {
+      float gx = 0.f, gy = 0.f, gz = 0.f;
+      rec->Tower2Global(eReco, xT, yT, gx, gy, gz);
+      return std::atan2(gy, gx);
+    }
 
-  /* ---------- CG‑frame → shower‑depth η (vertex‑aware) ------------- */
-  inline float cg2ShowerEta(BEmcRecCEMC* rec,
-                            float eReco,float xT,float yT,float vtxZ)
-  {
-    float gx,gy,gz; rec->Tower2Global(eReco,xT,yT,gx,gy,gz);
-    return std::asinh((gz-vtxZ)/std::hypot(gx,gy));
-  }
+    inline float cg2ShowerEta(BEmcRecCEMC* rec,
+                              float eReco,float xT,float yT,float vtxZ)
+    {
+      float gx = 0.f, gy = 0.f, gz = 0.f;
+      rec->Tower2Global(eReco, xT, yT, gx, gy, gz);
+      return std::asinh((gz - vtxZ) / std::hypot(gx, gy));
+    }
+
 
   /* ---------- front‑face φ → shower‑depth φ ------------------------ */
   inline float front2ShowerPhi(BEmcRecCEMC* rec,float eReco,
