@@ -5667,7 +5667,6 @@ void makeLegoGifHD(TH3          *h1,                /* mandatory          */
  }
 
 
-
 void MakeDeltaPhiEtaPlayground(
     const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
@@ -5722,7 +5721,7 @@ void MakeDeltaPhiEtaPlayground(
     };
 
     // =====================================================================
-    //                      micro‑helpers
+    //                      micro-helpers
     // =====================================================================
 
     auto setPadMargins = [](double L=0.12,double R=0.04,double T=0.12,double B=0.12){
@@ -5775,10 +5774,135 @@ void MakeDeltaPhiEtaPlayground(
         if (!f) return;
         f->SetLineColor(col); f->SetLineWidth(lw); f->SetNpx(npx);
     };
+
+    // ----------------------- CSV helpers ----------------------------
+
+    // Replace “.png” (or any extension) with “.csv”
+    auto pngToCsvPath = [](const std::string& png)->std::string {
+        const auto pos = png.find_last_of('.');
+        return (pos == std::string::npos) ? (png + ".csv")
+                                          : (png.substr(0,pos) + ".csv");
+    };
+
+    // Quote CSV fields that may contain commas
+    auto csvQuote = [](const std::string& s)->std::string{
+        std::string t = s;
+        for (std::size_t i=0; i<t.size(); ++i)
+            if (t[i] == '"') { t.insert(i, 1, '"'); ++i; }
+        return "\"" + t + "\"";
+    };
+
+    // Find energy-bin edges for a given center (nearest)
+    auto edgesFromCenter = [&](double ctr)->std::pair<double,double>{
+        if (eEdges.empty()) return {0.0,0.0};
+        double best = 1e99;
+        std::pair<double,double> out = eEdges.front();
+        for (const auto& pr : eEdges){
+            const double c = 0.5*(pr.first + pr.second);
+            const double d = std::fabs(c - ctr);
+            if (d < best){ best = d; out = pr; }
+        }
+        return out;
+    };
+
+    // Detect residual kind from a vector of hists (“phi” / “eta”)
+    auto detectResidual = [](const std::vector<TH1F*>& V)->std::string{
+        for (auto* h : V){
+            if (!h) continue;
+            const TString n = h->GetName();
+            if (n.Contains("phi")) return "phi";
+            if (n.Contains("eta")) return "eta";
+        }
+        return "residual";
+    };
+
+    // Variant mapping from histogram name (used by FS vs Clus overlays)
+    auto variantFromHistName = [](const std::string& n)->std::string{
+        if (n.find("cpBcorr") != std::string::npos) return "b(E) corr, cluster";
+        if (n.find("cpCorr")  != std::string::npos) return "CorrectPosition, cluster";
+        if (n.find("cpRaw")   != std::string::npos) return "no corr, cluster";
+        if (n.find("_corr_")  != std::string::npos) return "b(E) corr, scratch";
+        if (n.find("_raw_")   != std::string::npos) return "no corr, scratch";
+        return "variant";
+    };
+
+    auto firstHistName = [](const std::vector<TH1F*>& V)->std::string{
+        for (auto* h : V) if (h) return std::string(h->GetName());
+        return {};
+    };
+
+    // Core writer: one row per point per series
+    auto saveMuSigmaCSV = [&](const std::string& pngPath,
+                              const std::vector<std::string>& variants,
+                              const std::vector<std::string>& residuals,
+                              const std::vector<std::vector<double>>& eCtrS,
+                              const std::vector<std::vector<double>>& muS,
+                              const std::vector<std::vector<double>>& dmuS,
+                              const std::vector<std::vector<double>>& sgS,
+                              const std::vector<std::vector<double>>& dsgS)
+    {
+        const std::string csv = pngToCsvPath(pngPath);
+        std::ofstream out(csv.c_str());
+        if (!out){
+            std::cerr << "[Playground][ERROR] Cannot open CSV for writing: " << csv << "\n";
+            return;
+        }
+        out << "variant,residual,E_lo,E_hi,E_ctr,mu,mu_err,sigma,sigma_err\n";
+        out.setf(std::ios::fixed);
+        out << std::setprecision(8);
+
+        for (std::size_t s=0; s<variants.size(); ++s){
+            const auto& E   = eCtrS[s];
+            const auto& MU  = muS[s];
+            const auto& DMU = dmuS[s];
+            const auto& SG  = sgS[s];
+            const auto& DSG = dsgS[s];
+
+            const std::string vq = csvQuote(variants[s]);
+            const std::string rq = csvQuote(residuals[s]);
+
+            for (std::size_t i=0; i<E.size() && i<MU.size() && i<SG.size(); ++i){
+                // Skip obviously empty placeholders (both errors 0 and values 0)
+                if ((DMU[i]==0.0 && DSG[i]==0.0) && (MU[i]==0.0 && SG[i]==0.0))
+                    continue;
+
+                const auto pr = edgesFromCenter(E[i]);
+                out << vq << "," << rq << ","
+                    << pr.first  << "," << pr.second << ","
+                    << E[i]      << ","
+                    << MU[i]     << "," << DMU[i] << ","
+                    << SG[i]     << "," << DSG[i] << "\n";
+            }
+        }
+        out.close();
+        std::cout << "[Playground] Wrote " << csv << "\n";
+    };
+
+    // ---- Range-aware (xMin,xMax) Mean/RMS using ROOT built-ins ----
+    auto statsFromHistRange = [&](TH1F* h, double lo, double hi)
+        -> std::tuple<double,double,double,double>
+    {
+        if (!h || h->Integral() <= 0) return std::make_tuple(0.0,0.0,0.0,0.0);
+        TAxis* ax = h->GetXaxis();
+        const int nbin    = ax->GetNbins();
+        const int oldLo   = ax->GetFirst();
+        const int oldHi   = ax->GetLast();
+        const int iLo     = std::max(1,       ax->FindFixBin(lo + 1e-9));
+        const int iHi     = std::min(nbin,    ax->FindFixBin(hi - 1e-9));
+        if (iLo > iHi)    return std::make_tuple(0.0,0.0,0.0,0.0);
+        ax->SetRange(iLo, iHi);
+        const double m    = h->GetMean();
+        const double me   = h->GetMeanError();
+        const double r    = h->GetRMS();
+        const double re   = h->GetRMSError();
+        ax->SetRange(oldLo, oldHi);
+        return std::make_tuple(m,me,r,re);
+    };
     
     // ---------------------------------------------------------------------
     // Unified residual-panel drawer: single curve OR overlay
     // ---------------------------------------------------------------------
+
 
     // Forward declarations so the fitter can be called before its definition.
     // fitG is the full-argument implementation.
@@ -6255,11 +6379,11 @@ void MakeDeltaPhiEtaPlayground(
                     continue;
                 }
 
-                auto [fr, fG] = fitGaussianInRange(H[iE], xMin, xMax);
-                if (fG) delete fG;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(H[iE], xMin, xMax);
+                mu .push_back(m );  dmu.push_back(me);
+                sg .push_back(r );  dsg.push_back(re);
 
-                mu .push_back(fr.mu ); dmu.push_back(fr.dmu);
-                sg .push_back(fr.sg ); dsg.push_back(fr.dsg);
             }
 
             if (!eCtr.empty())
@@ -6308,12 +6432,22 @@ void MakeDeltaPhiEtaPlayground(
                 // Title + save
                 cS.cd(0);
                 TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.038);
-                h.DrawLatex(0.5,0.98,Form("%s  (Clusterizer Output, No Position Correction)  -  Gaussian #mu / #sigma vs E", sym));
+                h.DrawLatex(0.5,0.98,Form("%s  (Clusterizer Output, No Position Correction)  -  Mean / RMS vs E", sym));
 
                 std::string out3 = dirSeparateNoCorr + "/" + std::string(stem) + "_noCorrCluster_MeanSigmaVsE.png";
                 cS.SaveAs(out3.c_str());
                 cS.Close();
                 std::cout << "[Playground] Wrote " << out3 << "\n";
+
+                // CSV: single series (“no corr, cluster”), residual from stem
+                const std::string resid = (TString(stem)=="DeltaPhi") ? "phi" : "eta";
+                saveMuSigmaCSV(out3,
+                               { "no corr, cluster" },         // variants
+                               { resid },                       // residuals
+                               { eCtr },                        // E centers
+                               { mu  }, { dmu },                // μ, dμ
+                               { sg  }, { dsg });               // σ, dσ
+
             }
         }
 
@@ -6394,14 +6528,14 @@ void MakeDeltaPhiEtaPlayground(
             if (!Vraw[i] || !Vcor[i] || Vraw[i]->Integral()==0 || Vcor[i]->Integral()==0) continue;
             eCtr.push_back(0.5*(eEdges[i].first + eEdges[i].second));
 
-            auto [frR, fR] = fitGaussianInRange(Vraw[i], xMin, xMax);
-            auto [frC, fC] = fitGaussianInRange(Vcor[i], xMin, xMax);
-            if (fR) delete fR; if (fC) delete fC;
+            double mR, meR, rR, reR, mC, meC, rC, reC;
+            std::tie(mR, meR, rR, reR) = statsFromHistRange(Vraw[i], xMin, xMax);
+            std::tie(mC, meC, rC, reC) = statsFromHistRange(Vcor[i], xMin, xMax);
 
-            muR.push_back(frR.mu); dmuR.push_back(frR.dmu);
-            sgR.push_back(frR.sg); dsgR.push_back(frR.dsg);
-            muC.push_back(frC.mu); dmuC.push_back(frC.dmu);
-            sgC.push_back(frC.sg); dsgC.push_back(frC.dsg);
+            muR.push_back(mR); dmuR.push_back(meR);
+            sgR.push_back(rR); dsgR.push_back(reR);
+            muC.push_back(mC); dmuC.push_back(meC);
+            sgC.push_back(rC); dsgC.push_back(reC);
         }
         if (eCtr.empty()) return;
 
@@ -6464,10 +6598,20 @@ void MakeDeltaPhiEtaPlayground(
         // Header
         c.cd();
         TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.040);
-        h.DrawLatex(0.50,0.985,"no corr, cluster  vs  CorrectPosition, cluster  –  Gaussian #mu / #sigma vs E");
+        h.DrawLatex(0.50,0.985,"no corr, cluster  vs  CorrectPosition, cluster  –  Mean / RMS vs E");
+
 
         c.SaveAs(outPng);
         c.Close();
+
+        // CSV: two series, residual auto-detected from input hist names
+        const std::string resid = detectResidual(Vraw);
+        saveMuSigmaCSV(outPng,
+                       { "no corr, cluster", "CorrectPosition, cluster" },
+                       { resid, resid },
+                       { eCtr, eCtr },
+                       { muR,  muC  }, { dmuR, dmuC },
+                       { sgR,  sgC  }, { dsgR, dsgC });
     };
 
     // ---- labeled μ/σ vs E overlay (two series) for custom legends/headers ----
@@ -6485,14 +6629,15 @@ void MakeDeltaPhiEtaPlayground(
             if (!Vraw[i] || !Vcor[i] || Vraw[i]->Integral()==0 || Vcor[i]->Integral()==0) continue;
             eCtr.push_back(0.5*(eEdges[i].first + eEdges[i].second));
 
-            auto [frR, fR] = fitGaussianInRange(Vraw[i], xMin, xMax);
-            auto [frC, fC] = fitGaussianInRange(Vcor[i], xMin, xMax);
-            if (fR) delete fR; if (fC) delete fC;
+            double mR, meR, rR, reR, mC, meC, rC, reC;
+            std::tie(mR, meR, rR, reR) = statsFromHistRange(Vraw[i], xMin, xMax);
+            std::tie(mC, meC, rC, reC) = statsFromHistRange(Vcor[i], xMin, xMax);
 
-            muR.push_back(frR.mu); dmuR.push_back(frR.dmu);
-            sgR.push_back(frR.sg); dsgR.push_back(frR.dsg);
-            muC.push_back(frC.mu); dmuC.push_back(frC.dmu);
-            sgC.push_back(frC.sg); dsgC.push_back(frC.dsg);
+            muR.push_back(mR); dmuR.push_back(meR);
+            sgR.push_back(rR); dsgR.push_back(reR);
+            muC.push_back(mC); dmuC.push_back(meC);
+            sgC.push_back(rC); dsgC.push_back(reC);
+
         }
         if (eCtr.empty()) return;
 
@@ -6559,6 +6704,15 @@ void MakeDeltaPhiEtaPlayground(
 
         c.SaveAs(outPng);
         c.Close();
+
+        // CSV: honor custom labels
+        const std::string resid = detectResidual(Vraw);
+        saveMuSigmaCSV(outPng,
+                       { std::string(labelRaw), std::string(labelCorr) },
+                       { resid, resid },
+                       { eCtr, eCtr },
+                       { muR,  muC  }, { dmuR, dmuC },
+                       { sgR,  sgC  }, { dsgR, dsgC });
     };
 
 
@@ -6574,27 +6728,31 @@ void MakeDeltaPhiEtaPlayground(
 
         for (std::size_t i=0;i<eEdges.size();++i){
             if (Praw[i] && Praw[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Praw[i], xMin, xMax); if (f) delete f;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Praw[i], xMin, xMax);
                 eCtrP.push_back(0.5*(eEdges[i].first + eEdges[i].second));
-                muPR.push_back(fr.mu); dmuPR.push_back(fr.dmu);
-                sgPR.push_back(fr.sg); dsgPR.push_back(fr.dsg);
+                muPR.push_back(m);  dmuPR.push_back(me);
+                sgPR.push_back(r);  dsgPR.push_back(re);
             }
             if (Pcorr[i] && Pcorr[i]->Integral()>0 && Praw[i] && Praw[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Pcorr[i], xMin, xMax); if (f) delete f;
-                muPC.push_back(fr.mu); dmuPC.push_back(fr.dmu);
-                sgPC.push_back(fr.sg); dsgPC.push_back(fr.dsg);
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Pcorr[i], xMin, xMax);
+                muPC.push_back(m);  dmuPC.push_back(me);
+                sgPC.push_back(r);  dsgPC.push_back(re);
             }
 
             if (Eraw[i] && Eraw[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Eraw[i], xMin, xMax); if (f) delete f;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Eraw[i], xMin, xMax);
                 eCtrE.push_back(0.5*(eEdges[i].first + eEdges[i].second));
-                muER.push_back(fr.mu); dmuER.push_back(fr.dmu);
-                sgER.push_back(fr.sg); dsgER.push_back(fr.dsg);
+                muER.push_back(m);  dmuER.push_back(me);
+                sgER.push_back(r);  dsgER.push_back(re);
             }
             if (Ecorr[i] && Ecorr[i]->Integral()>0 && Eraw[i] && Eraw[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Ecorr[i], xMin, xMax); if (f) delete f;
-                muEC.push_back(fr.mu); dmuEC.push_back(fr.dmu);
-                sgEC.push_back(fr.sg); dsgEC.push_back(fr.dsg);
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Ecorr[i], xMin, xMax);
+                muEC.push_back(m);  dmuEC.push_back(me);
+                sgEC.push_back(r);  dsgEC.push_back(re);
             }
         }
 
@@ -6668,10 +6826,20 @@ void MakeDeltaPhiEtaPlayground(
 
         c.cd();
         TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.032);
-        h.DrawLatex(0.50,0.985,"#Delta#phi / #Delta#eta  (not corr vs corr)  -  Gaussian #mu / #sigma vs E");
+        h.DrawLatex(0.50,0.985,"#Delta#phi / #Delta#eta  (not corr vs corr)  -  Mean / RMS vs E");
+
 
         c.SaveAs(outPng);
         c.Close();
+
+        // CSV: 4 series (phi raw/corr, eta raw/corr) – cluster variants
+        saveMuSigmaCSV(outPng,
+                       { "no corr, cluster", "CorrectPosition, cluster",
+                         "no corr, cluster", "CorrectPosition, cluster" },
+                       { "phi", "phi", "eta", "eta" },
+                       { eCtrP, eCtrP, eCtrE, eCtrE },
+                       { muPR,  muPC,  muER,  muEC  }, { dmuPR, dmuPC, dmuER, dmuEC },
+                       { sgPR,  sgPC,  sgER,  sgEC  }, { dsgPR, dsgPC, dsgER, dsgEC });
     };
 
     // =====================================================================
@@ -6742,14 +6910,14 @@ void MakeDeltaPhiEtaPlayground(
             kRed+1, 20, 24, "#mu",
             (dirScratchRawVsCorr + "/DeltaPhi_raw_vs_corr_MeanSigmaVsE_Overlay.png").c_str(),
             "no corr, scratch", "b(E) corr, scratch",
-            "no corr, scratch  vs  b(E) corr, scratch  –  Gaussian #mu / #sigma vs E");
+            "no corr, scratch  vs  b(E) corr, scratch  –  Mean / RMS vs E");
 
     if (!HetaScratchRaw.empty() && !HetaScratchCorr.empty())
         makeMuSigmaVariantOverlayWithLabels(HetaScratchRaw, HetaScratchCorr,
             kBlue+1, 20, 24, "#mu",
             (dirScratchRawVsCorr + "/DeltaEta_raw_vs_corr_MeanSigmaVsE_Overlay.png").c_str(),
             "no corr, scratch", "b(E) corr, scratch",
-            "no corr, scratch  vs  b(E) corr, scratch  –  Gaussian #mu / #sigma vs E");
+            "no corr, scratch  vs  b(E) corr, scratch  –  Mean / RMS vs E");
 
     // μ/σ vs E overlay for FOUR series (Δφ/Δη raw+corr, from-scratch)
     if (!HphiScratchRaw.empty() && !HphiScratchCorr.empty()
@@ -6773,29 +6941,34 @@ void MakeDeltaPhiEtaPlayground(
 
         for (std::size_t i=0;i<eEdges.size();++i){
             if (Pfs[i] && Pfs[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Pfs[i], xMin, xMax); if (f) delete f;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Pfs[i], xMin, xMax);
                 eCtrPfs.push_back(0.5*(eEdges[i].first + eEdges[i].second));
-                muPfs.push_back(fr.mu); dmuPfs.push_back(fr.dmu);
-                sgPfs.push_back(fr.sg); dsgPfs.push_back(fr.dsg);
+                muPfs.push_back(m);  dmuPfs.push_back(me);
+                sgPfs.push_back(r);  dsgPfs.push_back(re);
             }
             if (Pcl[i] && Pcl[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Pcl[i], xMin, xMax); if (f) delete f;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Pcl[i], xMin, xMax);
                 eCtrPcl.push_back(0.5*(eEdges[i].first + eEdges[i].second));
-                muPcl.push_back(fr.mu); dmuPcl.push_back(fr.dmu);
-                sgPcl.push_back(fr.sg); dsgPcl.push_back(fr.dsg);
+                muPcl.push_back(m);  dmuPcl.push_back(me);
+                sgPcl.push_back(r);  dsgPcl.push_back(re);
             }
             if (Efs[i] && Efs[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Efs[i], xMin, xMax); if (f) delete f;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Efs[i], xMin, xMax);
                 eCtrEfs.push_back(0.5*(eEdges[i].first + eEdges[i].second));
-                muEfs.push_back(fr.mu); dmuEfs.push_back(fr.dmu);
-                sgEfs.push_back(fr.sg); dsgEfs.push_back(fr.dsg);
+                muEfs.push_back(m);  dmuEfs.push_back(me);
+                sgEfs.push_back(r);  dsgEfs.push_back(re);
             }
             if (Ecl[i] && Ecl[i]->Integral()>0){
-                auto [fr, f] = fitGaussianInRange(Ecl[i], xMin, xMax); if (f) delete f;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(Ecl[i], xMin, xMax);
                 eCtrEcl.push_back(0.5*(eEdges[i].first + eEdges[i].second));
-                muEcl.push_back(fr.mu); dmuEcl.push_back(fr.dmu);
-                sgEcl.push_back(fr.sg); dsgEcl.push_back(fr.dsg);
+                muEcl.push_back(m);  dmuEcl.push_back(me);
+                sgEcl.push_back(r);  dsgEcl.push_back(re);
             }
+
         }
         if (eCtrPfs.empty() && eCtrPcl.empty() && eCtrEfs.empty() && eCtrEcl.empty()) return;
 
@@ -6875,6 +7048,20 @@ void MakeDeltaPhiEtaPlayground(
 
         c.SaveAs(outPng);
         c.Close();
+
+        // CSV: infer variants from histogram names (scratch vs clusterizer; raw or corr)
+        const std::string vPfs = variantFromHistName(firstHistName(Pfs));
+        const std::string vPcl = variantFromHistName(firstHistName(Pcl));
+        const std::string vEfs = variantFromHistName(firstHistName(Efs));
+        const std::string vEcl = variantFromHistName(firstHistName(Ecl));
+
+        saveMuSigmaCSV(outPng,
+                       { vPfs, vPcl, vEfs, vEcl },
+                       { "phi", "phi", "eta", "eta" },
+                       { eCtrPfs, eCtrPcl, eCtrEfs, eCtrEcl },
+                       { muPfs,   muPcl,   muEfs,   muEcl   }, { dmuPfs, dmuPcl, dmuEfs, dmuEcl },
+                       { sgPfs,   sgPcl,   sgEfs,   sgEcl   }, { dsgPfs, dsgPcl, dsgEfs, dsgEcl });
+
     };
 
 
@@ -6992,7 +7179,7 @@ void MakeDeltaPhiEtaPlayground(
             kRed+1, 20, 24, "#mu",
             (dirFSvsClusNoCorr + "/DeltaPhi_FSvsClus_MeanSigmaVsE_Overlay.png").c_str(),
             "from scratch", "clusterizer",
-            "#Delta#phi  -  from scratch vs clusterizer  (No Position Correction)  –  Gaussian #mu / #sigma vs E");
+            "#Delta#phi  -  from scratch vs clusterizer  (No Position Correction)  –  Mean / RMS vs E");
 
     // Δη — μ/σ(E) overlay (two series): from‑scratch vs clusterizer, no corr
     if (!HetaScratchRaw.empty() && !Heta.empty())
@@ -7000,7 +7187,7 @@ void MakeDeltaPhiEtaPlayground(
             kBlue+1, 20, 24, "#mu",
             (dirFSvsClusNoCorr + "/DeltaEta_FSvsClus_MeanSigmaVsE_Overlay.png").c_str(),
             "from scratch", "clusterizer",
-            "#Delta#eta  -  from scratch vs clusterizer  (No Position Correction)  –  Gaussian #mu / #sigma vs E");
+            "#Delta#eta  -  from scratch vs clusterizer  (No Position Correction)  –  Mean / RMS vs E");
 
     // NEW: 4-series μ/σ(E) overlay (from‑scratch vs clusterizer), no corr
     if (!HphiScratchRaw.empty() && !Hphi.empty()
@@ -7121,7 +7308,8 @@ void MakeDeltaPhiEtaPlayground(
             kRed+1, 20, 24, "#mu",
             (dirFSvsClusWithCorr + "/DeltaPhi_FSvsClus_MeanSigmaVsE_Overlay.png").c_str(),
             "from scratch (corr)", "clusterizer (corr)",
-            "#Delta#phi  -  from scratch vs clusterizer  (With Position Correction)  –  Gaussian #mu / #sigma vs E");
+            "#Delta#phi  -  from scratch vs clusterizer  (With Position Correction)  –  Mean / RMS vs E");
+
 
     // Δη — μ/σ(E) overlay (two series): from‑scratch vs clusterizer, with corr
     if (!HetaScratchCorr.empty() && !HetaCorr.empty())
@@ -7129,7 +7317,7 @@ void MakeDeltaPhiEtaPlayground(
             kBlue+1, 20, 24, "#mu",
             (dirFSvsClusWithCorr + "/DeltaEta_FSvsClus_MeanSigmaVsE_Overlay.png").c_str(),
             "from scratch (corr)", "clusterizer (corr)",
-            "#Delta#eta  -  from scratch vs clusterizer  (With Position Correction)  -  Gaussian #mu / #sigma vs E");
+            "#Delta#eta  -  from scratch vs clusterizer  (With Position Correction)  -  Mean / RMS vs E");
 
     // NEW: 4-series μ/σ(E) overlay (from‑scratch vs clusterizer), with corr
     if (!HphiScratchCorr.empty() && !HphiCorr.empty()
@@ -7289,15 +7477,15 @@ void MakeDeltaPhiEtaPlayground(
 
             eCtr.push_back( 0.5*(eEdges[iE].first + eEdges[iE].second) );
 
-            auto [frP, fP] = fitGaussianInRange(Hphi[iE], xMin, xMax);
-            auto [frE, fE] = fitGaussianInRange(Heta[iE], xMin, xMax);
-            if (fP) delete fP; if (fE) delete fE;
+            double mP, meP, rP, reP, mE, meE, rE, reE;
+            std::tie(mP, meP, rP, reP) = statsFromHistRange(Hphi[iE], xMin, xMax);
+            std::tie(mE, meE, rE, reE) = statsFromHistRange(Heta[iE], xMin, xMax);
 
-            muP.push_back(frP.mu); dmuP.push_back(frP.dmu);
-            sgP.push_back(frP.sg); dsgP.push_back(frP.dsg);
+            muP.push_back(mP); dmuP.push_back(meP);
+            sgP.push_back(rP); dsgP.push_back(reP);
 
-            muE.push_back(frE.mu); dmuE.push_back(frE.dmu);
-            sgE.push_back(frE.sg); dsgE.push_back(frE.dsg);
+            muE.push_back(mE); dmuE.push_back(meE);
+            sgE.push_back(rE); dsgE.push_back(reE);
         }
 
         if (!eCtr.empty())
@@ -7376,7 +7564,8 @@ void MakeDeltaPhiEtaPlayground(
             // Header
             cS.cd();
             TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.038);
-            h.DrawLatex(0.50,0.97,"#Delta#phi & #Delta#eta - Gaussian #mu / #sigma vs E, Clusterizer with No Position Correction");
+            h.DrawLatex(0.50,0.97,"#Delta#phi & #Delta#eta - Mean / RMS vs E, Clusterizer with No Position Correction");
+
 
             std::string outOS = dirOverlayNoCorr + "/DeltaEtaPhi_noCorrCluster_MeanSigmaVsE_Overlay.png";
             cS.SaveAs(outOS.c_str());
@@ -7433,10 +7622,10 @@ void MakeDeltaPhiEtaPlayground(
                     continue;
                 }
                 any = true;
-                auto [fr, f] = fitGaussianInRange(PHI[v][iE], xMin, xMax);
-                if (f) delete f;
-                MU[v].push_back(fr.mu);   dMU[v].push_back(fr.dmu);
-                SG[v].push_back(fr.sg);   dSG[v].push_back(fr.dsg);
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(PHI[v][iE], xMin, xMax);
+                MU[v].push_back(m);   dMU[v].push_back(me);
+                SG[v].push_back(r);   dSG[v].push_back(re);
             }
             if (any) shown.push_back(v);
         }
@@ -7514,9 +7703,24 @@ void MakeDeltaPhiEtaPlayground(
 
             c.cd();
             TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.040);
-            h.DrawLatex(0.50,0.985,"#Delta#phi  –  Gaussian #mu / #sigma vs E  (variants)");
-            c.SaveAs((dirPhiLog + "/DeltaPhi_MeanSigmaVsE_5Variants.png").c_str());
+            h.DrawLatex(0.50,0.985,"#Delta#phi  –  Mean / RMS vs E  (variants)");
+            const std::string outP = dirPhiLog + "/DeltaPhi_MeanSigmaVsE_5Variants.png";
+            c.SaveAs(outP.c_str());
             c.Close();
+
+            // CSV: include only shown variants, labels from phiLab[v]
+            std::vector<std::string> Vlab; Vlab.reserve(shown.size());
+            std::vector<std::vector<double>> EctrS, MUv, dMUv, SGv, dSGv;
+            for (int v : shown){
+                Vlab.emplace_back(phiLab[v]);
+                EctrS.push_back(eCtr);
+                MUv  .push_back(MU[v]);   dMUv.push_back(dMU[v]);
+                SGv  .push_back(SG[v]);   dSGv.push_back(dSG[v]);
+            }
+            saveMuSigmaCSV(outP,
+                           Vlab,
+                           std::vector<std::string>(Vlab.size(), "phi"),
+                           EctrS, MUv, dMUv, SGv, dSGv);
         }
 
         // μ vs ln(E) fits (all available variants)
@@ -7703,9 +7907,19 @@ void MakeDeltaPhiEtaPlayground(
 
                     c2.cd();
                     TLatex h2; h2.SetNDC(); h2.SetTextAlign(22); h2.SetTextSize(0.038);
-                    h2.DrawLatex(0.52,0.96,"#Delta#phi  -  Gaussian #mu / #sigma vs E  (No Position Corr vs With Position Correction)");
-                    c2.SaveAs((dirPhiLog + "/DeltaPhi_MeanSigmaVsE_RawVsCorr.png").c_str());
+                    h2.DrawLatex(0.52,0.96,"#Delta#phi  -  Mean / RMS vs E  (No Position Corr vs With Position Correction)");
+
+                    const std::string outP2 = dirPhiLog + "/DeltaPhi_MeanSigmaVsE_RawVsCorr.png";
+                    c2.SaveAs(outP2.c_str());
                     c2.Close();
+
+                    // CSV: exactly the two cluster variants (vA=2 raw, vB=3 corr)
+                    saveMuSigmaCSV(outP2,
+                                   { phiLab[vA], phiLab[vB] },           // "no corr, cluster", "CorrectPosition, cluster"
+                                   { "phi", "phi" },
+                                   { eCtr, eCtr },
+                                   { MU[vA], MU[vB] }, { dMU[vA], dMU[vB] },
+                                   { SG[vA], SG[vB] }, { dSG[vA], dSG[vB] });
                 }
             }
         }
@@ -7898,196 +8112,196 @@ void PDCanalysis()
   OverlayUncorrPhiEta(hUnc3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
     
   PlotPhiShiftAndWidth(hUnc3D, hCor3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
-//    
-//    /* ----- build the input views ------------------------------------------------- */
-//    /* ------------------------------------------------------------ *
-//     *  Re‑create the five histogram vectors for every E‑slice
-//     *  by loading them directly from the ROOT file.  The Tag that
-//     *  the producer used is identical to the one in the Fit code:
-//     *        RANGE  →  "low_high"   (e.g.  2_4)
-//     *        DISC   →  "E<low>"     (e.g.  E2)
-//     * ------------------------------------------------------------ */
-//
-//    auto makeSliceTag = [binMode](std::size_t iE,
-//                                  const std::pair<double,double>& edge)
-//    {
-//        return (binMode == EBinningMode::kRange)
-//               ? TString::Format("%.0f_%.0f", edge.first, edge.second)
-//               : TString::Format("E%.0f",     edge.first);
-//    };
-//
-//    /* φ‑residual histograms ------------------------------------------------- */
-//    std::array<std::vector<TH1F*>,5> phiView;
-//    for (int v = 0; v < 5; ++v) phiView[v].resize(eEdges.size(), nullptr);
-//
-//    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
-//    {
-//        const TString tag = makeSliceTag(iE, eEdges[iE]);
-//
-//        phiView[0][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_raw_%s"    , tag.Data())) );
-//        phiView[1][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_corr_%s"   , tag.Data())) );
-//        phiView[2][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpRaw_%s"  , tag.Data())) );
-//        phiView[3][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpCorr_%s" , tag.Data())) );
-//        phiView[4][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpBcorr_%s", tag.Data())) );
-//    }
-//
-//    /* η‑residual histograms  (global |z_vtx|-mixed) ------------------------- */
-//    std::array<std::vector<TH1F*>,5> etaGlobal;
-//    for (int v = 0; v < 5; ++v) etaGlobal[v].resize(eEdges.size(), nullptr);
-//
-//    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
-//    {
-//        const TString tag = makeSliceTag(iE, eEdges[iE]);
-//
-//        etaGlobal[0][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_raw_%s"    , tag.Data())) );
-//        etaGlobal[1][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_corr_%s"   , tag.Data())) );
-//        etaGlobal[2][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_cpRaw_%s"  , tag.Data())) );
-//        etaGlobal[3][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_cpCorr_%s" , tag.Data())) );
-//        etaGlobal[4][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_cpBcorr_%s", tag.Data())) );
-//    }
-//
-//    /* φ‑residual histograms  (global |z_vtx|-mixed) ------------------------- */
-//    std::array<std::vector<TH1F*>,5> phiGlobalSlices;
-//    for (int v = 0; v < 5; ++v) phiGlobalSlices[v].resize(eEdges.size(), nullptr);
-//
-//    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
-//    {
-//        const TString tag = makeSliceTag(iE, eEdges[iE]);
-//
-//        phiGlobalSlices[0][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_raw_%s"    , tag.Data())) );
-//        phiGlobalSlices[1][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_corr_%s"   , tag.Data())) );
-//        phiGlobalSlices[2][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpRaw_%s"  , tag.Data())) );
-//        phiGlobalSlices[3][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpCorr_%s" , tag.Data())) );
-//        phiGlobalSlices[4][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpBcorr_%s", tag.Data())) );
-//    }
-//
-//
-//    /* legacy |z| and signed‑z containers: η */
-//    std::array<std::vector<std::vector<TH1F*>>,5> etaVzAbs;   // legacy |z|
-//    std::array<std::vector<std::vector<TH1F*>>,5> etaVzPos;   // z>0
-//    std::array<std::vector<std::vector<TH1F*>>,5> etaVzNeg;   // z<0
-//
-//    /* legacy |z| and signed‑z containers: φ */
-//    std::array<std::vector<std::vector<TH1F*>>,5> phiVzAbs;   // legacy |z|
-//    std::array<std::vector<std::vector<TH1F*>>,5> phiVzPos;   // z>0
-//    std::array<std::vector<std::vector<TH1F*>>,5> phiVzNeg;   // z<0
-//
-//    for (int v = 0; v < 5; ++v)
-//    {
-//        etaVzAbs[v].resize(eEdges.size());
-//        etaVzPos[v].resize(eEdges.size());
-//        etaVzNeg[v].resize(eEdges.size());
-//
-//        phiVzAbs[v].resize(eEdges.size());
-//        phiVzPos[v].resize(eEdges.size());
-//        phiVzNeg[v].resize(eEdges.size());
-//
-//        for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
-//        {
-//            etaVzAbs[v][iE].resize(N_VzBins,  nullptr);  // absolute |z|
-//            etaVzPos[v][iE].resize(N_VzBins,  nullptr);  // z > 0
-//            etaVzNeg[v][iE].resize(N_VzBins,  nullptr);  // z < 0
-//
-//            phiVzAbs[v][iE].resize(N_VzBins,  nullptr);  // absolute |z|
-//            phiVzPos[v][iE].resize(N_VzBins,  nullptr);  // z > 0
-//            phiVzNeg[v][iE].resize(N_VzBins,  nullptr);  // z < 0
-//        }
-//    }
-//
-//    /* –– fill (η & φ) –– */
-//    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
-//    {
-//        const TString eTag = makeSliceTag(iE, eEdges[iE]);   // e.g. "2_4"
-//
-//        for (int iVz = 0; iVz < N_VzBins; ++iVz)
-//        {
-//            const TString vzTag = Form("vz%d_%d",
-//                                       int(vzEdge[iVz]), int(vzEdge[iVz+1]));
-//            /* η */
-//            etaVzAbs[0][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_eta_diff_raw_%s_%s"    , eTag.Data(), vzTag.Data())) );
-//            etaVzAbs[1][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_eta_diff_corr_%s_%s"   , eTag.Data(), vzTag.Data())) );
-//            etaVzAbs[2][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_eta_diff_cpRaw_%s_%s"  , eTag.Data(), vzTag.Data())) );
-//            etaVzAbs[3][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_eta_diff_cpCorr_%s_%s" , eTag.Data(), vzTag.Data())) );
-//            etaVzAbs[4][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_eta_diff_cpBcorr_%s_%s", eTag.Data(), vzTag.Data())) );
-//            /* φ */
-//            phiVzAbs[0][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_phi_diff_raw_%s_%s"    , eTag.Data(), vzTag.Data())) );
-//            phiVzAbs[1][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_phi_diff_corr_%s_%s"   , eTag.Data(), vzTag.Data())) );
-//            phiVzAbs[2][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_phi_diff_cpRaw_%s_%s"  , eTag.Data(), vzTag.Data())) );
-//            phiVzAbs[3][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_phi_diff_cpCorr_%s_%s" , eTag.Data(), vzTag.Data())) );
-//            phiVzAbs[4][iE][iVz] = static_cast<TH1F*>( fIn->Get(
-//                                    Form("h_phi_diff_cpBcorr_%s_%s", eTag.Data(), vzTag.Data())) );
-//        }
-//
-//        for (int iVz = 0; iVz < N_VzBins; ++iVz)
-//        {
-//            const TString vzTagP = Form("%s_vzP%d_%d", eTag.Data(),
-//                                        int(vzEdge[iVz]), int(vzEdge[iVz+1]));
-//            /* η */
-//            etaVzPos[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_raw_%s"   , vzTagP.Data()) ));
-//            etaVzPos[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_corr_%s"  , vzTagP.Data()) ));
-//            etaVzPos[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpRaw_%s", vzTagP.Data()) ));
-//            etaVzPos[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpCorr_%s",vzTagP.Data()) ));
-//            etaVzPos[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpBcorr_%s",vzTagP.Data()) ));
-//            /* φ */
-//            phiVzPos[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_raw_%s"   , vzTagP.Data()) ));
-//            phiVzPos[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_corr_%s"  , vzTagP.Data()) ));
-//            phiVzPos[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpRaw_%s", vzTagP.Data()) ));
-//            phiVzPos[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpCorr_%s",vzTagP.Data()) ));
-//            phiVzPos[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpBcorr_%s",vzTagP.Data()) ));
-//        }
-//
-//        for (int iVz = 0; iVz < N_VzBins; ++iVz)
-//        {
-//            const TString vzTagN = Form("%s_vzN%d_%d", eTag.Data(),
-//                                        int(vzEdge[iVz]), int(vzEdge[iVz+1]));
-//            /* η */
-//            etaVzNeg[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_raw_%s"   , vzTagN.Data()) ));
-//            etaVzNeg[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_corr_%s"  , vzTagN.Data()) ));
-//            etaVzNeg[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpRaw_%s", vzTagN.Data()) ));
-//            etaVzNeg[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpCorr_%s", vzTagN.Data()) ));
-//            etaVzNeg[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpBcorr_%s", vzTagN.Data()) ));
-//            /* φ */
-//            phiVzNeg[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_raw_%s"   , vzTagN.Data()) ));
-//            phiVzNeg[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_corr_%s"  , vzTagN.Data()) ));
-//            phiVzNeg[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpRaw_%s", vzTagN.Data()) ));
-//            phiVzNeg[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpCorr_%s", vzTagN.Data()) ));
-//            phiVzNeg[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpBcorr_%s", vzTagN.Data()) ));
-//        }
-//    }
-//
-//  /* ----- produce all plots ----------------------------------------------------- */
-//  const char* OUTROOT = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits";
-//
-//  /* global φ (unchanged) */
-//  MakeDeltaPhiPlots(eEdges, binMode, phiView, OUTROOT);
-//
-//  /* legacy absolute-|z| (η) */
-//  MakeDeltaEtaPlots(eEdges, binMode, etaGlobal, etaVzAbs, OUTROOT);
-//
-//  /* η (positive/negative z) */
-//  const std::string etaPosDir = std::string(OUTROOT) + "/deltaEta/vertexDependent/positiveVertexDependent";
-//  const std::string etaNegDir = std::string(OUTROOT) + "/deltaEta/vertexDependent/negativeVertexDependent";
-//  ensureDir(etaPosDir);
-//  ensureDir(etaNegDir);
-//  makeEtaVertexTables(eEdges, etaVzPos, etaPosDir.c_str(), {0,1,2,3,4}, "#Delta#eta", 'P');
-//  makeEtaVertexTables(eEdges, etaVzNeg, etaNegDir.c_str(), {0,1,2,3,4}, "#Delta#eta", 'N');
-//
-//  /* φ (positive/negative z) */
-//  const std::string phiPosDir = std::string(OUTROOT) + "/deltaPhi/vertexDependent/positiveVertexDependent";
-//  const std::string phiNegDir = std::string(OUTROOT) + "/deltaPhi/vertexDependent/negativeVertexDependent";
-//  ensureDir(phiPosDir);
-//  ensureDir(phiNegDir);
-//  makeEtaVertexTables(eEdges, phiVzPos, phiPosDir.c_str(), {0,1,2,3,4}, "#Delta#phi", 'P');
-//  makeEtaVertexTables(eEdges, phiVzNeg, phiNegDir.c_str(), {0,1,2,3,4}, "#Delta#phi", 'N');
+    
+    /* ----- build the input views ------------------------------------------------- */
+    /* ------------------------------------------------------------ *
+     *  Re‑create the five histogram vectors for every E‑slice
+     *  by loading them directly from the ROOT file.  The Tag that
+     *  the producer used is identical to the one in the Fit code:
+     *        RANGE  →  "low_high"   (e.g.  2_4)
+     *        DISC   →  "E<low>"     (e.g.  E2)
+     * ------------------------------------------------------------ */
+
+    auto makeSliceTag = [binMode](std::size_t iE,
+                                  const std::pair<double,double>& edge)
+    {
+        return (binMode == EBinningMode::kRange)
+               ? TString::Format("%.0f_%.0f", edge.first, edge.second)
+               : TString::Format("E%.0f",     edge.first);
+    };
+
+    /* φ‑residual histograms ------------------------------------------------- */
+    std::array<std::vector<TH1F*>,5> phiView;
+    for (int v = 0; v < 5; ++v) phiView[v].resize(eEdges.size(), nullptr);
+
+    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+    {
+        const TString tag = makeSliceTag(iE, eEdges[iE]);
+
+        phiView[0][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_raw_%s"    , tag.Data())) );
+        phiView[1][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_corr_%s"   , tag.Data())) );
+        phiView[2][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpRaw_%s"  , tag.Data())) );
+        phiView[3][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpCorr_%s" , tag.Data())) );
+        phiView[4][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpBcorr_%s", tag.Data())) );
+    }
+
+    /* η‑residual histograms  (global |z_vtx|-mixed) ------------------------- */
+    std::array<std::vector<TH1F*>,5> etaGlobal;
+    for (int v = 0; v < 5; ++v) etaGlobal[v].resize(eEdges.size(), nullptr);
+
+    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+    {
+        const TString tag = makeSliceTag(iE, eEdges[iE]);
+
+        etaGlobal[0][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_raw_%s"    , tag.Data())) );
+        etaGlobal[1][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_corr_%s"   , tag.Data())) );
+        etaGlobal[2][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_cpRaw_%s"  , tag.Data())) );
+        etaGlobal[3][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_cpCorr_%s" , tag.Data())) );
+        etaGlobal[4][iE] = static_cast<TH1F*>( fIn->Get(Form("h_eta_diff_cpBcorr_%s", tag.Data())) );
+    }
+
+    /* φ‑residual histograms  (global |z_vtx|-mixed) ------------------------- */
+    std::array<std::vector<TH1F*>,5> phiGlobalSlices;
+    for (int v = 0; v < 5; ++v) phiGlobalSlices[v].resize(eEdges.size(), nullptr);
+
+    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+    {
+        const TString tag = makeSliceTag(iE, eEdges[iE]);
+
+        phiGlobalSlices[0][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_raw_%s"    , tag.Data())) );
+        phiGlobalSlices[1][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_corr_%s"   , tag.Data())) );
+        phiGlobalSlices[2][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpRaw_%s"  , tag.Data())) );
+        phiGlobalSlices[3][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpCorr_%s" , tag.Data())) );
+        phiGlobalSlices[4][iE] = static_cast<TH1F*>( fIn->Get(Form("h_phi_diff_cpBcorr_%s", tag.Data())) );
+    }
+
+
+    /* legacy |z| and signed‑z containers: η */
+    std::array<std::vector<std::vector<TH1F*>>,5> etaVzAbs;   // legacy |z|
+    std::array<std::vector<std::vector<TH1F*>>,5> etaVzPos;   // z>0
+    std::array<std::vector<std::vector<TH1F*>>,5> etaVzNeg;   // z<0
+
+    /* legacy |z| and signed‑z containers: φ */
+    std::array<std::vector<std::vector<TH1F*>>,5> phiVzAbs;   // legacy |z|
+    std::array<std::vector<std::vector<TH1F*>>,5> phiVzPos;   // z>0
+    std::array<std::vector<std::vector<TH1F*>>,5> phiVzNeg;   // z<0
+
+    for (int v = 0; v < 5; ++v)
+    {
+        etaVzAbs[v].resize(eEdges.size());
+        etaVzPos[v].resize(eEdges.size());
+        etaVzNeg[v].resize(eEdges.size());
+
+        phiVzAbs[v].resize(eEdges.size());
+        phiVzPos[v].resize(eEdges.size());
+        phiVzNeg[v].resize(eEdges.size());
+
+        for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+        {
+            etaVzAbs[v][iE].resize(N_VzBins,  nullptr);  // absolute |z|
+            etaVzPos[v][iE].resize(N_VzBins,  nullptr);  // z > 0
+            etaVzNeg[v][iE].resize(N_VzBins,  nullptr);  // z < 0
+
+            phiVzAbs[v][iE].resize(N_VzBins,  nullptr);  // absolute |z|
+            phiVzPos[v][iE].resize(N_VzBins,  nullptr);  // z > 0
+            phiVzNeg[v][iE].resize(N_VzBins,  nullptr);  // z < 0
+        }
+    }
+
+    /* –– fill (η & φ) –– */
+    for (std::size_t iE = 0; iE < eEdges.size(); ++iE)
+    {
+        const TString eTag = makeSliceTag(iE, eEdges[iE]);   // e.g. "2_4"
+
+        for (int iVz = 0; iVz < N_VzBins; ++iVz)
+        {
+            const TString vzTag = Form("vz%d_%d",
+                                       int(vzEdge[iVz]), int(vzEdge[iVz+1]));
+            /* η */
+            etaVzAbs[0][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_raw_%s_%s"    , eTag.Data(), vzTag.Data())) );
+            etaVzAbs[1][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_corr_%s_%s"   , eTag.Data(), vzTag.Data())) );
+            etaVzAbs[2][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_cpRaw_%s_%s"  , eTag.Data(), vzTag.Data())) );
+            etaVzAbs[3][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_cpCorr_%s_%s" , eTag.Data(), vzTag.Data())) );
+            etaVzAbs[4][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_eta_diff_cpBcorr_%s_%s", eTag.Data(), vzTag.Data())) );
+            /* φ */
+            phiVzAbs[0][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_phi_diff_raw_%s_%s"    , eTag.Data(), vzTag.Data())) );
+            phiVzAbs[1][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_phi_diff_corr_%s_%s"   , eTag.Data(), vzTag.Data())) );
+            phiVzAbs[2][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_phi_diff_cpRaw_%s_%s"  , eTag.Data(), vzTag.Data())) );
+            phiVzAbs[3][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_phi_diff_cpCorr_%s_%s" , eTag.Data(), vzTag.Data())) );
+            phiVzAbs[4][iE][iVz] = static_cast<TH1F*>( fIn->Get(
+                                    Form("h_phi_diff_cpBcorr_%s_%s", eTag.Data(), vzTag.Data())) );
+        }
+
+        for (int iVz = 0; iVz < N_VzBins; ++iVz)
+        {
+            const TString vzTagP = Form("%s_vzP%d_%d", eTag.Data(),
+                                        int(vzEdge[iVz]), int(vzEdge[iVz+1]));
+            /* η */
+            etaVzPos[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_raw_%s"   , vzTagP.Data()) ));
+            etaVzPos[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_corr_%s"  , vzTagP.Data()) ));
+            etaVzPos[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpRaw_%s", vzTagP.Data()) ));
+            etaVzPos[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpCorr_%s",vzTagP.Data()) ));
+            etaVzPos[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpBcorr_%s",vzTagP.Data()) ));
+            /* φ */
+            phiVzPos[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_raw_%s"   , vzTagP.Data()) ));
+            phiVzPos[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_corr_%s"  , vzTagP.Data()) ));
+            phiVzPos[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpRaw_%s", vzTagP.Data()) ));
+            phiVzPos[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpCorr_%s",vzTagP.Data()) ));
+            phiVzPos[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpBcorr_%s",vzTagP.Data()) ));
+        }
+
+        for (int iVz = 0; iVz < N_VzBins; ++iVz)
+        {
+            const TString vzTagN = Form("%s_vzN%d_%d", eTag.Data(),
+                                        int(vzEdge[iVz]), int(vzEdge[iVz+1]));
+            /* η */
+            etaVzNeg[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_raw_%s"   , vzTagN.Data()) ));
+            etaVzNeg[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_corr_%s"  , vzTagN.Data()) ));
+            etaVzNeg[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpRaw_%s", vzTagN.Data()) ));
+            etaVzNeg[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpCorr_%s", vzTagN.Data()) ));
+            etaVzNeg[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_eta_diff_cpBcorr_%s", vzTagN.Data()) ));
+            /* φ */
+            phiVzNeg[0][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_raw_%s"   , vzTagN.Data()) ));
+            phiVzNeg[1][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_corr_%s"  , vzTagN.Data()) ));
+            phiVzNeg[2][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpRaw_%s", vzTagN.Data()) ));
+            phiVzNeg[3][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpCorr_%s", vzTagN.Data()) ));
+            phiVzNeg[4][iE][iVz] = static_cast<TH1F*>( fIn->Get( Form("h_phi_diff_cpBcorr_%s", vzTagN.Data()) ));
+        }
+    }
+
+  /* ----- produce all plots ----------------------------------------------------- */
+  const char* OUTROOT = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits";
+
+  /* global φ (unchanged) */
+  MakeDeltaPhiPlots(eEdges, binMode, phiView, OUTROOT);
+
+  /* legacy absolute-|z| (η) */
+  MakeDeltaEtaPlots(eEdges, binMode, etaGlobal, etaVzAbs, OUTROOT);
+
+  /* η (positive/negative z) */
+  const std::string etaPosDir = std::string(OUTROOT) + "/deltaEta/vertexDependent/positiveVertexDependent";
+  const std::string etaNegDir = std::string(OUTROOT) + "/deltaEta/vertexDependent/negativeVertexDependent";
+  ensureDir(etaPosDir);
+  ensureDir(etaNegDir);
+  makeEtaVertexTables(eEdges, etaVzPos, etaPosDir.c_str(), {0,1,2,3,4}, "#Delta#eta", 'P');
+  makeEtaVertexTables(eEdges, etaVzNeg, etaNegDir.c_str(), {0,1,2,3,4}, "#Delta#eta", 'N');
+
+  /* φ (positive/negative z) */
+  const std::string phiPosDir = std::string(OUTROOT) + "/deltaPhi/vertexDependent/positiveVertexDependent";
+  const std::string phiNegDir = std::string(OUTROOT) + "/deltaPhi/vertexDependent/negativeVertexDependent";
+  ensureDir(phiPosDir);
+  ensureDir(phiNegDir);
+  makeEtaVertexTables(eEdges, phiVzPos, phiPosDir.c_str(), {0,1,2,3,4}, "#Delta#phi", 'P');
+  makeEtaVertexTables(eEdges, phiVzNeg, phiNegDir.c_str(), {0,1,2,3,4}, "#Delta#phi", 'N');
 
     
   const char* out2DDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots";
@@ -8103,23 +8317,22 @@ void PDCanalysis()
   auditResidual(hCor3D, "CORRECTED",  out2DDir,
                   0.045, 0.035);
 
-////
+//
 //  makeLegoGifHD(hUnc3D, "unc", "UNCORRECTED",
 //                  hCor3D, "cor", "CORRECTED",
 //                  out2DDir);
-//
-//
 
-//  // after opening the file …
-//  TH1F* h_truth_vz = static_cast<TH1F*>( fIn->Get("h_truth_vz") );
-//
-//  if(!h_truth_vz){
-//      std::cerr << "[ERROR] vertex-Z histograms not found!\n";
-//  } else {
-//      PlotVertexZTruthOnly(h_truth_vz, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/QA");
-//  }
-//
-//
+
+
+  // after opening the file …
+  TH1F* h_truth_vz = static_cast<TH1F*>( fIn->Get("h_truth_vz") );
+
+  if(!h_truth_vz){
+      std::cerr << "[ERROR] vertex-Z histograms not found!\n";
+  } else {
+      PlotVertexZTruthOnly(h_truth_vz, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/QA");
+  }
+
     PlotBvaluesVsEnergy(hUnc3D, eEdges,
                         "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
 //    // Retrieve the two maps
