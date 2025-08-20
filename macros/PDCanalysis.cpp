@@ -5676,19 +5676,21 @@ void MakeDeltaPhiEtaPlayground(
     // -------------------- global plot style & folders --------------------
     gStyle->SetOptStat(0);
     ensureDir(outDir);
-
+    
     const std::string dirOverlayNoCorr        = std::string(outDir) + "/etaPhiCompareNoCorrection";
     const std::string dirSeparateNoCorr       = std::string(outDir) + "/seperatePhiEtaNoCorrection";
     const std::string dirRawVsCorr            = std::string(outDir) + "/Clusterizer_RawVsCorr_EtaPhi";
     const std::string dirScratchRawVsCorr     = std::string(outDir) + "/fromScratch_RawVsCorr_EtaPhi";
     const std::string dirFSvsClusNoCorr       = std::string(outDir) + "/fromScratchVsClusterizerNoCorrection";
     const std::string dirFSvsClusWithCorr     = std::string(outDir) + "/fromScratchVsClusterizerWithCorrection";
+    const std::string dirMeanSigmaGaussCompare= std::string(outDir) + "/mean_sigmaGauss_HistCompare";
     ensureDir(dirOverlayNoCorr.c_str());
     ensureDir(dirSeparateNoCorr.c_str());
     ensureDir(dirRawVsCorr.c_str());
     ensureDir(dirScratchRawVsCorr.c_str());
     ensureDir(dirFSvsClusNoCorr.c_str());
     ensureDir(dirFSvsClusWithCorr.c_str());
+    ensureDir(dirMeanSigmaGaussCompare.c_str());
 
     // -------------------- input file --------------------
     std::cout << "[Playground] Opening: " << inFile << "\n";
@@ -5898,6 +5900,212 @@ void MakeDeltaPhiEtaPlayground(
         ax->SetRange(oldLo, oldHi);
         return std::make_tuple(m,me,r,re);
     };
+
+    // -------------------- NEW: CSV (Gaussian) reader + overlay helpers --------------------
+    struct GaussSeries {
+        std::vector<double> E, mu, dmu, sg, dsg;
+    };
+    using GaussDB = std::map<std::string, std::map<std::string, GaussSeries>>; // variant -> residual -> series
+
+    auto unquote = [](std::string s)->std::string {
+        if (s.size()>=2 && s.front()=='"' && s.back()=='"') {
+            s = s.substr(1, s.size()-2);
+            // unescape ""
+            std::string t; t.reserve(s.size());
+            for (size_t i=0;i<s.size();++i){
+                if (s[i]=='"' && i+1<s.size() && s[i+1]=='"') { t.push_back('"'); ++i; }
+                else t.push_back(s[i]);
+            }
+            return t;
+        }
+        return s;
+    };
+
+    auto splitCSVLine = [&](const std::string& line)->std::vector<std::string>{
+        std::vector<std::string> out;
+        std::string cur; bool inQ=false;
+        for(char ch : line){
+            if (ch=='"'){ inQ=!inQ; cur.push_back(ch); }
+            else if (ch==',' && !inQ){ out.push_back(cur); cur.clear(); }
+            else cur.push_back(ch);
+        }
+        out.push_back(cur);
+        for (auto& f : out) f = unquote(f);
+        return out;
+    };
+
+    auto parseGaussCSV = [&](const std::string& path, GaussDB& db){
+        std::ifstream fin(path.c_str());
+        if (!fin.good()){
+            std::cerr << "[Playground][WARN] Cannot open Gaussian CSV: " << path << "\n";
+            return;
+        }
+        std::string line;
+        // header
+        if (!std::getline(fin, line)) return;
+
+        // to avoid duplicates across multiple CSVs
+        std::set<std::tuple<std::string,std::string,double,double>> seen;
+        while (std::getline(fin, line)){
+            if (line.empty()) continue;
+            auto tok = splitCSVLine(line);
+            if (tok.size() < 9) continue;
+
+            const std::string variant  = tok[0];
+            const std::string residual = tok[1];
+            const double Elo  = atof(tok[2].c_str());
+            const double Ehi  = atof(tok[3].c_str());
+            const double Ectr = atof(tok[4].c_str());
+            const double mu   = atof(tok[5].c_str());
+            const double dmu  = atof(tok[6].c_str());
+            const double sg   = atof(tok[7].c_str());
+            const double dsg  = atof(tok[8].c_str());
+
+            auto key = std::make_tuple(variant, residual, Elo, Ehi);
+            if (seen.count(key)) continue;  // dedupe
+            seen.insert(key);
+
+            GaussSeries& S = db[variant][residual];
+            S.E.push_back(Ectr);
+            S.mu.push_back(mu);  S.dmu.push_back(dmu);
+            S.sg.push_back(sg);  S.dsg.push_back(dsg);
+        }
+    };
+
+    auto safeName = [](std::string s)->std::string{
+        for (char& c : s) if (c==' ' || c==',' || c=='/' || c=='(' || c==')') c = '_';
+        return s;
+    };
+
+    auto makeBuiltInSeries = [&](const std::vector<TH1F*>& H,
+                                 const std::vector<std::pair<double,double>>& edges,
+                                 double lo, double hi)
+                                 -> GaussSeries {
+        GaussSeries S;
+        for (std::size_t i=0;i<edges.size();++i){
+            if (!H[i] || H[i]->Integral()==0) continue;
+            double m,me,r,re;
+            std::tie(m,me,r,re) = statsFromHistRange(H[i], lo, hi);
+            S.E .push_back(0.5*(edges[i].first + edges[i].second));
+            S.mu.push_back(m);  S.dmu.push_back(me);
+            S.sg.push_back(r);  S.dsg.push_back(re);
+        }
+        return S;
+    };
+
+    auto drawMeanRMSvsGaussOne = [&](const std::string& variantLabel,
+                                     const std::string& residual,           // "phi" or "eta"
+                                     const std::vector<TH1F*>& H,           // built-in hist set for this residual
+                                     const GaussDB& db,
+                                     const std::string& outDirPNG,
+                                     const std::vector<std::pair<double,double>>& edges,
+                                     double lo, double hi){
+        if (H.empty()) return;
+
+        // built-in (Mean/RMS)
+        GaussSeries A = makeBuiltInSeries(H, edges, lo, hi);
+
+        // gauss overlay (from CSVs)
+        GaussSeries B;
+        auto iv = db.find(variantLabel);
+        if (iv != db.end()){
+            auto ir = iv->second.find(residual);
+            if (ir != iv->second.end()) B = ir->second;
+        }
+
+        const Color_t col = (residual=="phi") ? (kRed+1) : (kBlue+1);
+
+        // x-range
+        double xAxisMin = 0.0;
+        double lastCtr  = A.E.empty() ? 0.0 : A.E.back();
+        double binW     = edges.empty()? 0.0 : 0.5*(edges.back().second - edges.back().first);
+        double xAxisMax = std::max(lastCtr, (B.E.empty()? 0.0 : B.E.back())) + binW;
+
+        // y-ranges (μ)
+        auto minMu = [](const GaussSeries& S)->double{
+            double v=+1e30; for(size_t i=0;i<S.mu.size();++i) v = std::min(v, S.mu[i]-S.dmu[i]); return v;
+        };
+        auto maxMu = [](const GaussSeries& S)->double{
+            double v=-1e30; for(size_t i=0;i<S.mu.size();++i) v = std::max(v, S.mu[i]+S.dmu[i]); return v;
+        };
+        double muLo = +1e30, muHi = -1e30;
+        if (!A.mu.empty()){ muLo = std::min(muLo, minMu(A)); muHi = std::max(muHi, maxMu(A)); }
+        if (!B.mu.empty()){ muLo = std::min(muLo, minMu(B)); muHi = std::max(muHi, maxMu(B)); }
+        if (muLo>muHi){ muLo=-1, muHi=1; }
+        double padMu = 0.25*(muHi-muLo);
+
+        // y-range (σ)
+        auto maxSg = [](const GaussSeries& S)->double{
+            double v=0; for(double x:S.sg) v=std::max(v,x); return v;
+        };
+        double sgHi = std::max(maxSg(A), maxSg(B));
+        if (sgHi<=0) sgHi=1.0;
+
+        std::vector<double> exA(A.E.size(),0.0), exB(B.E.size(),0.0);
+
+        TCanvas c(("cGauss_"+safeName(variantLabel)+"_"+residual).c_str(),
+                  "Mean/RMS vs Gauss", 900, 800);
+        TPad *pTop = new TPad("pTop_ga","pTop_ga",0.0,0.38,1.0,1.0);
+        TPad *pBot = new TPad("pBot_ga","pBot_ga",0.0,0.00,1.0,0.34);
+        pTop->SetLeftMargin(0.15); pTop->SetRightMargin(0.05);
+        pTop->SetTopMargin(0.14);  pTop->SetBottomMargin(0.02);
+        pBot->SetLeftMargin(0.15); pBot->SetRightMargin(0.05);
+        pBot->SetTopMargin(0.04);  pBot->SetBottomMargin(0.16);
+        pTop->Draw(); pBot->Draw();
+
+        // μ(E)
+        pTop->cd();
+        TH1F frU("frU",(";E_{ctr}  [GeV];#mu  [rad]").c_str(),1,xAxisMin,xAxisMax);
+        frU.SetMinimum(muLo - padMu);
+        frU.SetMaximum(muHi + padMu);
+        frU.GetXaxis()->SetLabelSize(0.0);
+        frU.GetXaxis()->SetTitleSize(0.0);
+        frU.GetXaxis()->SetTickLength(0.0);
+        frU.Draw("AXIS");
+        TLine l0(xAxisMin,0.0,xAxisMax,0.0); l0.SetLineStyle(2); l0.Draw();
+
+        TGraphErrors gMuA((int)A.E.size(), A.E.data(), A.mu.data(), exA.data(), A.dmu.data());
+        gMuA.SetMarkerStyle(20); // circles (requirement)
+        gMuA.SetMarkerColor(col); gMuA.SetLineColor(col); gMuA.SetMarkerSize(1.05);
+        gMuA.Draw("P SAME");
+        TGraphErrors gMuB((int)B.E.size(), B.E.data(), B.mu.data(), exB.data(), B.dmu.data());
+        gMuB.SetMarkerStyle(25); // open squares for Gauss overlay
+        gMuB.SetMarkerColor(col); gMuB.SetLineColor(col); gMuB.SetMarkerSize(1.05);
+        gMuB.Draw("P SAME");
+
+        TLegend legU(0.62,0.74,0.93,0.92);
+        legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.032);
+        legU.AddEntry(&gMuA, "Mean/RMS (built-in)", "p");
+        legU.AddEntry(&gMuB, "Gaussian fit (CSV)", "p");
+        legU.Draw();
+
+        // σ(E)
+        pBot->cd();
+        TH1F frL("frL",";E_{ctr}  [GeV];#sigma  [rad]",1,xAxisMin,xAxisMax);
+        frL.SetMinimum(0.0); frL.SetMaximum(1.15*sgHi); frL.Draw("AXIS");
+        TGraphErrors gSgA((int)A.E.size(), A.E.data(), A.sg.data(), exA.data(), A.dsg.data());
+        gSgA.SetMarkerStyle(20);
+        gSgA.SetMarkerColor(col); gSgA.SetLineColor(col); gSgA.SetMarkerSize(1.05);
+        gSgA.Draw("P SAME");
+        TGraphErrors gSgB((int)B.E.size(), B.E.data(), B.sg.data(), exB.data(), B.dsg.data());
+        gSgB.SetMarkerStyle(25);
+        gSgB.SetMarkerColor(col); gSgB.SetLineColor(col); gSgB.SetMarkerSize(1.05);
+        gSgB.Draw("P SAME");
+
+        // Header
+        c.cd();
+        TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.038);
+        h.DrawLatex(0.50,0.985,
+            Form("%s  –  #Delta%s  Mean/RMS vs E  with Gaussian overlay",
+                 variantLabel.c_str(), (residual=="phi" ? "#phi" : "#eta")));
+
+        const std::string outPng = outDirPNG + "/Delta" + (residual=="phi"?"Phi_":"Eta_")
+                                 + safeName(variantLabel) + "_MeanRMS_vs_Gauss.png";
+        c.SaveAs(outPng.c_str());
+        c.Close();
+        std::cout << "[Playground] Wrote " << outPng << "\n";
+    };
+
     
     // ---------------------------------------------------------------------
     // Unified residual-panel drawer: single curve OR overlay
@@ -7665,6 +7873,36 @@ void MakeDeltaPhiEtaPlayground(
                                    { SG[vA], SG[vB] }, { dSG[vA], dSG[vB] });
                 }
             }
+        }
+    }
+    // ---------------------------------------------------------------------
+    // Mean/RMS vs Gaussian-fit overlays per variant (8 PNGs total)
+    //       Output folder: mean_sigmaGauss_HistCompare
+    //       Gaussian sources:
+    //        - Clusterizer:   .../Clusterizer_RawVsCorr_EtaPhi/DeltaEtaPhi_cpRaw_vs_cpCorr_MeanSigmaVsE_Overlay_4Series.csv
+    //        - From-scratch:  .../fromScratch_RawVsCorr_EtaPhi/DeltaEtaPhi_raw_vs_corr_MeanSigmaVsE_Overlay_4Series.csv
+    // ---------------------------------------------------------------------
+    {
+        const std::string gaussBase = "/Users/patsfan753/Desktop/scratchPDC_fitGuassianOutputAfterPhiTiltCorr";
+        const std::string fClus  = gaussBase + "/Clusterizer_RawVsCorr_EtaPhi/DeltaEtaPhi_cpRaw_vs_cpCorr_MeanSigmaVsE_Overlay_4Series.csv";
+        const std::string fScratch = gaussBase + "/fromScratch_RawVsCorr_EtaPhi/DeltaEtaPhi_raw_vs_corr_MeanSigmaVsE_Overlay_4Series.csv";
+
+        GaussDB gdb;
+        parseGaussCSV(fClus,   gdb);
+        parseGaussCSV(fScratch,gdb);
+
+        // Variant -> (phi-hists, eta-hists)
+        struct Vspec { const char* label; const std::vector<TH1F*>* Hphi; const std::vector<TH1F*>* Heta; };
+        std::vector<Vspec> V = {
+            { "PDC raw",               &HphiScratchRaw, &HetaScratchRaw },
+            { "PDC corrected",         &HphiScratchCorr,&HetaScratchCorr},
+            { "no corr, cluster",      &Hphi,           &Heta           },
+            { "CorrectPosition, cluster",&HphiCorr,     &HetaCorr       }
+        };
+
+        for (const auto& v : V){
+            if (v.Hphi && !v.Hphi->empty()) drawMeanRMSvsGaussOne(v.label, "phi", *v.Hphi, gdb, dirMeanSigmaGaussCompare, eEdges, xMin, xMax);
+            if (v.Heta && !v.Heta->empty()) drawMeanRMSvsGaussOne(v.label, "eta", *v.Heta, gdb, dirMeanSigmaGaussCompare, eEdges, xMin, xMax);
         }
     }
 
