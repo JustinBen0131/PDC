@@ -396,6 +396,33 @@ PositionDependentCorrection::bookSimulationHistograms
       hm->registerHisto(h_phi_diff_corrected_E[i]);
       hm->registerHisto(h_eta_diff_corrected_E[i]);
 
+      const char* title2D =
+        (m_binningMode==EBinningMode::kRange)
+          ? Form("#Delta#phi vs #eta;#eta;#Delta#phi  [rad]  (%.0f<E<%.0f GeV)", eLo, eHi)
+          : Form("#Delta#phi vs #eta;#eta;#Delta#phi  [rad]  (E=%.0f GeV)",       eLo);
+
+      h2_phi_diff_vsEta_RAW_E[i]     = new TH2F(
+          Form("h2_dphi_vs_eta_RAW_%s",    lab.c_str()), title2D,
+          96, -1.1, 1.1,   200, -0.1, 0.1);
+      h2_phi_diff_vsEta_CP_E[i]      = new TH2F(
+          Form("h2_dphi_vs_eta_CP_%s",     lab.c_str()), title2D,
+          96, -1.1, 1.1,   200, -0.1, 0.1);
+      h2_phi_diff_vsEta_BCORR_E[i]   = new TH2F(
+          Form("h2_dphi_vs_eta_BCORR_%s",  lab.c_str()), title2D,
+          96, -1.1, 1.1,   200, -0.1, 0.1);
+      h2_phi_diff_vsEta_PDCraw_E[i]  = new TH2F(
+          Form("h2_dphi_vs_eta_PDCraw_%s", lab.c_str()), title2D,
+          96, -1.1, 1.1,   200, -0.1, 0.1);
+      h2_phi_diff_vsEta_PDCcorr_E[i] = new TH2F(
+          Form("h2_dphi_vs_eta_PDCCorr_%s",lab.c_str()), title2D,
+          96, -1.1, 1.1,   200, -0.1, 0.1);
+
+      hm->registerHisto(h2_phi_diff_vsEta_RAW_E[i]);
+      hm->registerHisto(h2_phi_diff_vsEta_CP_E[i]);
+      hm->registerHisto(h2_phi_diff_vsEta_BCORR_E[i]);
+      hm->registerHisto(h2_phi_diff_vsEta_PDCraw_E[i]);
+      hm->registerHisto(h2_phi_diff_vsEta_PDCcorr_E[i]);
+      
       /* -------- CP helper histograms (needed by code below) ------------- */
       h_phi_diff_cpRaw_E [i] = new TH1F(
             Form("h_phi_diff_cpRaw_%s",  lab.c_str()),
@@ -1815,15 +1842,39 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse,
                                                      blkCoord.second);
 
-      /* geometry of the tower that actually contains (blkPhiCoarse , blkCoord) */
-      const int  ixFineBlk = blkPhiCoarse * 2
-                           + int(std::floor(blkCoord.second + 0.5F));
-      const int  iyFineBlk = tgLead->get_bineta();          // same η row as lead
+      /* choose the geometry tower **consistent** with convertBlockToGlobalPhi:
+         build the same “full fine index”, apply the module-of-8 bias undo, then floor */
+      auto finePhiIndexFromBlkLoc = [&](int blk, float loc)->int {
+          // fold into (-0.5, 1.5]
+          float t = loc;
+          if (t <= -0.5f || t > 1.5f) t = std::fmod(t + 2.f, 2.f);
+
+          // full fine index with the +0.5 center convention
+          float full = static_cast<float>(blk)*2.f + t + 0.5f;
+
+          // module-of-8 φ-bias undo (same as convertBlockToGlobalPhi)
+          int   mod8  = static_cast<int>(std::floor(full)) / 8;
+          float x8    = full - mod8*8.0f - 4.0f;     // −4 … +4
+          float dBias = 0.10f * x8 / 4.0f;
+          if (std::fabs(x8) > 3.3f) dBias = 0.0f;
+          full -= dBias;
+
+          // wrap to [0,256)
+          if (full < 0.f)      full += 256.f;
+          if (full >= 256.f)   full -= 256.f;
+
+          return static_cast<int>(std::floor(full)) % 256;
+      };
+
+      const int  ixFineBlk = finePhiIndexFromBlkLoc(blkPhiCoarse, blkCoord.second);
+      const int  iyFineBlk = tgLead->get_bineta();     // same η row as lead
+
       RawTowerDefs::keytype keyBlk =
               RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
-                                           iyFineBlk,   // η‑index FIRST
-                                           ixFineBlk);  // φ‑index SECOND
+                                           iyFineBlk,   // η-index FIRST
+                                           ixFineBlk);  // φ-index SECOND
       const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
+
 
       /* guard against missing geometry */
       if (!geomBlk)
@@ -1873,12 +1924,32 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
         const float phiFront = convertBlockToGlobalPhi(blk, loc);
 
-        const int  ixFineBlk = blk * 2 + int(std::floor(loc + 0.5F));
+        /* geometry tower **consistent** with convertBlockToGlobalPhi post-bias */
+        auto finePhiIndexFromBlkLoc = [&](int blkC, float locC)->int {
+              float t = locC;
+              if (t <= -0.5f || t > 1.5f) t = std::fmod(t + 2.f, 2.f);
+
+              float full = static_cast<float>(blkC)*2.f + t + 0.5f;
+
+              int   mod8  = static_cast<int>(std::floor(full)) / 8;
+              float x8    = full - mod8*8.0f - 4.0f;
+              float dBias = 0.10f * x8 / 4.0f;
+              if (std::fabs(x8) > 3.3f) dBias = 0.0f;
+              full -= dBias;
+
+              if (full < 0.f)      full += 256.f;
+              if (full >= 256.f)   full -= 256.f;
+
+              return static_cast<int>(std::floor(full)) % 256;
+        };
+
+        const int  ixFineBlk = finePhiIndexFromBlkLoc(blk, loc);
         const int  iyFineBlk = tgLead->get_bineta();
+
         RawTowerDefs::keytype keyBlk =
-                  RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
-                                               iyFineBlk,   // η‑index FIRST
-                                               ixFineBlk);  // φ‑index SECOND
+                      RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
+                                                   iyFineBlk,   // η-index FIRST
+                                                   ixFineBlk);  // φ-index SECOND
         const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
 
         if (!geomBlk)
@@ -1911,34 +1982,81 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         rec[4] = {"PDC-CORR", blkCoord.second, rec[3].phi};
   }
 
-  /* ── F) residuals and histogram filling ─────────────────────────── */
-  auto wrap = [](float d){ return TVector2::Phi_mpi_pi(d); };
+    /* ── F) residuals and histogram filling ─────────────────────────── */
+    auto wrap = [](float d){ return TVector2::Phi_mpi_pi(d); };
 
-  for (auto& r : rec)
-  {
-    r.d = wrap(r.phi - phiTruth);
-    if (!std::isfinite(r.phi)) ++g_nanPhi;
+    for (auto& r : rec)
+    {
+      r.d = wrap(r.phi - phiTruth);
+      if (!std::isfinite(r.phi)) ++g_nanPhi;
 
-    if (vb > 3)
-      std::cout << "    " << r.tag << "  loc=" << r.loc
-                << "  φ_SD=" << r.phi
-                << "  Δφ="   << r.d << '\n';
-  }
- //rec[0] -->Clusterizer tower2global NO CP
- //rec[1] --> Clusterizer CP with tower2global
- //rec[2] --> nrg dep b corr with tower2global
- //rec[3] --> PDC global conv no corr
- //rec[4] --> PDC global conv w PDC corr
+      if (vb > 3)
+        std::cout << "    " << r.tag << "  loc=" << r.loc
+                  << "  φ_SD=" << r.phi
+                  << "  Δφ="   << r.d << '\n';
+    }
 
-#define HFill(H,V)  do{ if((H)&&std::isfinite(V)) (H)->Fill(V); }while(0)
-  if (fillGlobal) {
-        HFill(hRAW [iE], rec[0].d);
-        HFill(hCP  [iE], rec[1].d);
-        HFill(h_phi_diff_cpBcorr_E [iE], rec[2].d);
-        HFill(h_phi_diff_raw_E     [iE], rec[3].d);
-        HFill(h_phi_diff_corrected_E[iE], rec[4].d);
-  }
-    /* ---------- vertex-resolved histogramming ---------- */
+    /* ---- side-peak counters for PDC variants (Δφ ≈ ± one-tower width) ----
+       tower width = 2π / 256 ≈ 0.0245437 rad; use a small window around it */
+    {
+      const float kTw = 2.f * static_cast<float>(M_PI) / 256.f;   // one fine-bin
+      const float tol = 0.15f * kTw;                              // ~15% window
+
+      const float dRaw  = rec[3].d;   // PDC-RAW
+      const float dCorr = rec[4].d;   // PDC-CORR
+
+      if (std::isfinite(dRaw)) {
+        if (std::fabs(dRaw - (+kTw)) < tol) ++m_pdcRawPos1Tw;
+        if (std::fabs(dRaw - (-kTw)) < tol) ++m_pdcRawNeg1Tw;
+      }
+      if (std::isfinite(dCorr)) {
+        if (std::fabs(dCorr - (+kTw)) < tol) ++m_pdcCorrPos1Tw;
+        if (std::fabs(dCorr - (-kTw)) < tol) ++m_pdcCorrNeg1Tw;
+      }
+    }
+   //rec[0] -->Clusterizer tower2global NO CP
+   //rec[1] --> Clusterizer CP with tower2global
+   //rec[2] --> nrg dep b corr with tower2global
+   //rec[3] --> PDC global conv no corr
+   //rec[4] --> PDC global conv w PDC corr
+
+    /* ---- NEW: compute η per variant for Δφ–η maps ------------------- */
+    float etaCLUSraw = std::numeric_limits<float>::quiet_NaN();
+    float etaCLUScp  = std::numeric_limits<float>::quiet_NaN();
+    float etaBCORR   = std::numeric_limits<float>::quiet_NaN();
+    float etaPDCraw  = std::numeric_limits<float>::quiet_NaN();
+    float etaPDCcorr = std::numeric_limits<float>::quiet_NaN();
+
+    // CLUS variants → use Tower2Global → shower-depth η
+    etaCLUSraw = cg2ShowerEta(m_bemcRec, eReco, xCG,          yCG,          vtxZ);
+    etaCLUScp  = cg2ShowerEta(m_bemcRec, eReco, xCP,          yCP,          vtxZ);
+    etaBCORR   = cg2ShowerEta(m_bemcRec, eReco, rec[2].loc,   yCG,          vtxZ);
+
+    // PDC variants → map block (η) to global η (front-face); good axis for binning
+    const int blkEtaCoarse = iyFine / 2; // use lead-tower row as the parent block
+    etaPDCraw  = convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
+    etaPDCcorr = etaPDCraw;              // φ-correction doesn’t change η in this study
+
+  #define HFill(H,V)    do{ if((H) && std::isfinite(V))             (H)->Fill(V); }while(0)
+  #define HFill2(H,X,Y) do{ if((H) && std::isfinite(X) && std::isfinite(Y)) (H)->Fill((X),(Y)); }while(0)
+
+    if (fillGlobal) {
+          // 1D (existing)
+          HFill(hRAW [iE], rec[0].d);
+          HFill(hCP  [iE], rec[1].d);
+          HFill(h_phi_diff_cpBcorr_E [iE], rec[2].d);
+          HFill(h_phi_diff_raw_E     [iE], rec[3].d);
+          HFill(h_phi_diff_corrected_E[iE], rec[4].d);
+
+          // 2D Δφ vs η (NEW)
+          HFill2(h2_phi_diff_vsEta_RAW_E    [iE], etaCLUSraw, rec[0].d);
+          HFill2(h2_phi_diff_vsEta_CP_E     [iE], etaCLUScp,  rec[1].d);
+          HFill2(h2_phi_diff_vsEta_BCORR_E  [iE], etaBCORR,   rec[2].d);
+          HFill2(h2_phi_diff_vsEta_PDCraw_E [iE], etaPDCraw,  rec[3].d);
+          HFill2(h2_phi_diff_vsEta_PDCcorr_E[iE], etaPDCcorr, rec[4].d);
+    }
+
+    /* ---------- vertex-resolved histogramming (unchanged) ---------- */
     if (!skipVertexDep)
     {
         const float absVz   = std::fabs(vtxZ);
@@ -1964,7 +2082,8 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         }
     }
 
- #undef  HFill
+   #undef  HFill
+   #undef  HFill2
 
   /* ── G) “winner” bookkeeping ────────────────────────────────────── */
   int best5 = 0; for (int i=1;i<5;++i)
@@ -3287,45 +3406,56 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
         m_phiWinCLUSraw + m_phiWinCLUScp + m_phiWinCLUSbcorr +
         m_phiWinPDCraw  + m_phiWinPDCcorr;
 
-  if (Verbosity() > 0)
-  {
-    std::cout << '\n' << ANSI_BOLD
-              << "╭───────────────────────────────╮\n"
-              << "│        Δφ   –   FIVE-WAY      │\n"
-              << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
-              << std::left << std::setw(14) << "variant"
-              << std::right<< std::setw(12)<< "wins"
-              << std::setw(12)             << "share\n"
-              << "────────────────────────────────────────────\n"
-              << std::left << std::setw(14) << "CLUS-RAW"
-              << std::right<< std::setw(12)<< m_phiWinCLUSraw
-              << std::setw(12)             << pct(m_phiWinCLUSraw,nTotPhi) << '\n'
-              << std::left << std::setw(14) << "CLUS-CP"
-              << std::right<< std::setw(12)<< m_phiWinCLUScp
-              << std::setw(12)             << pct(m_phiWinCLUScp ,nTotPhi) << '\n'
-              << std::left << std::setw(14) << "CLUS-BCORR"
-              << std::right<< std::setw(12)<< m_phiWinCLUSbcorr
-              << std::setw(12)             << pct(m_phiWinCLUSbcorr,nTotPhi)<< '\n'
-              << std::left << std::setw(14) << "PDC-RAW"
-              << std::right<< std::setw(12)<< m_phiWinPDCraw
-              << std::setw(12)             << pct(m_phiWinPDCraw ,nTotPhi) << '\n'
-              << std::left << std::setw(14) << "PDC-CORR"
-              << std::right<< std::setw(12)<< m_phiWinPDCcorr
-              << std::setw(12)             << pct(m_phiWinPDCcorr,nTotPhi)<< '\n'
-              << "────────────────────────────────────────────\n"
-              << std::left << std::setw(14) << "TOTAL"
-              << std::right<< std::setw(12)<< nTotPhi << "\n";
-
-    /* quick verdict */
-    if (m_phiWinCLUScp)
+    if (Verbosity() > 0)
     {
-      const double rel = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScp);
-      std::cout << "BCORR / CP (φ) : " << std::fixed << std::setprecision(1)
-                << rel << " %  →  "
-                << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
-                << '\n';
+      std::cout << '\n' << ANSI_BOLD
+                << "╭───────────────────────────────╮\n"
+                << "│        Δφ   –   FIVE-WAY      │\n"
+                << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
+                << std::left << std::setw(14) << "variant"
+                << std::right<< std::setw(12)<< "wins"
+                << std::setw(12)             << "share\n"
+                << "────────────────────────────────────────────\n"
+                << std::left << std::setw(14) << "CLUS-RAW"
+                << std::right<< std::setw(12)<< m_phiWinCLUSraw
+                << std::setw(12)             << pct(m_phiWinCLUSraw,nTotPhi) << '\n'
+                << std::left << std::setw(14) << "CLUS-CP"
+                << std::right<< std::setw(12)<< m_phiWinCLUScp
+                << std::setw(12)             << pct(m_phiWinCLUScp ,nTotPhi) << '\n'
+                << std::left << std::setw(14) << "CLUS-BCORR"
+                << std::right<< std::setw(12)<< m_phiWinCLUSbcorr
+                << std::setw(12)             << pct(m_phiWinCLUSbcorr,nTotPhi)<< '\n'
+                << std::left << std::setw(14) << "PDC-RAW"
+                << std::right<< std::setw(12)<< m_phiWinPDCraw
+                << std::setw(12)             << pct(m_phiWinPDCraw ,nTotPhi) << '\n'
+                << std::left << std::setw(14) << "PDC-CORR"
+                << std::right<< std::setw(12)<< m_phiWinPDCcorr
+                << std::setw(12)             << pct(m_phiWinPDCcorr,nTotPhi)<< '\n'
+                << "────────────────────────────────────────────\n"
+                << std::left << std::setw(14) << "TOTAL"
+                << std::right<< std::setw(12)<< nTotPhi << "\n";
+
+      /* quick verdict */
+      if (m_phiWinCLUScp)
+      {
+        const double rel = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScp);
+        std::cout << "BCORR / CP (φ) : " << std::fixed << std::setprecision(1)
+                  << rel << " %  →  "
+                  << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
+                  << '\n';
+      }
+
+      // Side-peak tallies near ± one-tower width for PDC variants
+      {
+        const double kTw = 2.0 * M_PI / 256.0;
+        std::cout << "\n[Δφ near ±1-tower width (" << std::fixed << std::setprecision(4)
+                  << kTw << " rad)]\n"
+                  << "  PDC-RAW : +1×tw = " << m_pdcRawPos1Tw
+                  << " , -1×tw = "        << m_pdcRawNeg1Tw << '\n'
+                  << "  PDC-CORR: +1×tw = " << m_pdcCorrPos1Tw
+                  << " , -1×tw = "          << m_pdcCorrNeg1Tw << '\n';
+      }
     }
-  }
 
   /* ──────────────────────────────────────── 2) Δη five-way table ───── */
   const std::uint64_t nTotEta5 =
@@ -3519,6 +3649,25 @@ PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
                     << ANSI_RESET << '\n';
       }
   };
+    
+//auto foldOnce = [&](float &loc, int &coarse, const char *tag)
+//{
+//  if (loc <= -0.5f || loc > 1.5f)
+//  {
+//    const float before = loc;
+//    loc = std::fmod(loc + 2.0f, 2.0f);           // (0 … 2)
+//    if (loc > 1.5f) { loc -= 2.0f; ++coarse; }   // shift block by +1
+//
+//    if (coarse == kNCoarseBlocks) coarse = 0;    // φ wrap-around
+//
+//    if (Verbosity() > 0)
+//      std::cout << ANSI_YELLOW
+//                << "    • " << tag
+//                << " folded: " << before << " → " << loc
+//                << "  |  blk+1 → " << coarse
+//                << ANSI_RESET << '\n';
+//  }
+//};
 
   foldOnce(locEta, blkEta, "η");
   foldOnce(locPhi, blkPhi, "φ");

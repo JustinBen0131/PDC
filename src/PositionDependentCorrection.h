@@ -301,6 +301,9 @@ class PositionDependentCorrection : public SubsysReco
                              m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
                              m_etaWinPDCcorr{0};
     
+  std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
+  std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
+    
   /* Δη out‑of‑window counters (|Δη| > 0.04) */
   std::atomic<std::uint64_t> m_etaOutCLUSraw   {0};
   std::atomic<std::uint64_t> m_etaOutCLUScp    {0};
@@ -324,6 +327,12 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpCorr_E     [N_Ebins]{};
   TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
+    
+  TH2F* h2_phi_diff_vsEta_RAW_E     [N_Ebins]{};
+  TH2F* h2_phi_diff_vsEta_CP_E      [N_Ebins]{};
+  TH2F* h2_phi_diff_vsEta_BCORR_E   [N_Ebins]{};
+  TH2F* h2_phi_diff_vsEta_PDCraw_E  [N_Ebins]{};
+  TH2F* h2_phi_diff_vsEta_PDCcorr_E [N_Ebins]{};
     
   /* |z|‑sliced and signed‑z φ histograms */
   TH1F* h_phi_diff_raw_E_vz        [N_Ebins][N_VzBins]{};
