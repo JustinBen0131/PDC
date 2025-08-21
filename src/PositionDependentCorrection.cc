@@ -1844,8 +1844,8 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
       // Choose host fine-φ tower from the very same angle we pass to depth transport.
       auto finePhiIndexFromAngle = [](float phi)->int {
-          constexpr float twoPi     = 2.f * static_cast<float>(M_PI);
-          constexpr float kRadPerBin= twoPi / 256.f;
+          constexpr float twoPi      = 2.f * static_cast<float>(M_PI);
+          constexpr float kRadPerBin = twoPi / 256.f;
 
           // phiFront comes in (−π, +π]; map to [0, 2π)
           float a = (phi < 0.f) ? (phi + twoPi) : phi;
@@ -1859,8 +1859,14 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           return ix;
       };
 
-      const int  ixFineBlk = finePhiIndexFromAngle(phiFront);
-      const int  iyFineBlk = tgLead->get_bineta();     // same η row as lead
+      const int ixFineBlk = finePhiIndexFromAngle(phiFront);
+
+      // η row must come from the *same* 2×2 block as blkCoord.first.
+      // Determine the parent coarse-η block and select the in-block fine row by local η.
+      const int blkEtaCoarse_forBlock = iyFine / 2;        // parent coarse row (from lead row)
+      const int iyFineBlk = blkEtaCoarse_forBlock * 2
+                          + ((blkCoord.first < 0.5f) ? 0 : 1);  // local-η picks row 0 or 1
+
 
       RawTowerDefs::keytype keyBlk =
               RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
@@ -1929,8 +1935,13 @@ void PositionDependentCorrection::fillDPhiAllVariants(
               return ix;
           };
 
-          const int  ixFineBlk = finePhiIndexFromAngle(phiFront);
-          const int  iyFineBlk = tgLead->get_bineta();
+          const int ixFineBlk = finePhiIndexFromAngle(phiFront);
+
+          // η row from the same 2×2 block as the *corrected* local η (loc was corrected).
+          const int blkEtaCoarse_forBlock = iyFine / 2;
+          const int iyFineBlk = blkEtaCoarse_forBlock * 2
+                              + ((blkCoord.first < 0.5f) ? 0 : 1);
+
 
 
         RawTowerDefs::keytype keyBlk =
@@ -2157,34 +2168,53 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
     if (vb >= 2)
     {
-      /* ──────────────────────────────────────────────────────────────── *
-       *  Diagnostic summary: shows absolute |Δφ| *and* the gain/loss   *
-       *  versus the CLUS‑RAW baseline to spotlight which branch helped *
-       * ──────────────────────────────────────────────────────────────── */
-      std::cout << "  ── Δφ summary table ────────────────────────────────\n"
-                << "  tag         loc      φ_SD(rad)   Δφ(rad)   |Δφ|   Δ|Δφ| vs RAW\n";
+      // Print the Δφ summary ONLY if this event is interesting:
+      //  • near ± one-tower width (~±0.0245 rad), OR
+      //  • farther than 0.025 rad from zero (any variant)
+      const float kTw   = 2.f * static_cast<float>(M_PI) / 256.f; // one fine bin
+      const float tol   = 0.15f * kTw;                            // ±15% window
+      const float kFar  = 0.025f;                                 // 0.025 rad
 
-      const float absRaw = std::fabs(rec[0].d);   // baseline = CLUS‑RAW
+      auto nearOneTw = [&](float d)->bool {
+        return (std::fabs(d - kTw) < tol) || (std::fabs(d + kTw) < tol);
+      };
 
+      bool shouldPrint = false;
       for (const auto& r : rec)
       {
-        const float gain = absRaw - std::fabs(r.d);      // + ⇒ improvement
-        std::cout << std::setw(10)<<r.tag<<"  "
-                  << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
-                  << std::setw(11)<<r.phi<<"  "
-                  << std::setw(9)<<r.d<<"  "
-                  << std::setw(7)<<std::fabs(r.d)<<"  "
-                  << std::setw(11)<<std::showpos<<std::fixed<<std::setprecision(3)
-                  << gain << std::noshowpos << '\n';
+        if (!std::isfinite(r.d)) continue;
+        if (nearOneTw(r.d) || std::fabs(r.d) >= kFar) { shouldPrint = true; break; }
       }
 
-      std::cout << "  WINNER: " << rec[best5].tag
-                << "   (|Δφ| improved by "
-                << std::fixed<<std::setprecision(3)
-                << absRaw - std::fabs(rec[best5].d)
-                << " rad vs CLUS‑RAW)\n"
-                << "  ────────────────────────────────────────────────\n";
+      if (shouldPrint)
+      {
+        std::cout << "  ── Δφ summary table (flagged event) ──────────────\n"
+                  << "  tag         loc      φ_SD(rad)   Δφ(rad)   |Δφ|   Δ|Δφ| vs RAW\n";
+
+        const float absRaw = std::fabs(rec[0].d);   // baseline = CLUS-RAW
+
+        for (const auto& r : rec)
+        {
+          const float gain = absRaw - std::fabs(r.d);      // + ⇒ improvement
+          std::cout << std::setw(10)<<r.tag<<"  "
+                    << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
+                    << std::setw(11)<<r.phi<<"  "
+                    << std::setw(9)<<r.d<<"  "
+                    << std::setw(7)<<std::fabs(r.d)<<"  "
+                    << std::setw(11)<<std::showpos<<std::fixed<<std::setprecision(3)
+                    << gain << std::noshowpos << '\n';
+        }
+
+        std::cout << "  WINNER: " << rec[best5].tag
+                  << "   (|Δφ| improved by "
+                  << std::fixed<<std::setprecision(3)
+                  << absRaw - std::fabs(rec[best5].d)
+                  << " rad vs CLUS-RAW)\n"
+                  << "  ────────────────────────────────────────────────\n";
+      }
     }
+
+
 
 }
 
@@ -3509,42 +3539,29 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
                     << "  PDC-CORR : +1×tw = " << m_pdcCorrPos1Tw
                     << " , -1×tw = "          << m_pdcCorrNeg1Tw  << "\n\n";
 
-          auto print_table3 = [](const char* title,
-                                 const std::vector<float>& etas,
-                                 const std::vector<float>& vzs,
-                                 const std::vector<float>& Es)
-          {
-            std::cout << title << "  (N=" << etas.size() << ")\n";
-            if (etas.empty()) { std::cout << "  (none)\n\n"; return; }
+            auto print_table3 = [](const char* title,
+                                   const std::vector<float>& etas,
+                                   const std::vector<float>& vzs,
+                                   const std::vector<float>& Es)
+            {
+              const std::size_t N = etas.size();
+              std::cout << title << "  (N=" << N << ")\n";
+              if (N == 0) { std::cout << "  (none)\n\n"; return; }
 
-            double sEta=0.0, sVz=0.0, sE=0.0;
-            std::cout << std::left
-                      << std::setw(6)  << "idx"
-                      << std::setw(12) << "eta"
-                      << std::setw(12) << "vtxZ(cm)"
-                      << std::setw(12) << "E(GeV)"
-                      << "\n"
-                      << "--------------------------------------------\n";
+              double sEta = 0.0, sVz = 0.0, sE = 0.0;
+              for (std::size_t i = 0; i < N; ++i) {
+                sEta += etas[i];
+                sVz  += vzs[i];
+                sE   += Es[i];
+              }
+              const double invN = 1.0 / static_cast<double>(N);
 
-            for (std::size_t i=0;i<etas.size();++i) {
-              sEta += etas[i];
-              sVz  += vzs[i];
-              sE   += Es[i];
-              std::cout << std::left
-                        << std::setw(6)  << i
-                        << std::setw(12) << std::fixed << std::setprecision(5) << etas[i]
-                        << std::setw(12) << std::fixed << std::setprecision(2) << vzs[i]
-                        << std::setw(12) << std::fixed << std::setprecision(2) << Es[i]
-                        << "\n";
-            }
-            const double n = static_cast<double>(etas.size());
-            std::cout << "--------------------------------------------\n"
-                      << std::left << std::setw(6) << "AVG"
-                      << std::setw(12) << std::fixed << std::setprecision(5) << (sEta/n)
-                      << std::setw(12) << std::fixed << std::setprecision(2) << (sVz/n)
-                      << std::setw(12) << std::fixed << std::setprecision(2) << (sE/n)
-                      << "\n\n";
-          };
+              // Condensed summary: totals + averages only (no per-row listing)
+              std::cout << "  AVG  "
+                        << "eta="    << std::fixed << std::setprecision(5) << (sEta * invN)
+                        << "  vtxZ=" << std::fixed << std::setprecision(2) << (sVz  * invN) << " cm"
+                        << "  E="    << std::fixed << std::setprecision(2) << (sE   * invN) << " GeV\n\n";
+            };
 
           // CLUS-RAW
           print_table3("CLUS-RAW  +1×tw  (Δφ≈+tw):",
@@ -4140,14 +4157,14 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
     std::cout << "    ▸ fullPhiIndex = " << fullPhiIndex
               << "   (coarse*2 + local + 0.5)\n";
     
-  /* --- residual φ‑bias inside an 8‑tower module (same as CorrectPosition) --- */
-  {
-      int  mod8   = static_cast<int>(fullPhiIndex) / 8;           // module #
-      float x8    = fullPhiIndex - mod8 * 8.0f - 4.0f;            // −4 … +4
-      float dBias = 0.10f * x8 / 4.0f;                            // default factors
-      if (std::fabs(x8) > 3.3f) dBias = 0.0f;                     // edge guard
-      fullPhiIndex -= dBias;                                      // apply bias‑undo
-  }
+//  /* --- residual φ‑bias inside an 8‑tower module (same as CorrectPosition) --- */
+//  {
+//      int  mod8   = static_cast<int>(fullPhiIndex) / 8;           // module #
+//      float x8    = fullPhiIndex - mod8 * 8.0f - 4.0f;            // −4 … +4
+//      float dBias = 0.10f * x8 / 4.0f;                            // default factors
+//      if (std::fabs(x8) > 3.3f) dBias = 0.0f;                     // edge guard
+//      fullPhiIndex -= dBias;                                      // apply bias‑undo
+//  }
 
 
   /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
@@ -4166,6 +4183,7 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
   }
   return globalPhi;
 }
+
 
 /**********************************************************************
  * convertBlockToGlobalEta – diagnostic edition
