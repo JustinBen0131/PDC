@@ -301,8 +301,24 @@ class PositionDependentCorrection : public SubsysReco
                              m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
                              m_etaWinPDCcorr{0};
     
-  std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
-  std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
+    // PDC side-peak tallies (± one-tower width)
+    std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
+    std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
+
+    std::vector<float> m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E;
+    std::vector<float> m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E;
+    std::vector<float> m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E;
+    std::vector<float> m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E;
+
+    // CLUS (clusterizer) side-peak tallies (± one-tower width) for RAW and CP
+    std::atomic<std::uint64_t> m_clusRawPos1Tw{0},  m_clusRawNeg1Tw{0};
+    std::atomic<std::uint64_t> m_clusCPPos1Tw{0},   m_clusCPNeg1Tw{0};
+
+    std::vector<float> m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E;
+    std::vector<float> m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E;
+    std::vector<float> m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E;
+    std::vector<float> m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E;
+
     
   /* Δη out‑of‑window counters (|Δη| > 0.04) */
   std::atomic<std::uint64_t> m_etaOutCLUSraw   {0};
@@ -310,6 +326,7 @@ class PositionDependentCorrection : public SubsysReco
   std::atomic<std::uint64_t> m_etaOutCLUSbcorr {0};
   std::atomic<std::uint64_t> m_etaOutPDCraw    {0};
   std::atomic<std::uint64_t> m_etaOutPDCcorr   {0};
+    
     // winner counters per flavour per E‑slice
     std::array<std::array<std::uint64_t, N_Ebins>, 5> m_phiWinByE{{}};
     std::array<std::array<std::uint64_t, N_Ebins>, 5> m_etaWinByE{{}};

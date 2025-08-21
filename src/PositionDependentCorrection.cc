@@ -1842,31 +1842,24 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse,
                                                      blkCoord.second);
 
-      /* choose the geometry tower **consistent** with convertBlockToGlobalPhi:
-         build the same “full fine index”, apply the module-of-8 bias undo, then floor */
-      auto finePhiIndexFromBlkLoc = [&](int blk, float loc)->int {
-          // fold into (-0.5, 1.5]
-          float t = loc;
-          if (t <= -0.5f || t > 1.5f) t = std::fmod(t + 2.f, 2.f);
+      // Choose host fine-φ tower from the very same angle we pass to depth transport.
+      auto finePhiIndexFromAngle = [](float phi)->int {
+          constexpr float twoPi     = 2.f * static_cast<float>(M_PI);
+          constexpr float kRadPerBin= twoPi / 256.f;
 
-          // full fine index with the +0.5 center convention
-          float full = static_cast<float>(blk)*2.f + t + 0.5f;
+          // phiFront comes in (−π, +π]; map to [0, 2π)
+          float a = (phi < 0.f) ? (phi + twoPi) : phi;
 
-          // module-of-8 φ-bias undo (same as convertBlockToGlobalPhi)
-          int   mod8  = static_cast<int>(std::floor(full)) / 8;
-          float x8    = full - mod8*8.0f - 4.0f;     // −4 … +4
-          float dBias = 0.10f * x8 / 4.0f;
-          if (std::fabs(x8) > 3.3f) dBias = 0.0f;
-          full -= dBias;
+          // fine-bin index in [0,256)
+          const float idx = a / kRadPerBin;
 
-          // wrap to [0,256)
-          if (full < 0.f)      full += 256.f;
-          if (full >= 256.f)   full -= 256.f;
-
-          return static_cast<int>(std::floor(full)) % 256;
+          // round to the nearest fine tower (avoids left-bias from floor)
+          int ix = static_cast<int>(std::floor(idx + 0.5f));
+          if (ix >= 256) ix -= 256;   // wrap 256 → 0
+          return ix;
       };
 
-      const int  ixFineBlk = finePhiIndexFromBlkLoc(blkPhiCoarse, blkCoord.second);
+      const int  ixFineBlk = finePhiIndexFromAngle(phiFront);
       const int  iyFineBlk = tgLead->get_bineta();     // same η row as lead
 
       RawTowerDefs::keytype keyBlk =
@@ -1922,29 +1915,23 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         if (blk < 0) blk += kCoarsePhiBins;
         if (blk >= kCoarsePhiBins) blk -= kCoarsePhiBins;
 
-        const float phiFront = convertBlockToGlobalPhi(blk, loc);
+          const float phiFront = convertBlockToGlobalPhi(blk, loc);
 
-        /* geometry tower **consistent** with convertBlockToGlobalPhi post-bias */
-        auto finePhiIndexFromBlkLoc = [&](int blkC, float locC)->int {
-              float t = locC;
-              if (t <= -0.5f || t > 1.5f) t = std::fmod(t + 2.f, 2.f);
+          auto finePhiIndexFromAngle = [](float phi)->int {
+              constexpr float twoPi      = 2.f * static_cast<float>(M_PI);
+              constexpr float kRadPerBin = twoPi / 256.f;
 
-              float full = static_cast<float>(blkC)*2.f + t + 0.5f;
+              float a = (phi < 0.f) ? (phi + twoPi) : phi;  // [0,2π)
+              const float idx = a / kRadPerBin;             // [0,256)
 
-              int   mod8  = static_cast<int>(std::floor(full)) / 8;
-              float x8    = full - mod8*8.0f - 4.0f;
-              float dBias = 0.10f * x8 / 4.0f;
-              if (std::fabs(x8) > 3.3f) dBias = 0.0f;
-              full -= dBias;
+              int ix = static_cast<int>(std::floor(idx + 0.5f));  // nearest
+              if (ix >= 256) ix -= 256;                           // wrap
+              return ix;
+          };
 
-              if (full < 0.f)      full += 256.f;
-              if (full >= 256.f)   full -= 256.f;
+          const int  ixFineBlk = finePhiIndexFromAngle(phiFront);
+          const int  iyFineBlk = tgLead->get_bineta();
 
-              return static_cast<int>(std::floor(full)) % 256;
-        };
-
-        const int  ixFineBlk = finePhiIndexFromBlkLoc(blk, loc);
-        const int  iyFineBlk = tgLead->get_bineta();
 
         RawTowerDefs::keytype keyBlk =
                       RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
@@ -1996,31 +1983,12 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                   << "  Δφ="   << r.d << '\n';
     }
 
-    /* ---- side-peak counters for PDC variants (Δφ ≈ ± one-tower width) ----
-       tower width = 2π / 256 ≈ 0.0245437 rad; use a small window around it */
-    {
-      const float kTw = 2.f * static_cast<float>(M_PI) / 256.f;   // one fine-bin
-      const float tol = 0.15f * kTw;                              // ~15% window
-
-      const float dRaw  = rec[3].d;   // PDC-RAW
-      const float dCorr = rec[4].d;   // PDC-CORR
-
-      if (std::isfinite(dRaw)) {
-        if (std::fabs(dRaw - (+kTw)) < tol) ++m_pdcRawPos1Tw;
-        if (std::fabs(dRaw - (-kTw)) < tol) ++m_pdcRawNeg1Tw;
-      }
-      if (std::isfinite(dCorr)) {
-        if (std::fabs(dCorr - (+kTw)) < tol) ++m_pdcCorrPos1Tw;
-        if (std::fabs(dCorr - (-kTw)) < tol) ++m_pdcCorrNeg1Tw;
-      }
-    }
    //rec[0] -->Clusterizer tower2global NO CP
    //rec[1] --> Clusterizer CP with tower2global
    //rec[2] --> nrg dep b corr with tower2global
    //rec[3] --> PDC global conv no corr
    //rec[4] --> PDC global conv w PDC corr
 
-    /* ---- NEW: compute η per variant for Δφ–η maps ------------------- */
     float etaCLUSraw = std::numeric_limits<float>::quiet_NaN();
     float etaCLUScp  = std::numeric_limits<float>::quiet_NaN();
     float etaBCORR   = std::numeric_limits<float>::quiet_NaN();
@@ -2036,6 +2004,88 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     const int blkEtaCoarse = iyFine / 2; // use lead-tower row as the parent block
     etaPDCraw  = convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
     etaPDCcorr = etaPDCraw;              // φ-correction doesn’t change η in this study
+
+    /* ---- side-peak capture for CLUS & PDC variants (Δφ ≈ ± one-tower width),
+           gated by the tight |z| cut via fillGlobal ----------------------- */
+    if (fillGlobal)
+    {
+      const float kTw  = 2.f * static_cast<float>(M_PI) / 256.f;  // one fine-bin
+      const float tol  = 0.15f * kTw;                             // ~15% window
+
+      // CLUS-branch residuals
+      const float dClusRaw = rec[0].d;    // CLUS-RAW
+      const float dClusCP  = rec[1].d;    // CLUS-CP
+
+      // PDC-branch residuals
+      const float dPdcRaw  = rec[3].d;    // PDC-RAW
+      const float dPdcCorr = rec[4].d;    // PDC-CORR
+
+      // ===== CLUS-RAW =====
+      if (std::isfinite(dClusRaw)) {
+        if (std::fabs(dClusRaw - (+kTw)) < tol) {
+          ++m_clusRawPos1Tw;
+          m_clusRawPos1Tw_eta.push_back(etaCLUSraw);
+          m_clusRawPos1Tw_vz .push_back(vtxZ);
+          m_clusRawPos1Tw_E  .push_back(eReco);
+        }
+        if (std::fabs(dClusRaw - (-kTw)) < tol) {
+          ++m_clusRawNeg1Tw;
+          m_clusRawNeg1Tw_eta.push_back(etaCLUSraw);
+          m_clusRawNeg1Tw_vz .push_back(vtxZ);
+          m_clusRawNeg1Tw_E  .push_back(eReco);
+        }
+      }
+
+      // ===== CLUS-CP =====
+      if (std::isfinite(dClusCP)) {
+        if (std::fabs(dClusCP - (+kTw)) < tol) {
+          ++m_clusCPPos1Tw;
+          m_clusCPPos1Tw_eta.push_back(etaCLUScp);
+          m_clusCPPos1Tw_vz .push_back(vtxZ);
+          m_clusCPPos1Tw_E  .push_back(eReco);
+        }
+        if (std::fabs(dClusCP - (-kTw)) < tol) {
+          ++m_clusCPNeg1Tw;
+          m_clusCPNeg1Tw_eta.push_back(etaCLUScp);
+          m_clusCPNeg1Tw_vz .push_back(vtxZ);
+          m_clusCPNeg1Tw_E  .push_back(eReco);
+        }
+      }
+
+      // ===== PDC-RAW =====
+      if (std::isfinite(dPdcRaw)) {
+        if (std::fabs(dPdcRaw - (+kTw)) < tol) {
+          ++m_pdcRawPos1Tw;
+          m_pdcRawPos1Tw_eta.push_back(etaPDCraw);
+          m_pdcRawPos1Tw_vz .push_back(vtxZ);
+          m_pdcRawPos1Tw_E  .push_back(eReco);
+        }
+        if (std::fabs(dPdcRaw - (-kTw)) < tol) {
+          ++m_pdcRawNeg1Tw;
+          m_pdcRawNeg1Tw_eta.push_back(etaPDCraw);
+          m_pdcRawNeg1Tw_vz .push_back(vtxZ);
+          m_pdcRawNeg1Tw_E  .push_back(eReco);
+        }
+      }
+
+      // ===== PDC-CORR =====
+      if (std::isfinite(dPdcCorr)) {
+        if (std::fabs(dPdcCorr - (+kTw)) < tol) {
+          ++m_pdcCorrPos1Tw;
+          m_pdcCorrPos1Tw_eta.push_back(etaPDCcorr);
+          m_pdcCorrPos1Tw_vz .push_back(vtxZ);
+          m_pdcCorrPos1Tw_E  .push_back(eReco);
+        }
+        if (std::fabs(dPdcCorr - (-kTw)) < tol) {
+          ++m_pdcCorrNeg1Tw;
+          m_pdcCorrNeg1Tw_eta.push_back(etaPDCcorr);
+          m_pdcCorrNeg1Tw_vz .push_back(vtxZ);
+          m_pdcCorrNeg1Tw_E  .push_back(eReco);
+        }
+      }
+    }
+
+
 
   #define HFill(H,V)    do{ if((H) && std::isfinite(V))             (H)->Fill(V); }while(0)
   #define HFill2(H,X,Y) do{ if((H) && std::isfinite(X) && std::isfinite(Y)) (H)->Fill((X),(Y)); }while(0)
@@ -3445,16 +3495,82 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
                   << '\n';
       }
 
-      // Side-peak tallies near ± one-tower width for PDC variants
-      {
-        const double kTw = 2.0 * M_PI / 256.0;
-        std::cout << "\n[Δφ near ±1-tower width (" << std::fixed << std::setprecision(4)
-                  << kTw << " rad)]\n"
-                  << "  PDC-RAW : +1×tw = " << m_pdcRawPos1Tw
-                  << " , -1×tw = "        << m_pdcRawNeg1Tw << '\n'
-                  << "  PDC-CORR: +1×tw = " << m_pdcCorrPos1Tw
-                  << " , -1×tw = "          << m_pdcCorrNeg1Tw << '\n';
-      }
+        // Side-peak tallies near ± one-tower width for CLUS & PDC variants
+        {
+          const double kTw = 2.0 * M_PI / 256.0;
+          std::cout << "\n[Δφ near ±1-tower width (" << std::fixed << std::setprecision(4)
+                    << kTw << " rad)]\n"
+                    << "  CLUS-RAW : +1×tw = " << m_clusRawPos1Tw
+                    << " , -1×tw = "          << m_clusRawNeg1Tw << '\n'
+                    << "  CLUS-CP  : +1×tw = " << m_clusCPPos1Tw
+                    << " , -1×tw = "          << m_clusCPNeg1Tw  << '\n'
+                    << "  PDC-RAW  : +1×tw = " << m_pdcRawPos1Tw
+                    << " , -1×tw = "          << m_pdcRawNeg1Tw  << '\n'
+                    << "  PDC-CORR : +1×tw = " << m_pdcCorrPos1Tw
+                    << " , -1×tw = "          << m_pdcCorrNeg1Tw  << "\n\n";
+
+          auto print_table3 = [](const char* title,
+                                 const std::vector<float>& etas,
+                                 const std::vector<float>& vzs,
+                                 const std::vector<float>& Es)
+          {
+            std::cout << title << "  (N=" << etas.size() << ")\n";
+            if (etas.empty()) { std::cout << "  (none)\n\n"; return; }
+
+            double sEta=0.0, sVz=0.0, sE=0.0;
+            std::cout << std::left
+                      << std::setw(6)  << "idx"
+                      << std::setw(12) << "eta"
+                      << std::setw(12) << "vtxZ(cm)"
+                      << std::setw(12) << "E(GeV)"
+                      << "\n"
+                      << "--------------------------------------------\n";
+
+            for (std::size_t i=0;i<etas.size();++i) {
+              sEta += etas[i];
+              sVz  += vzs[i];
+              sE   += Es[i];
+              std::cout << std::left
+                        << std::setw(6)  << i
+                        << std::setw(12) << std::fixed << std::setprecision(5) << etas[i]
+                        << std::setw(12) << std::fixed << std::setprecision(2) << vzs[i]
+                        << std::setw(12) << std::fixed << std::setprecision(2) << Es[i]
+                        << "\n";
+            }
+            const double n = static_cast<double>(etas.size());
+            std::cout << "--------------------------------------------\n"
+                      << std::left << std::setw(6) << "AVG"
+                      << std::setw(12) << std::fixed << std::setprecision(5) << (sEta/n)
+                      << std::setw(12) << std::fixed << std::setprecision(2) << (sVz/n)
+                      << std::setw(12) << std::fixed << std::setprecision(2) << (sE/n)
+                      << "\n\n";
+          };
+
+          // CLUS-RAW
+          print_table3("CLUS-RAW  +1×tw  (Δφ≈+tw):",
+                       m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E);
+          print_table3("CLUS-RAW  −1×tw  (Δφ≈−tw):",
+                       m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E);
+
+          // CLUS-CP
+          print_table3("CLUS-CP   +1×tw  (Δφ≈+tw):",
+                       m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E);
+          print_table3("CLUS-CP   −1×tw  (Δφ≈−tw):",
+                       m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E);
+
+          // PDC-RAW
+          print_table3("PDC-RAW   +1×tw  (Δφ≈+tw):",
+                       m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E);
+          print_table3("PDC-RAW   −1×tw  (Δφ≈−tw):",
+                       m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E);
+
+          // PDC-CORR
+          print_table3("PDC-CORR  +1×tw  (Δφ≈+tw):",
+                       m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E);
+          print_table3("PDC-CORR  −1×tw  (Δφ≈−tw):",
+                       m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E);
+        }
+
     }
 
   /* ──────────────────────────────────────── 2) Δη five-way table ───── */
