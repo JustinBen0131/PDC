@@ -3525,7 +3525,6 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
                   << '\n';
       }
 
-        // Side-peak tallies near ± one-tower width for CLUS & PDC variants
         {
           const double kTw = 2.0 * M_PI / 256.0;
           std::cout << "\n[Δφ near ±1-tower width (" << std::fixed << std::setprecision(4)
@@ -3539,53 +3538,58 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
                     << "  PDC-CORR : +1×tw = " << m_pdcCorrPos1Tw
                     << " , -1×tw = "          << m_pdcCorrNeg1Tw  << "\n\n";
 
-            auto print_table3 = [](const char* title,
-                                   const std::vector<float>& etas,
-                                   const std::vector<float>& vzs,
-                                   const std::vector<float>& Es)
+          auto print_rows3 = [](const char* title,
+                                const std::vector<float>& etas,
+                                const std::vector<float>& vzs,
+                                const std::vector<float>& Es)
+          {
+            const std::size_t N = etas.size();
+            std::cout << title << "  (N=" << N << ")\n";
+            if (N == 0) { std::cout << "  (none)\n\n"; return; }
+
+            std::cout << std::left
+                      << std::setw(6)  << "idx"
+                      << std::setw(12) << "eta"
+                      << std::setw(12) << "vtxZ(cm)"
+                      << std::setw(12) << "E(GeV)"
+                      << "\n"
+                      << "--------------------------------------------\n";
+
+            for (std::size_t i = 0; i < N; ++i)
             {
-              const std::size_t N = etas.size();
-              std::cout << title << "  (N=" << N << ")\n";
-              if (N == 0) { std::cout << "  (none)\n\n"; return; }
-
-              double sEta = 0.0, sVz = 0.0, sE = 0.0;
-              for (std::size_t i = 0; i < N; ++i) {
-                sEta += etas[i];
-                sVz  += vzs[i];
-                sE   += Es[i];
-              }
-              const double invN = 1.0 / static_cast<double>(N);
-
-              // Condensed summary: totals + averages only (no per-row listing)
-              std::cout << "  AVG  "
-                        << "eta="    << std::fixed << std::setprecision(5) << (sEta * invN)
-                        << "  vtxZ=" << std::fixed << std::setprecision(2) << (sVz  * invN) << " cm"
-                        << "  E="    << std::fixed << std::setprecision(2) << (sE   * invN) << " GeV\n\n";
-            };
+              std::cout << std::left
+                        << std::setw(6)  << i
+                        << std::setw(12) << std::fixed << std::setprecision(5) << etas[i]
+                        << std::setw(12) << std::fixed << std::setprecision(2) << vzs[i]
+                        << std::setw(12) << std::fixed << std::setprecision(2) << Es[i]
+                        << "\n";
+            }
+            std::cout << "\n";
+          };
 
           // CLUS-RAW
-          print_table3("CLUS-RAW  +1×tw  (Δφ≈+tw):",
-                       m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E);
-          print_table3("CLUS-RAW  −1×tw  (Δφ≈−tw):",
-                       m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E);
+          print_rows3("CLUS-RAW  +1×tw  (Δφ≈+tw):",
+                      m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E);
+          print_rows3("CLUS-RAW  −1×tw  (Δφ≈−tw):",
+                      m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E);
 
           // CLUS-CP
-          print_table3("CLUS-CP   +1×tw  (Δφ≈+tw):",
-                       m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E);
-          print_table3("CLUS-CP   −1×tw  (Δφ≈−tw):",
-                       m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E);
+          print_rows3("CLUS-CP   +1×tw  (Δφ≈+tw):",
+                      m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E);
+          print_rows3("CLUS-CP   −1×tw  (Δφ≈−tw):",
+                      m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E);
 
           // PDC-RAW
-          print_table3("PDC-RAW   +1×tw  (Δφ≈+tw):",
-                       m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E);
-          print_table3("PDC-RAW   −1×tw  (Δφ≈−tw):",
-                       m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E);
+          print_rows3("PDC-RAW   +1×tw  (Δφ≈+tw):",
+                      m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E);
+          print_rows3("PDC-RAW   −1×tw  (Δφ≈−tw):",
+                      m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E);
 
           // PDC-CORR
-          print_table3("PDC-CORR  +1×tw  (Δφ≈+tw):",
-                       m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E);
-          print_table3("PDC-CORR  −1×tw  (Δφ≈−tw):",
-                       m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E);
+          print_rows3("PDC-CORR  +1×tw  (Δφ≈+tw):",
+                      m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E);
+          print_rows3("PDC-CORR  −1×tw  (Δφ≈−tw):",
+                      m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E);
         }
 
     }
