@@ -447,7 +447,7 @@ submit_sim_condor() {
 
   # ─────────────── 3) CLEAN-UP PRIOR TO SUBMISSION ────────────────────────
   if [[ "$execMode" == "condor" ]]; then
-      if $wipe_outputs; then
+      if [[ "$wipe_outputs" == true ]]; then
           echo "[STEP] Removing previous ROOT outputs from $OUTDIR_SIM"
           [[ -d "$OUTDIR_SIM" ]] && find "$OUTDIR_SIM" -mindepth 1 -delete
       fi
@@ -482,7 +482,7 @@ submit_sim_condor() {
   local maxN=${#simPairs[@]}
   (( offset < maxN )) || { echo "[WARN] Offset beyond list size – nothing to do."; return 0; }
 
-  if $doAll; then
+  if [[ "$doAll" == true ]]; then
       echo "[INFO] doAll requested → overriding slice to submit ALL ${maxN} pairs in one submission."
       offset=0
       chunkSize=$maxN
@@ -490,13 +490,21 @@ submit_sim_condor() {
   fi
 
   local endIndex=$(( offset + chunkSize ))
-  (( endIndex > maxN )) && endIndex=$maxN
+  if (( endIndex > maxN )); then
+      endIndex=$maxN
+  fi
   local nJobs=$(( endIndex - offset ))
   (( nJobs > 0 )) || { echo "[ERROR] Selected zero pairs"; return 1; }
 
   # Always show an inventory of available inputs; and optionally short-circuit
   local dstLines;  dstLines=$(wc -l < "$SIM_DST_LIST"  || echo 0)
   local hitsLines; hitsLines=$(wc -l < "$SIM_HITS_LIST" || echo 0)
+
+  # Preview the number of Condor jobs: ceil(nPairs / groupSizePreview).
+  # Keep this preview in sync with the grouping used later (GROUP_SIZE_SIM).
+  # If you use a larger grouping in doAll, reflect it here.
+  local groupSizePreview=5
+  local plannedJobs=$(( (nJobs + groupSizePreview - 1) / groupSizePreview ))
 
   echo "=================================================================="
   echo "[INVENTORY] Simulation input inventory"
@@ -506,50 +514,68 @@ submit_sim_condor() {
   echo "    └─ total lines = ${hitsLines}"
   echo "  Pairs available (post-merge) = ${maxN}"
   echo "  Round selection indices      = [${offset} .. $((endIndex-1))]"
-  echo "  Jobs that would be submitted = ${nJobs}"
+  echo "  Selected pairs this round    = ${nJobs}"
+  echo "  Planned Condor jobs          = ${plannedJobs}  (group size = ${groupSizePreview})"
+  echo "  Mode flags                   = doAll=${doAll}  FAST_SUBMIT=$([[ "$doAll" == true ]] && echo true || echo false)  execMode=${execMode}"
+  echo "  Preview first/last 3 selected pairs:"
+  for (( k=0; k<3 && (offset+k)<endIndex; ++k )); do
+      echo "    • $(printf "%6d" $((offset+k))) : ${simPairs[$((offset+k))]}"
+  done
+  if (( endIndex-offset > 6 )); then
+      echo "    …"
+  fi
+  for (( k=3; k>=1; --k )); do
+      if (( endIndex-k >= offset )); then
+        echo "    • $(printf "%6d" $((endIndex-k))) : ${simPairs[$((endIndex-k))]}"
+      fi
+  done
   echo "=================================================================="
 
-  # ── initialize / validate tracking file for multi-round accounting ───────
-  echo "------------------------------------------------------------------"
-  if [[ "$roundArg" == "firstRound" ]]; then
-      mkdir -p "$TRACK_DIR"
-      echo "[TRACK] firstRound: removing any previous tracking file and recreating fresh one"
-      rm -f "$TRACK_FILE" 2>/dev/null || true
-      printf "%s\n" "${simPairs[@]}" > "$TRACK_FILE"
-      sync
-      echo "[TRACK] Initialized tracking file:"
-  else
-      if [[ ! -f "$TRACK_FILE" ]]; then
-          mkdir -p "$TRACK_DIR"
-          printf "%s\n" "${simPairs[@]}" > "$TRACK_FILE"
-          echo "[TRACK][WARN] Tracking file was missing; re-created full list:"
-      else
-          echo "[TRACK] Continuing with existing tracking file:"
-      fi
+  # ---- tracking file initialization (skip entirely in doAll fast mode) ----
+  local FAST_SUBMIT=false
+  [[ "$doAll" == true ]] && FAST_SUBMIT=true
+
+  if ! $FAST_SUBMIT; then
+        echo "------------------------------------------------------------------"
+        if [[ "$roundArg" == "firstRound" ]]; then
+            mkdir -p "$TRACK_DIR"
+            echo "[TRACK] firstRound: removing any previous tracking file and recreating fresh one"
+            rm -f "$TRACK_FILE" 2>/dev/null || true
+            printf "%s\n" "${simPairs[@]}" > "$TRACK_FILE"
+        else
+            if [[ ! -f "$TRACK_FILE" ]]; then
+                mkdir -p "$TRACK_DIR"
+                printf "%s\n" "${simPairs[@]}" > "$TRACK_FILE"
+                echo "[TRACK][WARN] Tracking file was missing; re-created full list:"
+            else
+                echo "[TRACK] Continuing with existing tracking file:"
+            fi
+        fi
+
+        # Light snapshot only
+        local track_before_lines=0
+        [[ -f "$TRACK_FILE" ]] && track_before_lines=$(wc -l < "$TRACK_FILE" 2>/dev/null || echo 0)
+        echo "  • Tracking path : $TRACK_FILE"
+        echo "  • Lines (BEFORE): ${track_before_lines}"
+        echo "------------------------------------------------------------------"
   fi
 
-  # Verbose tracking snapshot (before this round)
-  local track_before_lines=0
-  [[ -f "$TRACK_FILE" ]] && track_before_lines=$(wc -l < "$TRACK_FILE" 2>/dev/null || echo 0)
-  echo "  • Tracking path : $TRACK_FILE"
-  echo "  • Lines (BEFORE): ${track_before_lines}"
-  if [[ -s "$TRACK_FILE" ]]; then
-      echo "  • First 3 lines:"
-      head -n 3 "$TRACK_FILE" | sed 's/^/     │ /'
-      echo "  • Last  3 lines:"
-      tail -n 3 "$TRACK_FILE" | sed 's/^/     │ /'
-  fi
-  echo "------------------------------------------------------------------"
-
-  if $checkOnly; then
+  if [[ "$checkOnly" == true ]]; then
       echo "[INFO] firstRoundCheck: count-only mode; no Condor submission."
       echo "[INFO] Exiting after inventory + tracking snapshot."
       return 0
   fi
 
-  # ─────────────── 5) LOCAL MODE  (single‑core loop) ──────────────────────
+  # ─────────────── 5) LOCAL MODE  (bundle X pairs and run once) ───────────
   if [[ "$execMode" == "local" ]]; then
-      echo "[STEP] LOCAL mode – processing $nJobs pair(s)"
+      echo "[STEP] LOCAL mode – bundling $nJobs pair(s) into one macro run"
+
+      # Build temp list files for this local bundle
+      local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
+      local dstList="${CONDOR_LISTFILES_DIR}/local_bundle_DST_${offset}_${endIndex}_${stamp}.list"
+      local hitsList="${CONDOR_LISTFILES_DIR}/local_bundle_HITS_${offset}_${endIndex}_${stamp}.list"
+      rm -f "$dstList" "$hitsList" 2>/dev/null || true
+
       local idx=0
       for (( i=offset; i<endIndex; i++ )); do
           idx=$(( idx + 1 ))
@@ -558,21 +584,34 @@ submit_sim_condor() {
           [[ -f "$dstFile" ]] || { echo "[WARN] Missing DST  $dstFile – skip"; continue; }
           [[ -f "$hitFile" ]] || { echo "[WARN] Missing HITS $hitFile – skip"; continue; }
 
-          local outRoot="${OUTDIR_SIM}/PositionDep_sim_pair$(printf "%06d" "$i").root"
-          echo "------------------------------------------------------------------"
-          echo "[RUN]  $idx / $nJobs"
-          echo "   DST : $(basename "$dstFile")"
-          echo "   HITS: $(basename "$hitFile")"
-          echo "   OUT : $(basename "$outRoot")"
-          echo "------------------------------------------------------------------"
-
-          root -b -q -l "${MACRO_PATH}(0, \"${dstFile}\", \"${hitFile}\", \"${outRoot}\")"
+          echo "$dstFile"  >> "$dstList"
+          echo "$hitFile"  >> "$hitsList"
       done
-      echo "[INFO] LOCAL slice complete → $OUTDIR_SIM"
+
+      # Quick sanity
+      local nd=$(wc -l < "$dstList"  || echo 0)
+      local nh=$(wc -l < "$hitsList" || echo 0)
+      if (( nd == 0 || nh == 0 || nd != nh )); then
+          echo "[ERROR] Local bundle lists invalid (DST=$nd, HITS=$nh) – abort local run"
+          return 1
+      fi
+
+      local outRoot="${OUTDIR_SIM}/PositionDep_sim_bundle_${offset}_${endIndex}_${stamp}.root"
+      echo "------------------------------------------------------------------"
+      echo "[RUN]  single macro call over ${nd} pairs"
+      echo "   DST-LIST : $(basename "$dstList")"
+      echo "   HITS-LIST: $(basename "$hitsList")"
+      echo "   OUT      : $(basename "$outRoot")"
+      echo "------------------------------------------------------------------"
+
+      # nevents=0 → process all events across all files in the lists
+      root -b -q -l "${MACRO_PATH}(0, \"${dstList}\", \"${hitsList}\", \"${outRoot}\")"
+
+      echo "[INFO] LOCAL bundle complete → $outRoot"
       return 0
   fi
 
-  # ─────────────── 6) CONDOR SUBMISSION ──────────────────────────────────
+  # ─────────────── 6) CONDOR SUBMISSION (group N pairs per job) ───────────
   local submitFile="PositionDependentCorrect_sim.sub"
   cat > "$submitFile" <<EOL
 universe   = vanilla
@@ -584,108 +623,97 @@ request_memory = 1500MB
 # Args: <runNum=9999> <listFileData> <sim> <Cluster> <nEvents=0> <processID> [<listFileHits>]
 EOL
 
-  for (( i=offset; i<endIndex; i++ )); do
-      IFS=' ' read -r dstFile hitFile <<< "${simPairs[$i]}"
-      printf 'arguments = 9999 %s sim $(Cluster) 0 %d %s\nqueue\n\n' \
-             "$dstFile" "$i" "$hitFile" >> "$submitFile"
-  done
+  # How many (DST,G4) pairs per Condor job:
+  local GROUP_SIZE_SIM=5
 
-  echo "[STEP] condor_submit → $submitFile  (jobs=$nJobs)"
+  # Verbose grouping plan
+  echo "[PLAN] Building grouped lists for submission:"
+  echo "       • GROUP_SIZE_SIM=${GROUP_SIZE_SIM}"
+  echo "       • Pair range     = [${offset} .. $((endIndex-1))]"
+  echo "       • Total pairs    = ${nJobs}"
+  echo "       • Expected jobs  = $(( (nJobs + GROUP_SIZE_SIM - 1) / GROUP_SIZE_SIM ))"
+
+  local groupIdx=0
+  local i=$offset
+  while (( i < endIndex )); do
+        local gStart=$i
+        local gEnd=$(( i + GROUP_SIZE_SIM ))
+        if (( gEnd > endIndex )); then
+            gEnd=$endIndex
+        fi
+        local pairsInGroup=$(( gEnd - gStart ))
+
+        local dstGroup="${CONDOR_LISTFILES_DIR}/sim_group_DST_${gStart}_${gEnd}.list"
+        local hitGroup="${CONDOR_LISTFILES_DIR}/sim_group_HITS_${gStart}_${gEnd}.list"
+        rm -f "$dstGroup" "$hitGroup" 2>/dev/null || true
+
+        # Fill the group list files
+        local j
+        for (( j=gStart; j<gEnd; j++ )); do
+            IFS=' ' read -r dstFile hitFile <<< "${simPairs[$j]}"
+            echo "$dstFile" >> "$dstGroup"
+            echo "$hitFile" >> "$hitGroup"
+        done
+
+        # Log every group (comment out to throttle)
+        echo "[GROUP $(printf "%6d" "${groupIdx}")] indices=${gStart}..$((gEnd-1))  pairs=${pairsInGroup}"
+        echo "    dstList: ${dstGroup}"
+        echo "    hitList: ${hitGroup}"
+
+        # One job per group: pass the two list files to the wrapper
+        printf 'arguments = 9999 %s sim $(Cluster) 0 %d %s\nqueue\n\n' \
+               "$dstGroup" "$groupIdx" "$hitGroup" >> "$submitFile"
+
+        (( ++groupIdx ))
+        i=$gEnd
+  done
+  echo "[PLAN] Finished grouping: total jobs queued in submit file = ${groupIdx}"
+
+  echo "[STEP] condor_submit → $submitFile  (jobs=$groupIdx)"
   if condor_submit "$submitFile"; then
       echo "=================================================================="
       echo "[INFO] condor_submit succeeded."
       echo "=================================================================="
 
-      # ── round-tracking: remove submitted pairs from tracking file ────────
-      if [[ -f "$TRACK_FILE" ]]; then
-          # Prepare per-round submitted list for full transparency
-          local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
-          local submitted_list="${TRACK_DIR}/submitted_${roundArg}_${stamp}.txt"
-          local tmp_remove="${TRACK_DIR}/to_remove.tmp"
-          local tmp_remaining="${TRACK_DIR}/remaining.tmp"
+      # ── round-tracking: remove submitted pairs from tracking file (skip in FAST_SUBMIT) ──
+      if ! $FAST_SUBMIT; then
+            if [[ -f "$TRACK_FILE" ]]; then
+                local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
+                local submitted_list="${TRACK_DIR}/submitted_${roundArg}_${stamp}.txt"
+                local tmp_remove="${TRACK_DIR}/to_remove.tmp"
+                local tmp_remaining="${TRACK_DIR}/remaining.tmp"
 
-          rm -f "$tmp_remove" "$tmp_remaining" 2>/dev/null || true
+                rm -f "$tmp_remove" "$tmp_remaining" 2>/dev/null || true
 
-          echo "------------------------------------------------------------------"
-          echo "[TRACK] Building submitted-this-round list"
-          echo "  • Range indices: [${offset} .. $((endIndex-1))]"
-          echo "  • Output file  : $submitted_list"
-          echo "------------------------------------------------------------------"
+                echo "------------------------------------------------------------------"
+                echo "[TRACK] Building submitted-this-round list"
+                echo "  • Range indices: [${offset} .. $((endIndex-1))]"
+                echo "  • Output file  : $submitted_list"
+                echo "------------------------------------------------------------------"
 
-          # Build the exact lines to remove (match simPairs formatting)
-          for (( i=offset; i<endIndex; i++ )); do
-              printf "%s\n" "${simPairs[$i]}" >> "$tmp_remove"
-              printf "%s\n" "${simPairs[$i]}" >> "$submitted_list"
-          done
+                for (( i=offset; i<endIndex; i++ )); do
+                    printf "%s\n" "${simPairs[$i]}" >> "$tmp_remove"
+                    printf "%s\n" "${simPairs[$i]}" >> "$submitted_list"
+                done
 
-          local before_lines=0
-          before_lines=$(wc -l < "$TRACK_FILE" 2>/dev/null || echo 0)
-          local to_remove_lines=0
-          to_remove_lines=$(wc -l < "$tmp_remove" 2>/dev/null || echo 0)
+                grep -F -x -v -f "$tmp_remove" "$TRACK_FILE" > "$tmp_remaining" || true
+                mv -f "$tmp_remaining" "$TRACK_FILE"
+                rm -f "$tmp_remove" 2>/dev/null || true
 
-          echo "------------------------------------------------------------------"
-          echo "[TRACK] BEFORE removal:"
-          echo "  • Tracking file : $TRACK_FILE"
-          echo "  • Lines (before): ${before_lines}"
-          echo "  • Candidate removals (this round): ${to_remove_lines}"
-          echo "  • submitted list preview (first 5):"
-          head -n 5 "$submitted_list" | sed 's/^/     │ /'
-          echo "------------------------------------------------------------------"
+                local after_lines=0
+                after_lines=$(wc -l < "$TRACK_FILE" 2>/dev/null || echo 0)
 
-          # Compute set difference: TRACK_FILE − submitted lines
-          grep -F -x -v -f "$tmp_remove" "$TRACK_FILE" > "$tmp_remaining" || true
-          mv -f "$tmp_remaining" "$TRACK_FILE"
-
-          local removed_lines="$to_remove_lines"
-          local after_lines=0
-          after_lines=$(wc -l < "$TRACK_FILE" 2>/dev/null || echo 0)
-
-          echo "[TRACK] AFTER removal:"
-          echo "  • Lines removed (expected=nJobs): ${removed_lines} (expected=${nJobs})"
-          if [[ "$removed_lines" -ne "$nJobs" ]]; then
-              echo "[TRACK][WARN] Removed-line count != jobs for this round."
-          fi
-          echo "  • Lines (remaining): ${after_lines}"
-          if [[ -s "$TRACK_FILE" ]]; then
-              echo "  • Remaining preview (first 5):"
-              head -n 5 "$TRACK_FILE" | sed 's/^/     │ /'
-          else
-              echo "  • Tracking now EMPTY."
-          fi
-          echo "------------------------------------------------------------------"
-
-          rm -f "$tmp_remove" 2>/dev/null || true
-
-          # Per-round summary table
-          local total_pairs="$maxN"
-          local processed_pairs=$(( total_pairs - after_lines ))
-          local pct_done=0
-          if [[ "$total_pairs" -gt 0 ]]; then
-              pct_done=$(( 100 * processed_pairs / total_pairs ))
-          fi
-          printf "[SUMMARY] Round: %-12s | submitted: %6d | total: %6d | remaining: %6d | done: %3d%%\n" \
-                 "$roundArg" "$nJobs" "$total_pairs" "$after_lines" "$pct_done"
-
-          # on fourthRound: verify and clean up if done
-          if [[ "$roundArg" == "fourthRound" ]]; then
-              echo "=================================================================="
-              echo "[FINAL CHECK] Post-fourthRound tracking verification"
-              echo "  • Tracking file: $TRACK_FILE"
-              if [[ -s "$TRACK_FILE" ]]; then
-                  echo "[FINAL][WARNING] Tracking file NOT empty after fourthRound."
-                  echo "[FINAL][WARNING] Remaining pairs not submitted: ${after_lines}"
-                  echo "[FINAL][WARNING] Investigate remaining lines in:"
-                  echo "                   $TRACK_FILE"
-              else
-                  echo "[FINAL] All input pairs accounted for after fourthRound."
-                  echo "[FINAL] Cleaning up tracking artifacts."
-                  rm -f "$TRACK_FILE"
-                  rmdir "$TRACK_DIR" 2>/dev/null || true
-              fi
-              echo "=================================================================="
-          fi
-      else
-          echo "[TRACK][WARN] Tracking file not found; skipping removal step."
+                local total_pairs="$maxN"
+                local processed_pairs=$(( total_pairs - after_lines ))
+                local pct_done=0
+                if [[ "$total_pairs" -gt 0 ]]; then
+                    pct_done=$(( 100 * processed_pairs / total_pairs ))
+                fi
+                printf "[SUMMARY] Round: %-12s | submitted: %6d | total: %6d | remaining: %6d | done: %3d%%\n" \
+                       "$roundArg" "$nJobs" "$total_pairs" "$after_lines" "$pct_done"
+            else
+                echo "[TRACK][WARN] Tracking file not found; skipping removal step."
+            fi
       fi
   else
       echo "[ERROR] condor_submit failed"

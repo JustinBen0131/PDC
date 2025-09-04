@@ -1842,20 +1842,19 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse,
                                                      blkCoord.second);
 
-      // Choose host fine-φ tower from the very same angle we pass to depth transport.
       auto finePhiIndexFromAngle = [](float phi)->int {
           constexpr float twoPi      = 2.f * static_cast<float>(M_PI);
           constexpr float kRadPerBin = twoPi / 256.f;
 
-          // phiFront comes in (−π, +π]; map to [0, 2π)
+          // map (−π, +π] → [0, 2π)
           float a = (phi < 0.f) ? (phi + twoPi) : phi;
 
-          // fine-bin index in [0,256)
-          const float idx = a / kRadPerBin;
+          // choose the bin that CONTAINS the angle (no +0.5 shift)
+          int ix = static_cast<int>(std::floor(a / kRadPerBin));
 
-          // round to the nearest fine tower (avoids left-bias from floor)
-          int ix = static_cast<int>(std::floor(idx + 0.5f));
-          if (ix >= 256) ix -= 256;   // wrap 256 → 0
+          // wrap guards
+          if (ix >= 256) ix -= 256;
+          if (ix < 0)     ix += 256;
           return ix;
       };
 
@@ -1928,10 +1927,10 @@ void PositionDependentCorrection::fillDPhiAllVariants(
               constexpr float kRadPerBin = twoPi / 256.f;
 
               float a = (phi < 0.f) ? (phi + twoPi) : phi;  // [0,2π)
-              const float idx = a / kRadPerBin;             // [0,256)
+              int ix = static_cast<int>(std::floor(a / kRadPerBin));  // containing bin
 
-              int ix = static_cast<int>(std::floor(idx + 0.5f));  // nearest
-              if (ix >= 256) ix -= 256;                           // wrap
+              if (ix >= 256) ix -= 256;
+              if (ix < 0)     ix += 256;
               return ix;
           };
 

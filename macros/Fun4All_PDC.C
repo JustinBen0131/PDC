@@ -131,16 +131,20 @@ void Fun4All_PDC(int nevents = 0,
 
 
   // (a) for the calo cluster DST
-  Fun4AllInputManager* in0 = new Fun4AllDstInputManager("in0");
-
-  // The second argument '1' means topNode level or segment, depending on your usage
-  in0->AddFile(caloListFile);
-  se->registerInputManager(in0);
+  auto* in0 = new Fun4AllDstInputManager("in0");
+  if (caloListFile.size() > 5 && caloListFile.substr(caloListFile.size()-5) == ".list")
+      in0->AddListFile(caloListFile);
+  else
+    in0->AddFile(caloListFile);
+    se->registerInputManager(in0);
 
   // (b) for G4Hits
-  Fun4AllInputManager* in1 = new Fun4AllDstInputManager("in1");
-  in1->AddFile(g4HitsListFile);
-  se->registerInputManager(in1);
+  auto* in1 = new Fun4AllDstInputManager("in1");
+  if (g4HitsListFile.size() > 5 && g4HitsListFile.substr(g4HitsListFile.size()-5) == ".list")
+      in1->AddListFile(g4HitsListFile);
+  else
+    in1->AddFile(g4HitsListFile);
+    se->registerInputManager(in1);
 
   GlobalVertexReco *gvertex = new GlobalVertexReco("GlobalVertexReco");
   gvertex->Verbosity(0);
@@ -252,7 +256,7 @@ void Fun4All_PDC(int nevents = 0,
   pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
   pdc->setIsSimulation(isSimulation);
   pdc->UseSurveyGeometry(false);      // load barrel-tilt from CDB (recommended)
-  pdc->UseSignedVz(true);
+  pdc->UseSignedVz(false);
   /*------------------------------------------------------------
       2)  π0-mass-window support
     ------------------------------------------------------------*/

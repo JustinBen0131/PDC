@@ -109,6 +109,7 @@ DO_FILE_CHECK=false
 usage() {
   echo "Usage:"
   echo "  $0 condor [test|firstHalf|asManyAsCan]"
+  echo "  $0 local                      # sequential first-stage merges locally (1000 per group)"
   echo "  $0 addChunks [condor]"
   echo "  $0 addChunks part1 [condor]"
   echo "  $0 checkFileOutput"
@@ -118,6 +119,7 @@ usage() {
   echo "  $0 condor test"
   echo "  $0 condor firstHalf"
   echo "  $0 condor asManyAsCan"
+  echo "  $0 local"
   echo "  $0 addChunks"
   echo "  $0 addChunks condor"
   echo "  $0 addChunks part1"
@@ -132,7 +134,7 @@ SUB2="${3:-}"
 # Preserve existing two-arg behavior; allow combined submodes for addChunks
 SUBMODE="$SUB1"
 [[ -n "$SUB2" ]] && SUBMODE="$SUB1 $SUB2"
-[[ "$MODE" != "condor" && "$MODE" != "addChunks" && "$MODE" != "checkFileOutput" ]] && usage
+[[ "$MODE" != "condor" && "$MODE" != "local" && "$MODE" != "addChunks" && "$MODE" != "checkFileOutput" ]] && usage
 
 
 # asManyAsCan ⇒ 1 000-file groups
@@ -218,9 +220,69 @@ if [[ "$MODE" == "checkFileOutput" && "$DO_FILE_CHECK" == true ]]; then
 fi
 
 ###############################################################################
-# 1b) CONDOR   ----------------------------------------------------------------
+# 1b) LOCAL (sequential) or CONDOR  ------------------------------------------
 ###############################################################################
-if [[ "$MODE" == "condor" ]]; then
+if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
+
+  if [[ "$MODE" == "local" ]]; then
+    # -------- LOCAL: do first-stage merges sequentially on this node --------
+    FILES_PER_GROUP=1000
+    echo "======================================================================="
+    echo "[LOCAL] First-stage merging (sequential) with FILES_PER_GROUP=$FILES_PER_GROUP"
+    echo "======================================================================="
+
+    # Optional precheck (same logic as in condor path)
+    if [[ "$DO_FILE_CHECK" == true ]]; then
+      echo "[LOCAL][PRECHECK] Verifying produced sim outputs vs expected inputs"
+      [[ -d "$SIM_CHUNK_DIR" ]] || { echo "[ERROR] SIM_CHUNK_DIR not found: $SIM_CHUNK_DIR"; exit 1; }
+      [[ -f "$SIM_DST_LIST"  ]] || { echo "[ERROR] SIM_DST_LIST not found:  $SIM_DST_LIST";  exit 1; }
+      [[ -f "$SIM_HITS_LIST" ]] || { echo "[ERROR] SIM_HITS_LIST not found: $SIM_HITS_LIST"; exit 1; }
+
+      mapfile -t pairs < <(paste -d' ' "$SIM_DST_LIST" "$SIM_HITS_LIST" | sort -k1,1V)
+      totalExpected=${#pairs[@]}
+      presentOutputs=$(find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name 'PositionDep_sim_*.root' | wc -l)
+
+      echo "  SIM_CHUNK_DIR : $SIM_CHUNK_DIR"
+      echo "  SIM_DST_LIST  : $SIM_DST_LIST"
+      echo "  SIM_HITS_LIST : $SIM_HITS_LIST"
+      echo "  Expected input pairs : $totalExpected"
+      echo "  Found output files   : $presentOutputs"
+    fi
+
+    # CLEAN old outputs (partials, superchunks, final)
+    echo "[LOCAL][CLEAN] Removing old ${PARTIAL_PREFIX}_*.root, ${SUPER_PREFIX}_*.root, and $MERGED_FILE from $OUTPUT_DIR"
+    find "$OUTPUT_DIR" -maxdepth 1 -type f \( -name "${PARTIAL_PREFIX}_*.root" -o -name "${SUPER_PREFIX}_*.root" -o -name "$MERGED_FILE" \) -delete
+    rm -rf "$TMP_SUBDIR" "$TMP_SUPERDIR"
+
+    # Build master list of chunk files
+    find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" \
+      | sort -V > "$LISTFILE"
+    [[ ! -s "$LISTFILE" ]] && { echo "[ERROR][LOCAL] No chunk files found"; exit 1; }
+
+    totalToMerge=$(wc -l < "$LISTFILE")
+    echo "[LOCAL] Files to merge listed in $LISTFILE  (count=$totalToMerge)"
+
+    mkdir -p "$TMP_SUBDIR" "$TMP_SUPERDIR"
+    split -d -l "$FILES_PER_GROUP" "$LISTFILE" "$TMP_SUBDIR/sublist_"
+    totalSublists=$(compgen -G "$TMP_SUBDIR/sublist_*" | wc -l)
+    echo "[LOCAL] Total sublists (groups of $FILES_PER_GROUP): $totalSublists"
+
+    i=0
+    for SL in "$TMP_SUBDIR"/sublist_*; do
+      ((i++))
+      out="$OUTPUT_DIR/${PARTIAL_PREFIX}_$(printf "%d" "$i").root"
+      echo "-----------------------------------------------------------------------"
+      echo "[LOCAL] hadd -v 3 -f $out @$SL"
+      hadd -v 3 -f "$out" @"$SL" || { echo "[ERROR][LOCAL] hadd failed for $SL"; exit 1; }
+    done
+
+    echo "======================================================================="
+    echo "[LOCAL] Completed $i partial merges in $OUTPUT_DIR"
+    echo "======================================================================="
+    exit 0
+  fi
+
+  # ----------------------------- CONDOR path (unchanged) ---------------------
   testMode=false; firstHalf=false; asMany=false
   case "$SUBMODE" in
     test)          testMode=true  ;;
@@ -378,7 +440,7 @@ executable = $CONDOR_EXEC
 output     = $CONDOR_OUTDIR/merge.\$(Cluster).\$(Process).out
 error      = $CONDOR_ERRDIR/merge.\$(Cluster).\$(Process).err
 log        = $CONDOR_LOGDIR/merge.\$(Cluster).\$(Process).log
-request_memory = 4096MB
+request_memory = 1.5GB
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
 stream_output = True
