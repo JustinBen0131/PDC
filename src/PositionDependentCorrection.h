@@ -305,19 +305,20 @@ class PositionDependentCorrection : public SubsysReco
     std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
     std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
 
-    std::vector<float> m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E;
-    std::vector<float> m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E;
-    std::vector<float> m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E;
-    std::vector<float> m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E;
+    std::vector<float> m_pdcRawPos1Tw_dphi,  m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E;
+    std::vector<float> m_pdcRawNeg1Tw_dphi,  m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E;
+    std::vector<float> m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E;
+    std::vector<float> m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E;
+
 
     // CLUS (clusterizer) side-peak tallies (± one-tower width) for RAW and CP
     std::atomic<std::uint64_t> m_clusRawPos1Tw{0},  m_clusRawNeg1Tw{0};
     std::atomic<std::uint64_t> m_clusCPPos1Tw{0},   m_clusCPNeg1Tw{0};
 
-    std::vector<float> m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E;
-    std::vector<float> m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E;
-    std::vector<float> m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E;
-    std::vector<float> m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E;
+    std::vector<float> m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E;
+    std::vector<float> m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E;
+    std::vector<float> m_clusCPPos1Tw_dphi,  m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E;
+    std::vector<float> m_clusCPNeg1Tw_dphi,  m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E;
 
     
   /* Δη out‑of‑window counters (|Δη| > 0.04) */
@@ -562,20 +563,45 @@ namespace PDC_detail
     }
 
 
-  /* ---------- front‑face φ → shower‑depth φ ------------------------ */
-  inline float front2ShowerPhi(BEmcRecCEMC* rec,float eReco,
-                               double rF,double zF,float phiF,
-                               int ix,int iy)
-  {
-    float xSD,ySD,zSD;
-    rec->CorrectShowerDepth(ix,iy,eReco,
-                            rF*std::cos(phiF),rF*std::sin(phiF),zF,
-                            xSD,ySD,zSD);
-    return std::atan2(ySD,xSD);
-  }
+    inline float front2ShowerPhi(BEmcRecCEMC* rec,float eReco,
+                                 double rF,double zF,float phiF,
+                                 int ix,int iy)
+    {
+      // Transport the chosen front-face point to shower depth
+      float xSD,ySD,zSD;
+      rec->CorrectShowerDepth(ix,iy,eReco,
+                              static_cast<float>(rF*std::cos(phiF)),
+                              static_cast<float>(rF*std::sin(phiF)),
+                              static_cast<float>(zF),
+                              xSD,ySD,zSD);
+      float phiSD = std::atan2(ySD,xSD);
+
+      // Owner-branch guard: fold around the owner tower center at shower depth
+      TowerGeom g{};
+      if (rec->GetTowerGeometry(ix, iy, g))
+      {
+        float xcC=0.f, ycC=0.f, zcC=0.f;
+        rec->CorrectShowerDepth(ix, iy, eReco,
+                                g.Xcenter, g.Ycenter, g.Zcenter,
+                                xcC, ycC, zcC);
+        const float phiC = std::atan2(ycC, xcC);
+        const float tw   = 2.f * static_cast<float>(M_PI)
+                           / static_cast<float>(rec->GetNx());
+
+        float d = static_cast<float>(
+                    std::remainder(static_cast<double>(phiSD - phiC),
+                                   static_cast<double>(tw))
+                  );
+        if (d <= -0.5f*tw) d += tw;
+        if (d >   0.5f*tw) d -= tw;
+
+        phiSD = phiC + d;
+      }
+      return phiSD;
+    }
 
 
-    inline float front2ShowerEta(BEmcRecCEMC* rec,
+  inline float front2ShowerEta(BEmcRecCEMC* rec,
                                  float        eReco,     // cluster E [GeV]
                                  double       /*unused*/,// legacy rFront
                                  int          ix,        // tower φ index

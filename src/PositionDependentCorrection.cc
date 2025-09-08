@@ -1842,23 +1842,20 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse,
                                                      blkCoord.second);
 
-      auto finePhiIndexFromAngle = [](float phi)->int {
-          constexpr float twoPi      = 2.f * static_cast<float>(M_PI);
-          constexpr float kRadPerBin = twoPi / 256.f;
-
-          // map (−π, +π] → [0, 2π)
-          float a = (phi < 0.f) ? (phi + twoPi) : phi;
-
-          // choose the bin that CONTAINS the angle (no +0.5 shift)
-          int ix = static_cast<int>(std::floor(a / kRadPerBin));
-
-          // wrap guards
+      auto ixFromBlockCenter = [](int blkCoarse, float local)->int {
+          // fold local once to (−0.5, 1.5]
+          float l = local;
+          if (l <= -0.5f || l >  1.5f) l = std::fmod(l + 2.0f, 2.0f);
+          // choose nearest tower center inside the coarse block
+          int ix = blkCoarse * 2 + static_cast<int>(std::floor(l + 0.5f));
+          // wrap to [0,256)
           if (ix >= 256) ix -= 256;
-          if (ix < 0)     ix += 256;
+          if (ix < 0)    ix += 256;
           return ix;
       };
 
-      const int ixFineBlk = finePhiIndexFromAngle(phiFront);
+      const int ixFineBlk = ixFromBlockCenter(blkPhiCoarse, blkCoord.second);
+
 
       // η row must come from the *same* 2×2 block as blkCoord.first.
       // Determine the parent coarse-η block and select the in-block fine row by local η.
@@ -1922,19 +1919,16 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
           const float phiFront = convertBlockToGlobalPhi(blk, loc);
 
-          auto finePhiIndexFromAngle = [](float phi)->int {
-              constexpr float twoPi      = 2.f * static_cast<float>(M_PI);
-              constexpr float kRadPerBin = twoPi / 256.f;
-
-              float a = (phi < 0.f) ? (phi + twoPi) : phi;  // [0,2π)
-              int ix = static_cast<int>(std::floor(a / kRadPerBin));  // containing bin
-
+          auto ixFromBlockCenter = [](int blkCoarse, float local)->int {
+              float l = local;
+              if (l <= -0.5f || l >  1.5f) l = std::fmod(l + 2.0f, 2.0f); // one fold
+              int ix = blkCoarse * 2 + static_cast<int>(std::floor(l + 0.5f)); // nearest center
               if (ix >= 256) ix -= 256;
-              if (ix < 0)     ix += 256;
+              if (ix < 0)    ix += 256;
               return ix;
           };
 
-          const int ixFineBlk = finePhiIndexFromAngle(phiFront);
+          const int ixFineBlk = ixFromBlockCenter(blk, loc);
 
           // η row from the same 2×2 block as the *corrected* local η (loc was corrected).
           const int blkEtaCoarse_forBlock = iyFine / 2;
@@ -1982,15 +1976,27 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     /* ── F) residuals and histogram filling ─────────────────────────── */
     auto wrap = [](float d){ return TVector2::Phi_mpi_pi(d); };
 
+    const float kTw_global = 2.f * static_cast<float>(M_PI) / 256.f; // one fine tower pitch
+
+    auto foldToTowerPitch = [&](float d)->float {
+      float df = wrap(d);  // (−π, +π]
+      df = static_cast<float>(
+              std::remainder(static_cast<double>(df), static_cast<double>(kTw_global))
+           );              // (−tw, +tw]
+      if (df <= -0.5f * kTw_global) df += kTw_global;  // (−tw/2, +tw/2]
+      if (df >   0.5f * kTw_global) df -= kTw_global;
+      return df;
+    };
+
     for (auto& r : rec)
     {
-      r.d = wrap(r.phi - phiTruth);
+      r.d = foldToTowerPitch(r.phi - phiTruth);
       if (!std::isfinite(r.phi)) ++g_nanPhi;
 
       if (vb > 3)
         std::cout << "    " << r.tag << "  loc=" << r.loc
                   << "  φ_SD=" << r.phi
-                  << "  Δφ="   << r.d << '\n';
+                  << "  Δφ(folded)="   << r.d << '\n';
     }
 
    //rec[0] -->Clusterizer tower2global NO CP
@@ -2015,12 +2021,11 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     etaPDCraw  = convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
     etaPDCcorr = etaPDCraw;              // φ-correction doesn’t change η in this study
 
-    /* ---- side-peak capture for CLUS & PDC variants (Δφ ≈ ± one-tower width),
-           gated by the tight |z| cut via fillGlobal ----------------------- */
+    /* ---- OUT-OF-WINDOW capture for CLUS & PDC variants (|Δφ| > 0.025 rad),
+           gated by the tight |z| cut via fillGlobal ---------------------- */
     if (fillGlobal)
     {
-      const float kTw  = 2.f * static_cast<float>(M_PI) / 256.f;  // one fine-bin
-      const float tol  = 0.15f * kTw;                             // ~15% window
+      const float kOut = 0.025f;  // 25 mrad in radians
 
       // CLUS-branch residuals
       const float dClusRaw = rec[0].d;    // CLUS-RAW
@@ -2030,70 +2035,44 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       const float dPdcRaw  = rec[3].d;    // PDC-RAW
       const float dPdcCorr = rec[4].d;    // PDC-CORR
 
+      auto push_row = [&](float dphi,
+                          std::vector<float>& vecDphi,
+                          std::vector<float>& vecEta,
+                          std::vector<float>& vecVz,
+                          std::vector<float>& vecE,
+                          float eta, float vz, float E)
+      {
+        vecDphi.push_back(dphi);
+        vecEta .push_back(eta);
+        vecVz  .push_back(vz);
+        vecE   .push_back(E);
+      };
+
       // ===== CLUS-RAW =====
       if (std::isfinite(dClusRaw)) {
-        if (std::fabs(dClusRaw - (+kTw)) < tol) {
-          ++m_clusRawPos1Tw;
-          m_clusRawPos1Tw_eta.push_back(etaCLUSraw);
-          m_clusRawPos1Tw_vz .push_back(vtxZ);
-          m_clusRawPos1Tw_E  .push_back(eReco);
-        }
-        if (std::fabs(dClusRaw - (-kTw)) < tol) {
-          ++m_clusRawNeg1Tw;
-          m_clusRawNeg1Tw_eta.push_back(etaCLUSraw);
-          m_clusRawNeg1Tw_vz .push_back(vtxZ);
-          m_clusRawNeg1Tw_E  .push_back(eReco);
-        }
+        if ( dClusRaw >= +kOut) { ++m_clusRawPos1Tw; push_row(dClusRaw, m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta, m_clusRawPos1Tw_vz, m_clusRawPos1Tw_E, etaCLUSraw, vtxZ, eReco); }
+        if ( dClusRaw <= -kOut) { ++m_clusRawNeg1Tw; push_row(dClusRaw, m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta, m_clusRawNeg1Tw_vz, m_clusRawNeg1Tw_E, etaCLUSraw, vtxZ, eReco); }
       }
 
       // ===== CLUS-CP =====
       if (std::isfinite(dClusCP)) {
-        if (std::fabs(dClusCP - (+kTw)) < tol) {
-          ++m_clusCPPos1Tw;
-          m_clusCPPos1Tw_eta.push_back(etaCLUScp);
-          m_clusCPPos1Tw_vz .push_back(vtxZ);
-          m_clusCPPos1Tw_E  .push_back(eReco);
-        }
-        if (std::fabs(dClusCP - (-kTw)) < tol) {
-          ++m_clusCPNeg1Tw;
-          m_clusCPNeg1Tw_eta.push_back(etaCLUScp);
-          m_clusCPNeg1Tw_vz .push_back(vtxZ);
-          m_clusCPNeg1Tw_E  .push_back(eReco);
-        }
+        if ( dClusCP >= +kOut) { ++m_clusCPPos1Tw; push_row(dClusCP, m_clusCPPos1Tw_dphi, m_clusCPPos1Tw_eta, m_clusCPPos1Tw_vz, m_clusCPPos1Tw_E, etaCLUScp, vtxZ, eReco); }
+        if ( dClusCP <= -kOut) { ++m_clusCPNeg1Tw; push_row(dClusCP, m_clusCPNeg1Tw_dphi, m_clusCPNeg1Tw_eta, m_clusCPNeg1Tw_vz, m_clusCPNeg1Tw_E, etaCLUScp, vtxZ, eReco); }
       }
 
       // ===== PDC-RAW =====
       if (std::isfinite(dPdcRaw)) {
-        if (std::fabs(dPdcRaw - (+kTw)) < tol) {
-          ++m_pdcRawPos1Tw;
-          m_pdcRawPos1Tw_eta.push_back(etaPDCraw);
-          m_pdcRawPos1Tw_vz .push_back(vtxZ);
-          m_pdcRawPos1Tw_E  .push_back(eReco);
-        }
-        if (std::fabs(dPdcRaw - (-kTw)) < tol) {
-          ++m_pdcRawNeg1Tw;
-          m_pdcRawNeg1Tw_eta.push_back(etaPDCraw);
-          m_pdcRawNeg1Tw_vz .push_back(vtxZ);
-          m_pdcRawNeg1Tw_E  .push_back(eReco);
-        }
+        if ( dPdcRaw >= +kOut) { ++m_pdcRawPos1Tw; push_row(dPdcRaw, m_pdcRawPos1Tw_dphi, m_pdcRawPos1Tw_eta, m_pdcRawPos1Tw_vz, m_pdcRawPos1Tw_E, etaPDCraw, vtxZ, eReco); }
+        if ( dPdcRaw <= -kOut) { ++m_pdcRawNeg1Tw; push_row(dPdcRaw, m_pdcRawNeg1Tw_dphi, m_pdcRawNeg1Tw_eta, m_pdcRawNeg1Tw_vz, m_pdcRawNeg1Tw_E, etaPDCraw, vtxZ, eReco); }
       }
 
       // ===== PDC-CORR =====
       if (std::isfinite(dPdcCorr)) {
-        if (std::fabs(dPdcCorr - (+kTw)) < tol) {
-          ++m_pdcCorrPos1Tw;
-          m_pdcCorrPos1Tw_eta.push_back(etaPDCcorr);
-          m_pdcCorrPos1Tw_vz .push_back(vtxZ);
-          m_pdcCorrPos1Tw_E  .push_back(eReco);
-        }
-        if (std::fabs(dPdcCorr - (-kTw)) < tol) {
-          ++m_pdcCorrNeg1Tw;
-          m_pdcCorrNeg1Tw_eta.push_back(etaPDCcorr);
-          m_pdcCorrNeg1Tw_vz .push_back(vtxZ);
-          m_pdcCorrNeg1Tw_E  .push_back(eReco);
-        }
+        if ( dPdcCorr >= +kOut) { ++m_pdcCorrPos1Tw; push_row(dPdcCorr, m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta, m_pdcCorrPos1Tw_vz, m_pdcCorrPos1Tw_E, etaPDCcorr, vtxZ, eReco); }
+        if ( dPdcCorr <= -kOut) { ++m_pdcCorrNeg1Tw; push_row(dPdcCorr, m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta, m_pdcCorrNeg1Tw_vz, m_pdcCorrNeg1Tw_E, etaPDCcorr, vtxZ, eReco); }
       }
     }
+
 
 
 
@@ -2167,23 +2146,16 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
     if (vb >= 2)
     {
-      // Print the Δφ summary ONLY if this event is interesting:
-      //  • near ± one-tower width (~±0.0245 rad), OR
-      //  • farther than 0.025 rad from zero (any variant)
-      const float kTw   = 2.f * static_cast<float>(M_PI) / 256.f; // one fine bin
-      const float tol   = 0.15f * kTw;                            // ±15% window
-      const float kFar  = 0.025f;                                 // 0.025 rad
+        // Print the Δφ summary ONLY if this event has any |Δφ| > 0.025 rad (any variant)
+        const float kOut = 0.025f;  // 25 mrad in radians
 
-      auto nearOneTw = [&](float d)->bool {
-        return (std::fabs(d - kTw) < tol) || (std::fabs(d + kTw) < tol);
-      };
+        bool shouldPrint = false;
+        for (const auto& r : rec)
+        {
+          if (!std::isfinite(r.d)) continue;
+          if (std::fabs(r.d) > kOut) { shouldPrint = true; break; }
+        }
 
-      bool shouldPrint = false;
-      for (const auto& r : rec)
-      {
-        if (!std::isfinite(r.d)) continue;
-        if (nearOneTw(r.d) || std::fabs(r.d) >= kFar) { shouldPrint = true; break; }
-      }
 
       if (shouldPrint)
       {
@@ -2211,10 +2183,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                   << " rad vs CLUS-RAW)\n"
                   << "  ────────────────────────────────────────────────\n";
       }
-    }
-
-
-
+   }
 }
 
 
@@ -3525,39 +3494,41 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
       }
 
         {
-          const double kTw = 2.0 * M_PI / 256.0;
-          std::cout << "\n[Δφ near ±1-tower width (" << std::fixed << std::setprecision(4)
-                    << kTw << " rad)]\n"
-                    << "  CLUS-RAW : +1×tw = " << m_clusRawPos1Tw
-                    << " , -1×tw = "          << m_clusRawNeg1Tw << '\n'
-                    << "  CLUS-CP  : +1×tw = " << m_clusCPPos1Tw
-                    << " , -1×tw = "          << m_clusCPNeg1Tw  << '\n'
-                    << "  PDC-RAW  : +1×tw = " << m_pdcRawPos1Tw
-                    << " , -1×tw = "          << m_pdcRawNeg1Tw  << '\n'
-                    << "  PDC-CORR : +1×tw = " << m_pdcCorrPos1Tw
-                    << " , -1×tw = "          << m_pdcCorrNeg1Tw  << "\n\n";
+          std::cout << "\n[Δφ outside ±0.025 rad]\n"
+                    << "  CLUS-RAW : +out = " << m_clusRawPos1Tw
+                    << " , -out = "          << m_clusRawNeg1Tw << '\n'
+                    << "  CLUS-CP  : +out = " << m_clusCPPos1Tw
+                    << " , -out = "          << m_clusCPNeg1Tw  << '\n'
+                    << "  PDC-RAW  : +out = " << m_pdcRawPos1Tw
+                    << " , -out = "          << m_pdcRawNeg1Tw  << '\n'
+                    << "  PDC-CORR : +out = " << m_pdcCorrPos1Tw
+                    << " , -out = "          << m_pdcCorrNeg1Tw  << "\n\n";
 
-          auto print_rows3 = [](const char* title,
+          auto print_rows4 = [](const char* title,
+                                const std::vector<float>& dphis,
                                 const std::vector<float>& etas,
                                 const std::vector<float>& vzs,
                                 const std::vector<float>& Es)
           {
-            const std::size_t N = etas.size();
+            const std::size_t N = std::min(std::min(dphis.size(), etas.size()),
+                                           std::min(vzs.size(),   Es.size()));
             std::cout << title << "  (N=" << N << ")\n";
             if (N == 0) { std::cout << "  (none)\n\n"; return; }
 
             std::cout << std::left
                       << std::setw(6)  << "idx"
+                      << std::setw(14) << "Δφ (rad)"
                       << std::setw(12) << "eta"
                       << std::setw(12) << "vtxZ(cm)"
                       << std::setw(12) << "E(GeV)"
                       << "\n"
-                      << "--------------------------------------------\n";
+                      << "--------------------------------------------------------------\n";
 
             for (std::size_t i = 0; i < N; ++i)
             {
               std::cout << std::left
                         << std::setw(6)  << i
+                        << std::setw(14) << std::fixed << std::setprecision(5) << dphis[i]
                         << std::setw(12) << std::fixed << std::setprecision(5) << etas[i]
                         << std::setw(12) << std::fixed << std::setprecision(2) << vzs[i]
                         << std::setw(12) << std::fixed << std::setprecision(2) << Es[i]
@@ -3567,30 +3538,29 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
           };
 
           // CLUS-RAW
-          print_rows3("CLUS-RAW  +1×tw  (Δφ≈+tw):",
-                      m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E);
-          print_rows3("CLUS-RAW  −1×tw  (Δφ≈−tw):",
-                      m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E);
+          print_rows4("CLUS-RAW  + OUT (|Δφ|>0.025, positive):",
+                      m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E);
+          print_rows4("CLUS-RAW  − OUT (|Δφ|>0.025, negative):",
+                      m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E);
 
           // CLUS-CP
-          print_rows3("CLUS-CP   +1×tw  (Δφ≈+tw):",
-                      m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E);
-          print_rows3("CLUS-CP   −1×tw  (Δφ≈−tw):",
-                      m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E);
+          print_rows4("CLUS-CP   + OUT (|Δφ|>0.025, positive):",
+                      m_clusCPPos1Tw_dphi,  m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E);
+          print_rows4("CLUS-CP   − OUT (|Δφ|>0.025, negative):",
+                      m_clusCPNeg1Tw_dphi,  m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E);
 
           // PDC-RAW
-          print_rows3("PDC-RAW   +1×tw  (Δφ≈+tw):",
-                      m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E);
-          print_rows3("PDC-RAW   −1×tw  (Δφ≈−tw):",
-                      m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E);
+          print_rows4("PDC-RAW   + OUT (|Δφ|>0.025, positive):",
+                      m_pdcRawPos1Tw_dphi,  m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E);
+          print_rows4("PDC-RAW   − OUT (|Δφ|>0.025, negative):",
+                      m_pdcRawNeg1Tw_dphi,  m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E);
 
           // PDC-CORR
-          print_rows3("PDC-CORR  +1×tw  (Δφ≈+tw):",
-                      m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E);
-          print_rows3("PDC-CORR  −1×tw  (Δφ≈−tw):",
-                      m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E);
+          print_rows4("PDC-CORR  + OUT (|Δφ|>0.025, positive):",
+                      m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E);
+          print_rows4("PDC-CORR  − OUT (|Δφ|>0.025, negative):",
+                      m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E);
         }
-
     }
 
   /* ──────────────────────────────────────── 2) Δη five-way table ───── */
