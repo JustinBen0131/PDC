@@ -2,14 +2,120 @@
 ###############################################################################
 # PositionDependentCorrect_Condor_submit.sh
 #
-# Final reference script combining:
-#   - local mode (both/noSim/localSimTest) with up to 10k events
-#   - Condor submission mode (data only / sim only / both)
-#   - "localSimTest" picks just the first line from each sim list
-#   - merges for local modes so the macro stops after 10k events
-#   - chunking for condor modes to run all events
-#   - "submitTestSimCondor" => partial Condor sim submission using only 4 lines
+# Driver for Position-Dependent Correction (PDC) production on sPHENIX:
+#   • Data-side Condor submissions (chunked by file lists)
+#   • Simulation-side submissions (Condor or Local), with support for:
+#       - round slicing (first/second/third/fourthRound)
+#       - sample <N> subsets
+#       - full “doAll” processing
+#       - optional tracking of submitted pairs across rounds
+#   • Golden-run segmentation helper for data (split into job-balanced segments)
+#
+# PATHS (key defaults)
+#   MACRO_PATH            : /sphenix/u/patsfan753/scratch/PDCrun24pp/macros/Fun4All_PDC.C
+#   DST_LIST_DIR          : /sphenix/u/patsfan753/scratch/PDCrun24pp/dst_list
+#   OUTDIR_DATA           : /sphenix/tg/tg01/bulk/jbennett/PDC/output
+#   OUTDIR_SIM            : /sphenix/tg/tg01/bulk/jbennett/PDC/SimOut
+#   LOG_DIR               : /sphenix/user/${USER}/PositionDependentCorrect
+#   CONDOR_LISTFILES_DIR  : ${LOG_DIR}/condorListFiles
+#
+# SPECIAL OUTPUT (LOCAL doAll for SIM ONLY)
+#   • When you run:  ./PositionDependentCorrect_Condor_submit.sh simOnly local doAll
+#     the script processes ALL sim pairs locally (single macro call) and writes:
+#       /sphenix/u/patsfan753/scratch/PDCrun24pp/output/PositionDep_sim_ALL.root
+#     This is equivalent to Condor “doAll” followed by the final addChunks merger.
+#
+# TOP-LEVEL MODES (first argument)
+# -----------------------------------------------------------------------------
+# 1)  (no args)           Submit BOTH data & sim on Condor (all events).
+#       Example:  ./PositionDependentCorrect_Condor_submit.sh
+#
+# 2)  noSim               Data only on Condor (all events).
+#       Example:  ./PositionDependentCorrect_Condor_submit.sh noSim
+#
+# 3)  dataOnly <submode>  Data-only helpers & wrappers:
+#       submodes:
+#         • local              Run locally (≤ LOCAL_NEVENTS) using your local helper.
+#         • condorTest         Submit a very small test (first run only).
+#         • condorFirstTen     Cap total submitted jobs at MAX_JOBS_DATA.
+#         • condor             Full scan (legacy behavior).
+#             - Optional:  round <N>   Submit only the Nth golden-run segment.
+#         • splitGoldenRunList Build goldenRuns_segment*.txt from Final_RunNumbers.
+#         • condorAll          Alias of plain “condor”.
+#       Examples:
+#         ./PositionDependentCorrect_Condor_submit.sh dataOnly condor
+#         ./PositionDependentCorrect_Condor_submit.sh dataOnly condor round 3
+#         ./PositionDependentCorrect_Condor_submit.sh dataOnly splitGoldenRunList
+#
+# 4)  condor [firstTen]   Shorthand for data-only Condor submit.
+#       • firstTen         Cap total submitted jobs at MAX_JOBS_DATA.
+#       Examples:
+#         ./PositionDependentCorrect_Condor_submit.sh condor
+#         ./PositionDependentCorrect_Condor_submit.sh condor firstTen
+#
+# 5)  condorTest          Shorthand for data-only “condorTest”.
+#       Example:  ./PositionDependentCorrect_Condor_submit.sh condorTest
+#
+# 6)  simOnly <args…>     Simulation-side driver (passes remaining args to
+#                         submit_sim_condor). Supported tokens (any order):
+#       Execution mode (choose one):
+#         • local              Run on this node.
+#         • condor             Submit grouped jobs to Condor.
+#       Round selection (choose at most one):
+#         • firstRound         Use pairs [0 .. 14999], wipe outputs.
+#         • secondRound        Use pairs [15000 .. 29999].
+#         • thirdRound         Use pairs [30000 .. 44999].
+#         • fourthRound        Use pairs [45000 .. 59999].
+#         • testSubmit         Use exactly 5 pairs (quick smoke test).
+#         • sample <N>         Use the first N pairs, wipe outputs.
+#         • firstRoundCheck    Inventory only; no submission.
+#       Global switches:
+#         • doAll              Override selection and process ALL available pairs.
+#
+#       Behavior notes:
+#         • simOnly condor doAll
+#             - Groups all pairs into Condor jobs (GROUP_SIZE_SIM=5), writes
+#               per-job ROOT files into OUTDIR_SIM. Use external merger if needed.
+#         • simOnly local doAll
+#             - Runs one macro over ALL pairs locally and writes a single final:
+#               /sphenix/u/patsfan753/scratch/PDCrun24pp/output/PositionDep_sim_ALL.root
+#
+#       Examples:
+#         ./PositionDependentCorrect_Condor_submit.sh simOnly condor firstRound
+#         ./PositionDependentCorrect_Condor_submit.sh simOnly condor sample 200
+#         ./PositionDependentCorrect_Condor_submit.sh simOnly condor doAll
+#         ./PositionDependentCorrect_Condor_submit.sh simOnly local  doAll
+#
+# 7)  submitTestSimCondor  Partial sim submission helper (small subset).
+#       Example:  ./PositionDependentCorrect_Condor_submit.sh submitTestSimCondor
+#
+# DATA-SIDE CONSTANTS
+#   CHUNK_SIZE_DATA = 10     # files per data job
+#   MAX_JOBS_DATA   = 10000  # cap used by “firstTen” mode
+#
+# SIM-SIDE CONSTANTS (submit_sim_condor)
+#   GROUP_SIZE_SIM  = 5      # (DST,G4) pairs per Condor job
+#   LOCAL_NEVENTS   = 10000  # used by dataOnly local helper
+#
+# GOLDEN-RUN SEGMENTER
+#   dataOnly splitGoldenRunList
+#     - Reads $GOLDEN_RUN_LIST (one run per line)
+#     - Counts expected jobs per run (ceil(Nfiles / CHUNK_SIZE_DATA))
+#     - Emits goldenRuns_segment*.txt so each segment’s total job count
+#       stays ≤ MAX_JOBS_DATA; prints a detailed summary table.
+#
+# LOGGING / STAGING
+#   Logs:   ${LOG_DIR}/{stdout,error,log}
+#   Staging for list files:  ${CONDOR_LISTFILES_DIR}
+#
+# EXAMPLES (quick reference)
+#   • BOTH (default):               ./PositionDependentCorrect_Condor_submit.sh
+#   • DATA (full Condor):           ./PositionDependentCorrect_Condor_submit.sh noSim
+#   • DATA (segment #3):            ./PositionDependentCorrect_Condor_submit.sh dataOnly condor round 3
+#   • SIM  (all via Condor):        ./PositionDependentCorrect_Condor_submit.sh simOnly condor doAll
+#   • SIM  (all locally → ALL):     ./PositionDependentCorrect_Condor_submit.sh simOnly local doAll
 ###############################################################################
+
 
 #############################
 # 0) CONFIGURATION
@@ -596,7 +702,17 @@ submit_sim_condor() {
           return 1
       fi
 
-      local outRoot="${OUTDIR_SIM}/PositionDep_sim_bundle_${offset}_${endIndex}_${stamp}.root"
+      # If user requested "doAll" in local mode, write the final ALL file directly
+      local finalOutDir="/sphenix/u/patsfan753/scratch/PDCrun24pp/output"
+      local outRoot
+      if $FAST_SUBMIT; then
+          mkdir -p "$finalOutDir"
+          outRoot="${finalOutDir}/PositionDep_sim_ALL.root"
+          rm -f "$outRoot" 2>/dev/null || true
+      else
+          outRoot="${OUTDIR_SIM}/PositionDep_sim_bundle_${offset}_${endIndex}_${stamp}.root"
+      fi
+
       echo "------------------------------------------------------------------"
       echo "[RUN]  single macro call over ${nd} pairs"
       echo "   DST-LIST : $(basename "$dstList")"
@@ -607,7 +723,11 @@ submit_sim_condor() {
       # nevents=0 → process all events across all files in the lists
       root -b -q -l "${MACRO_PATH}(0, \"${dstList}\", \"${hitsList}\", \"${outRoot}\")"
 
-      echo "[INFO] LOCAL bundle complete → $outRoot"
+      if $FAST_SUBMIT; then
+          echo "[INFO] LOCAL doAll complete → $outRoot"
+      else
+          echo "[INFO] LOCAL bundle complete → $outRoot"
+      fi
       return 0
   fi
 

@@ -996,7 +996,8 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
                     bool   isFirstPass,
                     const std::vector<std::pair<double,double>>& eEdges,
                     const char* outDir,
-                    std::ofstream& bOut)
+                    std::ofstream& bOut,
+                    const char* etaLabel)
 // ===========================================================================
 {
     // ----------( B )  Local-φ ------------------------------------------------
@@ -1119,7 +1120,8 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         if(hCorRaw) tl.DrawLatex(0.88,0.82,Form("Corr: %.0f",nCor));
 
         if (bOut.is_open() && best.val>0)
-            bOut << Form("PHI [%.1f,%.1f) %.6f\n",eLo,eHi,best.val);
+            bOut << Form("PHI [%.1f,%.1f) %.6f  %s\n", eLo, eHi, best.val, etaLabel ? etaLabel : "default");
+
     } // end φ loop
 
     cFitsPhi.SaveAs(Form("%s/LocalPhiFits_4by2.png",outDir));
@@ -1228,8 +1230,9 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
         tl.DrawLatex(0.88,0.85,Form("Uncorr: %.0f",nUnc));
         if(hCorRaw) tl.DrawLatex(0.88,0.82,Form("Corr: %.0f",nCor));
 
-        if(bOut.is_open() && best.val>0)
-            bOut << Form("ETA [%.1f,%.1f)  %.6f\n", eLo, eHi, best.val);
+        if (bOut.is_open() && best.val>0)
+            bOut << Form("ETA [%.1f,%.1f)  %.6f  %s\n", eLo, eHi, best.val, etaLabel ? etaLabel : "default");
+
     } // end η loop
 
     cFitsEta.SaveAs(Form("%s/LocalEtaFits_4by2.png",outDir));
@@ -1237,154 +1240,6 @@ void FitLocalPhiEta(TH3F*  hUnc3D,
 }
 
 
-
-
-void PlotPhiShiftAndWidth(TH3F*  hUnc3D,
-                          TH3F*  hCor3D,
-                          const std::vector<std::pair<double,double>>& eEdges,
-                          const char* outDir)
-{
-  if(!hUnc3D || !hCor3D){
-      std::cerr << "[PhiShift] need both uncorrected *and* corrected 3-D hists – abort\n";
-      return;
-  }
-
-  /* ————————————————————————
-     Style tuned for publications
-     ———————————————————————— */
-  gStyle->SetOptStat(0);
-  gStyle->SetTitleFont  (42,"XYZ");
-  gStyle->SetLabelFont  (42,"XYZ");
-  gStyle->SetTitleSize  (0.045,"XYZ");
-  gStyle->SetLabelSize  (0.040,"XYZ");
-  gStyle->SetPadTickX(1);   // ticks on all four sides
-  gStyle->SetPadTickY(1);
-
-  const int N_E = (int)eEdges.size();
-  std::vector<double> vEcen, vShift, vShiftErr, vRmsRatio;
-
-  /* ———————————————————————————————————————————
-     loop: project each (η,φ,E) cube on local φ
-     ——————————————————————————————————————————— */
-  for(int i=0;i<N_E;++i)
-  {
-      const double eLo=eEdges[i].first , eHi=eEdges[i].second ;
-      const double eC =0.5*(eLo+eHi);
-
-      auto slice = [&](TH3F* h)->std::unique_ptr<TH1D>
-      {
-          const int zLo = std::max(1 , h->GetZaxis()->FindBin(eLo+1e-9));
-          const int zHi = std::min(h->GetNbinsZ(),
-                                   h->GetZaxis()->FindBin(eHi-1e-9));
-          h->GetZaxis()->SetRange(zLo,zHi);
-          h->GetXaxis()->SetRange(1,h->GetNbinsX());   // full η range
-          auto hphi = std::unique_ptr<TH1D>(
-                         (TH1D*)h->Project3D("y") );
-          hphi->SetDirectory(nullptr);
-          return hphi;
-      };
-
-      auto hU = slice(hUnc3D);
-      auto hC = slice(hCor3D);
-      if(!hU || !hC) continue;
-
-      const double meanU  = hU->GetMean();
-      const double meanC  = hC->GetMean();
-      const double rmsU   = hU->GetRMS();
-      const double rmsC   = hC->GetRMS();
-      const double nU     = std::max(1.0 , hU->GetEntries());
-
-      vEcen    .push_back(eC);
-      vShift   .push_back(meanC - meanU);
-      vShiftErr.push_back(rmsU/std::sqrt(nU));      // statistical error
-      vRmsRatio.push_back(rmsU>0 ? rmsC/rmsU : 0.0);
-  }
-
-  if(vEcen.empty()){
-      std::cerr<<"[PhiShift] no valid slices\n"; return;
-  }
-
-  /* ———————————————————————————————————————————
-     build graphs
-     ——————————————————————————————————————————— */
-  const int N = (int)vEcen.size();
-  TGraphErrors gShift (N, &vEcen[0], &vShift[0]   , nullptr, &vShiftErr[0]);
-  TGraph       gRms   (N, &vEcen[0], &vRmsRatio[0]);
-
-  gShift.SetMarkerStyle(20);
-  gShift.SetMarkerColor(kRed+1);  gShift.SetLineColor(kRed+1);
-  gShift.SetLineWidth(2);
-
-  gRms.SetMarkerStyle(25);
-  gRms.SetMarkerColor(kAzure+2);  gRms.SetLineColor(kAzure+2);
-  gRms.SetLineWidth(2);
-
-  /* ———————————————————————————————————————————
-     lay-out: two pads sharing the x-axis
-     ——————————————————————————————————————————— */
-  const double xMin = eEdges.front().first  - 0.5;
-  const double xMax = eEdges.back ().second + 0.5;
-
-  TCanvas c("PhiShift_vs_E","",1000,900);
-  c.cd();
-  TPad *p1 = new TPad("p1","",0,0.42,1,1);   // top 58 %
-  TPad *p2 = new TPad("p2","",0,0   ,1,0.42); // bottom 42 %
-  for(auto p : {p1,p2}){
-      p->SetLeftMargin (0.14);
-      p->SetRightMargin(0.04);
-      p->SetTickx(); p->SetTicky();
-      p->Draw();
-  }
-
-  /* ————————————————————
-     (a) mean shift
-     ———————————————————— */
-  p1->cd();
-  TH2F f1("f1",";E_{slice}  [GeV];#Delta#LT#varphi#GT  (corr - raw)",
-          100,xMin,xMax, 100, -0.05, 0.05);
-  f1.GetYaxis()->SetTitleOffset(1.2);
-  f1.Draw();
-  gShift.Draw("PZ SAME");
-
-  TLine l0(xMin,0,xMax,0); l0.SetLineStyle(2); l0.Draw();
-
-  TLatex lat; lat.SetNDC(); lat.SetTextFont(42);
-  lat.SetTextSize(0.045);
-  lat.DrawLatex(0.16,0.85,"#bf{(a)}  Mean shift");
-
-  /* ————————————————————
-     (b) width ratio
-     ———————————————————— */
-  p2->cd();
-  TH2F f2("f2",";E_{slice}  [GeV];RMS_{corr} / RMS_{raw}",
-          100,xMin,xMax, 100, 0.7, 1.25);
-  f2.GetYaxis()->SetTitleOffset(1.35);
-  f2.GetXaxis()->SetTitleOffset(1.2);
-  f2.Draw();
-  gRms.Draw("P SAME");
-
-  TLine l1(xMin,1,xMax,1); l1.SetLineStyle(2); l1.Draw();
-
-  lat.DrawLatex(0.16,0.84,"#bf{(b)}  Width ratio");
-
-  /* ————————————————————
-     Legend – unobtrusive, transparent
-     ———————————————————— */
-  TPaveText leg(0.70,0.78,0.93,0.90,"NDC");
-  leg.SetFillStyle(0); leg.SetBorderSize(0);
-  leg.SetTextAlign(12); leg.SetTextFont(42); leg.SetTextSize(0.036);
-  leg.AddText( Form("#color[%d]{#square}  #Delta#LT#varphi#GT", kRed+1) );
-  leg.AddText( Form("#color[%d]{#square}  RMS ratio",          kAzure+2) );
-  p1->cd();      // place it in the upper pad
-  leg.Draw();
-
-  /* ————————————————————
-     write file
-     ———————————————————— */
-  TString out = Form("%s/PhiShift_vs_E.png",outDir);
-  c.SaveAs(out);
-  std::cout<<"[PhiShift] wrote "<<out<<"\n";
-}
 
 void Plot2DBlockEtaPhi(TH3F* hUnc3D,
                        TH3F* hCor3D,
@@ -8744,51 +8599,61 @@ void MakeDeltaPhiEtaPlayground(
     }
 
     // =====================================================================
-    // NEW: 4WAY summary overlays (first non-empty lowest E bin) + 4-curve μ/σ(E)
+    // NEW: 4WAY summary overlays (first/second non-empty E bin) + singlets
     //       Outputs into: <outDir>/4WAYneededSUMMARIES
     // =====================================================================
     const std::string dir4Way = std::string(outDir) + "/4WAYneededSUMMARIES";
     ensureDir(dir4Way.c_str());
 
-    // Find the first energy slice where BOTH hists in a pair are non-empty
-    auto firstNonEmptyPair = [&](const std::vector<TH1F*>& A,
-                                 const std::vector<TH1F*>& B)->int {
+    // Find the N-th energy slice where BOTH hists in a pair are non-empty
+    auto nthNonEmptyPair = [&](const std::vector<TH1F*>& A,
+                               const std::vector<TH1F*>& B,
+                               int nth)->int
+    {
+        int count = 0;
         for (std::size_t i=0; i<eEdges.size(); ++i) {
             if (i<A.size() && i<B.size() && A[i] && B[i] &&
-                A[i]->Integral()>0 && B[i]->Integral()>0) return static_cast<int>(i);
+                A[i]->Integral()>0 && B[i]->Integral()>0)
+            {
+                ++count;
+                if (count == nth) return static_cast<int>(i);
+            }
         }
         return -1;
     };
 
-    // Draw one two-series overlay for a given residual (phi/eta)
-    auto overlayTwoSeriesFirstBin = [&](const char* baseLabel,   // "Variable-b (Benchmark)" or "Constant-b (Production)"
-                                        Color_t color,           // kBlue+1 or kRed+1
-                                        bool isPhi,              // true: phi, false: eta
-                                        const std::vector<TH1F*>& Vraw,
-                                        const std::vector<TH1F*>& Vcor,
-                                        const std::string& outPngStem)
+    // 2-series overlay for the N-th non-empty energy bin
+    auto overlayTwoSeriesNthBin = [&](const char* baseLabel,   // "Variable-b (Benchmark)" or "Constant-b (Production)"
+                                      Color_t color,           // kBlue+1 or kRed+1
+                                      bool isPhi,              // true: phi, false: eta
+                                      const std::vector<TH1F*>& Vraw,
+                                      const std::vector<TH1F*>& Vcor,
+                                      const std::string& outPngStemBase,
+                                      int nth)
     {
-        const int iE = firstNonEmptyPair(Vraw, Vcor);
+        const int iE = nthNonEmptyPair(Vraw, Vcor, nth);
         if (iE < 0) {
-            std::cerr << "[Playground][WARN] 4WAY overlay skipped for " << baseLabel
-                      << (isPhi? " (phi)" : " (eta)") << " – no non-empty first bin.\n";
+            std::cerr << "[Playground][WARN] 4WAY overlay skipped for "
+                      << baseLabel << (isPhi? " (phi)" : " (eta)")
+                      << " – no non-empty bin #" << nth << ".\n";
             return;
         }
 
-        TCanvas c(Form("c4Way_%s_%s", baseLabel, isPhi? "phi" : "eta"),
-                  "4WAY first-bin overlay", 1000, 750);
+        const char* suffix =
+            (nth == 1) ? "_FirstBin" :
+            (nth == 2) ? "_SecondBin" : Form("_Bin%d", nth);
+
+        TCanvas c(Form("c4Way_%s_%s_bin%d", baseLabel, isPhi? "phi" : "eta", nth),
+                  "4WAY Nth-bin overlay", 1000, 750);
 
         const char* symShort = isPhi ? "#phi" : "#eta";
         std::vector<ResidualSpec> specs = {
-            // Uncorrected = filled circle (20)
             { Vraw[iE], Form("%s Uncorr, %s", baseLabel, symShort),  color, (Style_t)20, 1 },
-            // Corrected   = open circle (24)
             { Vcor[iE], Form("%s Corr, %s",   baseLabel, symShort),  color, (Style_t)24, 1 }
         };
 
-        // Dynamic header: "<Δφ or Δη> Uncorrected/Corrected Overlay for <Constant b-Correction | Variable b-Correction>"
         const char* residTitle = isPhi ? "#Delta#phi" : "#Delta#eta";
-        const bool isConstB    = (std::string(baseLabel).find("Constant-b") != std::string::npos);
+        const bool  isConstB   = (std::string(baseLabel).find("Constant-b") != std::string::npos);
         const char* familyTitle= isConstB ? "Constant b-Correction" : "Variable b-Correction";
         std::string header     = Form("%s Uncorrected/Corrected Overlay for %s", residTitle, familyTitle);
 
@@ -8797,28 +8662,128 @@ void MakeDeltaPhiEtaPlayground(
                           eEdges[iE].first, eEdges[iE].second,
                           specs, xMin, xMax, 1.0);
 
-        const std::string outPng = dir4Way + "/" + outPngStem + ".png";
+        const std::string outPng = dir4Way + "/" + outPngStemBase + std::string(suffix) + ".png";
         c.SaveAs(outPng.c_str());
         c.Close();
         std::cout << "[Playground] Wrote " << outPng << "\n";
     };
 
-    // ---- The 4 requested first-bin overlays ----
+    // 1-series (stand-alone) plot(s) for the same N-th non-empty energy bin
+    auto singleSeriesNthBin = [&](const char* baseLabel,    // same labels as overlay
+                                  Color_t color,
+                                  bool isPhi,
+                                  const std::vector<TH1F*>& Vraw,
+                                  const std::vector<TH1F*>& Vcor,
+                                  const std::string& outPngStemBase,
+                                  int nth)
+    {
+        const int iE = nthNonEmptyPair(Vraw, Vcor, nth);
+        if (iE < 0) {
+            std::cerr << "[Playground][WARN] 4WAY singlet skipped for "
+                      << baseLabel << (isPhi? " (phi)" : " (eta)")
+                      << " – no non-empty bin #" << nth << ".\n";
+            return;
+        }
+
+        const char* suffix =
+            (nth == 1) ? "_FirstBin" :
+            (nth == 2) ? "_SecondBin" : Form("_Bin%d", nth);
+
+        const char* symShort   = isPhi ? "#phi" : "#eta";
+        const char* residTitle = isPhi ? "#Delta#phi" : "#Delta#eta";
+        const bool  isConstB   = (std::string(baseLabel).find("Constant-b") != std::string::npos);
+        const char* familyTitle= isConstB ? "Constant b-Correction" : "Variable b-Correction";
+
+        auto drawOne = [&](TH1F* H, const char* tag, const char* stemTag, Style_t mstyle)
+        {
+            if (!H || H->Integral() <= 0) return;
+
+            TCanvas c(Form("c4Way_%s_%s_%s_bin%d", baseLabel, isPhi? "phi":"eta", stemTag, nth),
+                      "4WAY Nth-bin single", 1000, 750);
+
+            std::vector<ResidualSpec> specs = {
+                { H, Form("%s %s, %s", baseLabel, tag, symShort), color, mstyle, 1 }
+            };
+
+            std::string header = Form("%s %s Only for %s", residTitle, tag, familyTitle);
+
+            drawResidualPanel(&c,
+                              header,
+                              eEdges[iE].first, eEdges[iE].second,
+                              specs, xMin, xMax, 1.0);
+
+            const std::string outPng = dir4Way + "/" + outPngStemBase + "_" + stemTag + std::string(suffix) + ".png";
+            c.SaveAs(outPng.c_str());
+            c.Close();
+            std::cout << "[Playground] Wrote " << outPng << "\n";
+        };
+
+        // Produce both stand-alone views
+        drawOne(Vraw[iE], "Uncorr", "Uncorr", (Style_t)20);
+        drawOne(Vcor[iE], "Corr",   "Corr",   (Style_t)24);
+    };
+
+    // ---- First and Second non-empty bin overlays + singlets ----
+
     // PDC (2×2 Block-Local), φ and η
-    overlayTwoSeriesFirstBin("Variable-b (Benchmark)", kBlue+1,  true,
-                             HphiScratchRaw,  HphiScratchCorr,
-                             "PDC_phi_RawVsCorr_FirstBin");
-    overlayTwoSeriesFirstBin("Variable-b (Benchmark)", kBlue+1,  false,
-                             HetaScratchRaw,  HetaScratchCorr,
-                             "PDC_eta_RawVsCorr_FirstBin");
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 1);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 2);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 2);
+
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 1);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 2);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 2);
 
     // CLUS (Constant-b (Production)), φ and η
-    overlayTwoSeriesFirstBin("Constant-b (Production)",    kRed+1,   true,
-                             Hphi,             HphiCorr,
-                             "CLUS_phi_RawVsCorr_FirstBin");
-    overlayTwoSeriesFirstBin("Constant-b (Production)",    kRed+1,   false,
-                             Heta,             HetaCorr,
-                             "CLUS_eta_RawVsCorr_FirstBin");
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 1);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 2);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 2);
+
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 1);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 2);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 2);
+
+
 
     // ---- Four-variant μ/σ vs E summary (φ and η) to the same folder ----
     struct MuSigSeries { std::vector<double> E, mu, dmu, sg, dsg; };
@@ -8836,12 +8801,15 @@ void MakeDeltaPhiEtaPlayground(
         return S;
     };
 
+    // Supports forced y-ranges so φ and η plots can share identical axes.
     auto drawMuSigmaFour = [&](bool isPhi,
                                const MuSigSeries& CLUSraw,
                                const MuSigSeries& CLUScor,
                                const MuSigSeries& PDCraw,
                                const MuSigSeries& PDCcor,
-                               const std::string& outPng)
+                               const std::string& outPng,
+                               bool forceMuRange, double muYmin, double muYmax,
+                               bool forceSgRange, double sgYmin, double sgYmax)
     {
         const double xMinE = 0.0;
         const double xMaxE = eEdges.empty() ? 1.0 : eEdges.back().second;
@@ -8876,22 +8844,35 @@ void MakeDeltaPhiEtaPlayground(
 
         // ---------- μ(E)
         pTop->cd();
-        double muLo = +1e30, muHi = -1e30;
-        auto updMu = [&](const MuSigSeries& S){
-            for (size_t i=0; i<S.mu.size(); ++i) {
-                const double lo = S.mu[i] - (S.dmu.empty()?0.0:S.dmu[i]);
-                const double hi = S.mu[i] + (S.dmu.empty()?0.0:S.dmu[i]);
-                muLo = std::min(muLo, lo);
-                muHi = std::max(muHi, hi);
-            }
-        };
-        updMu(CLUSraw); updMu(CLUScor); updMu(PDCraw); updMu(PDCcor);
-        if (muLo > muHi) { muLo = -1; muHi = 1; }
-        const double padMu = 0.25*(muHi - muLo);
+        double muMin = 0.0, muMax = 0.0;
+        if (!forceMuRange)
+        {
+            double muLo = +1e30, muHi = -1e30;
+            auto updMu = [&](const MuSigSeries& S){
+                for (size_t i=0; i<S.mu.size(); ++i) {
+                    const double lo = S.mu[i] - (S.dmu.empty()?0.0:S.dmu[i]);
+                    const double hi = S.mu[i] + (S.dmu.empty()?0.0:S.dmu[i]);
+                    muLo = std::min(muLo, lo);
+                    muHi = std::max(muHi, hi);
+                }
+            };
+            updMu(CLUSraw); updMu(CLUScor); updMu(PDCraw); updMu(PDCcor);
+            if (muLo > muHi) { muLo = -1e-3; muHi = 1e-3; }
+
+            // Symmetric around zero; enforce at least ±3e-4 rad
+            const double absMax = std::max(std::fabs(muLo), std::fabs(muHi));
+            const double minHalfRange = 3e-4; // ±0.3×10⁻³ rad
+            const double half = std::max(absMax * 1.10, minHalfRange); // +10% headroom
+            muMin = -half; muMax = +half;
+        }
+        else
+        {
+            muMin = muYmin; muMax = muYmax;
+        }
 
         TH1F frU("frU",";E  [GeV];#mu  [rad]",1,xMinE,xMaxE);
-        frU.SetMinimum(muLo - padMu);
-        frU.SetMaximum(muHi + padMu);
+        frU.SetMinimum(muMin);
+        frU.SetMaximum(muMax);
         frU.GetXaxis()->SetLabelSize(0.0);
         frU.GetXaxis()->SetTitleSize(0.0);
         frU.GetXaxis()->SetTickLength(0.0);
@@ -8903,19 +8884,29 @@ void MakeDeltaPhiEtaPlayground(
         TGraphErrors* gTCc = makeGE(CLUScor, kRed+1,  24, true);
         TGraphErrors* gBLu = makeGE(PDCraw,  kBlue+1, 20, true);
         TGraphErrors* gBLc = makeGE(PDCcor,  kBlue+1, 24, true);
-        // draw order (blue first to keep red on top if overlapping)
         gBLu->Draw("P SAME"); gBLc->Draw("P SAME"); gTCu->Draw("P SAME"); gTCc->Draw("P SAME");
 
         // ---------- σ(E)
         pBot->cd();
-        double sgHi = 0.0;
-        auto updSg = [&](const MuSigSeries& S){ for (double v : S.sg) sgHi = std::max(sgHi, v); };
-        updSg(CLUSraw); updSg(CLUScor); updSg(PDCraw); updSg(PDCcor);
-        if (sgHi <= 0) sgHi = 1.0;
+        double sgMinFinal = 0.0, sgMaxFinal = 0.0;
+        if (!forceSgRange)
+        {
+            double sgHi = 0.0;
+            auto updSg = [&](const MuSigSeries& S){ for (double v : S.sg) sgHi = std::max(sgHi, v); };
+            updSg(CLUSraw); updSg(CLUScor); updSg(PDCraw); updSg(PDCcor);
+            if (sgHi <= 0) sgHi = 1.0;
+            sgMinFinal = 0.0;
+            sgMaxFinal = 1.15*sgHi;
+        }
+        else
+        {
+            sgMinFinal = sgYmin;
+            sgMaxFinal = sgYmax;
+        }
 
         TH1F frL("frL",";E  [GeV];#sigma_{RMS}  [rad]",1,xMinE,xMaxE);
-        frL.SetMinimum(0.0);
-        frL.SetMaximum(1.15*sgHi);
+        frL.SetMinimum(sgMinFinal);
+        frL.SetMaximum(sgMaxFinal);
         frL.Draw("AXIS");
 
         TGraphErrors* hTCu = makeGE(CLUSraw, kRed+1,  20, false);
@@ -8925,17 +8916,18 @@ void MakeDeltaPhiEtaPlayground(
         hBLu->Draw("P SAME"); hBLc->Draw("P SAME"); hTCu->Draw("P SAME"); hTCc->Draw("P SAME");
 
         // Legend in the μ(E) panel (upper-right), 2 columns
-        pTop->cd();  // ensure the legend is drawn in the top pad
-        TLegend lg(0.37, 0.7, 0.92, 0.86);
+        pTop->cd();
+        TLegend lg(0.17, 0.73, 0.65, 0.86);
         lg.SetBorderSize(0);
         lg.SetFillStyle(0);
-        lg.SetTextSize(0.041);
+        lg.SetTextSize(0.038);
         lg.SetNColumns(2);
         lg.AddEntry(gTCu, "Constant-b (Production) Uncorr", "p");
         lg.AddEntry(gBLu, "Variable-b (Benchmark) Uncorr",  "p");
         lg.AddEntry(gTCc, "Constant-b (Production) Corr",   "p");
         lg.AddEntry(gBLc, "Variable-b (Benchmark) Corr",    "p");
         lg.Draw();
+
         // Header
         c.cd();
         TLatex hh; hh.SetNDC(); hh.SetTextAlign(22); hh.SetTextSize(0.028);
@@ -8947,6 +8939,7 @@ void MakeDeltaPhiEtaPlayground(
         c.Close();
         std::cout << "[Playground] Wrote " << outPng << "\n";
     };
+
     
     // --- Copy of drawMuSigmaFour, but μ(E) y-axis is clamped to ±0.025 rad ---
     auto drawMuSigmaFour_muClamp = [&](bool isPhi,
@@ -9047,21 +9040,64 @@ void MakeDeltaPhiEtaPlayground(
         std::cout << "[Playground] Wrote " << outPng << "\n";
     };
 
-    // Build series and draw for φ
+    // Build series for φ and η (both first so we can harmonize y-ranges)
     MuSigSeries CLUSraw_phi = makeMuSigSeries(Hphi);
     MuSigSeries CLUScor_phi = makeMuSigSeries(HphiCorr);
     MuSigSeries PDCraw_phi  = makeMuSigSeries(HphiScratchRaw);
     MuSigSeries PDCcor_phi  = makeMuSigSeries(HphiScratchCorr);
-    drawMuSigmaFour(true,  CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi,
-                    dir4Way + "/FourVariants_MeanSigmaVsE_Phi.png");
 
-    // Build series and draw for η
     MuSigSeries CLUSraw_eta = makeMuSigSeries(Heta);
     MuSigSeries CLUScor_eta = makeMuSigSeries(HetaCorr);
     MuSigSeries PDCraw_eta  = makeMuSigSeries(HetaScratchRaw);
     MuSigSeries PDCcor_eta  = makeMuSigSeries(HetaScratchCorr);
-    drawMuSigmaFour(false, CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta,
-                    dir4Way + "/FourVariants_MeanSigmaVsE_Eta.png");
+
+    // ---- compute shared μ(E) range: symmetric, floor ±3e-4 rad, +10% headroom
+    auto muAbsMax = [&](const MuSigSeries& A, const MuSigSeries& B,
+                        const MuSigSeries& C, const MuSigSeries& D)->double {
+      double m = 0.0;
+      auto upd = [&](const MuSigSeries& S){
+        for (size_t i=0; i<S.mu.size(); ++i) {
+          const double lo = S.mu[i] - (S.dmu.empty()?0.0:S.dmu[i]);
+          const double hi = S.mu[i] + (S.dmu.empty()?0.0:S.dmu[i]);
+          m = std::max(m, std::max(std::fabs(lo), std::fabs(hi)));
+        }
+      };
+      upd(A); upd(B); upd(C); upd(D);
+      return m;
+    };
+
+    const double muAbsPhi = muAbsMax(CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi);
+    const double muHalf   = std::max(muAbsPhi * 1.10, 3e-4);
+    const double muYmin   = -muHalf;
+    const double muYmax   = +muHalf;
+
+    // ---- compute shared σ(E) range: 0 → 1.15 × max(σ) across φ and η
+    auto sgMax = [&](const MuSigSeries& A, const MuSigSeries& B,
+                     const MuSigSeries& C, const MuSigSeries& D)->double {
+      double s = 0.0;
+      auto upd = [&](const MuSigSeries& S){ for (double v : S.sg) s = std::max(s, v); };
+      upd(A); upd(B); upd(C); upd(D);
+      return s;
+    };
+
+    const double sgHiPhi = sgMax(CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi);
+    const double sgHiEta = sgMax(CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta);
+    const double sgYmin  = 0.0;
+    const double sgYmax  = 1.15 * std::max(sgHiPhi, sgHiEta);
+
+    // ---- draw with forced shared ranges (matches the 12-arg lambda signature)
+    drawMuSigmaFour(true,
+                    CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi,
+                    dir4Way + "/FourVariants_MeanSigmaVsE_Phi.png",
+                    /*forceMuRange=*/true, muYmin, muYmax,
+                    /*forceSgRange=*/true, sgYmin, sgYmax);
+
+    drawMuSigmaFour(false,
+                    CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta,
+                    dir4Way + "/FourVariants_MeanSigmaVsE_Eta.png",
+                    /*forceMuRange=*/true, muYmin, muYmax,
+                    /*forceSgRange=*/true, sgYmin, sgYmax);
+
 
     // Parallel PNGs with μ(E) clamped to ±0.025 rad (top panel only)
     drawMuSigmaFour_muClamp(true,
@@ -9204,7 +9240,7 @@ void PDCanalysis()
 //  }
 
     /* ------------------------------------------------------------------ */
-    /* 2) fetch the 3-D histograms using the detected tag                 */
+    /* 2) fetch the 3-D histograms – default + four η views               */
     /* ------------------------------------------------------------------ */
     const TString hNameUnc = Form("h3_blockCoord_E_%s",      modeTag);
     const TString hNameCor = Form("h3_blockCoord_Ecorr_%s",  modeTag);
@@ -9220,6 +9256,46 @@ void PDCanalysis()
 
     TH3F* hCor3D = dynamic_cast<TH3F*>( fIn->Get(hNameCor) );   // may be null
     if (hCor3D) hCor3D->Sumw2();
+
+    // η-view uncorrected names
+    const TString hUnc_full = Form("h3_blockCoord_E_full_%s", modeTag);
+    const TString hUnc_core = Form("h3_blockCoord_E_etaCore_le0p20_%s", modeTag);
+    const TString hUnc_mid  = Form("h3_blockCoord_E_etaMid_0p20to0p70_%s", modeTag);
+    const TString hUnc_edge = Form("h3_blockCoord_E_etaEdge_0p70to1p10_%s", modeTag);
+
+    // η-view corrected names
+    const TString hCor_full = Form("h3_blockCoord_Ecorr_full_%s", modeTag);
+    const TString hCor_core = Form("h3_blockCoord_Ecorr_etaCore_le0p20_%s", modeTag);
+    const TString hCor_mid  = Form("h3_blockCoord_Ecorr_etaMid_0p20to0p70_%s", modeTag);
+    const TString hCor_edge = Form("h3_blockCoord_Ecorr_etaEdge_0p70to1p10_%s", modeTag);
+
+    struct EtaView {
+      const char* label;
+      TH3F* unc{nullptr};
+      TH3F* cor{nullptr};
+    };
+
+    std::vector<EtaView> views;
+    views.push_back({"default", hUnc3D, hCor3D});
+
+    auto load3 = [&](const TString& nUnc, const TString& nCor, const char* label)
+    {
+      TH3F* u = dynamic_cast<TH3F*>( fIn->Get(nUnc) );
+      TH3F* c = dynamic_cast<TH3F*>( fIn->Get(nCor) );
+      if (!u) { std::cerr << "[WARN] missing " << nUnc << " (skip view " << label << ")\n"; return; }
+      u->Sumw2();
+      if (c) c->Sumw2();
+      views.push_back({label, u, c});
+    };
+
+    load3(hUnc_full, hCor_full, "fullEta");
+    load3(hUnc_core, hCor_core, "etaCore");
+    load3(hUnc_mid,  hCor_mid,  "etaMid");
+    load3(hUnc_edge, hCor_edge, "etaEdge");
+
+
+    TH3F* hCor3D = dynamic_cast<TH3F*>( fIn->Get(hNameCor) );   // may be null
+    if (hCor3D) hCor3D->Sumw2();
     
 
   // 5) Our 8 energy slices => [2..4), [4..6), etc.
@@ -9231,15 +9307,15 @@ void PDCanalysis()
     
   std::string bValFile = std::string(outDir) + "/bValues.txt";
   std::ofstream bOut(bValFile);
-  if(!bOut.is_open())
-  {
-    std::cerr << "[WARN] Cannot open " << bValFile << " => won't save b-values.\n";
-  }
-  else
-  {
-    bOut << "# E range    best-b  (PHI or ETA)\n";
-  }
-
+    if(!bOut.is_open())
+    {
+      std::cerr << "[WARN] Cannot open " << bValFile << " => won't save b-values.\n";
+    }
+    else
+    {
+      bOut << "# E range    best-b  (PHI or ETA)   etaRange\n";
+    }
+    
 
   MakeDeltaPhiEtaPlayground(
         "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root",
@@ -9247,18 +9323,35 @@ void PDCanalysis()
         -0.035, 0.035
   );
     
-  Plot2DBlockEtaPhi(hUnc3D, hCor3D, isFirstPass, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots");
+    for (const auto& v : views)
+    {
+      if (!v.unc) continue;
 
-  FitLocalPhiEta(hUnc3D,           // uncorrected 3-D histogram
-                   hCor3D,           // corrected 3-D histogram (may be nullptr)
-                   isFirstPass,      // same toggle you already use
-                   eEdges,           // vector with the eight E-ranges
-                    "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits",           // where PNGs will be written
-                   bOut);            // SAME open ofstream instance
+      // 2D projections (both uncorr + corr if available)
+      std::string out2D = std::string("/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/2DPlots/") + v.label;
+      ensureDir(out2D.c_str());
+      Plot2DBlockEtaPhi(v.unc, v.cor, isFirstPass, eEdges, out2D.c_str());
 
-  OverlayUncorrPhiEta(hUnc3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
+      // 1D fits and overlays; write b-values with etaRange column
+      std::string out1D = std::string("/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits/") + v.label;
+      ensureDir(out1D.c_str());
+      FitLocalPhiEta(v.unc, v.cor, isFirstPass, eEdges, out1D.c_str(), bOut, v.label);
+      OverlayUncorrPhiEta(v.unc, eEdges, out1D.c_str());
+
+      // LEGO + residual QA per view
+      drawLego3D(v.unc, "unc", "UNCORRECTED", out2D.c_str(), 0.045, 0.035);
+      auditResidual(v.unc, "UNCORRECTED", out2D.c_str(), 0.045, 0.035);
+
+      if (!isFirstPass && v.cor) {
+        drawLego3D(v.cor, "cor", "CORRECTED", out2D.c_str(), 0.045, 0.035);
+        auditResidual(v.cor, "CORRECTED", out2D.c_str(), 0.045, 0.035);
+      }
+
+      // b vs E scatter
+      PlotBvaluesVsEnergy(v.unc, eEdges, out1D.c_str());
+    }
+
     
-  PlotPhiShiftAndWidth(hUnc3D, hCor3D, eEdges, "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutput/1DplotsAndFits");
     
     /* ----- build the input views ------------------------------------------------- */
     /* ------------------------------------------------------------ *

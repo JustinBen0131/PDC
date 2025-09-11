@@ -77,6 +77,9 @@ class PositionDependentCorrection : public SubsysReco
   void setMassFitsDone(bool done) { m_massFitsDone = done; }
   void UseSignedVz(bool v = true) { m_useSignedVz = v; }
   void UseSurveyGeometry(bool v=true)         { m_useSurveyGeometry = v; }
+    
+  // First-pass switch: when true, only uncorrected TH3 views are booked/filled
+  void setFirstPassBvaluesOnly(bool v=true)   { m_firstPassBvaluesOnly = v; }
 
   enum class EBinningMode { kRange , kDiscrete };
   void setBinningMode(EBinningMode m)         { m_binningMode = m; }
@@ -265,6 +268,8 @@ class PositionDependentCorrection : public SubsysReco
   EBinningMode      m_binningMode{EBinningMode::kRange};
   bool              m_vtxCut{true};
   bool              alreadyDeclaredHistograms{false};
+  bool              m_firstPassBvaluesOnly{false};   ///< fast path: only book/fill uncorrected TH3s
+
 
   std::string       detector;
   std::string       outfilename;
@@ -282,11 +287,20 @@ class PositionDependentCorrection : public SubsysReco
   uint64_t   m_timeStamp{0};
   std::string m_cdbTag{"MDC2"};
 
-  /* Ash / log scans */
-  std::vector<double> m_bScan;
-  std::vector<double> m_w0Scan;
-  float m_bValsPhi[N_Ebins]{};
-  float m_bValsEta[N_Ebins]{};
+    /* Ash / log scans */
+    std::vector<double> m_bScan;
+    std::vector<double> m_w0Scan;
+
+    // Default (legacy) b-tables — unchanged behaviour
+    float m_bValsPhi[N_Ebins]{};
+    float m_bValsEta[N_Ebins]{};
+
+    // Per-η-view b-tables (0: fullEta, 1: etaCore, 2: etaMid, 3: etaEdge)
+    static constexpr int kNEtaViews = 4;
+    std::array<std::array<float, N_Ebins>, kNEtaViews> m_bValsPhi_view{};
+    std::array<std::array<float, N_Ebins>, kNEtaViews> m_bValsEta_view{};
+    std::array<bool, kNEtaViews> m_bPhiReady_view{{false,false,false,false}};
+    std::array<bool, kNEtaViews> m_bEtaReady_view{{false,false,false,false}};
 
   /* random */
   TRandom3* rnd{nullptr};
@@ -294,12 +308,12 @@ class PositionDependentCorrection : public SubsysReco
   /* global counters (unchanged) */
   std::atomic<std::uint64_t> m_nWinRAW{0},   m_nWinCP{0},   m_nWinBCorr{0};
   std::atomic<std::uint64_t> m_nWinRAW_Eta{0},m_nWinCP_Eta{0},m_nWinBCorr_Eta{0};
-  std::atomic<std::uint64_t> m_phiWinCLUSraw{0}, m_phiWinCLUScp{0},
-                             m_phiWinCLUSbcorr{0}, m_phiWinPDCraw{0},
-                             m_phiWinPDCcorr{0};
-  std::atomic<std::uint64_t> m_etaWinCLUSraw{0}, m_etaWinCLUScp{0},
-                             m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
-                             m_etaWinPDCcorr{0};
+    std::atomic<std::uint64_t> m_phiWinCLUSraw{0}, m_phiWinCLUScp{0},
+                               m_phiWinCLUSbcorr{0}, m_phiWinPDCraw{0},
+                               m_phiWinPDCcorr{0},  m_phiWinCLUScpEA{0};
+    std::atomic<std::uint64_t> m_etaWinCLUSraw{0}, m_etaWinCLUScp{0},
+                               m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
+                               m_etaWinPDCcorr{0},  m_etaWinCLUScpEA{0};
     
     // PDC side-peak tallies (± one-tower width)
     std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
@@ -328,9 +342,8 @@ class PositionDependentCorrection : public SubsysReco
   std::atomic<std::uint64_t> m_etaOutPDCraw    {0};
   std::atomic<std::uint64_t> m_etaOutPDCcorr   {0};
     
-    // winner counters per flavour per E‑slice
-    std::array<std::array<std::uint64_t, N_Ebins>, 5> m_phiWinByE{{}};
-    std::array<std::array<std::uint64_t, N_Ebins>, 5> m_etaWinByE{{}};
+    std::array<std::array<std::uint64_t, N_Ebins>, 6> m_phiWinByE{{}};
+    std::array<std::array<std::uint64_t, N_Ebins>, 6> m_etaWinByE{{}};
 
   std::atomic<std::uint64_t> g_nanPhi{0}, g_nanEta{0}, g_nCorrPhiRight{0};
 
@@ -343,6 +356,7 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_raw_E        [N_Ebins]{};
   TH1F* h_phi_diff_cpRaw_E      [N_Ebins]{};
   TH1F* h_phi_diff_cpCorr_E     [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_E   [N_Ebins]{};
   TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
     
@@ -365,10 +379,10 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpCorr_E_vzsgn     [N_Ebins][N_VzBinsSigned]{};
   TH1F* h_phi_diff_cpBcorr_E_vzsgn    [N_Ebins][N_VzBinsSigned]{};
 
-
   TH1F* h_eta_diff_raw_E        [N_Ebins]{};
   TH1F* h_eta_diff_cpRaw_E      [N_Ebins]{};
   TH1F* h_eta_diff_cpCorr_E     [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_E   [N_Ebins]{};
   TH1F* h_eta_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_eta_diff_corrected_E  [N_Ebins]{};
 
@@ -426,8 +440,30 @@ class PositionDependentCorrection : public SubsysReco
   static const int NBinsBlock = 14;
   TH2* h_mass_block_pt[NBinsBlock][NBinsBlock]{};
   TH2* h_res_block_E [NBinsBlock][NBinsBlock]{};
-  TH3* h3_cluster_block_cord_E{nullptr};
-  TH3* h3_cluster_block_cord_E_corrected{nullptr};
+
+    // Legacy default uncorrected TH3 and corrected TH3 (unchanged)
+    TH3* h3_cluster_block_cord_E{nullptr};
+    TH3* h3_cluster_block_cord_E_corrected{nullptr};
+
+    // New: uncorrected η-sliced variants (filled in parallel with the default)
+    TH3* h3_cluster_block_cord_E_full{nullptr};        // full |eta| <= 1.10
+    TH3* h3_cluster_block_cord_E_etaCore{nullptr};     // |eta| <= 0.20
+    TH3* h3_cluster_block_cord_E_etaMid{nullptr};      // 0.20 < |eta| <= 0.70
+    TH3* h3_cluster_block_cord_E_etaEdge{nullptr};     // 0.70 < |eta| <= 1.10
+
+    // New: corrected counterparts per η-slice (second pass)
+    TH3* h3_cluster_block_cord_E_full_corr{nullptr};
+    TH3* h3_cluster_block_cord_E_etaCore_corr{nullptr};
+    TH3* h3_cluster_block_cord_E_etaMid_corr{nullptr};
+    TH3* h3_cluster_block_cord_E_etaEdge_corr{nullptr};
+    
+//    TH3* h3_cluster_block_cord_E_full{nullptr};        // full |eta| <= 1.10
+//    TH3* h3_cluster_block_cord_E_etaCore{nullptr};     // |eta| <= 0.20
+//    TH3* h3_cluster_block_cord_E_etaMid{nullptr};      // 0.20 < |eta| <= 0.70
+//    TH3* h3_cluster_block_cord_E_etaEdge{nullptr};     // 0.70 < |eta| <= 1.10
+//    TH3* h3_cluster_block_cord_E_corrected{nullptr};
+    
+    
   TH1* h_block_phi{nullptr};
   TH1* h_block_eta{nullptr};
   TH1* h_clus_E_size{nullptr};

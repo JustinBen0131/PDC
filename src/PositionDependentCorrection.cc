@@ -168,188 +168,271 @@ int PositionDependentCorrection::getEnergySlice(float E) const
   return (bestDiff < dynTol) ? bestIdx : -1;
 }
 
-/* ------------------------------------------------------------------------- */
-/*  PositionDependentCorrection  –  histogram booking                        */
-/* ------------------------------------------------------------------------- */
 
 /** Book all histograms that are needed for _both_ data and simulation */
-void
-PositionDependentCorrection::bookCommonHistograms
+void PositionDependentCorrection::bookCommonHistograms
 (const std::function<std::string(int)>& makeLabel)
 {
-  /* ------------------------------------------------------------------ */
-  /* 1)  “Always‑on” histograms (identical to the original listing)      */
-  /* ------------------------------------------------------------------ */
-  h_mass_eta_lt      = new TH2F("h_mass_eta_lt",      "", 50, 0, 0.5, 96, 0, 96);
-  h_mass_eta_lt_rw   = new TH2F("h_mass_eta_lt_rw",   "", 50, 0, 0.5, 96, 0, 96);
-  h_pt_eta           = new TH2F("h_pt_eta",           "", 100, 0, 10, 96, 0, 96);
-  h_pt_eta_rw        = new TH2F("h_pt_eta_rw",        "", 100, 0, 10, 96, 0, 96);
-  h_cemc_etaphi      = new TH2F("h_cemc_etaphi",      "", 96, 0, 96, 256, 0, 256);
-  h_InvMass          = new TH1F("h_InvMass",          "Invariant Mass", 500, 0, 1.0);
-  h_InvMass_w        = new TH1F("h_InvMass_w",        "Invariant Mass", 500, 0, 1.0);
-  h_InvMassMix       = new TH1F("h_InvMassMix",       "Invariant Mass", 120, 0, 1.2);
-    
   // ------------------------------------------------------------------
-  // π0 invariant‑mass vs photon‑energy slice      (2 × TH2F)
-  // Y‑axis uses EXACTLY the edges from eEdge[9].
+  // Common binning used by the base 3D block-coordinate histograms
   // ------------------------------------------------------------------
-  h_mE_raw  = new TH2F("h_mE_raw",
-                         "π^{0} mass vs E_{#gamma}^{max} – RAW;"
-                         "M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
-                         120, 0.00, 0.30,         // X: mass
-                         N_Ebins, eEdge);         // Y: slice edges 2…30 GeV
-
-  h_mE_corr = new TH2F("h_mE_corr",
-                         "π^{0} mass vs E_{#gamma}^{max} – φ‑corr.;"
-                         "M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
-                         120, 0.00, 0.30,
-                         N_Ebins, eEdge);
-
-  hm->registerHisto(h_mE_raw );
-  hm->registerHisto(h_mE_corr);
-
-  h_m_blk_raw  = new TH3F("h_m_blk_raw",
-                            "π^{0} mass – RAW;η_{loc};φ_{loc};M_{γγ} [GeV]",
-                            14, -0.5, 1.5,     // X: ηloc
-                            14, -0.5, 1.5,     // Y: φloc
-                            60, 0.00, 0.30);   // Z: mass
-
-  h_m_blk_corr = new TH3F("h_m_blk_corr",
-                            "π^{0} mass – φ‑corr.;η_{loc};φ_{loc};M_{γγ} [GeV]",
-                            14, -0.5, 1.5,
-                            14, -0.5, 1.5,
-                            60, 0.00, 0.30);
-
-  hm->registerHisto(h_m_blk_raw );
-  hm->registerHisto(h_m_blk_corr);
-    
-    
-  h_tower_e          = new TH1F("h_tower_e",          "", 1000,-1,5);
-  h_etaphi_clus      = new TH2F("h_etaphi_clus",      "", 140,-1.2,1.2,64,-TMath::Pi(),TMath::Pi());
-  h_clusE            = new TH1F("h_clusE",            "", 100, 0, 10);
-  h_clusE_nTow       = new TH2F("h_clusE_nTow",       "", 20,0,20, 50,0,50);
-  h_emcal_e_eta      = new TH1F("h_emcal_e_eta",      "", 96, 0, 96);
-  h_pt1              = new TH1F("h_pt1",              "", 100, 0, 5);
-  h_pt2              = new TH1F("h_pt2",              "", 100, 0, 5);
-  h_nclusters        = new TH1F("h_nclusters",        "", 100, 0, 100);
-  h_matched_res      = new TH2F("h_matched_res",      "", 100,0,1.5,20,-1,1);
-  h_res_e            = new TH2F("h_res_e",            "", 100,0,1.5,20,0,20);
-  h_res_e_phi        = new TH3F("h_res_e_phi",        "", 100,0,1.5,10,0,20,256,0,256);
-  h_res_e_eta        = new TH3F("h_res_e_eta",        "", 300,0,1.5,40,0,20,96,0,96);
-  h_m_pt_eta         = new TH3F("h_m_pt_eta",         "", 70,0,0.7,10,0,10,96,0,96);
-  h_m_ptTr_eta       = new TH3F("h_m_ptTr_eta",       "", 70,0,0.7,10,0,10,96,0,96);
-  h_m_ptTr_eta_trKin = new TH3F("h_m_ptTr_eta_trKin", "", 70,0,0.7,10,0,10,96,0,96);
-  h_res              = new TH1F("h_res",              "", 50, 0, 1.5);
-  h_delEta_e_eta     = new TH3F("h_delEta_e_eta",     "", 100,-0.1,0.1,10,0,20,96,0,96);
-  h_delR_e_eta       = new TH3F("h_delR_e_eta",       "", 100,-0.1,0.1,10,0,20,96,0,96);
-  h_delPhi_e_eta     = new TH3F("h_delPhi_e_eta",     "", 100,-0.3,0.3,20,0,20,96,0,96);
-  h_delPhi_e_phi     = new TH3F("h_delPhi_e_phi",     "", 100,-0.1,0.1,20,0,20,256,0,256);
-  pr_eta_shower      = new TProfile("pr_eta_shower",  "", 96,-48.5,47.5,-1,1.5);
-  pr_phi_shower      = new TProfile("pr_phi_shower",  "", 256,-128.5,127.5,-1,1.5);
-  h_vert_xy          = new TH2F("h_vert_xy",          "", 500,-120,120,500,-120,120);
-
-  /* χ²‑maps (kept verbatim) */
-  h2_chi2_tot_etaPhi = new TH2F(
-        "h2_chi2_tot_etaPhi",
-        "Clusters BEFORE #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
-        96, 0, 96,
-        256, 0, 256);
-
-  h2_chi2_rej_etaPhi = new TH2F(
-        "h2_chi2_rej_etaPhi",
-        "Clusters REJECTED by #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
-        96, 0, 96,
-        256, 0, 256);
-
-  p_chi2_pass_etaPhi = new TProfile2D(
-        "p_chi2_pass_etaPhi",
-        "Pass fraction after #chi^{2} cut;Tower #eta index;Tower #varphi index;⟨pass⟩",
-        96, 0, 96,
-        256, 0, 256,
-        -0.1, 1.1);
-
-  hm->registerHisto(h2_chi2_tot_etaPhi);
-  hm->registerHisto(h2_chi2_rej_etaPhi);
-  hm->registerHisto(p_chi2_pass_etaPhi);
-
-  /* per‑block histograms (unchanged) */
-  for (int ie = 0; ie < NBinsBlock; ++ie)
-    for (int ip = 0; ip < NBinsBlock; ++ip)
-    {
-      h_mass_block_pt[ie][ip] = new TH2F(Form("h_mass_block_%d_%d_pt",ie,ip),
-                                         "", 100,0,1, 5,0,10);
-      h_res_block_E [ie][ip]  = new TH2F(Form("h_res_block_%d_%d_E",ie,ip),
-                                         "", 120,0,1.2,5,0,10);
-    }
-
-  /* block‑coordinate × energy TH3 (identical code) */
   Double_t xEdges[15], yEdges[15];
-  { const double s = 2.0/14.0; for (int i=0;i<=14;++i){ xEdges[i]=-0.5+i*s; yEdges[i]=-0.5+i*s; } }
-
+  {
+    const double s = 2.0/14.0;
+    for (int i = 0; i <= 14; ++i) { xEdges[i] = -0.5 + i*s; yEdges[i] = -0.5 + i*s; }
+  }
   static constexpr Double_t eEdges[9] = {2,4,6,8,10,12,15,20,30};
   const char* modeTag = (m_binningMode == EBinningMode::kRange ? "range" : "disc");
 
-  h3_cluster_block_cord_E = new TH3F(
+  // ==================================================================
+  // (A) ALWAYS BOOK the 5 uncorrected 3-D histograms (both modes)
+  // ==================================================================
+  if (!h3_cluster_block_cord_E)
+    h3_cluster_block_cord_E = new TH3F(
         Form("h3_blockCoord_E_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Uncorrected local block coords vs. E_{slice}" :
            "Uncorrected local block coords vs. E_{centre}"),
-        14,xEdges, 14,yEdges, 8,eEdges);
+        14, xEdges, 14, yEdges, 8, eEdges);
 
-  h3_cluster_block_cord_E_corrected = new TH3F(
+  if (!h3_cluster_block_cord_E_full)
+    h3_cluster_block_cord_E_full = new TH3F(
+        Form("h3_blockCoord_E_full_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Uncorrected local block coords vs. E_{slice} (full |#eta| #leq 1.10)" :
+           "Uncorrected local block coords vs. E_{centre} (full |#eta| #leq 1.10)"),
+        14, xEdges, 14, yEdges, 8, eEdges);
+
+  if (!h3_cluster_block_cord_E_etaCore)
+    h3_cluster_block_cord_E_etaCore = new TH3F(
+        Form("h3_blockCoord_E_etaCore_le0p20_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Uncorrected local block coords vs. E_{slice} (|#eta| #leq 0.20)" :
+           "Uncorrected local block coords vs. E_{centre} (|#eta| #leq 0.20)"),
+        14, xEdges, 14, yEdges, 8, eEdges);
+
+  if (!h3_cluster_block_cord_E_etaMid)
+    h3_cluster_block_cord_E_etaMid = new TH3F(
+        Form("h3_blockCoord_E_etaMid_0p20to0p70_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Uncorrected local block coords vs. E_{slice} (0.20 < |#eta| #leq 0.70)" :
+           "Uncorrected local block coords vs. E_{centre} (0.20 < |#eta| #leq 0.70)"),
+        14, xEdges, 14, yEdges, 8, eEdges);
+
+  if (!h3_cluster_block_cord_E_etaEdge)
+    h3_cluster_block_cord_E_etaEdge = new TH3F(
+        Form("h3_blockCoord_E_etaEdge_0p70to1p10_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Uncorrected local block coords vs. E_{slice} (0.70 < |#eta| #leq 1.10)" :
+           "Uncorrected local block coords vs. E_{centre} (0.70 < |#eta| #leq 1.10)"),
+        14, xEdges, 14, yEdges, 8, eEdges);
+
+
+    // Minimal QA needed by fillTowerInfo/fillTruthInfo/process_towers
+  if (!h_tower_e)     h_tower_e     = new TH1F("h_tower_e","",1000,-1,5);
+  if (!h_emcal_e_eta) h_emcal_e_eta = new TH1F("h_emcal_e_eta","",96,0,96);
+  if (!h_cemc_etaphi) h_cemc_etaphi = new TH2F("h_cemc_etaphi","",96,0,96,256,0,256);
+
+  if (!h_truth_eta)        h_truth_eta = new TH1F("h_truth_eta","",100,-1.2,1.2);
+  if (!h_truth_e)          h_truth_e   = new TH1F("h_truth_e","",100,0,10);
+  if (!h_truth_vz)         h_truth_vz  = new TH1F("h_truth_vz","Truth Vertex Z;z_{truth} (cm);Counts",200,-100,100);
+  if (!h2_truthReco_vz)    h2_truthReco_vz = new TH2F("h2_truthReco_vz",
+                                           "Truth vs Reco Vertex Z;z_{truth} (cm);z_{reco} (cm)",
+                                           200,-100,100,200,-100,100);
+  if (!h_vert_xy)          h_vert_xy   = new TH2F("h_vert_xy","",500,-120,120,500,-120,120);
+  if (!h_reco_vz)          h_reco_vz   = new TH1F("h_reco_vz","Reco Vertex Z;z_{reco} (cm);Counts",200,-100,100);
+
+    // Register only the QA that needs manager
+  if (hm)
+  {
+      hm->registerHisto(h_reco_vz);
+      hm->registerHisto(h_truth_vz);
+      hm->registerHisto(h2_truthReco_vz);
+  }
+
+  // ==================================================================
+  // (C) FULL MODE: book everything else (without rebooking base-5)
+  // ==================================================================
+
+  /* 1) “Always-on” histograms (original list) */
+  if (!h_mass_eta_lt)      h_mass_eta_lt      = new TH2F("h_mass_eta_lt","",50,0,0.5,96,0,96);
+  if (!h_mass_eta_lt_rw)   h_mass_eta_lt_rw   = new TH2F("h_mass_eta_lt_rw","",50,0,0.5,96,0,96);
+  if (!h_pt_eta)           h_pt_eta           = new TH2F("h_pt_eta","",100,0,10,96,0,96);
+  if (!h_pt_eta_rw)        h_pt_eta_rw        = new TH2F("h_pt_eta_rw","",100,0,10,96,0,96);
+  if (!h_cemc_etaphi)      h_cemc_etaphi      = new TH2F("h_cemc_etaphi","",96,0,96,256,0,256);
+  if (!h_InvMass)          h_InvMass          = new TH1F("h_InvMass","Invariant Mass",500,0,1.0);
+  if (!h_InvMass_w)        h_InvMass_w        = new TH1F("h_InvMass_w","Invariant Mass",500,0,1.0);
+  if (!h_InvMassMix)       h_InvMassMix       = new TH1F("h_InvMassMix","Invariant Mass",120,0,1.2);
+
+  if (!h_mE_raw)
+  {
+    h_mE_raw = new TH2F("h_mE_raw",
+                        "π^{0} mass vs E_{#gamma}^{max} – RAW;M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
+                        120,0.00,0.30, N_Ebins, eEdge);
+    if (hm) hm->registerHisto(h_mE_raw);
+  }
+  if (!h_mE_corr)
+  {
+    h_mE_corr = new TH2F("h_mE_corr",
+                         "π^{0} mass vs E_{#gamma}^{max} – φ-corr.;M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
+                         120,0.00,0.30, N_Ebins, eEdge);
+    if (hm) hm->registerHisto(h_mE_corr);
+  }
+
+  if (!h_m_blk_raw)
+  {
+    h_m_blk_raw = new TH3F("h_m_blk_raw",
+                           "π^{0} mass – RAW;η_{loc};φ_{loc};M_{γγ} [GeV]",
+                           14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
+    if (hm) hm->registerHisto(h_m_blk_raw);
+  }
+  if (!h_m_blk_corr)
+  {
+    h_m_blk_corr = new TH3F("h_m_blk_corr",
+                            "π^{0} mass – φ-corr.;η_{loc};φ_{loc};M_{γγ} [GeV]",
+                            14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
+    if (hm) hm->registerHisto(h_m_blk_corr);
+  }
+
+  // Full-mode scalar/2D/3D histos (guard against double-booking)
+  if (!h_tower_e)          h_tower_e          = new TH1F("h_tower_e","",1000,-1,5);
+  if (!h_etaphi_clus)      h_etaphi_clus      = new TH2F("h_etaphi_clus","",140,-1.2,1.2,64,-TMath::Pi(),TMath::Pi());
+  if (!h_clusE)            h_clusE            = new TH1F("h_clusE","",100,0,10);
+  if (!h_clusE_nTow)       h_clusE_nTow       = new TH2F("h_clusE_nTow","",20,0,20,50,0,50);
+  if (!h_emcal_e_eta)      h_emcal_e_eta      = new TH1F("h_emcal_e_eta","",96,0,96);
+  if (!h_pt1)              h_pt1              = new TH1F("h_pt1","",100,0,5);
+  if (!h_pt2)              h_pt2              = new TH1F("h_pt2","",100,0,5);
+  if (!h_nclusters)        h_nclusters        = new TH1F("h_nclusters","",100,0,100);
+  if (!h_matched_res)      h_matched_res      = new TH2F("h_matched_res","",100,0,1.5,20,-1,1);
+  if (!h_res_e)            h_res_e            = new TH2F("h_res_e","",100,0,1.5,20,0,20);
+  if (!h_res_e_phi)        h_res_e_phi        = new TH3F("h_res_e_phi","",100,0,1.5,10,0,20,256,0,256);
+  if (!h_res_e_eta)        h_res_e_eta        = new TH3F("h_res_e_eta","",300,0,1.5,40,0,20,96,0,96);
+  if (!h_m_pt_eta)         h_m_pt_eta         = new TH3F("h_m_pt_eta","",70,0,0.7,10,0,10,96,0,96);
+  if (!h_m_ptTr_eta)       h_m_ptTr_eta       = new TH3F("h_m_ptTr_eta","",70,0,0.7,10,0,10,96,0,96);
+  if (!h_m_ptTr_eta_trKin) h_m_ptTr_eta_trKin = new TH3F("h_m_ptTr_eta_trKin","",70,0,0.7,10,0,10,96,0,96);
+  if (!h_res)              h_res              = new TH1F("h_res","",50,0,1.5);
+  if (!h_delEta_e_eta)     h_delEta_e_eta     = new TH3F("h_delEta_e_eta","",100,-0.1,0.1,10,0,20,96,0,96);
+  if (!h_delR_e_eta)       h_delR_e_eta       = new TH3F("h_delR_e_eta","",100,-0.1,0.1,10,0,20,96,0,96);
+  if (!h_delPhi_e_eta)     h_delPhi_e_eta     = new TH3F("h_delPhi_e_eta","",100,-0.3,0.3,20,0,20,96,0,96);
+  if (!h_delPhi_e_phi)     h_delPhi_e_phi     = new TH3F("h_delPhi_e_phi","",100,-0.1,0.1,20,0,20,256,0,256);
+  if (!pr_eta_shower)      pr_eta_shower      = new TProfile("pr_eta_shower","",96,-48.5,47.5,-1,1.5);
+  if (!pr_phi_shower)      pr_phi_shower      = new TProfile("pr_phi_shower","",256,-128.5,127.5,-1,1.5);
+  if (!h_vert_xy)          h_vert_xy          = new TH2F("h_vert_xy","",500,-120,120,500,-120,120);
+
+  // χ² QA maps
+  if (!h2_chi2_tot_etaPhi)
+  {
+    h2_chi2_tot_etaPhi = new TH2F("h2_chi2_tot_etaPhi",
+                                  "Clusters BEFORE #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
+                                  96,0,96, 256,0,256);
+    if (hm) hm->registerHisto(h2_chi2_tot_etaPhi);
+  }
+  if (!h2_chi2_rej_etaPhi)
+  {
+    h2_chi2_rej_etaPhi = new TH2F("h2_chi2_rej_etaPhi",
+                                  "Clusters REJECTED by #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
+                                  96,0,96, 256,0,256);
+    if (hm) hm->registerHisto(h2_chi2_rej_etaPhi);
+  }
+  if (!p_chi2_pass_etaPhi)
+  {
+    p_chi2_pass_etaPhi = new TProfile2D("p_chi2_pass_etaPhi",
+                                        "Pass fraction after #chi^{2} cut;Tower #eta index;Tower #varphi index;⟨pass⟩",
+                                        96,0,96, 256,0,256, -0.1,1.1);
+    if (hm) hm->registerHisto(p_chi2_pass_etaPhi);
+  }
+
+  // Per-block histograms
+  for (int ie = 0; ie < NBinsBlock; ++ie)
+    for (int ip = 0; ip < NBinsBlock; ++ip)
+    {
+      if (!h_mass_block_pt[ie][ip])
+        h_mass_block_pt[ie][ip] = new TH2F(Form("h_mass_block_%d_%d_pt",ie,ip), "", 100,0,1, 5,0,10);
+      if (!h_res_block_E [ie][ip])
+        h_res_block_E [ie][ip] = new TH2F(Form("h_res_block_%d_%d_E" ,ie,ip), "", 120,0,1.2, 5,0,10);
+    }
+
+  // ==================================================================
+  // (D) Corrected TH3 histos (legacy + per-η views) — full mode only
+  //     (Do NOT re-create base-5 uncorrected here)
+  // ==================================================================
+  if (!h3_cluster_block_cord_E_corrected)
+    h3_cluster_block_cord_E_corrected = new TH3F(
         Form("h3_blockCoord_Ecorr_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Corrected local block coords vs. E_{slice}" :
            "Corrected local block coords vs. E_{centre}"),
-        14,xEdges, 14,yEdges, 8,eEdges);
+        14,xEdges,14,yEdges,8,eEdges);
 
-  h_block_bin            = new TH1F("h_block_bin","",14,-0.5,1.5);
-  pr_phi_vs_blockcoord   = new TProfile("pr_phi_vs_blockcoord","",14,-0.5,1.5,-0.2,0.2);
+  if (!h3_cluster_block_cord_E_full_corr)
+    h3_cluster_block_cord_E_full_corr = new TH3F(
+        Form("h3_blockCoord_Ecorr_full_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Corrected local block coords vs. E_{slice} (full |#eta| #leq 1.10)" :
+           "Corrected local block coords vs. E_{centre} (full |#eta| #leq 1.10)"),
+        14,xEdges,14,yEdges,8,eEdges);
 
-  /* per‑slice corrected local η/φ (unchanged) */
+  if (!h3_cluster_block_cord_E_etaCore_corr)
+    h3_cluster_block_cord_E_etaCore_corr = new TH3F(
+        Form("h3_blockCoord_Ecorr_etaCore_le0p20_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Corrected local block coords vs. E_{slice} (|#eta| #leq 0.20)" :
+           "Corrected local block coords vs. E_{centre} (|#eta| #leq 0.20)"),
+        14,xEdges,14,yEdges,8,eEdges);
+
+  if (!h3_cluster_block_cord_E_etaMid_corr)
+    h3_cluster_block_cord_E_etaMid_corr = new TH3F(
+        Form("h3_blockCoord_Ecorr_etaMid_0p20to0p70_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Corrected local block coords vs. E_{slice} (0.20 < |#eta| #leq 0.70)" :
+           "Corrected local block coords vs. E_{centre} (0.20 < |#eta| #leq 0.70)"),
+        14,xEdges,14,yEdges,8,eEdges);
+
+  if (!h3_cluster_block_cord_E_etaEdge_corr)
+    h3_cluster_block_cord_E_etaEdge_corr = new TH3F(
+        Form("h3_blockCoord_Ecorr_etaEdge_0p70to1p10_%s",modeTag),
+        (m_binningMode==EBinningMode::kRange ?
+           "Corrected local block coords vs. E_{slice} (0.70 < |#eta| #leq 1.10)" :
+           "Corrected local block coords vs. E_{centre} (0.70 < |#eta| #leq 1.10)"),
+        14,xEdges,14,yEdges,8,eEdges);
+
+  // ==================================================================
+  // (E) Per-slice corrected local η/φ (unchanged logic; guarded)
+  // ==================================================================
   for (int i=0;i<N_Ebins;++i)
   {
     const float eLo = eEdge[i], eHi = eEdge[i+1];
     const std::string lab = makeLabel(i);
 
-    h_localPhi_corrected[i] = new TH1F(
-          Form("h_localPhi_corr_%s",lab.c_str()),
-          (m_binningMode==EBinningMode::kRange ?
-             Form("Corrected local #phi;%.0f < E < %.0f GeV",eLo,eHi) :
-             Form("Corrected local #phi;E = %.0f GeV",eLo)),
-          50,-0.5,0.5);
+    if (!h_localPhi_corrected[i])
+      h_localPhi_corrected[i] = new TH1F(
+            Form("h_localPhi_corr_%s",lab.c_str()),
+            (m_binningMode==EBinningMode::kRange ?
+               Form("Corrected local #phi;%.0f < E < %.0f GeV",eLo,eHi) :
+               Form("Corrected local #phi;E = %.0f GeV",eLo)),
+            50,-0.5,0.5);
 
-    h_localEta_corrected[i] = new TH1F(
-          Form("h_localEta_corr_%s",lab.c_str()),
-          (m_binningMode==EBinningMode::kRange ?
-             Form("Corrected local #eta;%.0f < E < %.0f GeV",eLo,eHi) :
-             Form("Corrected local #eta;E = %.0f GeV",eLo)),
-          50,-0.5,0.5);
+    if (!h_localEta_corrected[i])
+      h_localEta_corrected[i] = new TH1F(
+            Form("h_localEta_corr_%s",lab.c_str()),
+            (m_binningMode==EBinningMode::kRange ?
+               Form("Corrected local #eta;%.0f < E < %.0f GeV",eLo,eHi) :
+               Form("Corrected local #eta;E = %.0f GeV",eLo)),
+            50,-0.5,0.5);
   }
-
-  /* vertex‑Z (always booked) */
-  h_reco_vz = new TH1F("h_reco_vz","Reco Vertex Z;z_{reco} (cm);Counts",200,-100,100);
-  hm->registerHisto(h_reco_vz);
 }
+
 
 /** Extra histograms that are **only** needed when m_isSimulation == true */
 void
 PositionDependentCorrection::bookSimulationHistograms
 (const std::function<std::string(int)>& makeLabel)
 {
+    
+  // Skip ALL simulation histogram booking in first-pass b-values-only mode
+  if (m_firstPassBvaluesOnly) return;
   /* ---------------------- truth & matching ------------------------- */
-  h_truth_eta      = new TH1F("h_truth_eta", "", 100,-1.2,1.2);
-  h_truth_e        = new TH1F("h_truth_e",   "", 100, 0, 10);
   h_delR_recTrth   = new TH1F("h_delR_recTrth","",500,0,5);
-
-  h_truth_vz       = new TH1F("h_truth_vz",
-                               "Truth Vertex Z;z_{truth} (cm);Counts",200,-100,100);
-  hm->registerHisto(h_truth_vz);
-
-  h2_truthReco_vz  = new TH2F("h2_truthReco_vz",
-                               "Truth vs Reco Vertex Z;z_{truth} (cm);z_{reco} (cm)",
-                               200,-100,100,200,-100,100);
-  hm->registerHisto(h2_truthReco_vz);
 
   h_truthE         = new TH1F("h_truthE","",10000,0,30);
 
@@ -430,6 +513,9 @@ PositionDependentCorrection::bookSimulationHistograms
       h_phi_diff_cpCorr_E[i] = new TH1F(
             Form("h_phi_diff_cpCorr_%s", lab.c_str()),
             "#Delta#phi CP‑corr;#Delta#phi (rad);Counts",  200, -0.1, 0.1);
+      h_phi_diff_cpCorrEA_E[i] = new TH1F(
+            Form("h_phi_diff_cpCorrEA_%s", lab.c_str()),
+            "#Delta#phi CP‑corr(EA);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
       h_phi_diff_cpBcorr_E[i] = new TH1F(
             Form("h_phi_diff_cpBcorr_%s", lab.c_str()),
             "#Delta#phi b‑corr;#Delta#phi (rad);Counts",   200, -0.1, 0.1);
@@ -440,17 +526,22 @@ PositionDependentCorrection::bookSimulationHistograms
       h_eta_diff_cpCorr_E[i] = new TH1F(
             Form("h_eta_diff_cpCorr_%s", lab.c_str()),
             "#Delta#eta CP‑corr;#Delta#eta;Counts",        200, -0.1, 0.1);
+      h_eta_diff_cpCorrEA_E[i] = new TH1F(
+            Form("h_eta_diff_cpCorrEA_%s", lab.c_str()),
+            "#Delta#eta CP‑corr(EA);#Delta#eta;Counts",    200, -0.1, 0.1);
       h_eta_diff_cpBcorr_E[i] = new TH1F(
             Form("h_eta_diff_cpBcorr_%s", lab.c_str()),
             "#Delta#eta b‑corr;#Delta#eta;Counts",         200, -0.1, 0.1);
 
       hm->registerHisto(h_phi_diff_cpRaw_E [i]);
       hm->registerHisto(h_phi_diff_cpCorr_E[i]);
+      hm->registerHisto(h_phi_diff_cpCorrEA_E[i]);
       hm->registerHisto(h_phi_diff_cpBcorr_E[i]);
       hm->registerHisto(h_eta_diff_cpRaw_E [i]);
       hm->registerHisto(h_eta_diff_cpCorr_E[i]);
+      hm->registerHisto(h_eta_diff_cpCorrEA_E[i]);
       hm->registerHisto(h_eta_diff_cpBcorr_E[i]);
-
+      
       /* ------------------------------------------------------------------ *
        * (IIa)  NEW  Δφ(E, vz) histograms – one loop over |z| slices
        * ------------------------------------------------------------------ */
@@ -664,80 +755,178 @@ PositionDependentCorrection::bookSimulationHistograms
 }
 
 
-// ------------------------------------------------------------------
-//  Reads "bValues.txt" and populates m_bVals{Phi,Eta}.
-//
-//  Return ‑ true  : tables loaded, flags (isFitDoneForPhi/Eta) updated
-//          ‑ false : file missing → both corrections disabled
-// ------------------------------------------------------------------
 bool PositionDependentCorrection::loadBValues(const std::string& bFilePath)
 {
+  // If both corrections are disabled up-front, there is nothing to read
   if (!isFitDoneForPhi && !isFitDoneForEta)
   {
-    std::cout << "[INFO]   isFitDoneForPhi && isFitDoneForEta are both false ⇒ "
-                 "skip reading bValues.txt\n";
-    return true;                                   // nothing to do, not an error
+    std::cout << "[INFO] isFitDoneForPhi and isFitDoneForEta are both false ⇒ skip reading bValues.txt\n";
+    return true;
   }
 
   std::ifstream bfile(bFilePath);
   if (!bfile.is_open())
   {
     std::cout << "[WARN]  bValues.txt NOT found at " << bFilePath
-              << "  ➜  disabling φ‑ and η‑corrections.\n";
+              << "  ➜  disabling φ- and η-corrections.\n";
     isFitDoneForPhi = isFitDoneForEta = false;
+    std::fill(m_bPhiReady_view.begin(), m_bPhiReady_view.end(), false);
+    std::fill(m_bEtaReady_view.begin(), m_bEtaReady_view.end(), false);
     return false;
   }
 
-  std::cout << "[INFO]  Reading b‑values from " << bFilePath << '\n';
+  std::cout << "[INFO]  Reading b-values from " << bFilePath << '\n';
 
-  std::vector<bool> gotBinPhi(N_Ebins,false), gotBinEta(N_Ebins,false);
+  // Reset per-view readiness and values
+  for (int v = 0; v < kNEtaViews; ++v)
+  {
+    m_bPhiReady_view[v] = false;
+    m_bEtaReady_view[v] = false;
+    for (int i = 0; i < N_Ebins; ++i)
+    {
+      m_bValsPhi_view[v][i] = 0.f;
+      m_bValsEta_view[v][i] = 0.f;
+    }
+  }
+
+  // Track which slices we successfully filled
+  std::vector<bool> gotLegacyPhi(N_Ebins, false), gotLegacyEta(N_Ebins, false);
+  std::array<std::array<bool, N_Ebins>, kNEtaViews> gotPhi{}; // default-initialized false
+  std::array<std::array<bool, N_Ebins>, kNEtaViews> gotEta{};
+
+  // Map a label → η-view index
+  auto viewIndexOf = [](std::string lab) -> int
+  {
+    if (lab.empty()) return -1;
+    // normalize
+    std::transform(lab.begin(), lab.end(), lab.begin(),
+                   [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+
+    // legacy/default (apply to m_bVals*): originalEta / default / noeta / no-eta
+    if (lab == "originaleta" || lab == "default" || lab == "noeta" || lab == "no-eta")
+      return -1;
+
+    // view 0: full |eta| <= 1.10
+    if (lab == "fulleta" || lab == "full" || lab == "full-eta" || lab == "full_eta")
+      return 0;
+
+    // view 1: |eta| <= 0.20
+    if (lab == "etacore" || lab == "core" || lab == "eta-core" || lab == "eta_core")
+      return 1;
+
+    // view 2: 0.20 < |eta| <= 0.70
+    if (lab == "etamid" || lab == "mid" || lab == "eta-mid" || lab == "eta_mid")
+      return 2;
+
+    // view 3: 0.70 < |eta| <= 1.10
+    if (lab == "etaedge" || lab == "edge" || lab == "eta-edge" || lab == "eta_edge")
+      return 3;
+
+    // unknown → treat as legacy/default
+    return -1;
+  };
+
+  // Accept lines like:
+  //   PHI [2.0,4.0)  0.188029  originalEta
+  //   ETA [2.0,4.0)  0.194202  fullEta
+  // Both 3-column (legacy) and 4-column (with label) are supported.
   const std::regex lineRe(
-      R"(^\s*(PHI|ETA)\s*\[\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)\s*([0-9]*\.?[0-9]+)\s*$)"
-  );
+      R"(^\s*(PHI|ETA)\s*\[\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)\s*([0-9]*\.?[0-9]+)\s*(\S+)?\s*$)");
 
   std::string line;
-  while (std::getline(bfile,line))
+  while (std::getline(bfile, line))
   {
-    if (line.empty() || line[0]=='#') continue;
+    if (line.empty() || line[0] == '#') continue;
+
     std::smatch m;
-    if (!std::regex_match(line,m,lineRe)) continue;
+    if (!std::regex_match(line, m, lineRe)) continue;
 
-    const std::string dim = m[1];
-    const float eLo   = std::stof(m[2]);
-    const float eHi   = std::stof(m[3]);
-    const float bVal  = std::stof(m[4]);
+    const std::string dim = m[1];   // "PHI" or "ETA"
+    const float eLo = std::stof(m[2]);
+    const float eHi = std::stof(m[3]);
+    const float bVal = std::stof(m[4]);
+    const std::string label = m[5].matched ? m[5].str() : std::string{};
+    const int vIdx = viewIndexOf(label);
 
-    for (int i=0;i<N_Ebins;++i)
-      if (std::fabs(eLo-expectedLo[i])<1e-3 && std::fabs(eHi-expectedHi[i])<1e-3)
-      {
-        if (dim=="PHI") { m_bValsPhi[i]=bVal; gotBinPhi[i]=true; }
-        else            { m_bValsEta[i]=bVal; gotBinEta[i]=true; }
-        break;
-      }
+    // find target energy slice
+    int ie = -1;
+    for (int i = 0; i < N_Ebins; ++i)
+    {
+      if (std::fabs(eLo - expectedLo[i]) < 1e-3f &&
+          std::fabs(eHi - expectedHi[i]) < 1e-3f)
+      { ie = i; break; }
+    }
+    if (ie < 0) continue; // unknown E-range
+
+    if (dim == "PHI")
+    {
+      if (vIdx >= 0) { m_bValsPhi_view[vIdx][ie] = bVal; gotPhi[vIdx][ie] = true; }
+      else           { m_bValsPhi[ie]            = bVal; gotLegacyPhi[ie]  = true; }
+    }
+    else // "ETA"
+    {
+      if (vIdx >= 0) { m_bValsEta_view[vIdx][ie] = bVal; gotEta[vIdx][ie] = true; }
+      else           { m_bValsEta[ie]            = bVal; gotLegacyEta[ie]  = true; }
+    }
   }
   bfile.close();
 
-  const bool allPhi = std::all_of(gotBinPhi.begin(),gotBinPhi.end(),[](bool v){return v;});
-  const bool allEta = std::all_of(gotBinEta.begin(),gotBinEta.end(),[](bool v){return v;});
-  isFitDoneForPhi &= allPhi;
-  isFitDoneForEta &= allEta;
-
-  auto printTable=[&](const char* tag,const std::vector<bool>& got,
-                      const float* arr,bool enabled)
+  // Per-view readiness: only "OK" if we have all slices for that view
+  for (int v = 0; v < kNEtaViews; ++v)
   {
-    std::cout << "[INFO]  " << tag << (enabled
-                ?"  (enabled)\n":"  (DISABLED — missing slices)\n");
-    for(int i=0;i<N_Ebins;++i)
+    m_bPhiReady_view[v] = std::all_of(gotPhi[v].begin(), gotPhi[v].end(),
+                                      [](bool b){ return b; });
+    m_bEtaReady_view[v] = std::all_of(gotEta[v].begin(), gotEta[v].end(),
+                                      [](bool b){ return b; });
+  }
+
+  // Legacy/default readiness (for the always-present corrected histograms)
+  const bool legacyPhiReady = std::all_of(gotLegacyPhi.begin(), gotLegacyPhi.end(),
+                                          [](bool b){ return b; });
+  const bool legacyEtaReady = std::all_of(gotLegacyEta.begin(), gotLegacyEta.end(),
+                                          [](bool b){ return b; });
+
+  // Keep legacy semantics: only apply the *default* correction if the default table is complete
+  isFitDoneForPhi = isFitDoneForPhi && legacyPhiReady;
+  isFitDoneForEta = isFitDoneForEta && legacyEtaReady;
+
+  // ----- optional human-readable summary -----------------------------------
+  auto printTable = [&](const char* tag, const std::vector<bool>& got, const float* arr, bool enabled)
+  {
+    std::cout << "[INFO]  " << tag << (enabled ? "  (enabled)\n" : "  (DISABLED — missing slices)\n");
+    for (int i = 0; i < N_Ebins; ++i)
     {
-      std::cout << "        ["<<expectedLo[i]<<','<<expectedHi[i]<<")  : ";
+      std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : ";
       if (got[i]) std::cout << arr[i] << '\n';
       else        std::cout << "-- missing --\n";
     }
   };
-  printTable("PHI b‑values",gotBinPhi,m_bValsPhi,isFitDoneForPhi);
-  printTable("ETA b‑values",gotBinEta,m_bValsEta,isFitDoneForEta);
+  printTable("DEFAULT PHI b-values", gotLegacyPhi, m_bValsPhi, isFitDoneForPhi);
+  printTable("DEFAULT ETA b-values", gotLegacyEta, m_bValsEta, isFitDoneForEta);
 
-  return true;
+  auto printView = [&](const char* name, int v)
+  {
+    std::cout << "[INFO]  view=" << name
+              << "  PHI(" << (m_bPhiReady_view[v] ? "OK" : "MISS") << ")"
+              << "  ETA(" << (m_bEtaReady_view[v] ? "OK" : "MISS") << ")\n";
+    for (int i = 0; i < N_Ebins; ++i)
+    {
+      std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
+                << "b_phi=" << (gotPhi[v][i] ? m_bValsPhi_view[v][i] : NAN)
+                << " | b_eta=" << (gotEta[v][i] ? m_bValsEta_view[v][i] : NAN) << '\n';
+    }
+  };
+  printView("fullEta", 0);
+  printView("etaCore", 1);
+  printView("etaMid",  2);
+  printView("etaEdge", 3);
+
+  // Return true if we can apply *any* corrections (legacy or per-view)
+  const bool anyPhi = isFitDoneForPhi || m_bPhiReady_view[0] || m_bPhiReady_view[1]
+                                       || m_bPhiReady_view[2] || m_bPhiReady_view[3];
+  const bool anyEta = isFitDoneForEta || m_bEtaReady_view[0] || m_bEtaReady_view[1]
+                                       || m_bEtaReady_view[2] || m_bEtaReady_view[3];
+  return (anyPhi || anyEta);
 }
 
 
@@ -1148,8 +1337,8 @@ void PositionDependentCorrection::fillTruthInfo(
                      truth->get_pz(), truth->get_e());
 
     float energy = myVector.E();
-    h_truth_eta->Fill(myVector.Eta());
-    h_truth_e->Fill(energy, wieght);
+    if (h_truth_eta) h_truth_eta->Fill(myVector.Eta());
+    if (h_truth_e)   h_truth_e->Fill(energy, wieght);
 
     if (debug)
     {
@@ -1796,99 +1985,193 @@ void PositionDependentCorrection::fillDPhiAllVariants(
   const int    ixFine = tgLead->get_binphi();
   const int    iyFine = tgLead->get_bineta();
 
-  if (vb > 2)
-    std::cout << "  lead‑tower  rFront=" << rFront
-              << "  zFront=" << zFront
-              << "  ixFine="  << ixFine
-              << "  iyFine="  << iyFine << '\n';
-
-  /* ── E) build the five flavour records ───────────────────────────── */
-  PhiRec rec[5];
-  const float phiTruth = TVector2::Phi_mpi_pi(truthPhoton.Phi());
-
-  //---------------- (1) CLUS‑RAW -------------------------------------
-  m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_RAW);
-  rec[0] = {"CLUS-RAW", xCG,
-              cg2GlobalPhi(m_bemcRec, eReco, xCG, yCG)};
-
-  //---------------- (2) CLUS‑CP  -------------------------------------
-  m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP);
-  float xCP = xCG, yCP = yCG;
-  m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
-  rec[1] = {"CLUS-CP", xCP,
-            cg2GlobalPhi(m_bemcRec, eReco, xCP, yCP)};
-
-  //---------------- (3) CLUS‑BCORR -----------------------------------
-  {
-    const float nX   = static_cast<float>(m_bemcRec->GetNx());
-    const float bΦ   = m_bValsPhi[iE];
-    float       locB = xCG;
-
-    if (bΦ > 1e-9F)
-    {
-      const int   ix0 = int(xCG + .5F);
-      const float off = xCG - ix0;
-      locB = ix0 + doPhiBlockCorr(off, bΦ);
-      while (locB < -0.5F)     locB += nX;
-      while (locB >= nX-.5F)   locB -= nX;
+    if (vb > 2) {
+      std::cout << "  lead-tower  rFront=" << rFront
+                << "  zFront=" << zFront
+                << "  ixFine="  << ixFine
+                << "  iyFine="  << iyFine << '\n';
     }
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_BCORR);
-    rec[2] = {"CLUS-BCORR", locB,
-                cg2GlobalPhi(m_bemcRec, eReco, locB, yCG)};
-  }
 
-  //---------------- (4) PDC‑RAW  -------------------------------------
-  {
-      const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse,
-                                                     blkCoord.second);
+    /* ── E) build the five flavour records ───────────────────────────── */
+    PhiRec rec[5];
+    const float phiTruth = TVector2::Phi_mpi_pi(truthPhoton.Phi());
+
+    // NOTE: reuse the existing 'vb' declared earlier; do not redeclare it here.
+    if (vb > 9)
+    {
+      std::cout << "\n[φ-variants] ENTER"
+                << "  |  E=" << eReco
+                << "  xCG=" << xCG << "  yCG=" << yCG
+                << "  |  blkCoord(ηloc,φloc)=(" << blkCoord.first << "," << blkCoord.second << ")"
+                << "  blkPhiCoarse=" << blkPhiCoarse
+                << "  |  φ_truth=" << phiTruth
+                << "  |  iE=" << iE << '\n';
+    }
+    /* ----------------------------- (1) CLUS-RAW ----------------------------- */
+    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_RAW);
+    if (vb > 9) std::cout << "[CLUS-RAW] SetPhiTiltVariant → CLUS_RAW\n";
+
+    rec[0] = {"CLUS-RAW", xCG,
+              cg2GlobalPhi(m_bemcRec, eReco, xCG, yCG)};
+    if (vb > 9)
+    {
+      std::cout << "[CLUS-RAW] loc=" << rec[0].loc
+                << "  φ_SD=" << rec[0].phi
+                << "  (from tower2global at shower depth)\n";
+    }
+
+    /* ----------------------------- (2) CLUS-CP ------------------------------ */
+    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP);
+    if (vb > 9) std::cout << "[CLUS-CP] SetPhiTiltVariant → CLUS_CP\n";
+
+    float xCP = xCG, yCP = yCG;
+    if (vb > 9)
+      std::cout << "[CLUS-CP] CorrectPosition  IN  : x=" << xCG << "  y=" << yCG
+                << "  (E=" << eReco << ")\n";
+
+    m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
+
+    if (vb > 9)
+      std::cout << "[CLUS-CP] CorrectPosition  OUT : xC=" << xCP << "  yC=" << yCP << '\n';
+
+    rec[1] = {"CLUS-CP", xCP,
+              cg2GlobalPhi(m_bemcRec, eReco, xCP, yCP)};
+    if (vb > 9)
+    {
+      std::cout << "[CLUS-CP] loc=" << rec[1].loc
+                << "  φ_SD=" << rec[1].phi << '\n';
+    }
+
+    /* ------------------------ (2b) CLUS-CP(EA) ------------------------------ */
+    PDC_detail::PhiRec recEA = {"CLUS-CP(EA)",
+                                std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::quiet_NaN(), 0.f};
+
+    {
+      m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA);
+      if (vb > 9) std::cout << "[CLUS-CP(EA)] SetPhiTiltVariant → CLUS_CP_EA\n";
+
+      float xEA = xCG, yEA = yCG;
+
+      if (vb > 9)
+        std::cout << "[CLUS-CP(EA)] CorrectPositionEnergyAware  IN  : x=" << xCG
+                  << "  y=" << yCG << "  (E=" << eReco << ")\n";
+
+      m_bemcRec->CorrectPositionEnergyAware(eReco, xCG, yCG, xEA, yEA);
+
+      if (vb > 9)
+        std::cout << "[CLUS-CP(EA)] CorrectPositionEnergyAware  OUT : xC=" << xEA
+                  << "  yC=" << yEA << '\n';
+
+      recEA.loc = xEA;
+      recEA.phi = cg2GlobalPhi(m_bemcRec, eReco, xEA, yEA);
+
+      if (vb > 9)
+      {
+        std::cout << "[CLUS-CP(EA)] loc=" << recEA.loc
+                  << "  φ_SD=" << recEA.phi << '\n';
+      }
+    }
+
+    /* ----------------------------- (3) CLUS-BCORR --------------------------- */
+    {
+      const float nX   = static_cast<float>(m_bemcRec->GetNx());
+      const float bPhi = m_bValsPhi[iE];
+      float       locB = xCG;
+
+      if (vb > 9)
+        std::cout << "[CLUS-BCORR] inputs: nX=" << nX
+                  << "  bPhi(iE=" << iE << ")=" << bPhi
+                  << "  xCG=" << xCG << '\n';
+
+      if (bPhi > 1e-9F)
+      {
+        const int   ix0  = static_cast<int>(xCG + 0.5F);
+        const float off  = xCG - ix0;
+        const float corr = doPhiBlockCorr(off, bPhi);
+        locB = ix0 + corr;
+
+        int wrapL = 0, wrapR = 0;
+        while (locB < -0.5F)    { locB += nX; ++wrapL; }
+        while (locB >= nX-.5F)  { locB -= nX; ++wrapR; }
+
+        if (vb > 9)
+          std::cout << "[CLUS-BCORR] ix0=" << ix0 << "  off=" << off
+                    << "  corr(off,b)=" << corr
+                    << "  → locB(pre-wrap)=" << ix0 + corr
+                    << "  | wraps(L/R)=" << wrapL << "/" << wrapR
+                    << "  → locB(final)=" << locB << '\n';
+      }
+      else if (vb > 9)
+      {
+        std::cout << "[CLUS-BCORR] bPhi ≤ 0 → no corr, locB=xCG=" << locB << '\n';
+      }
+
+      m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_BCORR);
+      if (vb > 9) std::cout << "[CLUS-BCORR] SetPhiTiltVariant → CLUS_BCORR\n";
+
+      rec[2] = {"CLUS-BCORR", locB,
+                cg2GlobalPhi(m_bemcRec, eReco, locB, yCG)};
+
+      if (vb > 9)
+      {
+        std::cout << "[CLUS-BCORR] loc=" << rec[2].loc
+                  << "  φ_SD=" << rec[2].phi << '\n';
+      }
+    }
+
+    /* ----------------------------- (4) PDC-RAW ------------------------------ */
+    {
+      const float phiFront = convertBlockToGlobalPhi(blkPhiCoarse, blkCoord.second);
+      if (vb > 9)
+        std::cout << "[PDC-RAW] φFront=" << phiFront
+                  << "  | blkΦ=" << blkPhiCoarse
+                  << "  φloc(raw)=" << blkCoord.second << '\n';
 
       auto ixFromBlockCenter = [](int blkCoarse, float local)->int {
-          // fold local once to (−0.5, 1.5]
-          float l = local;
-          if (l <= -0.5f || l >  1.5f) l = std::fmod(l + 2.0f, 2.0f);
-          // choose nearest tower center inside the coarse block
-          int ix = blkCoarse * 2 + static_cast<int>(std::floor(l + 0.5f));
-          // wrap to [0,256)
-          if (ix >= 256) ix -= 256;
-          if (ix < 0)    ix += 256;
-          return ix;
+        float l = local;
+        if (l <= -0.5f || l > 1.5f) l = std::fmod(l + 2.0f, 2.0f);
+        int ix = blkCoarse * 2 + static_cast<int>(std::floor(l + 0.5f));
+        if (ix >= 256) ix -= 256;
+        if (ix < 0)    ix += 256;
+        return ix;
       };
 
       const int ixFineBlk = ixFromBlockCenter(blkPhiCoarse, blkCoord.second);
-
-
-      // η row must come from the *same* 2×2 block as blkCoord.first.
-      // Determine the parent coarse-η block and select the in-block fine row by local η.
-      const int blkEtaCoarse_forBlock = iyFine / 2;        // parent coarse row (from lead row)
+      const int blkEtaCoarse_forBlock = iyFine / 2; // from lead-tower row
       const int iyFineBlk = blkEtaCoarse_forBlock * 2
-                          + ((blkCoord.first < 0.5f) ? 0 : 1);  // local-η picks row 0 or 1
+                          + ((blkCoord.first < 0.5f) ? 0 : 1);
 
+      if (vb > 9)
+        std::cout << "[PDC-RAW] fine indices: ixFineBlk=" << ixFineBlk
+                  << "  iyFineBlk=" << iyFineBlk
+                  << "  (blkEtaCoarse_fromLead=" << blkEtaCoarse_forBlock << ")\n";
 
       RawTowerDefs::keytype keyBlk =
-              RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
-                                           iyFineBlk,   // η-index FIRST
-                                           ixFineBlk);  // φ-index SECOND
+          RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iyFineBlk, ixFineBlk);
       const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
 
-
-      /* guard against missing geometry */
       if (!geomBlk)
       {
         if (vb > 0)
           std::cerr << ANSI_RED
-                    << "  ✘ geometry lookup failed for (iphi="
-                    << ixFineBlk << ", ieta=" << iyFineBlk
-                    << ") – skipping PDC‑RAW φ point\n"
-                    << ANSI_RESET;
-        rec[3] = {"PDC-RAW", blkCoord.second,
-                  std::numeric_limits<float>::quiet_NaN()};
+                    << "[PDC-RAW] geometry lookup FAILED for (iphi=" << ixFineBlk
+                    << ", ieta=" << iyFineBlk << ") → φ point skipped"
+                    << ANSI_RESET << '\n';
+
+        rec[3] = {"PDC-RAW", blkCoord.second, std::numeric_limits<float>::quiet_NaN()};
       }
       else
       {
         const double rFrontBlk = geomBlk->get_center_radius();
         const double zFrontBlk = geomBlk->get_center_z();
-          
+
+        if (vb > 9)
+          std::cout << "[PDC-RAW] geom: rFront=" << rFrontBlk
+                    << "  zFront=" << zFrontBlk << '\n';
+
         m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::PDC_RAW);
+        if (vb > 9) std::cout << "[PDC-RAW] SetPhiTiltVariant → PDC_RAW\n";
 
         const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
                                             rFrontBlk , zFrontBlk ,
@@ -1896,82 +2179,109 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                                             ixFineBlk , iyFineBlk);
 
         rec[3] = {"PDC-RAW", blkCoord.second, phiSD};
+
+        if (vb > 9)
+          std::cout << "[PDC-RAW] φloc=" << rec[3].loc
+                    << "  φ_SD=" << rec[3].phi << '\n';
       }
-  }
+    }
 
-  //---------------- (5) PDC‑CORR -------------------------------------
-  {
-      const float bΦ = m_bValsPhi[iE];
-      if (isFitDoneForPhi && bΦ > 1e-9F)
+    /* ----------------------------- (5) PDC-CORR ----------------------------- */
+    /* use LEGACY (originalEta) bϕ only */
+    {
+      const float bPhi_legacy = m_bValsPhi[iE];
+      if (vb > 9)
+        std::cout << "[PDC-CORR] bPhi_legacy(iE=" << iE << ")=" << bPhi_legacy
+                  << "  |  φloc(raw)=" << blkCoord.second
+                  << "  blkΦ(raw)=" << blkPhiCoarse << '\n';
+
+      if (isFitDoneForPhi && bPhi_legacy > 1e-9F)
       {
-        /* undo Ash distortion inside the 2×2 block */
-        float loc = doPhiBlockCorr(blkCoord.second, bΦ);
+        float loc = doPhiBlockCorr(blkCoord.second, bPhi_legacy);
 
-        if (loc > 0.5F && loc <= 1.5F) ++g_nCorrPhiRight;
-
-        /* keep (loc,blk) self‑consistent with exactly one fold */
-        int blk = blkPhiCoarse;                       // start value
-        while (loc <= -0.5F) { loc += 2.F; --blk; }
-        while (loc >   1.5F) { loc -= 2.F; ++blk; }
-        constexpr int kCoarsePhiBins = 128;           // 256 fine /2
-        if (blk < 0) blk += kCoarsePhiBins;
+        int blk = blkPhiCoarse;
+        int wrapL = 0, wrapR = 0;
+        while (loc <= -0.5F) { loc += 2.F; --blk; ++wrapL; }
+        while (loc >   1.5F) { loc -= 2.F; ++blk; ++wrapR; }
+        constexpr int kCoarsePhiBins = 128;
+        if (blk < 0)             blk += kCoarsePhiBins;
         if (blk >= kCoarsePhiBins) blk -= kCoarsePhiBins;
 
-          const float phiFront = convertBlockToGlobalPhi(blk, loc);
+        if (vb > 9)
+          std::cout << "[PDC-CORR] loc(corr)=" << loc
+                    << "  | blk(after fold)=" << blk
+                    << "  | wraps(L/R)=" << wrapL << "/" << wrapR << '\n';
 
-          auto ixFromBlockCenter = [](int blkCoarse, float local)->int {
-              float l = local;
-              if (l <= -0.5f || l >  1.5f) l = std::fmod(l + 2.0f, 2.0f); // one fold
-              int ix = blkCoarse * 2 + static_cast<int>(std::floor(l + 0.5f)); // nearest center
-              if (ix >= 256) ix -= 256;
-              if (ix < 0)    ix += 256;
-              return ix;
-          };
+        const float phiFront = convertBlockToGlobalPhi(blk, loc);
+        if (vb > 9)
+          std::cout << "[PDC-CORR] φFront(corrected)=" << phiFront << '\n';
 
-          const int ixFineBlk = ixFromBlockCenter(blk, loc);
+        auto ixFromBlockCenter = [](int blkCoarse, float local)->int {
+          float l = local;
+          if (l <= -0.5f || l > 1.5f) l = std::fmod(l + 2.0f, 2.0f);
+          int ix = blkCoarse * 2 + static_cast<int>(std::floor(l + 0.5f));
+          if (ix >= 256) ix -= 256;
+          if (ix < 0)    ix += 256;
+          return ix;
+        };
 
-          // η row from the same 2×2 block as the *corrected* local η (loc was corrected).
-          const int blkEtaCoarse_forBlock = iyFine / 2;
-          const int iyFineBlk = blkEtaCoarse_forBlock * 2
-                              + ((blkCoord.first < 0.5f) ? 0 : 1);
+        const int ixFineBlk = ixFromBlockCenter(blk, loc);
+        const int blkEtaCoarse_forBlock = iyFine / 2;
+        const int iyFineBlk = blkEtaCoarse_forBlock * 2
+                            + ((blkCoord.first < 0.5f) ? 0 : 1);
 
-
+        if (vb > 9)
+          std::cout << "[PDC-CORR] fine indices: ixFineBlk=" << ixFineBlk
+                    << "  iyFineBlk=" << iyFineBlk
+                    << "  (blkEtaCoarse_fromLead=" << blkEtaCoarse_forBlock << ")\n";
 
         RawTowerDefs::keytype keyBlk =
-                      RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
-                                                   iyFineBlk,   // η-index FIRST
-                                                   ixFineBlk);  // φ-index SECOND
+            RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iyFineBlk, ixFineBlk);
         const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
 
         if (!geomBlk)
-          {
-            if (vb > 0)
-              std::cerr << ANSI_RED
-                        << "  ✘ geometry lookup failed for (iphi="
-                        << ixFineBlk << ", ieta=" << iyFineBlk
-                        << ") – skipping PDC‑CORR φ point\n"
-                        << ANSI_RESET;
-            rec[4] = {"PDC-CORR", loc,
-                      std::numeric_limits<float>::quiet_NaN()};
+        {
+          if (vb > 0)
+            std::cerr << ANSI_RED
+                      << "[PDC-CORR] geometry lookup FAILED for (iphi=" << ixFineBlk
+                      << ", ieta=" << iyFineBlk << ") → φ point skipped"
+                      << ANSI_RESET << '\n';
+
+          rec[4] = {"PDC-CORR", loc, std::numeric_limits<float>::quiet_NaN()};
         }
         else
         {
-            const double rFrontBlk = geomBlk->get_center_radius();
-            const double zFrontBlk = geomBlk->get_center_z();
+          const double rFrontBlk = geomBlk->get_center_radius();
+          const double zFrontBlk = geomBlk->get_center_z();
 
-            m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::PDC_CORR);
-            const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
-                                                rFrontBlk , zFrontBlk ,
-                                                phiFront,
-                                                ixFineBlk , iyFineBlk);
+          if (vb > 9)
+            std::cout << "[PDC-CORR] geom: rFront=" << rFrontBlk
+                      << "  zFront=" << zFrontBlk << '\n';
 
-            rec[4] = {"PDC-CORR", loc, phiSD};
+          m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::PDC_CORR);
+          if (vb > 9) std::cout << "[PDC-CORR] SetPhiTiltVariant → PDC_CORR\n";
+
+          const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
+                                              rFrontBlk , zFrontBlk ,
+                                              phiFront,
+                                              ixFineBlk , iyFineBlk);
+
+          rec[4] = {"PDC-CORR", loc, phiSD};
+
+          if (vb > 9)
+            std::cout << "[PDC-CORR] loc=" << rec[4].loc
+                      << "  φ_SD=" << rec[4].phi << '\n';
         }
-
       }
       else
+      {
+        if (vb > 9)
+          std::cout << "[PDC-CORR] legacy bΦ not available/enabled → copy PDC-RAW φ\n";
         rec[4] = {"PDC-CORR", blkCoord.second, rec[3].phi};
-  }
+      }
+    }
+
+    if (vb > 9) std::cout << "[φ-variants] EXIT\n";
 
     /* ── F) residuals and histogram filling ─────────────────────────── */
     auto wrap = [](float d){ return TVector2::Phi_mpi_pi(d); };
@@ -1998,6 +2308,15 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                   << "  φ_SD=" << r.phi
                   << "  Δφ(folded)="   << r.d << '\n';
     }
+
+    // also compute residual for the CLUS‑CP(EA) companion
+    recEA.d = foldToTowerPitch(recEA.phi - phiTruth);
+    if (!std::isfinite(recEA.phi)) ++g_nanPhi;
+    if (vb > 3)
+      std::cout << "    " << recEA.tag << "  loc=" << recEA.loc
+                << "  φ_SD=" << recEA.phi
+                << "  Δφ(folded)=" << recEA.d << '\n';
+
 
    //rec[0] -->Clusterizer tower2global NO CP
    //rec[1] --> Clusterizer CP with tower2global
@@ -2080,14 +2399,15 @@ void PositionDependentCorrection::fillDPhiAllVariants(
   #define HFill2(H,X,Y) do{ if((H) && std::isfinite(X) && std::isfinite(Y)) (H)->Fill((X),(Y)); }while(0)
 
     if (fillGlobal) {
-          // 1D (existing)
+          // 1D (existing + EA)
           HFill(hRAW [iE], rec[0].d);
           HFill(hCP  [iE], rec[1].d);
+          HFill(h_phi_diff_cpCorrEA_E[iE], recEA.d);
           HFill(h_phi_diff_cpBcorr_E [iE], rec[2].d);
           HFill(h_phi_diff_raw_E     [iE], rec[3].d);
           HFill(h_phi_diff_corrected_E[iE], rec[4].d);
 
-          // 2D Δφ vs η (NEW)
+          // 2D Δφ vs η (keep existing only)
           HFill2(h2_phi_diff_vsEta_RAW_E    [iE], etaCLUSraw, rec[0].d);
           HFill2(h2_phi_diff_vsEta_CP_E     [iE], etaCLUScp,  rec[1].d);
           HFill2(h2_phi_diff_vsEta_BCORR_E  [iE], etaBCORR,   rec[2].d);
@@ -2124,66 +2444,66 @@ void PositionDependentCorrection::fillDPhiAllVariants(
    #undef  HFill
    #undef  HFill2
 
-  /* ── G) “winner” bookkeeping ────────────────────────────────────── */
-  int best5 = 0; for (int i=1;i<5;++i)
-    if (std::fabs(rec[i].d) < std::fabs(rec[best5].d)) best5 = i;
-  switch(best5){
-    case 0: ++m_phiWinCLUSraw;   break;
-    case 1: ++m_phiWinCLUScp;    break;
-    case 2: ++m_phiWinCLUSbcorr; break;
-    case 3: ++m_phiWinPDCraw;    break;
-    case 4: ++m_phiWinPDCcorr;   break;
-  }
-  ++m_phiWinByE[best5][iE];
-
-  int best3 = 0; for (int i=1;i<3;++i)
-    if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
-  switch(best3){
-    case 0: ++m_nWinRAW;   break;
-    case 1: ++m_nWinCP;    break;
-    case 2: ++m_nWinBCorr; break;
-  }
-
-    if (vb >= 2)
+    // ---------- Δφ winner bookkeeping + optional summary (count only when we filled) ----------
+    if (fillGlobal)
     {
-        // Print the Δφ summary ONLY if this event has any |Δφ| > 0.025 rad (any variant)
-        const float kOut = 0.025f;  // 25 mrad in radians
+      PDC_detail::PhiRec rec6[6] = { rec[0], rec[1], rec[2], rec[3], rec[4], recEA };
 
-        bool shouldPrint = false;
-        for (const auto& r : rec)
-        {
-          if (!std::isfinite(r.d)) continue;
-          if (std::fabs(r.d) > kOut) { shouldPrint = true; break; }
-        }
+      int best6 = 0;
+      for (int i = 1; i < 6; ++i)
+        if (std::fabs(rec6[i].d) < std::fabs(rec6[best6].d)) best6 = i;
 
-
-      if (shouldPrint)
+      // six‑way counters (per-run and per-energy-slice)
+      switch (best6)
       {
-        std::cout << "  ── Δφ summary table (flagged event) ──────────────\n"
+        case 0: ++m_phiWinCLUSraw;   break;
+        case 1: ++m_phiWinCLUScp;    break;
+        case 2: ++m_phiWinCLUSbcorr; break;
+        case 3: ++m_phiWinPDCraw;    break;
+        case 4: ++m_phiWinPDCcorr;   break;
+        case 5: ++m_phiWinCLUScpEA;  break;
+      }
+      ++m_phiWinByE[best6][iE];
+
+      // legacy three‑way overview (RAW vs CP vs BCORR)
+      int best3 = 0;
+      for (int i = 1; i < 3; ++i)
+        if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
+      switch (best3)
+      {
+        case 0: ++m_nWinRAW;   break;
+        case 1: ++m_nWinCP;    break;
+        case 2: ++m_nWinBCorr; break;
+      }
+
+      if (vb >= 2)
+      {
+        std::cout << "  ── Δφ summary table ──────────────\n"
                   << "  tag         loc      φ_SD(rad)   Δφ(rad)   |Δφ|   Δ|Δφ| vs RAW\n";
 
-        const float absRaw = std::fabs(rec[0].d);   // baseline = CLUS-RAW
+        const float absRaw = std::fabs(rec6[0].d);   // baseline = CLUS-RAW
 
-        for (const auto& r : rec)
+        for (const auto& r : rec6)
         {
-          const float gain = absRaw - std::fabs(r.d);      // + ⇒ improvement
-          std::cout << std::setw(10)<<r.tag<<"  "
-                    << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
-                    << std::setw(11)<<r.phi<<"  "
-                    << std::setw(9)<<r.d<<"  "
-                    << std::setw(7)<<std::fabs(r.d)<<"  "
-                    << std::setw(11)<<std::showpos<<std::fixed<<std::setprecision(3)
+          const float gain = absRaw - std::fabs(r.d);   // + ⇒ improvement vs RAW
+          std::cout << std::setw(10) << r.tag << "  "
+                    << std::setw(7)  << std::fixed << std::setprecision(3) << r.loc << "  "
+                    << std::setw(11) << r.phi << "  "
+                    << std::setw(9)  << r.d   << "  "
+                    << std::setw(7)  << std::fabs(r.d) << "  "
+                    << std::setw(11) << std::showpos << std::fixed << std::setprecision(3)
                     << gain << std::noshowpos << '\n';
         }
 
-        std::cout << "  WINNER: " << rec[best5].tag
+        std::cout << "  WINNER: " << rec6[best6].tag
                   << "   (|Δφ| improved by "
-                  << std::fixed<<std::setprecision(3)
-                  << absRaw - std::fabs(rec[best5].d)
+                  << std::fixed << std::setprecision(3)
+                  << absRaw - std::fabs(rec6[best6].d)
                   << " rad vs CLUS-RAW)\n"
                   << "  ────────────────────────────────────────────────\n";
       }
-   }
+    }
+
 }
 
 
@@ -2247,11 +2567,17 @@ void PositionDependentCorrection::fillDEtaAllVariants(
   rec[0] = {"CLUS-RAW", yCG,
             cg2ShowerEta(m_bemcRec, eReco, xCG, yCG, vtxZ)};
 
-  // 2) CLUS‑CP
-  float xCP = xCG, yCP = yCG;
-  m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
-  rec[1] = {"CLUS-CP", yCP,
-            cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ)};
+    // 2) CLUS‑CP
+    float xCP = xCG, yCP = yCG;
+    m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
+    rec[1] = {"CLUS-CP", yCP,
+              cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ)};
+
+    // 2b) CLUS‑CP(EA) — energy/angle aware
+    float xEA = xCG, yEA = yCG;
+    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA);
+    m_bemcRec->CorrectPositionEnergyAware(eReco, xCG, yCG, xEA, yEA);
+    const float etaEA = cg2ShowerEta(m_bemcRec, eReco, xEA, yEA, vtxZ);
 
   // 3) CLUS‑BCORR
   {
@@ -2332,98 +2658,75 @@ void PositionDependentCorrection::fillDEtaAllVariants(
 
   }
 
-  // 5) PDC‑CORR
-  {
-      const float bEta = m_bValsEta[iE];
-      if (isFitDoneForEta && bEta > 1e-9F)
+    // 5) PDC-CORR  — use LEGACY (originalEta) bη only
+    {
+      const float bEta_legacy = m_bValsEta[iE];      // ← originalEta table
+      if (isFitDoneForEta && bEta_legacy > 1e-9F)
       {
-        int   blk = blkEtaCoarse;   // start from raw coarse index
+        int   blk = blkEtaCoarse;
 
         float dEtaPitchBlk =
-                    0.5f * ( convertBlockToGlobalEta(blk ,  1.5f) -
-                             convertBlockToGlobalEta(blk , -0.5f) );
-
+            0.5f * ( convertBlockToGlobalEta(blk,  1.5f)
+                   - convertBlockToGlobalEta(blk, -0.5f) );
         if (!std::isfinite(dEtaPitchBlk) || dEtaPitchBlk <= 0.0f)
-              dEtaPitchBlk = 2.2f / 96.0f;       // fallback for edge rows
+          dEtaPitchBlk = 2.2f / 96.0f;
 
-
-        float loc = doEtaBlockCorr(blkCoord.first, bEta, dEtaPitchBlk);
+        float loc = doEtaBlockCorr(blkCoord.first, bEta_legacy, dEtaPitchBlk);
 
         while (loc <= -0.5F) { loc += 2.F; --blk; }
         while (loc >   1.5F) { loc -= 2.F; ++blk; }
-        constexpr int kCoarseEtaBins = 48;            // 96 fine /2
+        constexpr int kCoarseEtaBins = 48;
         if (blk < 0) blk += kCoarseEtaBins;
         if (blk >= kCoarseEtaBins) blk -= kCoarseEtaBins;
 
-        const float etaFront =
-              convertBlockToGlobalEta(blk, loc);
-        const int ixFineBlk =
-                blkPhiCoarse * 2 + int(std::floor(blkCoord.second + 0.5F));
-        const int iyFine =
-                blk * 2 + int(std::floor(loc + 0.5F));
+        const float etaFront = convertBlockToGlobalEta(blk, loc);
+        const int ixFineBlk = blkPhiCoarse * 2 + int(std::floor(blkCoord.second + 0.5F));
+        const int iyFine    = blk          * 2 + int(std::floor(loc            + 0.5F));
 
-          RawTowerDefs::keytype keyBlkEta =
-                  RawTowerDefs::encode_towerid(RawTowerDefs::CEMC,
-                                               iyFine,       // η‑index
-                                               ixFineBlk);   // φ‑index
+        RawTowerDefs::keytype keyBlkEta =
+            RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iyFine, ixFineBlk);
         const auto* geomBlkEta = m_geometry->get_tower_geometry(keyBlkEta);
 
         if (!geomBlkEta)
         {
-            if (vb > 0)
-              std::cerr << ANSI_RED
-                        << "  ✘ geometry lookup failed for (iphi="
-                        << ixFineBlk << ", ieta=" << iyFine
-                        << ") – skipping PDC‑CORR η point\n"
-                        << ANSI_RESET;
-            rec[4] = {"PDC-CORR", loc,
-                      std::numeric_limits<float>::quiet_NaN()};
+          if (vb > 0)
+            std::cerr << ANSI_RED
+                      << "  ✘ geometry lookup failed for (iphi="
+                      << ixFineBlk << ", ieta=" << iyFine
+                      << ") – skipping PDC-CORR η point\n"
+                      << ANSI_RESET;
+          rec[4] = {"PDC-CORR", loc, std::numeric_limits<float>::quiet_NaN()};
         }
         else
         {
-            const double rFrontBlk = geomBlkEta->get_center_radius();
+          const double rFrontBlk = geomBlkEta->get_center_radius();
 
-            const float etaSD = front2ShowerEta(m_bemcRec, eReco,
-                                                rFrontBlk , ixFineBlk , iyFine ,
-                                                etaFront , phiFrontRaw ,
-                                                vtxZ);
-
-            rec[4] = {"PDC-CORR", loc, etaSD};
+          const float etaSD = front2ShowerEta(m_bemcRec, eReco,
+                                              rFrontBlk , ixFineBlk , iyFine ,
+                                              etaFront , phiFrontRaw ,
+                                              vtxZ);
+          rec[4] = {"PDC-CORR", loc, etaSD};
         }
-
-          
-        if (vb > 4)
-        {
-            std::cout << "  ▶ DEBUG: pre-SD values"
-                      << "   blkEta(raw)="   << blkEtaCoarse
-                      << "   blkEta(corr)="  << blk
-                      << "   locRaw="        << blkCoord.first
-                      << "   locCorr="       << loc
-                      << "   iyFineRaw="
-                      << blkEtaCoarse * 2 + int(std::floor(blkCoord.first + 0.5F))
-                      << "   iyFineCorr="    << iyFine
-                      << "   etaFront(raw)="
-                      << convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first)
-                      << "   etaFront(corr)="
-                      << convertBlockToGlobalEta(blk, loc)
-                      << '\n';
-         }
       }
       else
+      {
         rec[4] = {"PDC-CORR", blkCoord.first, rec[3].eta};
-  }
-    
-  /* ───────────────── residuals + histogramming ───────────────────── */
-  for (auto& r : rec)
-  {
-    r.d = r.eta - etaTruth;
-    if (!std::isfinite(r.eta)) ++g_nanEta;
+      }
+    }
 
-    if (vb > 3)
-      std::cout << "    " << r.tag << "  loc=" << r.loc
-                << "  η_SD=" << r.eta
-                << "  Δη="   << r.d << '\n';
-  }
+    /* ───────────────── residuals + histogramming ───────────────────── */
+    for (auto& r : rec)
+    {
+      r.d = r.eta - etaTruth;
+      if (!std::isfinite(r.eta)) ++g_nanEta;
+
+      if (vb > 3)
+        std::cout << "    " << r.tag << "  loc=" << r.loc
+                  << "  η_SD=" << r.eta
+                  << "  Δη="   << r.d << '\n';
+    }
+    // also compute residual for the CLUS‑CP(EA) companion
+    const float dEtaEA = etaEA - etaTruth;
     /* ── book‑keeping: |Δη| outside ±0.04 ───────────────────────────── */
     for (int i = 0; i < 5; ++i)
       if (std::fabs(rec[i].d) > 0.04f)
@@ -2448,14 +2751,15 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     //rec[4] --> PDC global conv w PDC corr
     
 #define HFill(H,V)  do{ if((H)&&std::isfinite(V)) (H)->Fill(V); }while(0)
-  if (fillGlobal)
-  {
-    HFill(hRAW [iE], rec[0].d);
-    HFill(hCP  [iE], rec[1].d);
-    HFill(h_eta_diff_cpBcorr_E [iE], rec[2].d);
-    HFill(h_eta_diff_raw_E     [iE], rec[3].d);
-    HFill(h_eta_diff_corrected_E[iE], rec[4].d);
-  }
+    if (fillGlobal)
+    {
+      HFill(hRAW [iE], rec[0].d);
+      HFill(hCP  [iE], rec[1].d);
+      HFill(h_eta_diff_cpCorrEA_E[iE], dEtaEA);
+      HFill(h_eta_diff_cpBcorr_E [iE], rec[2].d);
+      HFill(h_eta_diff_raw_E     [iE], rec[3].d);
+      HFill(h_eta_diff_corrected_E[iE], rec[4].d);
+    }
     /* ---------- vertex-resolved histogramming ---------- */
     if (!skipVertexDep)
     {
@@ -2484,38 +2788,50 @@ void PositionDependentCorrection::fillDEtaAllVariants(
 
 #undef  HFill
 
-  /* ───────────────── winner bookkeeping ──────────────────────────── */
-  int best5 = 0; for(int i=1;i<5;++i)
-    if (std::fabs(rec[i].d) < std::fabs(rec[best5].d)) best5 = i;
-  switch(best5){
-    case 0: ++m_etaWinCLUSraw;   break;
-    case 1: ++m_etaWinCLUScp;    break;
-    case 2: ++m_etaWinCLUSbcorr; break;
-    case 3: ++m_etaWinPDCraw;    break;
-    case 4: ++m_etaWinPDCcorr;   break;
-  }
-    ++m_etaWinByE[best5][iE];
+    // Build six-pack once so both bookkeeping and printing can reuse it
+    PDC_detail::EtaRec recEArec = {"CLUS-CP(EA)", yEA, etaEA, dEtaEA};
+    PDC_detail::EtaRec rec6[6]  = { rec[0], rec[1], rec[2], rec[3], rec[4], recEArec };
 
-  int best3 = 0; for(int i=1;i<3;++i)
-    if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
-  switch(best3){
-    case 0: ++m_nWinRAW_Eta;   break;
-    case 1: ++m_nWinCP_Eta;    break;
-    case 2: ++m_nWinBCorr_Eta; break;
-  }
+    // Determine the best (smallest |Δη|) now; counters will be updated only if we fill
+    int best6 = 0;
+    for (int i = 1; i < 6; ++i)
+      if (std::fabs(rec6[i].d) < std::fabs(rec6[best6].d)) best6 = i;
 
-    if (vb >= 2)
+    /* ───────────────── winner bookkeeping (count only when we filled) ───────────────── */
+    if (fillGlobal)
     {
-      /* ──────────────────────────────────────────────────────────────── *
-       *  Diagnostic summary: shows absolute |Δη| and the change versus  *
-       *  CLUS‑RAW.  Helpful to pin‑point why PDC‑CORR may under‑perform *
-       * ──────────────────────────────────────────────────────────────── */
-      std::cout << "  ── Δη summary table (|z|="<<std::fabs(vtxZ)<<" cm) ─────\n"
+      switch (best6)
+      {
+        case 0: ++m_etaWinCLUSraw;   break;
+        case 1: ++m_etaWinCLUScp;    break;
+        case 2: ++m_etaWinCLUSbcorr; break;
+        case 3: ++m_etaWinPDCraw;    break;
+        case 4: ++m_etaWinPDCcorr;   break;
+        case 5: ++m_etaWinCLUScpEA;  break;
+      }
+      ++m_etaWinByE[best6][iE];
+
+      // keep the legacy 3-way overview
+      int best3 = 0;
+      for (int i = 1; i < 3; ++i)
+        if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
+      switch (best3)
+      {
+        case 0: ++m_nWinRAW_Eta;   break;
+        case 1: ++m_nWinCP_Eta;    break;
+        case 2: ++m_nWinBCorr_Eta; break;
+      }
+    }
+
+    // Print only for events we also filled into histograms
+    if (fillGlobal && vb >= 2)
+    {
+      std::cout << "  ── Δη summary table (|z|="<<std::fabs(vtxZ)<<" cm) ─────\n"
                 << "  tag         loc      η_SD       Δη        |Δη|   Δ|Δη| vs RAW\n";
 
-      const float absRaw = std::fabs(rec[0].d);   // baseline
+      const float absRaw = std::fabs(rec6[0].d);   // baseline = CLUS-RAW
 
-      for (const auto& r : rec)
+      for (const auto& r : rec6)
       {
         const float gain = absRaw - std::fabs(r.d);
         std::cout << std::setw(10)<<r.tag<<"  "
@@ -2527,17 +2843,15 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                   << gain << std::noshowpos << '\n';
       }
 
-      std::cout << "  WINNER: " << rec[best5].tag
+      std::cout << "  WINNER: " << rec6[best6].tag
                 << "   (|Δη| improved by "
                 << std::fixed<<std::setprecision(3)
-                << absRaw - std::fabs(rec[best5].d)
-                << " vs CLUS‑RAW)\n"
+                << absRaw - std::fabs(rec6[best6].d)
+                << " vs CLUS-RAW)\n"
                 << "  ────────────────────────────────────────────────\n";
     }
 
 }
-
-
 
 
 
@@ -2751,7 +3065,8 @@ void PositionDependentCorrection::finalClusterLoop(
               << "    vtx_z        = " << vtx_z << std::endl;
   }
 
-  h_nclusters->Fill(nClusCount);
+  if (!m_firstPassBvaluesOnly && h_nclusters)
+      h_nclusters->Fill(nClusCount);
 
   // If the number of clusters is too large => skip
   if (nClusCount > max_nClusCount)
@@ -2836,7 +3151,8 @@ void PositionDependentCorrection::finalClusterLoop(
 
     int lt_eta = clus1->get_lead_tower().first;
     int lt_phi = clus1->get_lead_tower().second;
-    h2_chi2_tot_etaPhi->Fill(lt_eta, lt_phi);
+    if (!m_firstPassBvaluesOnly && h2_chi2_tot_etaPhi)
+        h2_chi2_tot_etaPhi->Fill(lt_eta, lt_phi);
 
     if (clusE < 0.1f)
     {
@@ -2851,9 +3167,11 @@ void PositionDependentCorrection::finalClusterLoop(
 
       if (clusChi2 > kChi2Cut)
       {
-        // ---- χ² QA (numerator & profile) ----
-        h2_chi2_rej_etaPhi->Fill(lt_eta, lt_phi);       // rejected count
-        p_chi2_pass_etaPhi ->Fill(lt_eta, lt_phi, 0.0); // pass-flag = 0
+        if (!m_firstPassBvaluesOnly)
+        {
+          if (h2_chi2_rej_etaPhi)  h2_chi2_rej_etaPhi->Fill(lt_eta, lt_phi);
+          if (p_chi2_pass_etaPhi)  p_chi2_pass_etaPhi->Fill(lt_eta, lt_phi, 0.0);
+        }
         if (Verbosity() > 0)
           std::cout << "[χ²-CUT]  cluster Chi2=" << clusChi2
                     << "  (lead η,φ)=" << lt_eta << ',' << lt_phi
@@ -2862,9 +3180,9 @@ void PositionDependentCorrection::finalClusterLoop(
       }
       else
       {
-        // cluster is accepted
-        p_chi2_pass_etaPhi->Fill(lt_eta, lt_phi, 1.0);  // pass-flag = 1
-      }
+        if (!m_firstPassBvaluesOnly && p_chi2_pass_etaPhi)
+          p_chi2_pass_etaPhi->Fill(lt_eta, lt_phi, 1.0);
+    }
     // 3) If lead tower index is out of range
     if (lt_eta > 95)
     {
@@ -2875,7 +3193,8 @@ void PositionDependentCorrection::finalClusterLoop(
       }
       continue;
     }
-    h_clusE->Fill(clusE);
+    if (!m_firstPassBvaluesOnly && h_clusE)
+        h_clusE->Fill(clusE);
 
     RawCluster::TowerConstRange towerCR = clus1->get_towers();
     std::vector<int> towerEtas, towerPhis;
@@ -2895,7 +3214,8 @@ void PositionDependentCorrection::finalClusterLoop(
       towerPhis.push_back(iPhi);
       towerEs.push_back(twE);
     }
-    h_clusE_nTow->Fill(clusE, nTow);
+    if (!m_firstPassBvaluesOnly && h_clusE_nTow)
+        h_clusE_nTow->Fill(clusE, nTow);
       
     TLorentzVector photon1;
     photon1.SetPtEtaPhiE(clusPt, clusEta, clusPhi, clusE);
@@ -2936,49 +3256,120 @@ void PositionDependentCorrection::finalClusterLoop(
     }
 
 
-    constexpr double kFillW = 1.0;      // weight per fill
-    if (fillGlobal)                       // store only when |z_vtx| ≤ 10 cm
-          h3_cluster_block_cord_E->Fill(blkCoord.first,
-                                        blkCoord.second,
-                                        clusE,
-                                        kFillW);
+      constexpr double kFillW = 1.0;      // weight per fill
+      if (fillGlobal)                       // store only when |z_vtx| ≤ 10 cm
+      {
+        // 1) Legacy default uncorrected (unchanged)
+        h3_cluster_block_cord_E->Fill(blkCoord.first,
+                                      blkCoord.second,
+                                      clusE,
+                                      kFillW);
 
-    if (Verbosity() > 0)
-    {
+        // 2) Uncorrected η-slices in parallel
+        const float absEta = std::fabs(clusEta);
+
+        if (h3_cluster_block_cord_E_full && absEta <= 1.10f)
+          h3_cluster_block_cord_E_full->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+
+        if (h3_cluster_block_cord_E_etaCore && absEta <= 0.20f)
+          h3_cluster_block_cord_E_etaCore->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+
+        if (h3_cluster_block_cord_E_etaMid && absEta > 0.20f && absEta <= 0.70f)
+          h3_cluster_block_cord_E_etaMid->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+
+        if (h3_cluster_block_cord_E_etaEdge && absEta > 0.70f && absEta <= 1.10f)
+          h3_cluster_block_cord_E_etaEdge->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+      }
+
+      if (Verbosity() > 0)
+      {
         const int bx = h3_cluster_block_cord_E->GetXaxis()->FindBin(blkCoord.first);
         const int by = h3_cluster_block_cord_E->GetYaxis()->FindBin(blkCoord.second);
         const int bz = h3_cluster_block_cord_E->GetZaxis()->FindBin(clusE);
 
         std::cout << "[RAW-FILL]  ηloc="  << blkCoord.first
-                    << "  φloc="           << blkCoord.second
-                    << "  E="              << clusE
-                    << "  (binX,Y,Z = "    << bx << "," << by << "," << bz << ")  "
-                    << "→ new content = "
-                    << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
-                << '\n';
-    }
-    /* ---- original raw local coordinates ---------------- */
-    const float rawEta = blkCoord.first;    // [0,1]
-    const float rawPhi = blkCoord.second;   // [0,1]
+                  << "  φloc="           << blkCoord.second
+                  << "  E="              << clusE
+                  << "  (binX,Y,Z = "    << bx << "," << by << "," << bz << ")  "
+                  << "→ new content = "
+                  << h3_cluster_block_cord_E->GetBinContent(bx,by,bz)
+                  << '\n';
+      }
 
-    /* ---- start from raw; apply shifts only if we have a fit --- */
-    float corrEta = rawEta;
-    float corrPhi = rawPhi;
+      // First-pass mode: fill ONLY uncorrected TH3s, skip everything else
+      if (m_firstPassBvaluesOnly)
+        continue;
 
-    if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
-    {
-      const float bPhi = m_bValsPhi[iEbin];
-      if (bPhi > 1e-9f) corrPhi = doPhiBlockCorr(rawPhi, bPhi);
-    }
+      // ---- raw local coordinates
+      const float rawEta = blkCoord.first;    // [0,1]
+      const float rawPhi = blkCoord.second;   // [0,1]
 
-    if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
-    {
-      const float bEta = m_bValsEta[iEbin];
-      if (bEta > 1e-9f) corrEta = doEtaBlockCorr(rawEta, bEta);
-    }
+      // ---- legacy default corrected (kept)
+      float corrEta = rawEta;
+      float corrPhi = rawPhi;
 
-    if (fillGlobal)                       // store only when |z_vtx| ≤ 10 cm
-          h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
+      if (isFitDoneForPhi && iEbin >= 0 && iEbin < N_Ebins)
+      {
+        const float bPhi = m_bValsPhi[iEbin];
+        if (bPhi > 1e-9f) corrPhi = doPhiBlockCorr(rawPhi, bPhi);
+      }
+      if (isFitDoneForEta && iEbin >= 0 && iEbin < N_Ebins)
+      {
+        const float bEta = m_bValsEta[iEbin];
+        if (bEta > 1e-9f) corrEta = doEtaBlockCorr(rawEta, bEta);
+      }
+      if (fillGlobal)
+        h3_cluster_block_cord_E_corrected->Fill(corrEta, corrPhi, clusE, kFillW);
+
+      // ---- per-η-view corrected (second pass; fill only if that view has b-values)
+      if (fillGlobal)
+      {
+        const float absEta = std::fabs(clusEta);
+
+        auto applyCorrView = [&](int vIdx, float inEta, float inPhi, float& outEta, float& outPhi)
+        {
+          outEta = inEta; outPhi = inPhi;
+          if (iEbin < 0 || iEbin >= N_Ebins) return;
+          if (m_bPhiReady_view[vIdx]) {
+            const float bP = m_bValsPhi_view[vIdx][iEbin];
+            if (bP > 1e-9f) outPhi = doPhiBlockCorr(outPhi, bP);
+          }
+          if (m_bEtaReady_view[vIdx]) {
+            const float bE = m_bValsEta_view[vIdx][iEbin];
+            if (bE > 1e-9f) outEta = doEtaBlockCorr(outEta, bE);
+          }
+        };
+
+        // fullEta
+        if (h3_cluster_block_cord_E_full_corr && absEta <= 1.10f &&
+            (m_bPhiReady_view[0] || m_bEtaReady_view[0]))
+        {
+          float e, p; applyCorrView(0, rawEta, rawPhi, e, p);
+          h3_cluster_block_cord_E_full_corr->Fill(e, p, clusE, kFillW);
+        }
+        // etaCore
+        if (h3_cluster_block_cord_E_etaCore_corr && absEta <= 0.20f &&
+            (m_bPhiReady_view[1] || m_bEtaReady_view[1]))
+        {
+          float e, p; applyCorrView(1, rawEta, rawPhi, e, p);
+          h3_cluster_block_cord_E_etaCore_corr->Fill(e, p, clusE, kFillW);
+        }
+        // etaMid
+        if (h3_cluster_block_cord_E_etaMid_corr && absEta > 0.20f && absEta <= 0.70f &&
+            (m_bPhiReady_view[2] || m_bEtaReady_view[2]))
+        {
+          float e, p; applyCorrView(2, rawEta, rawPhi, e, p);
+          h3_cluster_block_cord_E_etaMid_corr->Fill(e, p, clusE, kFillW);
+        }
+        // etaEdge
+        if (h3_cluster_block_cord_E_etaEdge_corr && absEta > 0.70f && absEta <= 1.10f &&
+            (m_bPhiReady_view[3] || m_bEtaReady_view[3]))
+        {
+          float e, p; applyCorrView(3, rawEta, rawPhi, e, p);
+          h3_cluster_block_cord_E_etaEdge_corr->Fill(e, p, clusE, kFillW);
+        }
+     }
+
 
 
     if (Verbosity() > 3)
@@ -3057,10 +3448,6 @@ void PositionDependentCorrection::finalClusterLoop(
         h_delPhi_e_phi  ->Fill(dPhi, trPhoton.E(), iLTphi);
         h_truthE        ->Fill(trPhoton.E());
 
-        fillAshLogDx(clus1, photon1, trPhoton,
-                       blkCoord, blkPhiCoarse,
-                       towerPhis, towerEs);
-
         fillDPhiAllVariants(
             clus1,
             photon1,                       // reco photon
@@ -3085,6 +3472,9 @@ void PositionDependentCorrection::finalClusterLoop(
             h_eta_diff_cpCorr_E,           // Δη(CLUS‑CP)   → truth
             fillGlobal
         );
+        fillAshLogDx(clus1, photon1, trPhoton,
+                       blkCoord, blkPhiCoarse,
+                       towerPhis, towerEs);
 
         if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
               blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
@@ -3206,12 +3596,13 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 
   if (Verbosity() > 5)
   {
-    std::cout << ANSI_BOLD
-              << "[process_towers] Finished fillTowerInfo, total tower energy="
-              << ANSI_RESET << tower_tot_e
-              << ", #tower etas=" << ht_eta.size()
-              << ", #tower phis=" << ht_phi.size() << std::endl;
+      std::cout << ANSI_BOLD
+                << "[process_towers] Finished fillTowerInfo, total tower energy="
+                << ANSI_RESET << tower_tot_e
+                << ", #tower etas=" << ht_eta.size()
+                << ", #tower phis=" << ht_phi.size() << std::endl;
   }
+    
   float weight = 1;
 
   // ------------------------------------------------------------------------
@@ -3224,10 +3615,10 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 
   if (Verbosity() > 0)
   {
-    std::cout << "[process_towers] => fillTruthInfo done.\n"
-              << "    #truth_photons=" << truth_photons.size()
-              << ", #truth_meson_photons=" << truth_meson_photons.size()
-              << std::endl;
+      std::cout << "[process_towers] => fillTruthInfo done.\n"
+                << "    #truth_photons=" << truth_photons.size()
+                << ", #truth_meson_photons=" << truth_meson_photons.size()
+                << std::endl;
   }
 
   /* ------------------------------------------------------------------
@@ -3444,54 +3835,73 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
   else if (Verbosity() > 0)
     std::cerr << "[ERROR] outfile pointer is null – nothing written!\n";
 
+  /* Skip all End()-summary printing in first-pass b-values-only mode */
+  if (m_firstPassBvaluesOnly)
+  {
+      return 0;
+  }
+
+    
   /* ──────────────────────────────────────── helper: % formatting ───── */
   auto pct = [](std::uint64_t n, std::uint64_t d)->std::string
              { return d ? Form("%6.1f %%", 100.*double(n)/double(d))
                          : "   n/a "; };
 
-  /* ──────────────────────────────────────── 1) Δφ five-way table ───── */
-  const std::uint64_t nTotPhi =
-        m_phiWinCLUSraw + m_phiWinCLUScp + m_phiWinCLUSbcorr +
-        m_phiWinPDCraw  + m_phiWinPDCcorr;
+    /* ──────────────────────────────────────── 1) Δφ six‑way table ───── */
+    const std::uint64_t nTotPhi =
+          m_phiWinCLUSraw + m_phiWinCLUScp + m_phiWinCLUSbcorr +
+          m_phiWinPDCraw  + m_phiWinPDCcorr + m_phiWinCLUScpEA;
 
-    if (Verbosity() > 0)
-    {
-      std::cout << '\n' << ANSI_BOLD
-                << "╭───────────────────────────────╮\n"
-                << "│        Δφ   –   FIVE-WAY      │\n"
-                << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
-                << std::left << std::setw(14) << "variant"
-                << std::right<< std::setw(12)<< "wins"
-                << std::setw(12)             << "share\n"
-                << "────────────────────────────────────────────\n"
-                << std::left << std::setw(14) << "CLUS-RAW"
-                << std::right<< std::setw(12)<< m_phiWinCLUSraw
-                << std::setw(12)             << pct(m_phiWinCLUSraw,nTotPhi) << '\n'
-                << std::left << std::setw(14) << "CLUS-CP"
-                << std::right<< std::setw(12)<< m_phiWinCLUScp
-                << std::setw(12)             << pct(m_phiWinCLUScp ,nTotPhi) << '\n'
-                << std::left << std::setw(14) << "CLUS-BCORR"
-                << std::right<< std::setw(12)<< m_phiWinCLUSbcorr
-                << std::setw(12)             << pct(m_phiWinCLUSbcorr,nTotPhi)<< '\n'
-                << std::left << std::setw(14) << "PDC-RAW"
-                << std::right<< std::setw(12)<< m_phiWinPDCraw
-                << std::setw(12)             << pct(m_phiWinPDCraw ,nTotPhi) << '\n'
-                << std::left << std::setw(14) << "PDC-CORR"
-                << std::right<< std::setw(12)<< m_phiWinPDCcorr
-                << std::setw(12)             << pct(m_phiWinPDCcorr,nTotPhi)<< '\n'
-                << "────────────────────────────────────────────\n"
-                << std::left << std::setw(14) << "TOTAL"
-                << std::right<< std::setw(12)<< nTotPhi << "\n";
-
-      /* quick verdict */
-      if (m_phiWinCLUScp)
+      if (Verbosity() > 0)
       {
-        const double rel = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScp);
-        std::cout << "BCORR / CP (φ) : " << std::fixed << std::setprecision(1)
-                  << rel << " %  →  "
-                  << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
-                  << '\n';
-      }
+        std::cout << '\n' << ANSI_BOLD
+                  << "╭────────────────────────────────╮\n"
+                  << "│        Δφ   –   SIX‑WAY        │\n"
+                  << "╰────────────────────────────────╯" << ANSI_RESET << '\n'
+                  << std::left << std::setw(14) << "variant"
+                  << std::right<< std::setw(12)<< "wins"
+                  << std::setw(12)             << "share\n"
+                  << "────────────────────────────────────────────\n"
+                  << std::left << std::setw(14) << "CLUS-RAW"
+                  << std::right<< std::setw(12)<< m_phiWinCLUSraw
+                  << std::setw(12)             << pct(m_phiWinCLUSraw,nTotPhi) << '\n'
+                  << std::left << std::setw(14) << "CLUS-CP"
+                  << std::right<< std::setw(12)<< m_phiWinCLUScp
+                  << std::setw(12)             << pct(m_phiWinCLUScp ,nTotPhi) << '\n'
+                  << std::left << std::setw(14) << "CLUS-BCORR"
+                  << std::right<< std::setw(12)<< m_phiWinCLUSbcorr
+                  << std::setw(12)             << pct(m_phiWinCLUSbcorr,nTotPhi)<< '\n'
+                  << std::left << std::setw(14) << "PDC-RAW"
+                  << std::right<< std::setw(12)<< m_phiWinPDCraw
+                  << std::setw(12)             << pct(m_phiWinPDCraw ,nTotPhi) << '\n'
+                  << std::left << std::setw(14) << "PDC-CORR"
+                  << std::right<< std::setw(12)<< m_phiWinPDCcorr
+                  << std::setw(12)             << pct(m_phiWinPDCcorr,nTotPhi)<< '\n'
+                  << std::left << std::setw(14) << "CLUS-CP(EA)"
+                  << std::right<< std::setw(12)<< m_phiWinCLUScpEA
+                  << std::setw(12)             << pct(m_phiWinCLUScpEA,nTotPhi)<< '\n'
+                  << "────────────────────────────────────────────\n"
+                  << std::left << std::setw(14) << "TOTAL"
+                  << std::right<< std::setw(12)<< nTotPhi << "\n";
+
+        /* quick verdicts */
+        if (m_phiWinCLUScp)
+        {
+          const double rel = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScp);
+          std::cout << "BCORR / CP (φ)    : " << std::fixed << std::setprecision(1)
+                    << rel << " %  →  "
+                    << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
+                    << '\n';
+        }
+        if (m_phiWinCLUScpEA)
+        {
+          const double relEA = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScpEA);
+          std::cout << "BCORR / CP(EA) (φ): " << std::fixed << std::setprecision(1)
+                    << relEA << " %  →  "
+                    << (relEA >= 100. ? "✅ matches/beats CP(EA)" : "⚠️ below CP(EA)")
+                    << '\n';
+        }
+
 
         {
           std::cout << "\n[Δφ outside ±0.025 rad]\n"
@@ -3563,56 +3973,67 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
         }
     }
 
-  /* ──────────────────────────────────────── 2) Δη five-way table ───── */
-  const std::uint64_t nTotEta5 =
-        m_etaWinCLUSraw + m_etaWinCLUScp + m_etaWinCLUSbcorr +
-        m_etaWinPDCraw  + m_etaWinPDCcorr;
+    /* ──────────────────────────────────────── 2) Δη six‑way table ───── */
+    const std::uint64_t nTotEta =
+          m_etaWinCLUSraw + m_etaWinCLUScp + m_etaWinCLUSbcorr +
+          m_etaWinPDCraw  + m_etaWinPDCcorr + m_etaWinCLUScpEA;
 
-  if (Verbosity() > 0)
-  {
-    std::cout << '\n' << ANSI_BOLD
-              << "╭───────────────────────────────╮\n"
-              << "│        Δη   –   FIVE-WAY      │\n"
-              << "╰───────────────────────────────╯" << ANSI_RESET << '\n'
-              << std::left << std::setw(14) << "variant"
-              << std::right<< std::setw(12)<< "wins"
-              << std::setw(12)             << "share\n"
-              << "────────────────────────────────────────────\n"
-              << std::left << std::setw(14) << "CLUS-RAW"
-              << std::right<< std::setw(12)<< m_etaWinCLUSraw
-              << std::setw(12)             << pct(m_etaWinCLUSraw,nTotEta5)<< '\n'
-              << std::left << std::setw(14) << "CLUS-CP"
-              << std::right<< std::setw(12)<< m_etaWinCLUScp
-              << std::setw(12)             << pct(m_etaWinCLUScp ,nTotEta5)<< '\n'
-              << std::left << std::setw(14) << "CLUS-BCORR"
-              << std::right<< std::setw(12)<< m_etaWinCLUSbcorr
-              << std::setw(12)             << pct(m_etaWinCLUSbcorr,nTotEta5)<< '\n'
-              << std::left << std::setw(14) << "PDC-RAW"
-              << std::right<< std::setw(12)<< m_etaWinPDCraw
-              << std::setw(12)             << pct(m_etaWinPDCraw ,nTotEta5)<< '\n'
-              << std::left << std::setw(14) << "PDC-CORR"
-              << std::right<< std::setw(12)<< m_etaWinPDCcorr
-              << std::setw(12)             << pct(m_etaWinPDCcorr,nTotEta5)<< '\n'
-              << "────────────────────────────────────────────\n"
-              << std::left << std::setw(14) << "TOTAL"
-              << std::right<< std::setw(12)<< nTotEta5 << "\n";
-
-    if (m_etaWinCLUScp)
+    if (Verbosity() > 0)
     {
-      const double rel = 100.*double(m_etaWinCLUSbcorr)/double(m_etaWinCLUScp);
-      std::cout << "BCORR / CP (η) : " << std::fixed << std::setprecision(1)
-                << rel << " %  →  "
-                << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
-                << '\n';
-    }
+      std::cout << '\n' << ANSI_BOLD
+                << "╭────────────────────────────────╮\n"
+                << "│        Δη   –   SIX‑WAY        │\n"
+                << "╰────────────────────────────────╯" << ANSI_RESET << '\n'
+                << std::left << std::setw(14) << "variant"
+                << std::right<< std::setw(12)<< "wins"
+                << std::setw(12)             << "share\n"
+                << "────────────────────────────────────────────\n"
+                << std::left << std::setw(14) << "CLUS-RAW"
+                << std::right<< std::setw(12)<< m_etaWinCLUSraw
+                << std::setw(12)             << pct(m_etaWinCLUSraw,nTotEta)<< '\n'
+                << std::left << std::setw(14) << "CLUS-CP"
+                << std::right<< std::setw(12)<< m_etaWinCLUScp
+                << std::setw(12)             << pct(m_etaWinCLUScp ,nTotEta)<< '\n'
+                << std::left << std::setw(14) << "CLUS-BCORR"
+                << std::right<< std::setw(12)<< m_etaWinCLUSbcorr
+                << std::setw(12)             << pct(m_etaWinCLUSbcorr,nTotEta)<< '\n'
+                << std::left << std::setw(14) << "PDC-RAW"
+                << std::right<< std::setw(12)<< m_etaWinPDCraw
+                << std::setw(12)             << pct(m_etaWinPDCraw ,nTotEta)<< '\n'
+                << std::left << std::setw(14) << "PDC-CORR"
+                << std::right<< std::setw(12)<< m_etaWinPDCcorr
+                << std::setw(12)             << pct(m_etaWinPDCcorr,nTotEta)<< '\n'
+                << std::left << std::setw(14) << "CLUS-CP(EA)"
+                << std::right<< std::setw(12)<< m_etaWinCLUScpEA
+                << std::setw(12)             << pct(m_etaWinCLUScpEA,nTotEta)<< '\n'
+                << "────────────────────────────────────────────\n"
+                << std::left << std::setw(14) << "TOTAL"
+                << std::right<< std::setw(12)<< nTotEta << "\n";
+
+      if (m_etaWinCLUScp)
+      {
+        const double rel = 100.*double(m_etaWinCLUSbcorr)/double(m_etaWinCLUScp);
+        std::cout << "BCORR / CP (η)    : " << std::fixed << std::setprecision(1)
+                  << rel << " %  →  "
+                  << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
+                  << '\n';
+      }
+      if (m_etaWinCLUScpEA)
+      {
+        const double relEA = 100.*double(m_etaWinCLUSbcorr)/double(m_etaWinCLUScpEA);
+        std::cout << "BCORR / CP(EA) (η): " << std::fixed << std::setprecision(1)
+                  << relEA << " %  →  "
+                  << (relEA >= 100. ? "✅ matches/beats CP(EA)" : "⚠️ below CP(EA)")
+                  << '\n';
+      }
+
 
   }
     
-    /* ───────────────── energy‑dependent winner overview ────────────── */
     if (Verbosity() > 5)
     {
-      const char* flav[5] = {"CLUS‑RAW","CLUS‑CP","CLUS‑BCORR",
-                             "PDC‑RAW","PDC‑CORR"};
+      const char* flav[6] = {"CLUS‑RAW","CLUS‑CP","CLUS‑BCORR",
+                             "PDC‑RAW","PDC‑CORR","CLUS‑CP(EA)"};
 
       std::cout << '\n' << ANSI_BOLD
                 << "╭──────────────────────────────────────────────────────────╮\n"
@@ -3623,7 +4044,7 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
       for (int ie = 0; ie < N_Ebins; ++ie)
       {
         std::uint64_t totPhi = 0, totEta = 0;
-        for (int f=0; f<5; ++f)
+        for (int f=0; f<6; ++f)
         { totPhi += m_phiWinByE[f][ie];  totEta += m_etaWinByE[f][ie]; }
 
         std::cout << ANSI_BOLD << "  • E‑slice " << ie << ANSI_RESET
@@ -3636,7 +4057,7 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
                   << std::setw(10)             << "%\n"
                   << "  ───────────────────────────────────────────────────────\n";
 
-        for (int f=0; f<5; ++f)
+        for (int f=0; f<6; ++f)
           std::cout << std::left << std::setw(14) << flav[f]
                     << std::right<< std::setw(12)<< m_phiWinByE[f][ie]
                     << std::setw(10)             << pct(m_phiWinByE[f][ie], totPhi)
@@ -3647,29 +4068,6 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
         std::cout << "  ───────────────────────────────────────────────────────\n";
       }
     }
-
-//    
-//    /* ───────────────── Δη out‑of‑window summary ─────────────────── */
-//    std::cout << '\n' << ANSI_BOLD
-//              << "╭────────────────────────────────────────────╮\n"
-//              << "│   Counts with |Δη| > 0.04 (all clusters)   │\n"
-//              << "╰────────────────────────────────────────────╯"
-//              << ANSI_RESET << '\n'
-//              << std::left << std::setw(14) << "variant"
-//              << std::right<< std::setw(12)<< "counts\n"
-//              << "────────────────────────────────────────────\n"
-//              << std::left << std::setw(14) << "CLUS-RAW"
-//              << std::right<< std::setw(12)<< m_etaOutCLUSraw   << '\n'
-//              << std::left << std::setw(14) << "CLUS-CP"
-//              << std::right<< std::setw(12)<< m_etaOutCLUScp    << '\n'
-//              << std::left << std::setw(14) << "CLUS-BCORR"
-//              << std::right<< std::setw(12)<< m_etaOutCLUSbcorr << '\n'
-//              << std::left << std::setw(14) << "PDC-RAW"
-//              << std::right<< std::setw(12)<< m_etaOutPDCraw    << '\n'
-//              << std::left << std::setw(14) << "PDC-CORR"
-//              << std::right<< std::setw(12)<< m_etaOutPDCcorr   << '\n'
-//              << "────────────────────────────────────────────\n";
-    
 
   return 0;
 }
