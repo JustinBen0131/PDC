@@ -99,6 +99,12 @@ void RawClusterBuilderTemplate::set_UseDetailedGeometry(const bool useDetailedGe
   bemc->set_UseDetailedGeometry(m_UseDetailedGeometry);
 }
 
+// cppcheck-suppress unusedFunction
+void RawClusterBuilderTemplate::WriteClusterV2(bool b)
+{
+  m_write_cluster_v2 = b;
+}
+
 void RawClusterBuilderTemplate::LoadProfile(const std::string &fname)
 {
   if (bemc == nullptr)
@@ -689,7 +695,7 @@ int RawClusterBuilderTemplate::process_event(PHCompositeNode *topNode)
         if (m_write_cluster_v2)
         {
           float xcorr = xcg, ycorr = ycg;
-          if (bemc) bemc->CorrectPosition(ecl, xcg, ycg, xcorr, ycorr);
+          bemc->CorrectPosition(ecl, xcg, ycg, xcorr, ycorr);
 
           auto* c2 = new RawClusterv2();
           c2->set_energy(cluster->get_energy());
@@ -789,14 +795,24 @@ void RawClusterBuilderTemplate::CreateNodes(PHCompositeNode *topNode)
 
   PHIODataNode<PHObject> *clusterNode = new PHIODataNode<PHObject>(_clusters, ClusterNodeName, "PHObject");
   cemcNode->addNode(clusterNode);
-    
+
+  if (Verbosity() > 0)
+  {
+      std::cout << "[RawClusterBuilderTemplate::CreateNodes] detector=" << detector
+                << " base=" << ClusterNodeName
+                << "  m_write_cluster_v2=" << std::boolalpha << m_write_cluster_v2 << std::endl;
+  }
+
   if (m_write_cluster_v2)
   {
-    const std::string ClusterNodeNameV2 = ClusterNodeName + "_V2"; // clean suffix
-    m_cluster_container_v2 = findNode::getClass<RawClusterContainer>(dstNode, ClusterNodeNameV2);
-    if (!m_cluster_container_v2) { m_cluster_container_v2 = new RawClusterContainer(); }
-    auto *clusterNodeV2 = new PHIODataNode<PHObject>(m_cluster_container_v2, ClusterNodeNameV2, "PHObject");
-    cemcNode->addNode(clusterNodeV2);
+      const std::string ClusterNodeNameV2 = ClusterNodeName + "_V2"; // clean suffix
+      if (Verbosity() > 0)
+        std::cout << "  -> creating v2 node: " << ClusterNodeNameV2 << std::endl;
+
+      m_cluster_container_v2 = findNode::getClass<RawClusterContainer>(dstNode, ClusterNodeNameV2);
+      if (!m_cluster_container_v2) { m_cluster_container_v2 = new RawClusterContainer(); }
+      auto *clusterNodeV2 = new PHIODataNode<PHObject>(m_cluster_container_v2, ClusterNodeNameV2, "PHObject");
+      cemcNode->addNode(clusterNodeV2);
   }
 }
 

@@ -241,20 +241,33 @@ float BEmcRecCEMC::GetProb(vector<EmcModule> HitList, float et, float xg, float 
 
 void BEmcRecCEMC::SetPhiTiltVariant(ETiltVariant v)
 {
+  // (a,b) in radians for φ(E) = a − b·lnE.  If you later calibrate EA flavours,
+  // update the four CLUS_CP_EA_* entries below.
   static const std::unordered_map<ETiltVariant,std::pair<double,double>> lut = {
-      {ETiltVariant::CLUS_RAW,    { 2.687127e-03, 8.367887e-04}},  // no corr, cluster
-      {ETiltVariant::CLUS_CP,     { 2.001589e-03, 8.143681e-04}},  // CorrectPosition, cluster
-      {ETiltVariant::CLUS_CP_EA,  { 2.001589e-03, 8.143681e-04}},  // Energy/angle-aware CP (start equal to CP)
-      {ETiltVariant::CLUS_BCORR,  { 2.201905e-03, 8.409767e-04}},  // b(E) corr, cluster
-      {ETiltVariant::PDC_RAW,     { 1.236497e-03, 7.982602e-04}},  // no corr, scratch
-      {ETiltVariant::PDC_CORR,    { 8.076897e-04, 8.185800e-04}},  // b(E) corr, scratch
-      {ETiltVariant::DEFAULT,     { 8.654924e-04, 8.490399e-04}}   // legacy numbers
+      {ETiltVariant::CLUS_RAW,              { 2.687127e-03, 8.367887e-04}},  // no corr, cluster
+      {ETiltVariant::CLUS_CP,               { 2.001589e-03, 8.143681e-04}},  // CorrectPosition, cluster
+
+      // Back-compat alias → same as CLUS_CP
+      {ETiltVariant::CLUS_CP_EA,            { 2.001589e-03, 8.143681e-04}},
+
+      // CLUS-CP(EA) flavours (default to CLUS_CP values until you retune)
+      {ETiltVariant::CLUS_CP_EA_GEOM,       { 2.001589e-03, 8.143681e-04}},
+      {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.001589e-03, 8.143681e-04}},
+      {ETiltVariant::CLUS_CP_EA_FIT_EONLY,  { 2.001589e-03, 8.143681e-04}},
+      {ETiltVariant::CLUS_CP_EA_MIX,        { 2.001589e-03, 8.143681e-04}},
+
+      {ETiltVariant::CLUS_BCORR,            { 2.201905e-03, 8.409767e-04}},  // b(E) corr, cluster
+      {ETiltVariant::PDC_RAW,               { 1.236497e-03, 7.982602e-04}},  // no corr, scratch
+      {ETiltVariant::PDC_CORR,              { 8.076897e-04, 8.185800e-04}},  // b(E) corr, scratch
+      {ETiltVariant::DEFAULT,               { 8.654924e-04, 8.490399e-04}}   // legacy numbers
   };
 
   auto it = lut.find(v);
-  m_abTiltCurrent = (it!=lut.end()) ? it->second : lut.at(ETiltVariant::DEFAULT);
+  m_abTiltCurrent = (it != lut.end()) ? it->second : lut.at(ETiltVariant::DEFAULT);
   m_tiltVariant   = v;
 }
+
+
 
 
 
@@ -492,7 +505,11 @@ void BEmcRecCEMC::CorrectPosition(float Energy, float x, float y,
 }
 
 
-void BEmcRecCEMC::CorrectPositionEnergyAware(float Energy, float x, float y,
+
+/*
+ GEOMETRY ONLY
+ */
+void BEmcRecCEMC::CorrectPositionEnergyAwareFromGeometry(float Energy, float x, float y,
                                              float& xc, float& yc,
                                              float* out_bphi, float* out_beta)
 {
@@ -717,69 +734,16 @@ void BEmcRecCEMC::CorrectPositionEnergyAware(float Energy, float x, float y,
     xZero = wHE_phi * xZero_raw;
   }
 
-    // φ inverse with asymmetric window at shower depth (±φ), CORRECTLY centered.
-        // Measure in owner cell: X = x - ix0. Apply zero-shift inside the inverse:
-        // Xeff = X - xZero. Solve for t from Xeff; then add the shift back: ix0 + xZero + t.
-        float x_corr = x; // start from measured x (no pre-shift)
-        {
-          const int   ix0  = EmcCluster::lowint(x + 0.5f);   // owner cell (kept fixed by earlier clamp)
-          const float X    = x - ix0;                        // in (-0.5, +0.5]
-          const float Xeff = X - xZero;                      // zero-shifted coord to invert
+  // φ inverse-asinh about (x + xZero)
+  float x_corr = x + xZero;
+  {
+    const int ix0 = EmcCluster::lowint(x_corr + 0.5f);
+    if (std::fabs(x_corr - ix0) <= 0.5f) {
+      const float Sx = std::sinh(0.5f / bx);
+      x_corr = (ix0 - xZero) + bx * std::asinh( 2.f * (x_corr - ix0) * Sx );
+    }
+  }
 
-          if (std::fabs(X) <= 0.5f)
-          {
-            // symmetric closed-form (initializer)
-            const float Sx    = std::sinh(0.5f / bx);
-            const float t_sym = bx * std::asinh( 2.f * Xeff * Sx );
-
-            auto safe_ratio = [&](float num, float den)->float { return (den > 1e-6f) ? (num/den) : 1.0f; };
-
-              // side-resolved half-widths at depth and energy-gated blend
-              const float sR_perp  = safe_ratio(wPh_front_perp , wPh_depth_perp_p );
-              const float sL_perp  = safe_ratio(wPh_front_perp , wPh_depth_perp_m );
-              const float sR_along = safe_ratio(wPh_front_along, wPh_depth_along_p);
-              const float sL_along = safe_ratio(wPh_front_along, wPh_depth_along_m);
-
-              const float sR_eff = (1.0f - wHE_phi) * sR_perp  + wHE_phi * sR_along;
-              const float sL_eff = (1.0f - wHE_phi) * sL_perp  + wHE_phi * sL_along;
-
-              float wR = clampf(0.5f * sR_eff, 0.35f, 0.80f);
-              float wL = clampf(0.5f * sL_eff, 0.35f, 0.80f);
-
-            // forward map for asymmetric window [-wL, +wR] in tower units
-            auto X_from_t_asym = [&](float t)->float {
-              const float eR = std::exp(-(wR - t)/bx);
-              const float eL = std::exp(-(wL + t)/bx);
-              const float I0 = 1.f - 0.5f*(eR + eL);
-              const float I1 = 0.5f*((wL + t)*eL - (wR - t)*eR) + 0.5f*bx*(eL - eR);
-              return t + I1 / std::max(I0, 1e-6f);
-            };
-            auto dXdt_num = [&](float t)->float {
-              const float h = 1e-3f;
-              return (X_from_t_asym(t + h) - X_from_t_asym(t - h)) / (2.f*h);
-            };
-
-            float t = t_sym;
-            const float wASY = 0.70f * wHE_phi;
-            if (wASY > 0.f)
-            {
-              for (int it = 0; it < 2; ++it)
-              {
-                const float F  = X_from_t_asym(t) - Xeff;   // solve for Xeff (not X+shift)
-                const float dF = dXdt_num(t);
-                if (std::fabs(dF) < 1e-4f) break;
-                t -= F / dF;
-                t  = clampf(t, -wL + 1e-4f, +wR - 1e-4f);
-              }
-              t = (1.f - wASY) * t_sym + wASY * t;
-            }
-
-            // shift back to absolute coordinate after inversion
-            x_corr = ix0 + xZero + t;
-          }
-        }
-
-    
   // φ ripple (module-of-8) + wrap (kept, with high‑E de‑emphasis)
   float dx = 0.f;
   {
@@ -901,158 +865,284 @@ void BEmcRecCEMC::CorrectPositionEnergyAware(float Energy, float x, float y,
   // report bη now (final)
   if (out_beta) *out_beta = by;
 
-    // η inverse with asymmetric window at shower depth (±η), gently enabled at high E
-    float y_corr = y;
-    {
-      const int   iy0   = EmcCluster::lowint(y_corr + 0.5f);
-      const float Ymeas = y_corr - iy0; // in (-0.5, +0.5]
-
-      if (std::fabs(Ymeas) <= 0.5f)
-      {
-        // symmetric closed-form (fallback & initializer)
-        const float Sy    = std::sinh(0.5f / by);
-        const float t_sym = by * std::asinh( 2.f * Ymeas * Sy );
-
-        auto safe_ratio = [&](float num, float den)->float { return (den > 1e-6f) ? (num/den) : 1.0f; };
-
-        // ⟂ to shower axis: +η(Up) and −η(Down) depths
-        const float sU_perp = safe_ratio(wEt_front_perp, wEt_depth_perpU);
-        const float sD_perp = safe_ratio(wEt_front_perp, wEt_depth_perpD);
-
-        // along eη (tiny weight at high E only)
-        const float sU_al   = safe_ratio(wEt_front_along, wEt_depth_alongU);
-        const float sD_al   = safe_ratio(wEt_front_along, wEt_depth_alongD);
-
-        const float sU_eff = (1.f - alpha_eta_along) * sU_perp + alpha_eta_along * sU_al;
-        const float sD_eff = (1.f - alpha_eta_along) * sD_perp + alpha_eta_along * sD_al;
-
-        float wUp = 0.5f * sU_eff;
-        float wDn = 0.5f * sD_eff;
-
-        wUp = clampf(wUp, 0.35f, 0.80f);
-        wDn = clampf(wDn, 0.35f, 0.80f);
-
-        // exact asymmetric map (same structure as φ, with Up/Down in place of R/L)
-        auto Y_from_t_asym = [&](float t)->float {
-          const float eU = std::exp(-(wUp - t)/by);
-          const float eD = std::exp(-(wDn + t)/by);
-          const float I0 = 1.f - 0.5f*(eU + eD);
-          const float I1 = 0.5f*((wDn + t)*eD - (wUp - t)*eU) + 0.5f*by*(eD - eU);
-          return t + I1 / std::max(I0, 1e-6f);
-        };
-        auto dYdt_num = [&](float t)->float {
-          const float h = 1e-3f;
-          return (Y_from_t_asym(t + h) - Y_from_t_asym(t - h)) / (2.f*h);
-        };
-
-        float t = t_sym;
-        const float wASY = 0.75f * wHE_eta; // slightly stronger gate for η
-        if (wASY > 0.f)
-        {
-          for (int it = 0; it < 2; ++it)
-          {
-            const float F  = Y_from_t_asym(t) - Ymeas;
-            const float dF = dYdt_num(t);
-            if (std::fabs(dF) < 1e-4f) break;
-            t -= F / dF;
-            t  = clampf(t, -wDn + 1e-4f, +wUp - 1e-4f);
-          }
-          t = (1.f - wASY) * t_sym + wASY * t;
-        }
-
-        y_corr = iy0 + t;
-      }
+  // η inverse-asinh (NO η zero-shift; center at home index)
+  float y_corr = y;
+  {
+    const int iy0 = EmcCluster::lowint(y_corr + 0.5f);
+    if (std::fabs(y_corr - iy0) <= 0.5f) {
+      const float Sy = std::sinh(0.5f / by);
+      y_corr = iy0 + by * std::asinh( 2.f * (y_corr - iy0) * Sy );
     }
-    yc = y_corr;
+  }
+  yc = y_corr;
+}
+
+
+/*
+ WITH ETA DEPENDENCY AND ENERGY DEPENDENCY FROM PDC-RAW b VALUE FITS
+ */
+
+void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float x, float y,
+                                             float& xc, float& yc)
+{
+  // Legacy gating
+  if (!m_UseCorrectPosition) { xc = x; yc = y; return; }
+  if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
+  { xc = x; yc = y; return; }
+
+  // ---- determine |η| slice from tower geometry (fallback: no-η-dep) ----
+  const int ix0 = EmcCluster::lowint(x + 0.5f);
+  const int iy0 = EmcCluster::lowint(y + 0.5f);
+
+  TowerGeom g{};
+  bool haveGeom = GetTowerGeometry(ix0, iy0, g);
+
+  float absEta = 0.f;
+  if (haveGeom)
+  {
+    const float r = std::hypot(g.Xcenter, g.Ycenter);
+    absEta = std::fabs(std::asinh((r > 0.f ? g.Zcenter / r : 0.f)));
+  }
+
+  // |η| bins: 0: [0,0.20], 1: (0.20,0.70], 2: (0.70,1.10], 3: no-η-dep (fallback)
+  int iEtaBin = 3;
+  if (haveGeom)
+  {
+    if      (absEta <= 0.20f) iEtaBin = 0;
+    else if (absEta <= 0.70f) iEtaBin = 1;
+    else                      iEtaBin = 2; // up to ~1.10
+  }
+
+  // ---- per-bin log-fit coefficients from your MC study (E0=3 GeV) ----
+  constexpr float E0 = 3.0f;
+
+  // φ: bφ(E,|η|) = b0φ + mφ * ln(E/E0)
+  static constexpr float B0_PHI[4] = { 0.187805f, 0.184350f, 0.182152f, 0.183339f };
+  static constexpr float M_PHI [4] = {-0.007606f,-0.008060f,-0.008994f,-0.007931f };
+
+  // η: bη(E,|η|) = b0η + mη * ln(E/E0)
+  static constexpr float B0_ETA[4] = { 0.178535f, 0.196368f, 0.200538f, 0.191296f };
+  static constexpr float M_ETA [4] = {-0.007176f,-0.006067f,-0.001264f,-0.004557f };
+
+  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
+  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
+
+  const float bx = clamp_b(B0_PHI[iEtaBin] + M_PHI[iEtaBin] * lnE);
+  const float by = clamp_b(B0_ETA[iEtaBin] + M_ETA[iEtaBin] * lnE);
+
+  // ---------------- φ inverse-asinh (legacy form) ----------------
+  float x_corr = x;
+  if (std::fabs(x - ix0) <= 0.5f)
+  {
+    const float Sx = std::sinh(0.5f / bx);
+    x_corr = ix0 + bx * std::asinh(2.f * (x - ix0) * Sx);
+  }
+
+  // module-of-8 ripple (identical to legacy CorrectPosition)
+  // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+  int   ix8 = int(x + 0.5f) / 8;
+  float x8  = x + 0.5f - (ix8 * 8) - 4.f;   // −4 … +4
+  float dx  = 0.f;
+  if (m_UseDetailedGeometry)
+  {
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+    int local_ix8 = int(x + 0.5f) - ix8 * 8;
+    dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
+  }
+  else
+  {
+    dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+  }
+  x_corr -= dx;
+
+  // wrap φ tower coordinate to [-0.5, Nx-0.5)
+  while (x_corr < -0.5f)              x_corr += float(fNx);
+  while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
+  xc = x_corr;
+
+  // ---------------- η inverse-asinh (legacy form) ----------------
+  float y_corr = y;
+  if (std::fabs(y - iy0) <= 0.5f)
+  {
+    const float Sy = std::sinh(0.5f / by);
+    y_corr = iy0 + by * std::asinh(2.f * (y - iy0) * Sy);
+  }
+  yc = y_corr;
 }
 
 
 
+/*
+ ENERGY ONLY NO ETA DEP FITS FROM PDC-RAW INFO
+ */
+
+void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x, float y,
+                                             float& xc, float& yc)
+{
+  // ---- legacy gating -------------------------------------------------
+  if (!m_UseCorrectPosition) { xc = x; yc = y; return; }
+  if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
+  { xc = x; yc = y; return; }
+
+  // ---- energy-only (no |η| dependence) log-fit laws (MC) -------------
+  // b(E) = b0 + m * ln(E/E0)  with  E0 = 3 GeV
+  constexpr float E0     = 3.0f;
+  constexpr float B0_PHI = 0.183339f;
+  constexpr float M_PHI  = -0.007931f;
+  constexpr float B0_ETA = 0.191296f;
+  constexpr float M_ETA  = -0.004557f;
+
+  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
+
+  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
+
+  const float bx = clamp_b(B0_PHI + M_PHI * lnE);  // φ-direction b(E)
+  const float by = clamp_b(B0_ETA + M_ETA * lnE);  // η-direction b(E)
+
+  // ============================== φ ===================================
+  float x_corr = x;
+  {
+    const int ix0 = EmcCluster::lowint(x + 0.5f);
+    const float X = x - ix0;                       // in (−0.5, +0.5]
+    if (std::fabs(X) <= 0.5f)
+    {
+      const float Sx = std::sinh(0.5f / bx);
+      x_corr = ix0 + bx * std::asinh(2.f * X * Sx);
+    }
+
+    // module-of-8 ripple (identical to legacy CorrectPosition)
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+    int   ix8 = int(x + 0.5f) / 8;
+    float x8  = x + 0.5f - (ix8 * 8) - 4.f;        // −4 … +4
+    float dx  = 0.f;
+    if (m_UseDetailedGeometry)
+    {
+      // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+      int local_ix8 = int(x + 0.5f) - ix8 * 8;     // 0..7
+      dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
+    }
+    else
+    {
+      dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+    }
+    x_corr -= dx;
+
+    // wrap φ tower coordinate to [−0.5, Nx−0.5)
+    while (x_corr < -0.5f)              x_corr += float(fNx);
+    while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
+  }
+  xc = x_corr;
+
+  // ============================== η ===================================
+  float y_corr = y;
+  {
+    const int iy0 = EmcCluster::lowint(y + 0.5f);
+    const float Y = y - iy0;                      // in (−0.5, +0.5]
+    if (std::fabs(Y) <= 0.5f)
+    {
+      const float Sy = std::sinh(0.5f / by);
+      y_corr = iy0 + by * std::asinh(2.f * Y * Sy);
+    }
+  }
+  yc = y_corr;
+}
 
 
 
+/*
+ energy only in phi no eta dependence and eta dependence in eta
+ */
+void BEmcRecCEMC::CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float Energy, float x, float y,
+                                             float& xc, float& yc)
+{
+  // ---- legacy gating -------------------------------------------------
+  if (!m_UseCorrectPosition) { xc = x; yc = y; return; }
+  if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
+  { xc = x; yc = y; return; }
 
-//void BEmcRecCEMC::CorrectPositionEnergyAware(float Energy, float x, float y,
-//                                             float& xc, float& yc)
-//{
-//  // Legacy pass-through / gating
-//  if (!m_UseCorrectPosition)
-//  { xc = x; yc = y; return; }
-//
-//  if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
-//  { xc = x; yc = y; return; }
-//
-//  // ---------------- MC‑tuned energy laws (no |η| dep) ----------------
-//  constexpr float E0    = 3.0f;        // reference energy for the log
-//  constexpr float b0phi = 0.183339f;   // from your "no |η|-dep" φ fit
-//  constexpr float mphi  = -0.007931f;
-//
-//  constexpr float b0eta = 0.191296f;   // from your "no |η|-dep" η fit
-//  constexpr float meta  = -0.004557f;
-//
-//  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
-//
-//  auto clamp_b = [](float b)
-//  {
-//    // light numerical guard; keeps inverse‑asinh well‑behaved
-//    return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b);
-//  };
-//
-//  const float bx = clamp_b(b0phi + mphi * lnE);   // φ‑direction b
-//  const float by = clamp_b(b0eta + meta * lnE);   // η‑direction b
-//
-//  // ---------------- φ inverse-asinh (identical to legacy) -------------
-//  float x0  = x;
-//  int   ix0 = EmcCluster::lowint(x0 + 0.5f);
-//  if (std::fabs(x0 - ix0) <= 0.5f)
-//  {
-//    x0 = ix0 + bx * std::asinh(2.f * (x0 - ix0) * std::sinh(0.5f / bx));
-//  }
-//  else
-//  {
-//    x0 = x;
-//#ifndef NDEBUG
-//    std::cout << "????? BEmcRecCEMC::CorrectPositionEnergyAware: x guard triggered; "
-//                 "x=" << x << "  dx=" << (x0 - ix0) << std::endl;
-//#endif
-//  }
-//
-//  // ---- module-of-8 ripple (legacy)
-//  // NOLINTNEXTLINE(bugprone-incorrect-roundings)
-//  int   ix8 = int(x + 0.5f) / 8;
-//  float x8  = x + 0.5f - (ix8 * 8) - 4.f;  // −4 … +4
-//  float dx  = 0.f;
-//  if (m_UseDetailedGeometry)
-//  {
-//    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
-//    int local_ix8 = int(x + 0.5f) - ix8 * 8;
-//    dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
-//  }
-//  else
-//  {
-//    dx = 0.10f * (x8 / 4.f);
-//    if (std::fabs(x8) > 3.3f) dx = 0.f;  // Don’t correct near module edge
-//  }
-//
-//  // ---- compose φ and wrap
-//  xc = x0 - dx;
-//  while (xc < -0.5f)       { xc += float(fNx); }
-//  while (xc >= fNx - 0.5f) { xc -= float(fNx); }
-//
-//  // ---------------- η inverse-asinh (identical to legacy) -------------
-//  float y0  = y;
-//  int   iy0 = EmcCluster::lowint(y0 + 0.5f);
-//  if (std::fabs(y0 - iy0) <= 0.5f)
-//  {
-//    y0 = iy0 + by * std::asinh(2.f * (y0 - iy0) * std::sinh(0.5f / by));
-//  }
-//  else
-//  {
-//    y0 = y;
-//#ifndef NDEBUG
-//    std::cout << "????? BEmcRecCEMC::CorrectPositionEnergyAware: y guard triggered; "
-//                 "y=" << y << "  dy=" << (y0 - iy0) << std::endl;
-//#endif
-//  }
-//  yc = y0;
-//}
+  // ---- determine |η| slice from tower geometry (fallback → no-η-dep) ----
+  const int ix0 = EmcCluster::lowint(x + 0.5f);
+  const int iy0 = EmcCluster::lowint(y + 0.5f);
+
+  TowerGeom g{};
+  const bool haveGeom = GetTowerGeometry(ix0, iy0, g);
+
+  float absEta = 0.f;
+  if (haveGeom)
+  {
+    const float r = std::hypot(g.Xcenter, g.Ycenter);
+    absEta = std::fabs((r > 0.f) ? std::asinh(g.Zcenter / r) : 0.f);
+  }
+
+  // |η| bins for η-side tuning:
+  // 0: |η| ≤ 0.20, 1: (0.20,0.70], 2: (0.70,1.10], 3: fallback (no-η-dep law)
+  int iEtaBin = 3;
+  if (haveGeom)
+  {
+    if      (absEta <= 0.20f) iEtaBin = 0;
+    else if (absEta <= 0.70f) iEtaBin = 1;
+    else                      iEtaBin = 2;
+  }
+
+  // ---- log-fit coefficients from MC (E0 = 3 GeV) -------------------------
+  constexpr float E0 = 3.0f;
+
+  // φ uses the **no-|η|-dep** category ONLY
+  constexpr float B0_PHI_NOETA = 0.183339f;
+  constexpr float M_PHI_NOETA  = -0.007931f;
+
+  // η uses the **|η|-dependent** categories (0,1,2), 3=fallback(no-η-dep)
+  static constexpr float B0_ETA[4] = { 0.178535f, 0.196368f, 0.200538f, 0.191296f };
+  static constexpr float M_ETA [4] = {-0.007176f,-0.006067f,-0.001264f,-0.004557f };
+
+  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
+  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
+
+  const float bx = clamp_b(B0_PHI_NOETA + M_PHI_NOETA * lnE);               // φ: no-|η|-dep law
+  const float by = clamp_b(B0_ETA[iEtaBin] + M_ETA[iEtaBin] * lnE);         // η: |η|-dep law
+
+  // ============================== φ ===================================
+  float x_corr = x;
+  {
+    const float X = x - ix0;                         // (-0.5, +0.5]
+    if (std::fabs(X) <= 0.5f)
+    {
+      const float Sx = std::sinh(0.5f / bx);
+      x_corr = ix0 + bx * std::asinh(2.f * X * Sx);
+    }
+
+    // module-of-8 ripple (identical to legacy CorrectPosition)
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+    int   ix8 = int(x + 0.5f) / 8;
+    float x8  = x + 0.5f - (ix8 * 8) - 4.f;          // −4 … +4
+    float dx  = 0.f;
+    if (m_UseDetailedGeometry)
+    {
+      // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+      int local_ix8 = int(x + 0.5f) - ix8 * 8;       // 0..7
+      dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
+    }
+    else
+    {
+      dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+    }
+    x_corr -= dx;
+
+    // wrap φ tower coordinate to [−0.5, Nx−0.5)
+    while (x_corr < -0.5f)              x_corr += float(fNx);
+    while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
+  }
+  xc = x_corr;
+
+  // ============================== η ===================================
+  float y_corr = y;
+  {
+    const float Y = y - iy0;                           // (-0.5, +0.5]
+    if (std::fabs(Y) <= 0.5f)
+    {
+      const float Sy = std::sinh(0.5f / by);
+      y_corr = iy0 + by * std::asinh(2.f * Y * Sy);
+    }
+  }
+  yc = y_corr;
+}

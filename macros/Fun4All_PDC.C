@@ -41,6 +41,7 @@
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeom.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeomContainer_Cylinderv1.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfoDefs.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterv2.h"
 
 #include <g4detectors/PHG4FullProjSpacalCellReco.h>
 #include <g4calo/RawTowerBuilder.h>
@@ -147,8 +148,10 @@ void Fun4All_PDC(int nevents = 0,
   gvertex->Verbosity(0);
   se->registerSubsystem(gvertex);
     
-  BEmcRecCEMC* bemcPtr = new BEmcRecCEMC();
-  bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
+    BEmcRecCEMC* bemcPtr = new BEmcRecCEMC();
+    bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
+    bemcPtr->set_UseDetailedGeometry(true);   // match builder ripple/geometry
+    bemcPtr->SetTowerThreshold(0.030f);       // match builder Momenta threshold
 
   /* 4a) Let CaloGeomMapping put "TOWERGEOM_CEMC_DETAILED" on the node-tree */
   CaloGeomMapping* geomMap = new CaloGeomMapping("CEMC_GeomFiller");
@@ -215,20 +218,27 @@ void Fun4All_PDC(int nevents = 0,
 
         RawClusterBuilderTemplate *ClusterBuilder = new RawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
         ClusterBuilder->Detector("CEMC");
+
+        // Make builder geometry match PDC bemc: cylinder + detailed
+        ClusterBuilder->SetCylindricalGeometry();
+        ClusterBuilder->set_UseDetailedGeometry(true);
+
+        // Use the same tower threshold you want PDC to see (optional but keeps Momenta identical)
         ClusterBuilder->set_threshold_energy(0.030f);
 
         std::string emc_prof = getenv("CALIBRATIONROOT");
         emc_prof += "/EmcProfile/CEMCprof_Thresh30MeV.root";
         ClusterBuilder->LoadProfile(emc_prof);
 
-        // If you want the base node to be CLUSTERINFO_CEMC → v2 becomes CLUSTERINFO_CEMC_V2
+        // TowerInfo mode → node name becomes CLUSTERINFO_CEMC, v2 → CLUSTERINFO_CEMC_V2
         ClusterBuilder->set_UseTowerInfo(1);
 
-        // Write the v2 copy (with tower-space CoG) to a separate node with “_V2” suffix
+        // Stamp v2 with tower-space CoG (raw & corrected)
         ClusterBuilder->WriteClusterV2(true);
 
         ClusterBuilder->Verbosity(1);
         se->registerSubsystem(ClusterBuilder);
+
     }
     else
     {

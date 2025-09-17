@@ -17,11 +17,13 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <TLorentzVector.h>
 
 #include <CLHEP/Vector/ThreeVector.h>   // Hep3Vector in inline helpers
 #include <fun4all/SubsysReco.h>
 #include <calotrigger/TriggerAnalyzer.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawCluster.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterv2.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterContainer.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerDefs.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeom.h"
@@ -46,7 +48,7 @@ class RawClusterv2;
 class TFile;  class TNtuple; class TTree;
 class TH1;    class TH1F;    class TH2;    class TH2F; class TH3;    class TH3F;
 class TF1;    class TProfile;class TProfile2D;
-class TLorentzVector; class TRandom3;
+class TRandom3;
 
 /* =================================================================== *
  *  3.  PositionDependentCorrection class                               *
@@ -206,11 +208,12 @@ class PositionDependentCorrection : public SubsysReco
                         float maxAlpha,float ptMaxCut,float pt1Cut,float pt2Cut,
                         float pi0ptcut,float weight,bool fillGlobal);
 
-  void fillAshLogDx(RawCluster*,const TLorentzVector& recoPhoton,
-                    const TLorentzVector& truthPhoton,
-                    const std::pair<float,float>& blkCord,int blkPhiBin,
-                    const std::vector<int>& tower_phis,
-                    const std::vector<float>& tower_energies);
+    void fillAshLogDx(RawCluster*, const TLorentzVector& recoPhoton,
+                      const TLorentzVector& truthPhoton,
+                      float vtxZ,
+                      const std::pair<float,float>& blkCord, int blkPhiBin,
+                      const std::vector<int>& tower_phis,
+                      const std::vector<float>& tower_energies);
 
   void fillDPhiAllVariants(RawCluster*,const TLorentzVector&,
                              const TLorentzVector&,const std::pair<float,float>&,
@@ -385,6 +388,21 @@ class PositionDependentCorrection : public SubsysReco
 
   /* --------------------  HISTOGRAM DECLARATIONS ------------------- */
     
+    // Eight reconstruction variants for π0 studies
+    enum class VarPi0 {
+      CLUS_RAW=0, CLUS_CP=1,
+      EA_GEOM=2, EA_FIT_ETADEP=3, EA_FIT_EONLY=4, EA_MIX=5,
+      PDC_RAW=6, PDC_CORR=7,
+      NVAR=8
+    };
+
+    // Truth π0 photons with their mother info (filled in fillTruthInfo)
+    struct TruthPhoton { TLorentzVector p4; int mother_id{0}; int mother_pid{0}; };
+    std::vector<TruthPhoton> m_truth_pi0_photons;
+
+    // Per-variant, per-slice π0 mass histograms (8 variants × N_Ebins)
+    TH1F* h_m_pi0_var[static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
+
   TH1F* h_phi_diff_raw_E        [N_Ebins]{};
   TH1F* h_phi_diff_cpRaw_E      [N_Ebins]{};
   TH1F* h_phi_diff_cpCorr_E     [N_Ebins]{};
@@ -392,11 +410,23 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
     
-    // --- per-E 2D maps already present ---
+    // --- NEW: per-slice (E) 2D maps for CP(EA) ---
     // x = b_phi  , y = Δφ(folded); one per energy bin
     TH2F* h2_phi_diffEA_vs_bphi_E [N_Ebins]{};
     // x = b_eta  , y = Δη        ; one per energy bin
     TH2F* h2_eta_diffEA_vs_beta_E [N_Ebins]{};
+
+    // --- EA residuals (φ) – four uniquely-named variants
+    TH1F* h_phi_diff_cpCorrEA_geom_E                          [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
+
+    // --- EA residuals (η) – four uniquely-named variants
+    TH1F* h_eta_diff_cpCorrEA_geom_E                          [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
 
     // --- Ash scan profiles: <(Δφ)^2> / <(Δη)^2> vs b (tower-space driven)
     TProfile* p_phi_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δφ)^2>
@@ -409,6 +439,23 @@ class PositionDependentCorrection : public SubsysReco
     // --- Agreement diagnostic in tower units: |CP(b) - CP(EA)|
     TProfile* p_abs_dloc_phi_CPea_vs_b_E [N_Ebins]{};
     TProfile* p_abs_dloc_eta_CPea_vs_b_E [N_Ebins]{};
+    
+    // ----- 6-way corrected winners (Δφ): RAW, CP, EA_geom, EA_fitEta, EA_fitE, EA_mix
+    std::uint64_t m_phi6WayWin_RAW{0}, m_phi6WayWin_CP{0},
+                  m_phi6WayWin_EA_geom{0}, m_phi6WayWin_EA_fitEta{0},
+                  m_phi6WayWin_EA_fitE{0},  m_phi6WayWin_EA_mix{0};
+    std::uint64_t m_phi6WayWinByE_RAW[N_Ebins]{}, m_phi6WayWinByE_CP[N_Ebins]{},
+                  m_phi6WayWinByE_EA_geom[N_Ebins]{}, m_phi6WayWinByE_EA_fitEta[N_Ebins]{},
+                  m_phi6WayWinByE_EA_fitE[N_Ebins]{},  m_phi6WayWinByE_EA_mix[N_Ebins]{};
+
+    // ----- 6-way corrected winners (Δη): RAW, CP, EA_geom, EA_fitEta, EA_fitE, EA_mix
+    std::uint64_t m_eta6WayWin_RAW{0}, m_eta6WayWin_CP{0},
+                  m_eta6WayWin_EA_geom{0}, m_eta6WayWin_EA_fitEta{0},
+                  m_eta6WayWin_EA_fitE{0},  m_eta6WayWin_EA_mix{0};
+    std::uint64_t m_eta6WayWinByE_RAW[N_Ebins]{}, m_eta6WayWinByE_CP[N_Ebins]{},
+                  m_eta6WayWinByE_EA_geom[N_Ebins]{}, m_eta6WayWinByE_EA_fitEta[N_Ebins]{},
+                  m_eta6WayWinByE_EA_fitE[N_Ebins]{},  m_eta6WayWinByE_EA_mix[N_Ebins]{};
+
     
     
     

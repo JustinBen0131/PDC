@@ -106,3 +106,13 @@ CorrectPosition(EA), cluster -1.830148e-03    7.435949e-04
 no corr, cluster             -1.990361e-03    5.634459e-04
 CorrectPosition, cluster     -2.007540e-03    8.359346e-04
 CorrectPosition(EA), cluster -1.830148e-03    7.435949e-04
+
+# ---- Clusterizer 3-way (cpRaw / cpCorr / cpCorrEA) ----
+no corr, cluster             -2.688224e-03    8.371234e-04
+CorrectPosition, cluster     -2.002849e-03    8.147587e-04
+CorrectPosition(EA), cluster -2.217791e-03    8.424086e-04
+
+# ---- Clusterizer 3-way (cpRaw / cpCorr / cpCorrEA) ----
+no corr, cluster             -2.688224e-03    8.371234e-04
+CorrectPosition, cluster     -2.002849e-03    8.147587e-04
+CorrectPosition(EA), cluster -2.217791e-03    8.424086e-04

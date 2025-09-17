@@ -2108,7 +2108,7 @@ static void MakeFourWaySummaries(
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_bundle_0_100_20250915_120651.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -2123,7 +2123,6 @@ void MakeDeltaPhiEtaPlayground(
     const std::string dirScratchRawVsCorr     = std::string(outDir) + "/fromScratch_RawVsCorr_EtaPhi";
     const std::string dirFSvsClusNoCorr       = std::string(outDir) + "/fromScratchVsClusterizerNoCorrection";
     const std::string dirFSvsClusWithCorr     = std::string(outDir) + "/fromScratchVsClusterizerWithCorrection";
-    const std::string dirMeanSigmaGaussCompare= std::string(outDir) + "/mean_sigmaGauss_HistCompare";
     const std::string dirIndivPerVar          = std::string(outDir) + "/invididualPerVariantSummary";
     const std::string dirEtaPhi2D             = std::string(outDir) + "/2DetaDphiDep";
     const std::string dirFirstBinOverlaysOnly = std::string(outDir) + "/firstBinOverlaysOnly";
@@ -2133,7 +2132,6 @@ void MakeDeltaPhiEtaPlayground(
     ensureDir(dirScratchRawVsCorr.c_str());
     ensureDir(dirFSvsClusNoCorr.c_str());
     ensureDir(dirFSvsClusWithCorr.c_str());
-    ensureDir(dirMeanSigmaGaussCompare.c_str());
     ensureDir(dirIndivPerVar.c_str());
     ensureDir(dirEtaPhi2D.c_str());
     ensureDir(dirFirstBinOverlaysOnly.c_str());
@@ -4887,7 +4885,7 @@ void PDCAnalysisPrime()
   gStyle->SetOptStat(0);
 
   // ——— paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_bundle_0_100_20250915_120651.root";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
   const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutputPrime";
 
   EnsureDir(outBaseDir);

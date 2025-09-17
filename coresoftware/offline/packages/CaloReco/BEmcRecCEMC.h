@@ -16,12 +16,34 @@ class BEmcRecCEMC : public BEmcRec
   ~BEmcRecCEMC() override = default;
   void CorrectEnergy(float energy, float x, float y, float &ecorr) override;
   void CorrectECore(float ecore, float x, float y, float &ecorecorr) override;
-  void CorrectPosition(float energy, float x, float y, float &xcorr, float &ycorr) override;
-  void CorrectPositionEnergyAware(float Energy, float x, float y,
+    void CorrectPosition(float energy, float x, float y, float &xcorr, float &ycorr) override;
+
+    // EA (baseline, already present)
+    void CorrectPositionEnergyAware(float Energy, float x, float y,
                                     float& xc, float& yc,
                                     float* out_bphi = nullptr,
                                     float* out_beta = nullptr);
-  void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
+
+    // EA variant #1: Geometry-only EA (axis/widths from geometry)
+    void CorrectPositionEnergyAwareFromGeometry(float Energy, float x, float y,
+                                                float& xc, float& yc,
+                                                float* out_bphi = nullptr,
+                                                float* out_beta  = nullptr);
+
+    // EA variant #2: |η|-dependent + energy-dependent fits for both φ and η
+    void CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float x, float y,
+                                                   float& xc, float& yc);
+
+    // EA variant #3: energy-only fits (no |η| dependence) for both φ and η
+    void CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x, float y,
+                                                 float& xc, float& yc);
+
+    // EA variant #4: φ uses energy-only fits; η uses |η|-dependent fits
+    void CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float Energy, float x, float y,
+                                                                float& xc, float& yc);
+
+    void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
+
 
 
   void LoadProfile(const std::string &fname) override;
@@ -30,8 +52,22 @@ class BEmcRecCEMC : public BEmcRec
   void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
     
     // ───────── variant–specific φ-tilt handling ─────────
-  enum class ETiltVariant  { CLUS_RAW, CLUS_CP, CLUS_CP_EA, CLUS_BCORR,
-                                 PDC_RAW,  PDC_CORR, DEFAULT };
+    enum class ETiltVariant  {
+      CLUS_RAW,
+      CLUS_CP,
+
+      // CLUS-CP(EA) flavours
+      CLUS_CP_EA,                 // backward-compat alias to CLUS_CP
+      CLUS_CP_EA_GEOM,            // EA from Geometry
+      CLUS_CP_EA_FIT_ETADEP,      // EA with |η|-dep + E-dep fits
+      CLUS_CP_EA_FIT_EONLY,       // EA with E-only fits
+      CLUS_CP_EA_MIX,             // EA φ(E-only), η(|η|+E)
+
+      CLUS_BCORR,
+      PDC_RAW,
+      PDC_CORR,
+      DEFAULT
+    };
   /// call once before any Tower2Global / CorrectShowerDepth
   void SetPhiTiltVariant(ETiltVariant v);
 
