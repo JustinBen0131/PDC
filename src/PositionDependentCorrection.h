@@ -21,11 +21,11 @@
 #include <CLHEP/Vector/ThreeVector.h>   // Hep3Vector in inline helpers
 #include <fun4all/SubsysReco.h>
 #include <calotrigger/TriggerAnalyzer.h>
-#include <calobase/RawCluster.h>
-#include <calobase/RawClusterContainer.h>
-#include <calobase/RawTowerDefs.h>
-#include <calobase/RawTowerGeom.h>
-#include <calobase/RawTowerGeomContainer.h>
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawCluster.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerDefs.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeom.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeomContainer.h"
 #include <TString.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRec.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
@@ -40,6 +40,7 @@ class RawTowerGeomContainer;
 class RawClusterContainer;
 class BEmcRecCEMC;
 class RawCluster;
+class RawClusterv2; 
 
 /* ROOT */
 class TFile;  class TNtuple; class TTree;
@@ -77,6 +78,7 @@ class PositionDependentCorrection : public SubsysReco
   void setMassFitsDone(bool done) { m_massFitsDone = done; }
   void UseSignedVz(bool v = true) { m_useSignedVz = v; }
   void UseSurveyGeometry(bool v=true)         { m_useSurveyGeometry = v; }
+    
     
   // First-pass switch: when true, only uncorrected TH3 views are booked/filled
   void setFirstPassBvaluesOnly(bool v=true)   { m_firstPassBvaluesOnly = v; }
@@ -118,6 +120,11 @@ class PositionDependentCorrection : public SubsysReco
   bool skipVertexDep {true};
   float m_vzTightCut { 10.f };                 ///< |z| ≤ 10 cm
 
+    int  m_print_first_N_clusters = 12;   // how many clusters to print nicely per job
+    bool m_printed_prop_header    = false;
+    TH2F* h_dx_prop_vsE = nullptr;        // (optional) quick QA
+    TH2F* h_dy_prop_vsE = nullptr;
+    
   static constexpr std::array<float,19> vzEdge = {
          0.f,  5.f, 10.f, 15.f, 20.f, 25.f, 30.f,
         40.f, 50.f, 60.f, 70.f, 80.f, 90.f,
@@ -179,10 +186,10 @@ class PositionDependentCorrection : public SubsysReco
   double xAtShowerDepth  (float energy,double rF,double zF,
                           float phiF,int ix,int iy)                   const;
 
-  float doAshShift        (float localPhi,float bVal);
-  float doLogWeightCoord  (const std::vector<int>& towerPhi,
-                           const std::vector<float>& towerE,float w0);
-    
+    float doAshShift(float xTower, float b);
+    float doLogWeightCoord(const std::vector<int>& towerPhi,
+                           const std::vector<float>& towerE,
+                           float w0);
   void  bookCommonHistograms      (const std::function<std::string(int)>& makeLabel);
   void  bookSimulationHistograms  (const std::function<std::string(int)>& makeLabel);
   bool  loadBValues               (const std::string& bFilePath);
@@ -254,6 +261,10 @@ class PositionDependentCorrection : public SubsysReco
   static constexpr double kTolFactor = 1.5;
   static constexpr double kTolMinGeV = 0.20;
   static constexpr float  kDiscreteTol = 0.25f;
+    
+    // CP vs CP(EA) tie tolerances (units: radians for φ, unitless for η)
+    static constexpr float  kTieTolPhi = 1e-8f;
+    static constexpr float  kTieTolEta = 1e-8f;
 
   inline std::string sliceTag(int i) const
   { return (m_binningMode==EBinningMode::kRange)
@@ -304,35 +315,46 @@ class PositionDependentCorrection : public SubsysReco
 
   /* random */
   TRandom3* rnd{nullptr};
-
-  /* global counters (unchanged) */
-  std::atomic<std::uint64_t> m_nWinRAW{0},   m_nWinCP{0},   m_nWinBCorr{0};
-  std::atomic<std::uint64_t> m_nWinRAW_Eta{0},m_nWinCP_Eta{0},m_nWinBCorr_Eta{0};
-    std::atomic<std::uint64_t> m_phiWinCLUSraw{0}, m_phiWinCLUScp{0},
-                               m_phiWinCLUSbcorr{0}, m_phiWinPDCraw{0},
-                               m_phiWinPDCcorr{0},  m_phiWinCLUScpEA{0};
-    std::atomic<std::uint64_t> m_etaWinCLUSraw{0}, m_etaWinCLUScp{0},
-                               m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
-                               m_etaWinPDCcorr{0},  m_etaWinCLUScpEA{0};
     
-    // PDC side-peak tallies (± one-tower width)
-    std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
-    std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
+    /* global counters (unchanged + ties added) */
+    std::atomic<std::uint64_t> m_nWinRAW{0},   m_nWinCP{0},   m_nWinBCorr{0};
+    std::atomic<std::uint64_t> m_nWinRAW_Eta{0},m_nWinCP_Eta{0},m_nWinBCorr_Eta{0};
+      std::atomic<std::uint64_t> m_phiWinCLUSraw{0}, m_phiWinCLUScp{0},
+                                 m_phiWinCLUSbcorr{0}, m_phiWinPDCraw{0},
+                                 m_phiWinPDCcorr{0},  m_phiWinCLUScpEA{0};
+      std::atomic<std::uint64_t> m_etaWinCLUSraw{0}, m_etaWinCLUScp{0},
+                                 m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
+                                 m_etaWinPDCcorr{0},  m_etaWinCLUScpEA{0};
 
-    std::vector<float> m_pdcRawPos1Tw_dphi,  m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E;
-    std::vector<float> m_pdcRawNeg1Tw_dphi,  m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E;
-    std::vector<float> m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E;
-    std::vector<float> m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E;
+
+    std::atomic<std::uint64_t> m_phiTieCLUScpEA{0};
+    std::atomic<std::uint64_t> m_etaTieCLUScpEA{0};
 
 
-    // CLUS (clusterizer) side-peak tallies (± one-tower width) for RAW and CP
-    std::atomic<std::uint64_t> m_clusRawPos1Tw{0},  m_clusRawNeg1Tw{0};
-    std::atomic<std::uint64_t> m_clusCPPos1Tw{0},   m_clusCPNeg1Tw{0};
+    std::atomic<std::uint64_t> m_phiNoChange_CP_vs_RAW{0};
+    std::atomic<std::uint64_t> m_phiNoChange_EA_vs_RAW{0};
+    std::atomic<std::uint64_t> m_etaNoChange_CP_vs_RAW{0};
+    std::atomic<std::uint64_t> m_etaNoChange_EA_vs_RAW{0};
 
-    std::vector<float> m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E;
-    std::vector<float> m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E;
-    std::vector<float> m_clusCPPos1Tw_dphi,  m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E;
-    std::vector<float> m_clusCPNeg1Tw_dphi,  m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E;
+      // PDC side-peak tallies (± one-tower width)
+      std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
+      std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
+
+      std::vector<float> m_pdcRawPos1Tw_dphi,  m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E;
+      std::vector<float> m_pdcRawNeg1Tw_dphi,  m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E;
+      std::vector<float> m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E;
+      std::vector<float> m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E;
+
+
+      // CLUS (clusterizer) side-peak tallies (± one-tower width) for RAW and CP
+      std::atomic<std::uint64_t> m_clusRawPos1Tw{0},  m_clusRawNeg1Tw{0};
+      std::atomic<std::uint64_t> m_clusCPPos1Tw{0},   m_clusCPNeg1Tw{0};
+
+      std::vector<float> m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E;
+      std::vector<float> m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E;
+      std::vector<float> m_clusCPPos1Tw_dphi,  m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E;
+      std::vector<float> m_clusCPNeg1Tw_dphi,  m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E;
+
 
     
   /* Δη out‑of‑window counters (|Δη| > 0.04) */
@@ -342,8 +364,18 @@ class PositionDependentCorrection : public SubsysReco
   std::atomic<std::uint64_t> m_etaOutPDCraw    {0};
   std::atomic<std::uint64_t> m_etaOutPDCcorr   {0};
     
-    std::array<std::array<std::uint64_t, N_Ebins>, 6> m_phiWinByE{{}};
-    std::array<std::array<std::uint64_t, N_Ebins>, 6> m_etaWinByE{{}};
+  std::array<std::array<std::uint64_t, N_Ebins>, 6> m_phiWinByE{{}};
+  std::array<std::array<std::uint64_t, N_Ebins>, 6> m_etaWinByE{{}};
+
+
+    std::array<std::uint64_t, N_Ebins> m_phiTieByE_CP_EA{};
+    std::array<std::uint64_t, N_Ebins> m_etaTieByE_CP_EA{};
+
+
+    std::array<std::uint64_t, N_Ebins> m_phiNoChangeByE_CP_vs_RAW{};
+    std::array<std::uint64_t, N_Ebins> m_phiNoChangeByE_EA_vs_RAW{};
+    std::array<std::uint64_t, N_Ebins> m_etaNoChangeByE_CP_vs_RAW{};
+    std::array<std::uint64_t, N_Ebins> m_etaNoChangeByE_EA_vs_RAW{};
 
   std::atomic<std::uint64_t> g_nanPhi{0}, g_nanEta{0}, g_nCorrPhiRight{0};
 
@@ -359,6 +391,26 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpCorrEA_E   [N_Ebins]{};
   TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
+    
+    // --- per-E 2D maps already present ---
+    // x = b_phi  , y = Δφ(folded); one per energy bin
+    TH2F* h2_phi_diffEA_vs_bphi_E [N_Ebins]{};
+    // x = b_eta  , y = Δη        ; one per energy bin
+    TH2F* h2_eta_diffEA_vs_beta_E [N_Ebins]{};
+
+    // --- Ash scan profiles: <(Δφ)^2> / <(Δη)^2> vs b (tower-space driven)
+    TProfile* p_phi_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δφ)^2>
+    TProfile* p_eta_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δη)^2>
+
+    // --- Log scan profiles: <(Δφ)^2> / <(Δη)^2> vs w0 (tower-space driven)
+    TProfile* p_phi_rms2_vs_w0_E[N_Ebins]{};
+    TProfile* p_eta_rms2_vs_w0_E[N_Ebins]{};
+
+    // --- Agreement diagnostic in tower units: |CP(b) - CP(EA)|
+    TProfile* p_abs_dloc_phi_CPea_vs_b_E [N_Ebins]{};
+    TProfile* p_abs_dloc_eta_CPea_vs_b_E [N_Ebins]{};
+    
+    
     
   TH2F* h2_phi_diff_vsEta_RAW_E     [N_Ebins]{};
   TH2F* h2_phi_diff_vsEta_CP_E      [N_Ebins]{};

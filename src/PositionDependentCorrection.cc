@@ -13,19 +13,6 @@
 #include <g4detectors/PHG4Cell.h>
 #include <g4detectors/PHG4CellContainer.h>
 #include <regex>
-#include <calobase/RawCluster.h>
-#include <calobase/RawClusterContainer.h>
-#include <calobase/RawClusterUtility.h>
-#include <calobase/RawTower.h>
-#include <calobase/RawTowerContainer.h>
-#include <calobase/RawTowerGeom.h>
-#include <calobase/RawTowerGeomContainer.h>
-#include <calobase/TowerInfo.h>
-#include <calobase/TowerInfoContainer.h>
-#include <calobase/TowerInfoDefs.h>
-#include <calobase/RawCluster.h>
-#include <calobase/RawClusterContainer.h>
-#include <calobase/RawTowerDefs.h>
 #include <fun4all/Fun4AllHistoManager.h>
 #include <fun4all/Fun4AllReturnCodes.h>
 #include <phool/getClass.h>
@@ -63,8 +50,22 @@
 #include <ffamodules/CDBInterface.h>
 #include <phool/recoConsts.h>
 #include <map>
-
+#include <TSystem.h>
 #include <g4main/PHG4TruthInfoContainer.h>
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawCluster.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterv2.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterUtility.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTower.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeom.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeomContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfo.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfoContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfoDefs.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawCluster.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerDefs.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
 
 using namespace PDC_detail;
@@ -179,7 +180,11 @@ void PositionDependentCorrection::bookCommonHistograms
   Double_t xEdges[15], yEdges[15];
   {
     const double s = 2.0/14.0;
-    for (int i = 0; i <= 14; ++i) { xEdges[i] = -0.5 + i*s; yEdges[i] = -0.5 + i*s; }
+    for (int i = 0; i <= 14; ++i)
+    {
+      xEdges[i] = -0.5 + i*s;
+      yEdges[i] = -0.5 + i*s;
+    }
   }
   static constexpr Double_t eEdges[9] = {2,4,6,8,10,12,15,20,30};
   const char* modeTag = (m_binningMode == EBinningMode::kRange ? "range" : "disc");
@@ -188,95 +193,126 @@ void PositionDependentCorrection::bookCommonHistograms
   // (A) ALWAYS BOOK the 5 uncorrected 3-D histograms (both modes)
   // ==================================================================
   if (!h3_cluster_block_cord_E)
+  {
     h3_cluster_block_cord_E = new TH3F(
         Form("h3_blockCoord_E_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Uncorrected local block coords vs. E_{slice}" :
            "Uncorrected local block coords vs. E_{centre}"),
         14, xEdges, 14, yEdges, 8, eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_full)
+  {
     h3_cluster_block_cord_E_full = new TH3F(
         Form("h3_blockCoord_E_full_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Uncorrected local block coords vs. E_{slice} (full |#eta| #leq 1.10)" :
            "Uncorrected local block coords vs. E_{centre} (full |#eta| #leq 1.10)"),
         14, xEdges, 14, yEdges, 8, eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_etaCore)
+  {
     h3_cluster_block_cord_E_etaCore = new TH3F(
         Form("h3_blockCoord_E_etaCore_le0p20_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Uncorrected local block coords vs. E_{slice} (|#eta| #leq 0.20)" :
            "Uncorrected local block coords vs. E_{centre} (|#eta| #leq 0.20)"),
         14, xEdges, 14, yEdges, 8, eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_etaMid)
+  {
     h3_cluster_block_cord_E_etaMid = new TH3F(
         Form("h3_blockCoord_E_etaMid_0p20to0p70_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Uncorrected local block coords vs. E_{slice} (0.20 < |#eta| #leq 0.70)" :
            "Uncorrected local block coords vs. E_{centre} (0.20 < |#eta| #leq 0.70)"),
         14, xEdges, 14, yEdges, 8, eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_etaEdge)
+  {
     h3_cluster_block_cord_E_etaEdge = new TH3F(
         Form("h3_blockCoord_E_etaEdge_0p70to1p10_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Uncorrected local block coords vs. E_{slice} (0.70 < |#eta| #leq 1.10)" :
            "Uncorrected local block coords vs. E_{centre} (0.70 < |#eta| #leq 1.10)"),
         14, xEdges, 14, yEdges, 8, eEdges);
+  }
 
-
-    // Minimal QA needed by fillTowerInfo/fillTruthInfo/process_towers
-  if (!h_tower_e)     h_tower_e     = new TH1F("h_tower_e","",1000,-1,5);
-  if (!h_emcal_e_eta) h_emcal_e_eta = new TH1F("h_emcal_e_eta","",96,0,96);
-  if (!h_cemc_etaphi) h_cemc_etaphi = new TH2F("h_cemc_etaphi","",96,0,96,256,0,256);
-
-  if (!h_truth_eta)        h_truth_eta = new TH1F("h_truth_eta","",100,-1.2,1.2);
-  if (!h_truth_e)          h_truth_e   = new TH1F("h_truth_e","",100,0,10);
-  if (!h_truth_vz)         h_truth_vz  = new TH1F("h_truth_vz","Truth Vertex Z;z_{truth} (cm);Counts",200,-100,100);
-  if (!h2_truthReco_vz)    h2_truthReco_vz = new TH2F("h2_truthReco_vz",
-                                           "Truth vs Reco Vertex Z;z_{truth} (cm);z_{reco} (cm)",
-                                           200,-100,100,200,-100,100);
-  if (!h_vert_xy)          h_vert_xy   = new TH2F("h_vert_xy","",500,-120,120,500,-120,120);
-  if (!h_reco_vz)          h_reco_vz   = new TH1F("h_reco_vz","Reco Vertex Z;z_{reco} (cm);Counts",200,-100,100);
-
-    // Register only the QA that needs manager
+  // QA: Δ between property raw CoG and recomputed raw CoG vs E
+  if (!h_dx_prop_vsE)
+  {
+    h_dx_prop_vsE = new TH2F("h_dx_prop_vsE",
+                             "x_{raw}(prop) - x_{raw}(recalc CoG) vs E;E [GeV];#Delta x_{raw} [tower]",
+                             80,0,40, 200,-1e-2,1e-2);
+  }
+  if (!h_dy_prop_vsE)
+  {
+    h_dy_prop_vsE = new TH2F("h_dy_prop_vsE",
+                             "y_{raw}(prop) - y_{raw}(recalc CoG) vs E;E [GeV];#Delta y_{raw} [tower]",
+                             80,0,40, 200,-1e-2,1e-2);
+  }
   if (hm)
   {
-      hm->registerHisto(h_reco_vz);
-      hm->registerHisto(h_truth_vz);
-      hm->registerHisto(h2_truthReco_vz);
+    hm->registerHisto(h_dx_prop_vsE);
+    hm->registerHisto(h_dy_prop_vsE);
+  }
+
+  // Minimal QA needed by fillTowerInfo/fillTruthInfo/process_towers
+  if (!h_tower_e)     { h_tower_e     = new TH1F("h_tower_e","",1000,-1,5); }
+  if (!h_emcal_e_eta) { h_emcal_e_eta = new TH1F("h_emcal_e_eta","",96,0,96); }
+  if (!h_cemc_etaphi) { h_cemc_etaphi = new TH2F("h_cemc_etaphi","",96,0,96,256,0,256); }
+
+  if (!h_truth_eta) { h_truth_eta = new TH1F("h_truth_eta","",100,-1.2,1.2); }
+  if (!h_truth_e)   { h_truth_e   = new TH1F("h_truth_e","",100,0,10); }
+  if (!h_truth_vz)  { h_truth_vz  = new TH1F("h_truth_vz","Truth Vertex Z;z_{truth} (cm);Counts",200,-100,100); }
+  if (!h2_truthReco_vz)
+  {
+    h2_truthReco_vz = new TH2F("h2_truthReco_vz",
+                               "Truth vs Reco Vertex Z;z_{truth} (cm);z_{reco} (cm)",
+                               200,-100,100,200,-100,100);
+  }
+  if (!h_vert_xy) { h_vert_xy = new TH2F("h_vert_xy","",500,-120,120,500,-120,120); }
+  if (!h_reco_vz) { h_reco_vz = new TH1F("h_reco_vz","Reco Vertex Z;z_{reco} (cm);Counts",200,-100,100); }
+
+  // Register only the QA that needs manager
+  if (hm)
+  {
+    hm->registerHisto(h_reco_vz);
+    hm->registerHisto(h_truth_vz);
+    hm->registerHisto(h2_truthReco_vz);
   }
 
   // ==================================================================
   // (C) FULL MODE: book everything else (without rebooking base-5)
   // ==================================================================
 
-  /* 1) “Always-on” histograms (original list) */
-  if (!h_mass_eta_lt)      h_mass_eta_lt      = new TH2F("h_mass_eta_lt","",50,0,0.5,96,0,96);
-  if (!h_mass_eta_lt_rw)   h_mass_eta_lt_rw   = new TH2F("h_mass_eta_lt_rw","",50,0,0.5,96,0,96);
-  if (!h_pt_eta)           h_pt_eta           = new TH2F("h_pt_eta","",100,0,10,96,0,96);
-  if (!h_pt_eta_rw)        h_pt_eta_rw        = new TH2F("h_pt_eta_rw","",100,0,10,96,0,96);
-  if (!h_cemc_etaphi)      h_cemc_etaphi      = new TH2F("h_cemc_etaphi","",96,0,96,256,0,256);
-  if (!h_InvMass)          h_InvMass          = new TH1F("h_InvMass","Invariant Mass",500,0,1.0);
-  if (!h_InvMass_w)        h_InvMass_w        = new TH1F("h_InvMass_w","Invariant Mass",500,0,1.0);
-  if (!h_InvMassMix)       h_InvMassMix       = new TH1F("h_InvMassMix","Invariant Mass",120,0,1.2);
+  // 1) “Always-on” histograms (original list)
+  if (!h_mass_eta_lt)    { h_mass_eta_lt    = new TH2F("h_mass_eta_lt","",50,0,0.5,96,0,96); }
+  if (!h_mass_eta_lt_rw) { h_mass_eta_lt_rw = new TH2F("h_mass_eta_lt_rw","",50,0,0.5,96,0,96); }
+  if (!h_pt_eta)         { h_pt_eta         = new TH2F("h_pt_eta","",100,0,10,96,0,96); }
+  if (!h_pt_eta_rw)      { h_pt_eta_rw      = new TH2F("h_pt_eta_rw","",100,0,10,96,0,96); }
+  if (!h_cemc_etaphi)    { h_cemc_etaphi    = new TH2F("h_cemc_etaphi","",96,0,96,256,0,256); }
+  if (!h_InvMass)        { h_InvMass        = new TH1F("h_InvMass","Invariant Mass",500,0,1.0); }
+  if (!h_InvMass_w)      { h_InvMass_w      = new TH1F("h_InvMass_w","Invariant Mass",500,0,1.0); }
+  if (!h_InvMassMix)     { h_InvMassMix     = new TH1F("h_InvMassMix","Invariant Mass",120,0,1.2); }
 
   if (!h_mE_raw)
   {
     h_mE_raw = new TH2F("h_mE_raw",
                         "π^{0} mass vs E_{#gamma}^{max} – RAW;M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
                         120,0.00,0.30, N_Ebins, eEdge);
-    if (hm) hm->registerHisto(h_mE_raw);
+    if (hm) { hm->registerHisto(h_mE_raw); }
   }
   if (!h_mE_corr)
   {
     h_mE_corr = new TH2F("h_mE_corr",
                          "π^{0} mass vs E_{#gamma}^{max} – φ-corr.;M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
                          120,0.00,0.30, N_Ebins, eEdge);
-    if (hm) hm->registerHisto(h_mE_corr);
+    if (hm) { hm->registerHisto(h_mE_corr); }
   }
 
   if (!h_m_blk_raw)
@@ -284,40 +320,40 @@ void PositionDependentCorrection::bookCommonHistograms
     h_m_blk_raw = new TH3F("h_m_blk_raw",
                            "π^{0} mass – RAW;η_{loc};φ_{loc};M_{γγ} [GeV]",
                            14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
-    if (hm) hm->registerHisto(h_m_blk_raw);
+    if (hm) { hm->registerHisto(h_m_blk_raw); }
   }
   if (!h_m_blk_corr)
   {
     h_m_blk_corr = new TH3F("h_m_blk_corr",
                             "π^{0} mass – φ-corr.;η_{loc};φ_{loc};M_{γγ} [GeV]",
                             14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
-    if (hm) hm->registerHisto(h_m_blk_corr);
+    if (hm) { hm->registerHisto(h_m_blk_corr); }
   }
 
   // Full-mode scalar/2D/3D histos (guard against double-booking)
-  if (!h_tower_e)          h_tower_e          = new TH1F("h_tower_e","",1000,-1,5);
-  if (!h_etaphi_clus)      h_etaphi_clus      = new TH2F("h_etaphi_clus","",140,-1.2,1.2,64,-TMath::Pi(),TMath::Pi());
-  if (!h_clusE)            h_clusE            = new TH1F("h_clusE","",100,0,10);
-  if (!h_clusE_nTow)       h_clusE_nTow       = new TH2F("h_clusE_nTow","",20,0,20,50,0,50);
-  if (!h_emcal_e_eta)      h_emcal_e_eta      = new TH1F("h_emcal_e_eta","",96,0,96);
-  if (!h_pt1)              h_pt1              = new TH1F("h_pt1","",100,0,5);
-  if (!h_pt2)              h_pt2              = new TH1F("h_pt2","",100,0,5);
-  if (!h_nclusters)        h_nclusters        = new TH1F("h_nclusters","",100,0,100);
-  if (!h_matched_res)      h_matched_res      = new TH2F("h_matched_res","",100,0,1.5,20,-1,1);
-  if (!h_res_e)            h_res_e            = new TH2F("h_res_e","",100,0,1.5,20,0,20);
-  if (!h_res_e_phi)        h_res_e_phi        = new TH3F("h_res_e_phi","",100,0,1.5,10,0,20,256,0,256);
-  if (!h_res_e_eta)        h_res_e_eta        = new TH3F("h_res_e_eta","",300,0,1.5,40,0,20,96,0,96);
-  if (!h_m_pt_eta)         h_m_pt_eta         = new TH3F("h_m_pt_eta","",70,0,0.7,10,0,10,96,0,96);
-  if (!h_m_ptTr_eta)       h_m_ptTr_eta       = new TH3F("h_m_ptTr_eta","",70,0,0.7,10,0,10,96,0,96);
-  if (!h_m_ptTr_eta_trKin) h_m_ptTr_eta_trKin = new TH3F("h_m_ptTr_eta_trKin","",70,0,0.7,10,0,10,96,0,96);
-  if (!h_res)              h_res              = new TH1F("h_res","",50,0,1.5);
-  if (!h_delEta_e_eta)     h_delEta_e_eta     = new TH3F("h_delEta_e_eta","",100,-0.1,0.1,10,0,20,96,0,96);
-  if (!h_delR_e_eta)       h_delR_e_eta       = new TH3F("h_delR_e_eta","",100,-0.1,0.1,10,0,20,96,0,96);
-  if (!h_delPhi_e_eta)     h_delPhi_e_eta     = new TH3F("h_delPhi_e_eta","",100,-0.3,0.3,20,0,20,96,0,96);
-  if (!h_delPhi_e_phi)     h_delPhi_e_phi     = new TH3F("h_delPhi_e_phi","",100,-0.1,0.1,20,0,20,256,0,256);
-  if (!pr_eta_shower)      pr_eta_shower      = new TProfile("pr_eta_shower","",96,-48.5,47.5,-1,1.5);
-  if (!pr_phi_shower)      pr_phi_shower      = new TProfile("pr_phi_shower","",256,-128.5,127.5,-1,1.5);
-  if (!h_vert_xy)          h_vert_xy          = new TH2F("h_vert_xy","",500,-120,120,500,-120,120);
+  if (!h_tower_e)     { h_tower_e     = new TH1F("h_tower_e","",1000,-1,5); }
+  if (!h_etaphi_clus) { h_etaphi_clus = new TH2F("h_etaphi_clus","",140,-1.2,1.2,64,-TMath::Pi(),TMath::Pi()); }
+  if (!h_clusE)       { h_clusE       = new TH1F("h_clusE","",100,0,10); }
+  if (!h_clusE_nTow)  { h_clusE_nTow  = new TH2F("h_clusE_nTow","",20,0,20,50,0,50); }
+  if (!h_emcal_e_eta) { h_emcal_e_eta = new TH1F("h_emcal_e_eta","",96,0,96); }
+  if (!h_pt1)         { h_pt1         = new TH1F("h_pt1","",100,0,5); }
+  if (!h_pt2)         { h_pt2         = new TH1F("h_pt2","",100,0,5); }
+  if (!h_nclusters)   { h_nclusters   = new TH1F("h_nclusters","",100,0,100); }
+  if (!h_matched_res) { h_matched_res = new TH2F("h_matched_res","",100,0,1.5,20,-1,1); }
+  if (!h_res_e)       { h_res_e       = new TH2F("h_res_e","",100,0,1.5,20,0,20); }
+  if (!h_res_e_phi)   { h_res_e_phi   = new TH3F("h_res_e_phi","",100,0,1.5,10,0,20,256,0,256); }
+  if (!h_res_e_eta)   { h_res_e_eta   = new TH3F("h_res_e_eta","",300,0,1.5,40,0,20,96,0,96); }
+  if (!h_m_pt_eta)    { h_m_pt_eta    = new TH3F("h_m_pt_eta","",70,0,0.7,10,0,10,96,0,96); }
+  if (!h_m_ptTr_eta)  { h_m_ptTr_eta  = new TH3F("h_m_ptTr_eta","",70,0,0.7,10,0,10,96,0,96); }
+  if (!h_m_ptTr_eta_trKin) { h_m_ptTr_eta_trKin = new TH3F("h_m_ptTr_eta_trKin","",70,0,0.7,10,0,10,96,0,96); }
+  if (!h_res)         { h_res         = new TH1F("h_res","",50,0,1.5); }
+  if (!h_delEta_e_eta){ h_delEta_e_eta= new TH3F("h_delEta_e_eta","",100,-0.1,0.1,10,0,20,96,0,96); }
+  if (!h_delR_e_eta)  { h_delR_e_eta  = new TH3F("h_delR_e_eta","",100,-0.1,0.1,10,0,20,96,0,96); }
+  if (!h_delPhi_e_eta){ h_delPhi_e_eta= new TH3F("h_delPhi_e_eta","",100,-0.3,0.3,20,0,20,96,0,96); }
+  if (!h_delPhi_e_phi){ h_delPhi_e_phi= new TH3F("h_delPhi_e_phi","",100,-0.1,0.1,20,0,20,256,0,256); }
+  if (!pr_eta_shower) { pr_eta_shower = new TProfile("pr_eta_shower","",96,-48.5,47.5,-1,1.5); }
+  if (!pr_phi_shower) { pr_phi_shower = new TProfile("pr_phi_shower","",256,-128.5,127.5,-1,1.5); }
+  if (!h_vert_xy)     { h_vert_xy     = new TH2F("h_vert_xy","",500,-120,120,500,-120,120); }
 
   // χ² QA maps
   if (!h2_chi2_tot_etaPhi)
@@ -325,76 +361,92 @@ void PositionDependentCorrection::bookCommonHistograms
     h2_chi2_tot_etaPhi = new TH2F("h2_chi2_tot_etaPhi",
                                   "Clusters BEFORE #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
                                   96,0,96, 256,0,256);
-    if (hm) hm->registerHisto(h2_chi2_tot_etaPhi);
+    if (hm) { hm->registerHisto(h2_chi2_tot_etaPhi); }
   }
   if (!h2_chi2_rej_etaPhi)
   {
     h2_chi2_rej_etaPhi = new TH2F("h2_chi2_rej_etaPhi",
                                   "Clusters REJECTED by #chi^{2} cut;Tower #eta index;Tower #varphi index;Counts",
                                   96,0,96, 256,0,256);
-    if (hm) hm->registerHisto(h2_chi2_rej_etaPhi);
+    if (hm) { hm->registerHisto(h2_chi2_rej_etaPhi); }
   }
   if (!p_chi2_pass_etaPhi)
   {
     p_chi2_pass_etaPhi = new TProfile2D("p_chi2_pass_etaPhi",
                                         "Pass fraction after #chi^{2} cut;Tower #eta index;Tower #varphi index;⟨pass⟩",
                                         96,0,96, 256,0,256, -0.1,1.1);
-    if (hm) hm->registerHisto(p_chi2_pass_etaPhi);
+    if (hm) { hm->registerHisto(p_chi2_pass_etaPhi); }
   }
 
   // Per-block histograms
   for (int ie = 0; ie < NBinsBlock; ++ie)
+  {
     for (int ip = 0; ip < NBinsBlock; ++ip)
     {
       if (!h_mass_block_pt[ie][ip])
+      {
         h_mass_block_pt[ie][ip] = new TH2F(Form("h_mass_block_%d_%d_pt",ie,ip), "", 100,0,1, 5,0,10);
+      }
       if (!h_res_block_E [ie][ip])
+      {
         h_res_block_E [ie][ip] = new TH2F(Form("h_res_block_%d_%d_E" ,ie,ip), "", 120,0,1.2, 5,0,10);
+      }
     }
+  }
 
   // ==================================================================
   // (D) Corrected TH3 histos (legacy + per-η views) — full mode only
   //     (Do NOT re-create base-5 uncorrected here)
   // ==================================================================
   if (!h3_cluster_block_cord_E_corrected)
+  {
     h3_cluster_block_cord_E_corrected = new TH3F(
         Form("h3_blockCoord_Ecorr_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Corrected local block coords vs. E_{slice}" :
            "Corrected local block coords vs. E_{centre}"),
         14,xEdges,14,yEdges,8,eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_full_corr)
+  {
     h3_cluster_block_cord_E_full_corr = new TH3F(
         Form("h3_blockCoord_Ecorr_full_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Corrected local block coords vs. E_{slice} (full |#eta| #leq 1.10)" :
            "Corrected local block coords vs. E_{centre} (full |#eta| #leq 1.10)"),
         14,xEdges,14,yEdges,8,eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_etaCore_corr)
+  {
     h3_cluster_block_cord_E_etaCore_corr = new TH3F(
         Form("h3_blockCoord_Ecorr_etaCore_le0p20_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Corrected local block coords vs. E_{slice} (|#eta| #leq 0.20)" :
            "Corrected local block coords vs. E_{centre} (|#eta| #leq 0.20)"),
         14,xEdges,14,yEdges,8,eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_etaMid_corr)
+  {
     h3_cluster_block_cord_E_etaMid_corr = new TH3F(
         Form("h3_blockCoord_Ecorr_etaMid_0p20to0p70_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Corrected local block coords vs. E_{slice} (0.20 < |#eta| #leq 0.70)" :
            "Corrected local block coords vs. E_{centre} (0.20 < |#eta| #leq 0.70)"),
         14,xEdges,14,yEdges,8,eEdges);
+  }
 
   if (!h3_cluster_block_cord_E_etaEdge_corr)
+  {
     h3_cluster_block_cord_E_etaEdge_corr = new TH3F(
         Form("h3_blockCoord_Ecorr_etaEdge_0p70to1p10_%s",modeTag),
         (m_binningMode==EBinningMode::kRange ?
            "Corrected local block coords vs. E_{slice} (0.70 < |#eta| #leq 1.10)" :
            "Corrected local block coords vs. E_{centre} (0.70 < |#eta| #leq 1.10)"),
         14,xEdges,14,yEdges,8,eEdges);
+  }
 
   // ==================================================================
   // (E) Per-slice corrected local η/φ (unchanged logic; guarded)
@@ -405,22 +457,27 @@ void PositionDependentCorrection::bookCommonHistograms
     const std::string lab = makeLabel(i);
 
     if (!h_localPhi_corrected[i])
+    {
       h_localPhi_corrected[i] = new TH1F(
             Form("h_localPhi_corr_%s",lab.c_str()),
             (m_binningMode==EBinningMode::kRange ?
                Form("Corrected local #phi;%.0f < E < %.0f GeV",eLo,eHi) :
                Form("Corrected local #phi;E = %.0f GeV",eLo)),
             50,-0.5,0.5);
+    }
 
     if (!h_localEta_corrected[i])
+    {
       h_localEta_corrected[i] = new TH1F(
             Form("h_localEta_corr_%s",lab.c_str()),
             (m_binningMode==EBinningMode::kRange ?
                Form("Corrected local #eta;%.0f < E < %.0f GeV",eLo,eHi) :
                Form("Corrected local #eta;E = %.0f GeV",eLo)),
             50,-0.5,0.5);
+    }
   }
 }
+
 
 
 /** Extra histograms that are **only** needed when m_isSimulation == true */
@@ -659,6 +716,41 @@ PositionDependentCorrection::bookSimulationHistograms
         hm->registerHisto(h_eta_diff_cpBcorr_E_vz [i][iVz]);
     }
 
+      for (int ieEA = 0; ieEA < N_Ebins; ++ieEA)
+      {
+        const std::string labEA = sliceTag(ieEA);
+
+        if (!h2_phi_diffEA_vs_bphi_E[ieEA])
+        {
+          h2_phi_diffEA_vs_bphi_E[ieEA] = new TH2F(
+            Form("h2_dphiEA_vs_bphi_%s", labEA.c_str()),
+            (m_binningMode == EBinningMode::kRange ?
+               Form("#Delta#varphi(CLUS-CP(EA)) vs b_{#varphi};b_{#varphi};#Delta#varphi (folded) [rad]  (%.0f<E<%.0f GeV)",
+                    eEdge[ieEA], eEdge[ieEA+1]) :
+               Form("#Delta#varphi(CLUS-CP(EA)) vs b_{#varphi};b_{#varphi};#Delta#varphi (folded) [rad]  (E=%.0f GeV)",
+                    eEdge[ieEA])),
+            60, 0.12, 0.25,
+            120, -0.030, 0.030);
+          if (hm) hm->registerHisto(h2_phi_diffEA_vs_bphi_E[ieEA]);
+        }
+
+        if (!h2_eta_diffEA_vs_beta_E[ieEA])
+        {
+          h2_eta_diffEA_vs_beta_E[ieEA] = new TH2F(
+            Form("h2_detaEA_vs_beta_%s", labEA.c_str()),
+            (m_binningMode == EBinningMode::kRange ?
+               Form("#Delta#eta(CLUS-CP(EA)) vs b_{#eta};b_{#eta};#Delta#eta  (%.0f<E<%.0f GeV)",
+                    eEdge[ieEA], eEdge[ieEA+1]) :
+               Form("#Delta#eta(CLUS-CP(EA)) vs b_{#eta};b_{#eta};#Delta#eta  (E=%.0f GeV)",
+                    eEdge[ieEA])),
+            80, 0.10, 0.32,
+            120, -0.060, 0.060);
+          if (hm) hm->registerHisto(h2_eta_diffEA_vs_beta_E[ieEA]);
+        }
+      }
+
+
+      
     /* ---------- OPTIONAL signed‑z booking (north / south) ---------- */
     if (m_useSignedVz)
     {
@@ -706,52 +798,91 @@ PositionDependentCorrection::bookSimulationHistograms
   }     // E‑slice loop
 
 
-  /* Δy scan & log‑weight scan histograms – exactly as before */
-  for (int iE=0;iE<N_Ebins;++iE)
-  {
-    const std::string lab = makeLabel(iE);
-    for (double b : m_bScan)
-      hm->registerHisto(new TH1F(Form("h_dy_ash_b%.4f_%s",b,lab.c_str()),
-                                 ";y_{reco}-y_{true}  [cm];Counts / 0.1 cm",
-                                 240,-12,12));
-    for (double w0 : m_w0Scan)
-      hm->registerHisto(new TH1F(Form("h_dy_log_w0%.2f_%s",w0,lab.c_str()),
-                                 ";y_{reco}-y_{true}  [cm];Counts / 0.1 cm",
-                                 240,-12,12));
-  }
+    // ────────────────────────────────────────────────────────────────
+    // Ash/Log scans (per‑E TProfiles).  Also seed default scan grids
+    // if the macro didn't pre-fill m_bScan / m_w0Scan.
+    // ────────────────────────────────────────────────────────────────
+    auto makeEdges = [](const std::vector<double>& grid) {
+      std::vector<double> edges;
+      if (grid.size() < 2) return edges;
+      const int n = static_cast<int>(grid.size());
+      edges.resize(n+1);
+      for (int i=1; i<n; ++i) edges[i] = 0.5*(grid[i-1] + grid[i]);
+      edges[0] = grid[0] - 0.5*(grid[1] - grid[0]);
+      edges[n] = grid[n-1] + 0.5*(grid[n-1] - grid[n-2]);
+      return edges;
+    };
 
-  /* Δx scan (identical) */
-  constexpr double DX_MAX = 12.0, BIN_W = 0.10;
-  constexpr int    NBINS  = int(2*DX_MAX/BIN_W + 0.5);
+    // 3a) Sane **defaults** (coarse pass) if not set by the macro
+    if (m_bScan.empty()) {
+      // Ash b: tower‑space parameter used by BEmcRec; cover common 0.10–0.30
+      // Use a moderate step to keep Condor jobs light; we refine later around minima.
+      for (double b = 0.10; b <= 0.30 + 1e-12; b += 0.02)
+        m_bScan.push_back(std::round(b*10000.)/10000.);
+    }
+    if (m_w0Scan.empty()) {
+      // Log w0: per PHENIX/ATLAS conventions, the optimum is typically 3–5.
+      for (double w0 = 2.5; w0 <= 6.5 + 1e-12; w0 += 0.25)
+        m_w0Scan.push_back(std::round(w0*100.)/100.);
+    }
 
-  if (!alreadyDeclaredHistograms)
-  {
-    for (double b = 0.01; b <= 0.50 + 1e-9; b += 0.01)
-      m_bScan.push_back(std::round(b*10000.)/10000.);
-    for (double w0 = 1.5;  w0 <= 7.0  + 1e-9; w0+=0.10)
-      m_w0Scan.push_back(std::round(w0*100.)/100.);
+    const std::vector<double> bEdges  = makeEdges(m_bScan);
+    const std::vector<double> w0Edges = makeEdges(m_w0Scan);
 
-    for (int iE=0;iE<N_Ebins;++iE)
+    for (int i=0; i<N_Ebins; ++i)
     {
-      const std::string lab = makeLabel(iE);
+      const std::string lab = makeLabel(i);
 
-      for (double bVal : m_bScan)
-      {
-        const TString hName = Form("h_dx_ash_b%.4f_%s",bVal,lab.c_str());
-        hm->registerHisto(new TH1F(hName,
-                                   ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                                   NBINS,-DX_MAX,DX_MAX));
+      // <(Δφ)^2> vs b  (Ash)
+      if (!p_phi_rms2_vs_b_E[i] && !bEdges.empty()) {
+        p_phi_rms2_vs_b_E[i] = new TProfile(
+          Form("p_phi_rms2_vs_b_%s",lab.c_str()),
+          "#LT(#Delta#phi)^{2}#GT vs b; b; #LT(#Delta#phi)^{2}#GT",
+          static_cast<int>(bEdges.size()-1), bEdges.data());
+        if (hm) hm->registerHisto(p_phi_rms2_vs_b_E[i]);
       }
-      for (double w0 : m_w0Scan)
-      {
-        const TString hName = Form("h_dx_log_w0%.2f_%s",w0,lab.c_str());
-        hm->registerHisto(new TH1F(hName,
-                                   ";x_{reco}-x_{true}  [cm];Counts / 0.1 cm",
-                                   NBINS,-DX_MAX,DX_MAX));
+      // <(Δη)^2> vs b  (Ash)
+      if (!p_eta_rms2_vs_b_E[i] && !bEdges.empty()) {
+        p_eta_rms2_vs_b_E[i] = new TProfile(
+          Form("p_eta_rms2_vs_b_%s",lab.c_str()),
+          "#LT(#Delta#eta)^{2}#GT vs b; b; #LT(#Delta#eta)^{2}#GT",
+          static_cast<int>(bEdges.size()-1), bEdges.data());
+        if (hm) hm->registerHisto(p_eta_rms2_vs_b_E[i]);
+      }
+
+      // <(Δφ)^2> vs w0 (Log)
+      if (!p_phi_rms2_vs_w0_E[i] && !w0Edges.empty()) {
+        p_phi_rms2_vs_w0_E[i] = new TProfile(
+          Form("p_phi_rms2_vs_w0_%s",lab.c_str()),
+          "#LT(#Delta#phi)^{2}#GT vs w_{0}; w_{0}; #LT(#Delta#phi)^{2}#GT",
+          static_cast<int>(w0Edges.size()-1), w0Edges.data());
+        if (hm) hm->registerHisto(p_phi_rms2_vs_w0_E[i]);
+      }
+      // <(Δη)^2> vs w0 (Log)
+      if (!p_eta_rms2_vs_w0_E[i] && !w0Edges.empty()) {
+        p_eta_rms2_vs_w0_E[i] = new TProfile(
+          Form("p_eta_rms2_vs_w0_%s",lab.c_str()),
+          "#LT(#Delta#eta)^{2}#GT vs w_{0}; w_{0}; #LT(#Delta#eta)^{2}#GT",
+          static_cast<int>(w0Edges.size()-1), w0Edges.data());
+        if (hm) hm->registerHisto(p_eta_rms2_vs_w0_E[i]);
+      }
+
+      // Agreement diagnostic in tower units: | CP(b) – CP(EA) |
+      if (!p_abs_dloc_phi_CPea_vs_b_E[i] && !bEdges.empty()) {
+        p_abs_dloc_phi_CPea_vs_b_E[i] = new TProfile(
+          Form("p_abs_dloc_phi_CPea_vs_b_%s",lab.c_str()),
+          "|x_{CP}(b)-x_{EA}| vs b; b; #LT|#Delta x|#GT  (tower units)",
+          static_cast<int>(bEdges.size()-1), bEdges.data(), "S");
+        if (hm) hm->registerHisto(p_abs_dloc_phi_CPea_vs_b_E[i]);
+      }
+      if (!p_abs_dloc_eta_CPea_vs_b_E[i] && !bEdges.empty()) {
+        p_abs_dloc_eta_CPea_vs_b_E[i] = new TProfile(
+          Form("p_abs_dloc_eta_CPea_vs_b_%s",lab.c_str()),
+          "|y_{CP}(b)-y_{EA}| vs b; b; #LT|#Delta y|#GT  (tower units)",
+          static_cast<int>(bEdges.size()-1), bEdges.data(), "S");
+        if (hm) hm->registerHisto(p_abs_dloc_eta_CPea_vs_b_E[i]);
       }
     }
-    alreadyDeclaredHistograms = true;
-  }
 }
 
 
@@ -964,15 +1095,13 @@ bool PositionDependentCorrection::loadMassWindowTable(const std::string& path)
   return true;
 }
 
-
-// -------------------------------------------------------------------------
-//  New, compact Init() – functional behaviour identical to the original
-// -------------------------------------------------------------------------
 int PositionDependentCorrection::Init(PHCompositeNode* /*topNode*/)
 {
   /* 0) Basic sanity / I/O managers ----------------------------------- */
-  if (Verbosity() > 0)
-    std::cout << "[DEBUG] PositionDependentCorrection::Init() called.\n";
+  if (Verbosity() > 0) {
+      std::cout << "[DEBUG] PositionDependentCorrection::Init() called.\n";
+  }
+
 
   hm = new Fun4AllHistoManager(Name());
   if (!hm)
@@ -1102,9 +1231,29 @@ int PositionDependentCorrection::Init(PHCompositeNode* /*topNode*/)
   /* 4) Misc ----------------------------------------------------------- */
   rnd = new TRandom3();
 
-  if (Verbosity()>0)
-    std::cout << "[DEBUG] PositionDependentCorrection::Init() completed successfully.\n";
+    
+    // Accept either v2 node fields or property IDs; only warn if neither is available.
+    {
+      bool props_ok = false;
+      try {
+        const bool ok_raw =
+          RawCluster::get_property_info(RawCluster::prop_x_tower_raw).second  == RawCluster::type_float &&
+          RawCluster::get_property_info(RawCluster::prop_y_tower_raw).second  == RawCluster::type_float;
+        const bool ok_cor =
+          RawCluster::get_property_info(RawCluster::prop_x_tower_corr).second == RawCluster::type_float &&
+          RawCluster::get_property_info(RawCluster::prop_y_tower_corr).second == RawCluster::type_float;
+        props_ok = (ok_raw && ok_cor);
+      } catch (...) { props_ok = false; }
 
+      // If properties are missing, we’ll still proceed—v2 may be present.
+      std::cout << (props_ok ? "[OK] RawCluster properties present (tower-space x/y raw & corr)."
+                             : "[INFO] RawCluster properties not present; will look for RawClusterv2.") << std::endl;
+    }
+
+    if (Verbosity()>0) {
+      std::cout << "[DEBUG] PositionDependentCorrection::Init() completed successfully.\n";
+    }
+    
   return 0;
 }
 
@@ -1672,265 +1821,255 @@ double PositionDependentCorrection::xAtShowerDepth( float  energy,
 }
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Forward distortion  ( true  →  measured )
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-float PositionDependentCorrection::doAshShift(float localPhi, float b)
+/// Inverse‑asinh correction in *tower units* about the nearest tower index.
+/// Input/Output: xTower = φ- or η‑like cluster CoG coordinate in tower units.
+/// Mirrors the φ/η branch inside BEmcRecCEMC::CorrectPosition(...).
+float PositionDependentCorrection::doAshShift(float xTower, float b)
 {
-  /* 0) no distortion when b ≈ 0 ------------------------------------ */
-  if (std::fabs(b) < 1e-9f) return localPhi;
+  if (!std::isfinite(xTower) || b <= 0.f) return xTower;
 
-  /* 1) one fold into (-0.5 … +1.5] --------------------------------- */
-  if (localPhi <= -0.5f || localPhi > 1.5f)
-      localPhi = std::fmod(localPhi + 2.f, 2.f);
+  // nearest tower index (same rounding as the clusterizer)
+  const int   i0 = EmcCluster::lowint(xTower + 0.5f);
+  const float du = xTower - i0;
 
-  /* 2) map to centre-of-gravity X ∈ (-0.5 … +0.5] ------------------ */
-  const float Xcg = (localPhi < 0.5f) ? localPhi : localPhi - 1.f;
+  // numeric guard: only act inside the owner tower
+  if (std::fabs(du) > 0.5f) return xTower;
 
-  /* 3) forward Ash-b ---------------------------------------------- */
-  const double S  = std::sinh(1.0 / (2.0 * b));                // sinh(1/2b)
-  float t        = static_cast<float>( b * std::asinh( 2.0 * Xcg * S ) );
-
-  /* 4) shift back to (-0.5 … +1.5] --------------------------------- */
-  if (localPhi >= 0.5f) t += 1.f;
-
-  /* 5) final safety fold (numerical guard) ------------------------- */
-  if (t <= -0.5f || t > 1.5f)
-  {
-    t = std::fmod(t + 2.f, 2.f);
-    if (t > 1.5f) t -= 2.f;
-  }
-  return t;
+  const float S = std::sinh(0.5f / b);     // sinh(1/2b)
+  return i0 + b * std::asinh(2.f * du * S);
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// doLogWeightCoord(...)
-// --------------------------------------------------------------------
-// • Computes the local block-φ  ∈ [0,1)  using the “log-weight” centroid
-//   w_i = max( 0 , w0 + ln(E_i / ΣE) ).
-// • Wrap handling and unit convention are now **identical** to the Ash
-//   branch, so the two algorithms can be compared one-to-one.
-//
-//   INPUT:
-//     towerPhi   – fine φ-index of every tower hit            (0 … 255)
-//     towerE     – corresponding tower energies               (GeV)
-//     w0         – logarithmic weight parameter               (unit-less)
-//
-//   RETURNS:
-//     local φ inside its 2×2 block (0 ≤ φloc < 1)             (tower units)
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 float
 PositionDependentCorrection::doLogWeightCoord( const std::vector<int>&   towerPhi,
                                                const std::vector<float>& towerE,
-                                               float                    w0 )
+                                               float                     w0 )
 {
-  if (towerPhi.empty() || towerE.empty())
-  {
-    if (Verbosity() > 0)
-      std::cout << "[doLogWeightCoord]  empty input → return 0\n";
-    return 0.f;
-  }
-  if (towerPhi.size() != towerE.size())
-  {
-    if (Verbosity() > 0)
-      std::cout << ANSI_RED << "[doLogWeightCoord]  size mismatch: "
-                << towerPhi.size() << " φ bins vs "
-                << towerE.size()   << " energies  → return 0"
-                << ANSI_RESET << '\n';
-    return 0.f;
-  }
+  if (towerPhi.size() != towerE.size() || towerPhi.empty())
+    return std::numeric_limits<float>::quiet_NaN();
 
-  /*──────────────────────────────
-   * 1) Total cluster energy
-   *──────────────────────────────*/
-  const double sumE = std::accumulate( towerE.begin(), towerE.end(), 0.0 );
-  if (sumE < 1e-9)
-  {
-    if (Verbosity() > 0)
-      std::cout << "[doLogWeightCoord]  ΣE≈0 → return 0\n";
-    return 0.f;
-  }
+  const double sumE = std::accumulate(towerE.begin(), towerE.end(), 0.0);
+  if (sumE <= 0.0) return std::numeric_limits<float>::quiet_NaN();
 
-  /*──────────────────────────────
-   * 2) Reference tower  (highest-E)
-   *──────────────────────────────*/
+  // reference: φ index of max‑E tower (handle wrap on the cylinder)
   const std::size_t iRef =
-      std::distance( towerE.begin(),
-                     std::max_element( towerE.begin(), towerE.end() ) );
-  const int refPhi = towerPhi[iRef];                   // 0 … 255
-  constexpr int nPhiBin = 256;
+      std::distance(towerE.begin(), std::max_element(towerE.begin(), towerE.end()));
+  const int refPhi = towerPhi[iRef];
 
-  if (Verbosity() > 0)
-  {
-    std::cout << "[doLogWeightCoord]  nTower=" << towerE.size()
-              << "  ΣE=" << sumE
-              << "  refPhi=" << refPhi << '\n';
-  }
+  const int nPhi = (m_bemcRec ? m_bemcRec->GetNx() : 256);
 
-  /*──────────────────────────────
-   * 3) Log-weight centroid
-   *──────────────────────────────*/
-  double sumW = 0.0, sumWPhi = 0.0;
+  double sw = 0.0, sphi = 0.0;
   for (std::size_t i = 0; i < towerE.size(); ++i)
   {
-    const double frac = towerE[i] / sumE;
-    double w = w0 + std::log(frac);
-    if (w < 0.0) w = 0.0;                               // clamp → 0
+    const double Ei = towerE[i];
+    if (Ei <= 0.0) continue;
+
+    // standard logarithmic weighting: wi = max(0, w0 + ln(Ei / Etot))
+    double wi = w0 + std::log(Ei / sumE);
+    if (wi < 0.0) wi = 0.0;
 
     int phi = towerPhi[i];
-    /* wrap fix relative to refPhi */
-    if (phi - refPhi < -nPhiBin/2) phi += nPhiBin;
-    if (phi - refPhi >  nPhiBin/2) phi -= nPhiBin;
+    if (phi - refPhi < -nPhi/2) phi += nPhi;
+    if (phi - refPhi >  nPhi/2) phi -= nPhi;
 
-    sumW    += w;
-    sumWPhi += w * phi;
-
-    if (Verbosity() > 1)
-      std::cout << "    tower#" << i << "  φ=" << towerPhi[i]
-                << "  φAdj=" << phi << "  E=" << towerE[i]
-                << "  w=" << w << '\n';
+    sw   += wi;
+    sphi += wi * static_cast<double>(phi);
   }
+  if (sw <= 0.0) return std::numeric_limits<float>::quiet_NaN();
 
-  if (sumW < 1e-9)
-  {
-    if (Verbosity() > 0)
-      std::cout << "[doLogWeightCoord]  Σw≈0 → return 0\n";
-    return 0.f;
-  }
-
-  double phiAvg = sumWPhi / sumW;                       // could be negative
-  phiAvg = std::fmod( phiAvg + nPhiBin, nPhiBin );      // wrap → 0 … 256
-
-  /*──────────────────────────────
-   * 4) Convert to local block-φ
-   *──────────────────────────────*/
-  const double localPhiRaw = std::fmod( phiAvg + 0.5, 2.0 ); // 0 … 2
-  const float  localPhi    =
-      static_cast<float>( localPhiRaw < 1.0 ? localPhiRaw
-                                            : localPhiRaw - 1.0 ); // 0 … 1
-
-  if (Verbosity() > 0)
-  {
-    std::cout << "[doLogWeightCoord]  φAvg="   << phiAvg
-              << "  → φloc=" << localPhi << '\n';
-  }
-  return localPhi;
+  float x = static_cast<float>(sphi / sw);
+  while (x < -0.5f)              x += nPhi;
+  while (x >= nPhi - 0.5f)       x -= nPhi;
+  return x;
 }
 
 
-/************************************************************************
- *  fillAshLogDx(...)  –  centimetre-accurate version
- ************************************************************************/
-void PositionDependentCorrection::fillAshLogDx(
-        RawCluster*                     cluster,
-        const TLorentzVector&           recoPhoton,
-        const TLorentzVector&           truthPhoton,
-        const std::pair<float,float>&   blockCord,   // (ηloc , φloc)
-        int                             blockPhiBin, // 0 … 127
-        const std::vector<int>&         tower_phis,
-        const std::vector<float>&       tower_energies )
-{
-  /* 0) energy slice --------------------------------------------------- */
-  const float eReco = recoPhoton.E();
 
-  const int   iSlice  = getEnergySlice( eReco );
-  if (iSlice < 0) return;
-  const std::string lab = sliceTag( iSlice );
-    
-    
-  /* 1) guards & geometry --------------------------------------------- */
-  if (!cluster || !m_geometry || !m_bemcRec) return;
-
-  float eMax = -1.f;  RawCluster::TowerConstIterator best{};
-  for (auto it = cluster->get_towers().first;
-            it != cluster->get_towers().second; ++it)
-    if (it->second > eMax) { eMax = it->second; best = it; }
-  if (eMax < 1e-6) return;
-    
-
-  auto* leadGeo = m_geometry->get_tower_geometry(best->first);
-  if (!leadGeo) return;
-
-  const double rFront = leadGeo->get_center_radius();
-  const double zFront = leadGeo->get_center_z();
-  int ixLead = leadGeo->get_binphi();   // 0 … 255   (column / φ)
-  int iyLead = leadGeo->get_bineta();   // 0 … 95    (row / η)
-    
-    
-  /* 2) truth reference ----------------------------------------------- */
-  const float  phiSDtruth = TVector2::Phi_mpi_pi( truthPhoton.Phi() );  // ← no depth propagation
-    
-  const double xTrue = rFront * std::cos(phiSDtruth);                   // front‑face reference
-
-  if (Verbosity() > 1)
-    std::cout << ANSI_CYAN
-              << "[fillAshLogDx] slice=" << iSlice
-              << "  E=" << eReco << " GeV"
-              << "  φSDtruth=" << phiSDtruth
-              << "  → xTrue="  << xTrue  << " cm"
-              << ANSI_RESET << '\n';
-
-  /* 3) local helper --------------------------------------------------- */
-  auto tryFill = [&](float        localPhi,
-                     const TString& hName,
-                     int&         okCtr,
-                     int&         missCtr)
+namespace {
+  // Prefer cluster properties if present; otherwise fall back to Momenta()
+  inline bool getTowerCG_fromPropsOrMomenta(const RawCluster* clus,
+                                            RawTowerGeomContainer* geo,
+                                            BEmcRecCEMC* rec,
+                                            float& xCG, float& yCG)
   {
-    if (localPhi < 0.f || localPhi >= 1.f) return;
+    xCG = yCG = std::numeric_limits<float>::quiet_NaN();
+    if (!clus || !geo || !rec) return false;
 
-    const float  phiFront = convertBlockToGlobalPhi(blockPhiBin, localPhi);
-    const double xReco = xAtShowerDepth(eReco, rFront, zFront,
-                                          phiFront, ixLead, iyLead);
+    const bool has_raw =
+        clus->has_property(RawCluster::prop_x_tower_raw) &&
+        clus->has_property(RawCluster::prop_y_tower_raw);
 
-    if (auto* h = dynamic_cast<TH1F*>(hm->getHisto(hName.Data())))
-    {
-      h->Fill(xReco - xTrue);
-      ++okCtr;
-      if (Verbosity() > 2)
-        std::cout << "    " << hName
-                  << "  φloc=" << localPhi
-                  << "  Δx="   << xReco - xTrue
-                  << "  ► filled\n";
+    if (has_raw) {
+      xCG = clus->get_property_float(RawCluster::prop_x_tower_raw);
+      yCG = clus->get_property_float(RawCluster::prop_y_tower_raw);
+      return std::isfinite(xCG) && std::isfinite(yCG);
     }
-    else
-    {
-      ++missCtr;
-      if (Verbosity() > 2)
-        std::cout << "    " << hName << "  ► missing\n";
+
+    // fallback: rebuild the hit list and call Momenta (same as clusterizer)
+    std::vector<EmcModule> hitlist;
+    hitlist.reserve(std::distance(clus->get_towers().first, clus->get_towers().second));
+    const int Nx = rec->GetNx();
+
+    for (auto it = clus->get_towers().first; it != clus->get_towers().second; ++it) {
+      const auto tg = geo->get_tower_geometry(it->first);
+      if (!tg) continue;
+      EmcModule m;
+      m.ich = tg->get_bineta()*Nx + tg->get_binphi();
+      m.amp = static_cast<float>(it->second);
+      m.tof = 0.0f;
+      hitlist.push_back(m);
     }
+    if (hitlist.empty()) return false;
+
+    float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
+    const float thr = rec->GetTowerThreshold();
+    rec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, thr);
+    if (E <= 0.0f) return false;
+    xCG = px; yCG = py;  // Momenta returns tower‑space CoG
+    return true;
+  }
+
+  inline float foldToOneTwPitch(float dphi, int Nx)
+  {
+    const float tw = 2.f*static_cast<float>(M_PI)/static_cast<float>(Nx);
+    float df = TVector2::Phi_mpi_pi(dphi);
+    df = static_cast<float>(std::remainder(static_cast<double>(df), static_cast<double>(tw)));
+    if (df <= -0.5f*tw) df += tw;
+    if (df >   0.5f*tw) df -= tw;
+    return df;
+  }
+} // anon
+
+void PositionDependentCorrection::fillAshLogDx(
+        RawCluster*                   clus,
+        const TLorentzVector&         recoPhoton,
+        const TLorentzVector&         truthPhoton,
+        const std::pair<float,float>& /*blockCord (unused)*/,
+        int                           /*blockPhiBin (unused)*/,
+        const std::vector<int>&       /*tower_phis (unused here)*/,
+        const std::vector<float>&     /*tower_energies (unused here)*/)
+{
+  if (!clus || !m_geometry || !m_bemcRec) return;
+
+  const float eReco = recoPhoton.E();
+  const int   iE    = getEnergySlice(eReco);
+  if (iE < 0 || iE >= N_Ebins) return;
+
+  // --- (1) Tower‑space CoG from props or Momenta
+  float xCG{}, yCG{};
+  if (!getTowerCG_fromPropsOrMomenta(clus, m_geometry, m_bemcRec, xCG, yCG)) return;
+
+  // --- (2) Truth reference (global)
+  const float phiTruth = TVector2::Phi_mpi_pi(truthPhoton.Phi());
+  const float etaTruth = truthPhoton.Eta();
+  const int   Nx       = m_bemcRec->GetNx();
+
+  // --- (3) CP(EA) point in tower units (for agreement profiles)
+  float xEA = xCG, yEA = yCG;
+  m_bemcRec->CorrectPositionEnergyAware(eReco, xCG, yCG, xEA, yEA);
+
+  // Gather cluster towers once (for Log weights)
+  std::vector<int>   phiIdx; phiIdx.reserve(32);
+  std::vector<int>   etaIdx; etaIdx.reserve(32);
+  std::vector<float> twE;    twE.reserve(32);
+
+  for (auto it = clus->get_towers().first; it != clus->get_towers().second; ++it) {
+    const auto* tg = m_geometry->get_tower_geometry(it->first);
+    if (!tg) continue;
+    const float Ei = static_cast<float>(it->second);
+    if (Ei <= 0.f) continue;
+    phiIdx.push_back(tg->get_binphi());
+    etaIdx.push_back(tg->get_bineta());
+    twE   .push_back(Ei);
+  }
+
+  // Helper to turn (xT,yT) → global φ/η at shower depth
+  auto phi_at_SD = [&](float xT, float yT){ return PDC_detail::cg2GlobalPhi(m_bemcRec, eReco, xT, yT); };
+  auto eta_at_SD = [&](float xT, float yT, float vtxZ){ return PDC_detail::cg2ShowerEta(m_bemcRec, eReco, xT, yT, vtxZ); };
+
+  // ===================================================================
+  // (A) Ash scan (φ and η) in tower units; φ includes the 8‑tower ripple
+  // ===================================================================
+  for (double bd : m_bScan)
+  {
+    const float b = static_cast<float>(bd);
+    if (b <= 0.f) continue;
+
+    float xCorr = doAshShift(xCG, b);
+    int   ix8   = int(xCG + 0.5f) / 8;
+    float x8    = xCG + 0.5f - (ix8 * 8) - 4.f;
+
+    // Use the public legacy ripple formula; do not touch private BEmcRecCEMC internals
+    float dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+    xCorr -= dx;
+
+    const float phiAsh = phi_at_SD(xCorr, yCG);
+    const float dphi   = foldToOneTwPitch(phiAsh - phiTruth, Nx);
+    if (p_phi_rms2_vs_b_E[iE])           p_phi_rms2_vs_b_E[iE]->Fill(b, dphi*dphi);
+    if (p_abs_dloc_phi_CPea_vs_b_E[iE])  p_abs_dloc_phi_CPea_vs_b_E[iE]->Fill(b, std::fabs(xCorr - xEA));
+
+    // η: inverse‑asinh on y (no φ ripple here)
+    const float yCorr = doAshShift(yCG, b);
+    const float etaAsh = eta_at_SD(xCG, yCorr, /*vtxZ=*/retrieveVertexZ(nullptr));
+    const float deta   = etaAsh - etaTruth;
+    if (p_eta_rms2_vs_b_E[iE])           p_eta_rms2_vs_b_E[iE]->Fill(b, deta*deta);
+    if (p_abs_dloc_eta_CPea_vs_b_E[iE])  p_abs_dloc_eta_CPea_vs_b_E[iE]->Fill(b, std::fabs(yCorr - yEA));
+  }
+
+  // ===================================================================
+  // (B) Log scan (φ and η) — recompute CoG with log weights in tower units
+  // ===================================================================
+  auto computeLogCG = [&](float w0, float& x_log, float& y_log)->bool
+  {
+    if (twE.empty()) return false;
+    const double sumE = std::accumulate(twE.begin(), twE.end(), 0.0);
+    if (sumE <= 0.0) return false;
+
+    const std::size_t iRef =
+        std::distance(twE.begin(), std::max_element(twE.begin(), twE.end()));
+    const int refPhi = phiIdx[iRef];
+
+    double sw=0.0, sphi=0.0, seta=0.0;
+    for (std::size_t i=0;i<twE.size();++i)
+    {
+      const double Ei = twE[i]; if (Ei <= 0.0) continue;
+      double wi = w0 + std::log(Ei / sumE); if (wi < 0.0) wi = 0.0;
+
+      int phi = phiIdx[i];
+      if (phi - refPhi < -Nx/2) phi += Nx;
+      if (phi - refPhi >  Nx/2) phi -= Nx;
+
+      sw   += wi;
+      sphi += wi * static_cast<double>(phi);
+      seta += wi * static_cast<double>(etaIdx[i]);
+    }
+    if (sw <= 0.0) return false;
+
+    x_log = static_cast<float>(sphi / sw);
+    while (x_log < -0.5f)            x_log += Nx;
+    while (x_log >= Nx - 0.5f)       x_log -= Nx;
+
+    y_log = static_cast<float>(seta / sw);  // η index is linear
+    return std::isfinite(x_log) && std::isfinite(y_log);
   };
 
-  /* 4) Ash-b scan ----------------------------------------------------- */
-  int nAshOK = 0, nAshMiss = 0;
-  if (blockCord.second >= 0.f && blockCord.second < 1.f)
-    for (double b : m_bScan)
-    {
-      const double bVal   = std::round(b * 10000.) / 10000.;
-      const float  phiLoc = doAshShift(blockCord.second, bVal);
-      tryFill(phiLoc,
-              Form("h_dx_ash_b%.4f_%s", bVal, lab.c_str()),
-              nAshOK, nAshMiss);
-    }
+  for (double w0d : m_w0Scan)
+  {
+    const float w0 = static_cast<float>(w0d);
 
-  /* 5) Log-w0 scan ---------------------------------------------------- */
-  int nLogOK = 0, nLogMiss = 0;
-  if (!tower_phis.empty() && !tower_energies.empty())
-    for (double w0 : m_w0Scan)
-    {
-      const double w0Val  = std::round(w0 * 100.) / 100.;
-      const float  phiLoc = doLogWeightCoord(tower_phis, tower_energies,
-                                             w0Val);
-      tryFill(phiLoc,
-              Form("h_dx_log_w0%.2f_%s", w0Val, lab.c_str()),
-              nLogOK, nLogMiss);
-    }
+    float xLog=std::numeric_limits<float>::quiet_NaN();
+    float yLog=std::numeric_limits<float>::quiet_NaN();
+    if (!computeLogCG(w0, xLog, yLog)) continue;
 
-  /* 6) summary -------------------------------------------------------- */
-  if (Verbosity() > 0)
-    std::cout << "  ➜ Ash filled/miss = "
-              << nAshOK << '/' << nAshMiss
-              << "   |  Log filled/miss = "
-              << nLogOK << '/' << nLogMiss << '\n';
+    const float phiLog = phi_at_SD(xLog, yLog);
+    const float etaLog = eta_at_SD(xLog, yLog, /*vtxZ=*/retrieveVertexZ(nullptr));
+
+    const float dphi = foldToOneTwPitch(phiLog - phiTruth, Nx);
+    const float deta = etaLog - etaTruth;
+
+    if (p_phi_rms2_vs_w0_E[iE]) p_phi_rms2_vs_w0_E[iE]->Fill(w0, dphi*dphi);
+    if (p_eta_rms2_vs_w0_E[iE]) p_eta_rms2_vs_w0_E[iE]->Fill(w0, deta*deta);
+  }
 }
 
 
@@ -1957,19 +2096,67 @@ void PositionDependentCorrection::fillDPhiAllVariants(
   const int   iE    = getEnergySlice(eReco);
   if (iE < 0 || iE >= N_Ebins) return;
 
-  if (vb > 0)
-    std::cout << "\n[fillDPhiAllVariants]  →  slice=" << iE
-              << "  E=" << eReco << " GeV\n";
+    if (vb > 0) {
+      std::cout << "\n[fillDPhiAllVariants]  →  slice=" << iE
+                << "  E=" << eReco << " GeV\n";
+    }
 
-  /* ── C) cluster centre of gravity (tower grid) ───────────────────── */
-  float xCG{}, yCG{};
-  if (!clusterCentreOfGravity(clus, m_geometry, m_bemcRec, xCG, yCG))
-  {
-    if (vb > 1) std::cout << "  ‑ CG calculation failed – abort path\n";
-    return;
-  }
-  if (vb > 2)
-    std::cout << "  CG(x,y)=(" << xCG << ',' << yCG << ")\n";
+    // ── C) cluster centre of gravity (tower grid) ─────────────────────
+    float xCG{}, yCG{};
+    if (!PDC_detail::clusterCentreOfGravity(clus, m_geometry, m_bemcRec, xCG, yCG))
+    {
+      if (vb > 1) std::cout << "  ‑ CG calculation failed – abort path\n";
+      return;
+    }
+    if (vb > 2)
+      std::cout << "  CG(x,y)=(" << xCG << ',' << yCG << ")\n";
+
+    /* First‑pass RAW CoG cross‑check: property vs recomputed (tower units).
+     * Crash immediately if they differ beyond a tiny tolerance.
+     */
+    {
+      static bool s_checked_raw_phi_once = false;
+      if (!s_checked_raw_phi_once)
+      {
+        constexpr float kTolTw = 5e-4f;   // tower‑space tolerance
+        const bool has_raw =
+            clus->has_property(RawCluster::prop_x_tower_raw) &&
+            clus->has_property(RawCluster::prop_y_tower_raw);
+
+        if (!has_raw)
+        {
+          std::cerr << "[FATAL] RAW tower properties missing on cluster ID="
+                    << clus->get_id()
+                    << " (prop_x_tower_raw/prop_y_tower_raw). Cannot validate."
+                    << std::endl;
+          std::abort();
+        }
+
+        const float x_raw_prop = clus->get_property_float(RawCluster::prop_x_tower_raw);
+        const float y_raw_prop = clus->get_property_float(RawCluster::prop_y_tower_raw);
+
+        const float dx = std::fabs(x_raw_prop - xCG);
+        const float dy = std::fabs(y_raw_prop - yCG);
+
+        if (!(std::isfinite(x_raw_prop) && std::isfinite(y_raw_prop) &&
+              dx <= kTolTw && dy <= kTolTw))
+        {
+          std::cerr << std::setprecision(7)
+                    << "[FATAL] RAW tower CoG mismatch (φ path, first pass)\n"
+                    << "  cluster ID=" << clus->get_id()
+                    << "  E=" << eReco << " GeV\n"
+                    << "  property (x,y)=(" << x_raw_prop << "," << y_raw_prop << ")\n"
+                    << "  recomputed(x,y)=(" << xCG       << "," << yCG       << ")\n"
+                    << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
+          std::abort();
+        }
+
+        if (vb > 0)
+          std::cout << "[φ‑RAW check] property vs recomputed agree within "
+                    << kTolTw << " tower units.\n";
+        s_checked_raw_phi_once = true;
+      }
+    }
 
   /* ── D) lead‑tower geometry (needed for PDC path) ────────────────── */
   const auto lead =
@@ -2034,18 +2221,69 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     if (vb > 9)
       std::cout << "[CLUS-CP] CorrectPosition  OUT : xC=" << xCP << "  yC=" << yCP << '\n';
 
+    /* First‑pass CORR CoG cross‑check: property vs freshly corrected.
+     * Crash immediately if they differ beyond tolerance.
+     */
+    {
+      static bool s_checked_corr_phi_once = false;
+      if (!s_checked_corr_phi_once)
+      {
+        constexpr float kTolTw = 5e-4f;
+        const bool has_corr =
+            clus->has_property(RawCluster::prop_x_tower_corr) &&
+            clus->has_property(RawCluster::prop_y_tower_corr);
+
+        if (!has_corr)
+        {
+          std::cerr << "[FATAL] CORR tower properties missing on cluster ID="
+                    << clus->get_id()
+                    << " (prop_x_tower_corr/prop_y_tower_corr). Cannot validate."
+                    << std::endl;
+          std::abort();
+        }
+
+        const float x_cor_prop = clus->get_property_float(RawCluster::prop_x_tower_corr);
+        const float y_cor_prop = clus->get_property_float(RawCluster::prop_y_tower_corr);
+
+        const float dx = std::fabs(x_cor_prop - xCP);
+        const float dy = std::fabs(y_cor_prop - yCP);
+
+        if (!(std::isfinite(x_cor_prop) && std::isfinite(y_cor_prop) &&
+              dx <= kTolTw && dy <= kTolTw))
+        {
+          std::cerr << std::setprecision(7)
+                    << "[FATAL] CORR tower CoG mismatch (φ path, first pass)\n"
+                    << "  cluster ID=" << clus->get_id()
+                    << "  E=" << eReco << " GeV\n"
+                    << "  property (xC,yC)=(" << x_cor_prop << "," << y_cor_prop << ")\n"
+                    << "  recomputed(xC,yC)=(" << xCP        << "," << yCP        << ")\n"
+                    << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
+          std::abort();
+        }
+
+        if (vb > 0)
+          std::cout << "[φ‑CORR check] property vs recomputed agree within "
+                    << kTolTw << " tower units.\n";
+        s_checked_corr_phi_once = true;
+      }
+    }
+
     rec[1] = {"CLUS-CP", xCP,
-              cg2GlobalPhi(m_bemcRec, eReco, xCP, yCP)};
+              PDC_detail::cg2GlobalPhi(m_bemcRec, eReco, xCP, yCP)};
     if (vb > 9)
     {
       std::cout << "[CLUS-CP] loc=" << rec[1].loc
                 << "  φ_SD=" << rec[1].phi << '\n';
     }
 
+
     /* ------------------------ (2b) CLUS-CP(EA) ------------------------------ */
     PDC_detail::PhiRec recEA = {"CLUS-CP(EA)",
                                 std::numeric_limits<float>::quiet_NaN(),
                                 std::numeric_limits<float>::quiet_NaN(), 0.f};
+    
+    float bphiEA = std::numeric_limits<float>::quiet_NaN();
+    float betaEA = std::numeric_limits<float>::quiet_NaN();
 
     {
       m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA);
@@ -2057,7 +2295,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         std::cout << "[CLUS-CP(EA)] CorrectPositionEnergyAware  IN  : x=" << xCG
                   << "  y=" << yCG << "  (E=" << eReco << ")\n";
 
-      m_bemcRec->CorrectPositionEnergyAware(eReco, xCG, yCG, xEA, yEA);
+      m_bemcRec->CorrectPositionEnergyAware(eReco, xCG, yCG, xEA, yEA, &bphiEA, &betaEA);
 
       if (vb > 9)
         std::cout << "[CLUS-CP(EA)] CorrectPositionEnergyAware  OUT : xC=" << xEA
@@ -2406,6 +2644,8 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           HFill(h_phi_diff_cpBcorr_E [iE], rec[2].d);
           HFill(h_phi_diff_raw_E     [iE], rec[3].d);
           HFill(h_phi_diff_corrected_E[iE], rec[4].d);
+        
+          HFill2(h2_phi_diffEA_vs_bphi_E[iE], bphiEA, recEA.d);
 
           // 2D Δφ vs η (keep existing only)
           HFill2(h2_phi_diff_vsEta_RAW_E    [iE], etaCLUSraw, rec[0].d);
@@ -2443,67 +2683,119 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
    #undef  HFill
    #undef  HFill2
-
-    // ---------- Δφ winner bookkeeping + optional summary (count only when we filled) ----------
+    
+    // ---------- Δφ winner bookkeeping (only RAW/CP/CP(EA)) + ties ----------
     if (fillGlobal)
     {
       PDC_detail::PhiRec rec6[6] = { rec[0], rec[1], rec[2], rec[3], rec[4], recEA };
+      // indices: 0=CLUS-RAW, 1=CLUS-CP, 5=CLUS-CP(EA)
 
-      int best6 = 0;
-      for (int i = 1; i < 6; ++i)
-        if (std::fabs(rec6[i].d) < std::fabs(rec6[best6].d)) best6 = i;
+      const float absRAW = std::fabs(rec6[0].d);
+      const float absCP  = std::fabs(rec6[1].d);
+      const float absEA  = std::fabs(rec6[5].d);
 
-      // six‑way counters (per-run and per-energy-slice)
-      switch (best6)
+      const bool validRAW = std::isfinite(absRAW);
+      const bool validCP  = std::isfinite(absCP);
+      const bool validEA  = std::isfinite(absEA);
+
+      // "No-change" flags relative to CLUS-RAW (compare the final φ at shower depth)
+      const bool cpNoChange =
+          validCP && validRAW &&
+          std::isfinite(rec6[1].phi) && std::isfinite(rec6[0].phi) &&
+          std::fabs(rec6[1].phi - rec6[0].phi) <= kTieTolPhi;
+
+      const bool eaNoChange =
+          validEA && validRAW &&
+          std::isfinite(rec6[5].phi) && std::isfinite(rec6[0].phi) &&
+          std::fabs(rec6[5].phi - rec6[0].phi) <= kTieTolPhi;
+
+      if (cpNoChange) { ++m_phiNoChange_CP_vs_RAW; ++m_phiNoChangeByE_CP_vs_RAW[iE]; }
+      if (eaNoChange) { ++m_phiNoChange_EA_vs_RAW; ++m_phiNoChangeByE_EA_vs_RAW[iE]; }
+
+      // "Improved" means strictly closer to 0 than RAW (by a tiny tolerance)
+      const bool cpImproved = validCP && validRAW && (absCP + kTieTolPhi < absRAW);
+      const bool eaImproved = validEA && validRAW && (absEA + kTieTolPhi < absRAW);
+
+      if (cpImproved || eaImproved)
       {
-        case 0: ++m_phiWinCLUSraw;   break;
-        case 1: ++m_phiWinCLUScp;    break;
-        case 2: ++m_phiWinCLUSbcorr; break;
-        case 3: ++m_phiWinPDCraw;    break;
-        case 4: ++m_phiWinPDCcorr;   break;
-        case 5: ++m_phiWinCLUScpEA;  break;
-      }
-      ++m_phiWinByE[best6][iE];
-
-      // legacy three‑way overview (RAW vs CP vs BCORR)
-      int best3 = 0;
-      for (int i = 1; i < 3; ++i)
-        if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
-      switch (best3)
-      {
-        case 0: ++m_nWinRAW;   break;
-        case 1: ++m_nWinCP;    break;
-        case 2: ++m_nWinBCorr; break;
-      }
-
-      if (vb >= 2)
-      {
-        std::cout << "  ── Δφ summary table ──────────────\n"
-                  << "  tag         loc      φ_SD(rad)   Δφ(rad)   |Δφ|   Δ|Δφ| vs RAW\n";
-
-        const float absRaw = std::fabs(rec6[0].d);   // baseline = CLUS-RAW
-
-        for (const auto& r : rec6)
+        // At least one improved → only consider the improved set
+        if (cpImproved && eaImproved)
         {
-          const float gain = absRaw - std::fabs(r.d);   // + ⇒ improvement vs RAW
-          std::cout << std::setw(10) << r.tag << "  "
-                    << std::setw(7)  << std::fixed << std::setprecision(3) << r.loc << "  "
-                    << std::setw(11) << r.phi << "  "
-                    << std::setw(9)  << r.d   << "  "
-                    << std::setw(7)  << std::fabs(r.d) << "  "
-                    << std::setw(11) << std::showpos << std::fixed << std::setprecision(3)
-                    << gain << std::noshowpos << '\n';
+          // CP vs EA tie among the improved
+          if (std::fabs(absCP - absEA) <= kTieTolPhi)
+          {
+            ++m_phiTieCLUScpEA;
+            ++m_phiTieByE_CP_EA[iE];
+          }
+          else if (absCP < absEA)
+          {
+            ++m_phiWinCLUScp;
+            ++m_phiWinByE[1][iE];
+          }
+          else
+          {
+            ++m_phiWinCLUScpEA;
+            ++m_phiWinByE[5][iE];
+          }
+        }
+        else if (cpImproved)
+        {
+          ++m_phiWinCLUScp;
+          ++m_phiWinByE[1][iE];
+        }
+        else // eaImproved
+        {
+          ++m_phiWinCLUScpEA;
+          ++m_phiWinByE[5][iE];
         }
 
-        std::cout << "  WINNER: " << rec6[best6].tag
-                  << "   (|Δφ| improved by "
-                  << std::fixed << std::setprecision(3)
-                  << absRaw - std::fabs(rec6[best6].d)
-                  << " rad vs CLUS-RAW)\n"
-                  << "  ────────────────────────────────────────────────\n";
+        if (vb >= 2)
+        {
+          const float bestAbs = (cpImproved && (!eaImproved || absCP <= absEA)) ? absCP : absEA;
+          std::cout << "  WINNER(φ improved wrt RAW): "
+                    << (cpImproved && (!eaImproved || absCP <= absEA) ? "CLUS-CP" : "CLUS-CP(EA)")
+                    << "  |Δφ|=" << std::fixed << std::setprecision(6) << bestAbs << '\n';
+        }
+      }
+      else
+      {
+        // Nobody improved; if any corrected branch equals RAW, do not credit RAW
+        if (cpNoChange || eaNoChange)
+        {
+          if (vb >= 2)
+          {
+            std::cout << "  NO-CHANGE(φ): RAW=="
+                      << (cpNoChange ? "CP" : "")
+                      << (cpNoChange && eaNoChange ? "/" : "")
+                      << (eaNoChange ? "CP(EA)" : "")
+                      << " → no winner credited\n";
+          }
+        }
+        else
+        {
+          // Neither improved nor exact-equal; choose the smallest |Δφ| among the three (legacy behavior)
+          int   bestIdx = 0;
+          float bestAbs = validRAW ? absRAW : std::numeric_limits<float>::infinity();
+          if (validCP && absCP < bestAbs) { bestAbs = absCP; bestIdx = 1; }
+          if (validEA && absEA < bestAbs) { bestAbs = absEA; bestIdx = 5; }
+
+          switch (bestIdx)
+          {
+            case 0: ++m_phiWinCLUSraw;  break;
+            case 1: ++m_phiWinCLUScp;   break;
+            case 5: ++m_phiWinCLUScpEA; break;
+          }
+          ++m_phiWinByE[bestIdx][iE];
+
+          if (vb >= 2)
+          {
+            std::cout << "  WINNER(φ 3-way, no improvement): "
+                      << (bestIdx==0 ? "CLUS-RAW" : bestIdx==1 ? "CLUS-CP" : "CLUS-CP(EA)")
+                      << "  |Δφ|=" << std::fixed << std::setprecision(6) << bestAbs << '\n';
+          }
+        }
       }
     }
-
 }
 
 
@@ -2531,19 +2823,66 @@ void PositionDependentCorrection::fillDEtaAllVariants(
   const int   iE    = getEnergySlice(eReco);
   if (iE < 0 || iE >= N_Ebins) return;
 
-  if (vb > 0)
-    std::cout << "\n[fillDEtaAllVariants] slice=" << iE
-              << "  E=" << eReco << " GeV\n";
+    if (vb > 0) {
+      std::cout << "\n[fillDEtaAllVariants] slice=" << iE
+                << "  E=" << eReco << " GeV\n";
+    }
 
-  /* ────────────────────────────────── CG of the cluster ──────────── */
-  float xCG{}, yCG{};
-  if (!clusterCentreOfGravity(clus, m_geometry, m_bemcRec, xCG, yCG))
-  {
-    if (vb > 1) std::cout << "  ‑ CG calculation failed – abort path\n";
-    return;
-  }
-  if (vb > 2)
-    std::cout << "  CG(x,y)=(" << xCG << ',' << yCG << ")\n";
+    // ────────────────────────────────── CG of the cluster ────────────
+    float xCG{}, yCG{};
+    if (!PDC_detail::clusterCentreOfGravity(clus, m_geometry, m_bemcRec, xCG, yCG))
+    {
+      if (vb > 1) std::cout << "  ‑ CG calculation failed – abort path\n";
+      return;
+    }
+    if (vb > 2)
+      std::cout << "  CG(x,y)=(" << xCG << ',' << yCG << ")\n";
+
+    /* First‑pass RAW CoG cross‑check for the η path. */
+    {
+      static bool s_checked_raw_eta_once = false;
+      if (!s_checked_raw_eta_once)
+      {
+        constexpr float kTolTw = 5e-4f;
+        const bool has_raw =
+            clus->has_property(RawCluster::prop_x_tower_raw) &&
+            clus->has_property(RawCluster::prop_y_tower_raw);
+
+        if (!has_raw)
+        {
+          std::cerr << "[FATAL] RAW tower properties missing on cluster ID="
+                    << clus->get_id()
+                    << " (prop_x_tower_raw/prop_y_tower_raw). Cannot validate."
+                    << std::endl;
+          std::abort();
+        }
+
+        const float x_raw_prop = clus->get_property_float(RawCluster::prop_x_tower_raw);
+        const float y_raw_prop = clus->get_property_float(RawCluster::prop_y_tower_raw);
+
+        const float dx = std::fabs(x_raw_prop - xCG);
+        const float dy = std::fabs(y_raw_prop - yCG);
+
+        if (!(std::isfinite(x_raw_prop) && std::isfinite(y_raw_prop) &&
+              dx <= kTolTw && dy <= kTolTw))
+        {
+          std::cerr << std::setprecision(7)
+                    << "[FATAL] RAW tower CoG mismatch (η path, first pass)\n"
+                    << "  cluster ID=" << clus->get_id()
+                    << "  E=" << eReco << " GeV\n"
+                    << "  property (x,y)=(" << x_raw_prop << "," << y_raw_prop << ")\n"
+                    << "  recomputed(x,y)=(" << xCG       << "," << yCG       << ")\n"
+                    << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
+          std::abort();
+        }
+
+        if (vb > 0)
+          std::cout << "[η‑RAW check] property vs recomputed agree within "
+                    << kTolTw << " tower units.\n";
+        s_checked_raw_eta_once = true;
+      }
+    }
+
 
   /* ────────────────────────────────── lead‑tower geom ────────────── */
   const auto lead =
@@ -2570,14 +2909,66 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     // 2) CLUS‑CP
     float xCP = xCG, yCP = yCG;
     m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
+
+    /* First‑pass CORR CoG cross‑check for the η path. */
+    {
+      static bool s_checked_corr_eta_once = false;
+      if (!s_checked_corr_eta_once)
+      {
+        constexpr float kTolTw = 5e-4f;
+        const bool has_corr =
+            clus->has_property(RawCluster::prop_x_tower_corr) &&
+            clus->has_property(RawCluster::prop_y_tower_corr);
+
+        if (!has_corr)
+        {
+          std::cerr << "[FATAL] CORR tower properties missing on cluster ID="
+                    << clus->get_id()
+                    << " (prop_x_tower_corr/prop_y_tower_corr). Cannot validate."
+                    << std::endl;
+          std::abort();
+        }
+
+        const float x_cor_prop = clus->get_property_float(RawCluster::prop_x_tower_corr);
+        const float y_cor_prop = clus->get_property_float(RawCluster::prop_y_tower_corr);
+
+        const float dx = std::fabs(x_cor_prop - xCP);
+        const float dy = std::fabs(y_cor_prop - yCP);
+
+        if (!(std::isfinite(x_cor_prop) && std::isfinite(y_cor_prop) &&
+              dx <= kTolTw && dy <= kTolTw))
+        {
+          std::cerr << std::setprecision(7)
+                    << "[FATAL] CORR tower CoG mismatch (η path, first pass)\n"
+                    << "  cluster ID=" << clus->get_id()
+                    << "  E=" << eReco << " GeV\n"
+                    << "  property (xC,yC)=(" << x_cor_prop << "," << y_cor_prop << ")\n"
+                    << "  recomputed(xC,yC)=(" << xCP        << "," << yCP        << ")\n"
+                    << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
+          std::abort();
+        }
+
+        if (vb > 0)
+          std::cout << "[η‑CORR check] property vs recomputed agree within "
+                    << kTolTw << " tower units.\n";
+        s_checked_corr_eta_once = true;
+      }
+    }
+
     rec[1] = {"CLUS-CP", yCP,
-              cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ)};
+              PDC_detail::cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ)};
+
 
     // 2b) CLUS‑CP(EA) — energy/angle aware
     float xEA = xCG, yEA = yCG;
+
+    float bphiEA = std::numeric_limits<float>::quiet_NaN();
+    float betaEA = std::numeric_limits<float>::quiet_NaN();
+
     m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA);
-    m_bemcRec->CorrectPositionEnergyAware(eReco, xCG, yCG, xEA, yEA);
+    m_bemcRec->CorrectPositionEnergyAware(eReco, xCG, yCG, xEA, yEA, &bphiEA, &betaEA);
     const float etaEA = cg2ShowerEta(m_bemcRec, eReco, xEA, yEA, vtxZ);
+
 
   // 3) CLUS‑BCORR
   {
@@ -2727,6 +3118,13 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     }
     // also compute residual for the CLUS‑CP(EA) companion
     const float dEtaEA = etaEA - etaTruth;
+    
+    // --- NEW 2D fill macro (like in φ function)
+    #define HFill2(H,X,Y) do{ if((H) && std::isfinite(X) && std::isfinite(Y)) (H)->Fill((X),(Y)); }while(0)
+
+    // --- NEW: fill Δη vs bη (per energy slice)
+    HFill2(h2_eta_diffEA_vs_beta_E[iE], betaEA, dEtaEA);
+    
     /* ── book‑keeping: |Δη| outside ±0.04 ───────────────────────────── */
     for (int i = 0; i < 5; ++i)
       if (std::fabs(rec[i].d) > 0.04f)
@@ -2797,60 +3195,112 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     for (int i = 1; i < 6; ++i)
       if (std::fabs(rec6[i].d) < std::fabs(rec6[best6].d)) best6 = i;
 
-    /* ───────────────── winner bookkeeping (count only when we filled) ───────────────── */
+    /* ───────────────── winner bookkeeping (only RAW/CP/CP(EA)) + ties ───────────────── */
     if (fillGlobal)
     {
-      switch (best6)
+      // rec6 indices: 0=RAW, 1=CP, 5=CP(EA)
+      const float absRAW = std::fabs(rec6[0].d);
+      const float absCP  = std::fabs(rec6[1].d);
+      const float absEA  = std::fabs(rec6[5].d);
+
+      const bool validRAW = std::isfinite(absRAW);
+      const bool validCP  = std::isfinite(absCP);
+      const bool validEA  = std::isfinite(absEA);
+
+      // "No-change" flags relative to CLUS-RAW (compare the final η at shower depth)
+      const bool cpNoChange =
+          validCP && validRAW &&
+          std::isfinite(rec6[1].eta) && std::isfinite(rec6[0].eta) &&
+          std::fabs(rec6[1].eta - rec6[0].eta) <= kTieTolEta;
+
+      const bool eaNoChange =
+          validEA && validRAW &&
+          std::isfinite(rec6[5].eta) && std::isfinite(rec6[0].eta) &&
+          std::fabs(rec6[5].eta - rec6[0].eta) <= kTieTolEta;
+
+      if (cpNoChange) { ++m_etaNoChange_CP_vs_RAW; ++m_etaNoChangeByE_CP_vs_RAW[iE]; }
+      if (eaNoChange) { ++m_etaNoChange_EA_vs_RAW; ++m_etaNoChangeByE_EA_vs_RAW[iE]; }
+
+      // "Improved" means strictly closer to 0 than RAW (by a tiny tolerance)
+      const bool cpImproved = validCP && validRAW && (absCP + kTieTolEta < absRAW);
+      const bool eaImproved = validEA && validRAW && (absEA + kTieTolEta < absRAW);
+
+      if (cpImproved || eaImproved)
       {
-        case 0: ++m_etaWinCLUSraw;   break;
-        case 1: ++m_etaWinCLUScp;    break;
-        case 2: ++m_etaWinCLUSbcorr; break;
-        case 3: ++m_etaWinPDCraw;    break;
-        case 4: ++m_etaWinPDCcorr;   break;
-        case 5: ++m_etaWinCLUScpEA;  break;
-      }
-      ++m_etaWinByE[best6][iE];
+        if (cpImproved && eaImproved)
+        {
+          if (std::fabs(absCP - absEA) <= kTieTolEta)
+          {
+            ++m_etaTieCLUScpEA;
+            ++m_etaTieByE_CP_EA[iE];
+          }
+          else if (absCP < absEA)
+          {
+            ++m_etaWinCLUScp;
+            ++m_etaWinByE[1][iE];
+          }
+          else
+          {
+            ++m_etaWinCLUScpEA;
+            ++m_etaWinByE[5][iE];
+          }
+        }
+        else if (cpImproved)
+        {
+          ++m_etaWinCLUScp;
+          ++m_etaWinByE[1][iE];
+        }
+        else // eaImproved
+        {
+          ++m_etaWinCLUScpEA;
+          ++m_etaWinByE[5][iE];
+        }
 
-      // keep the legacy 3-way overview
-      int best3 = 0;
-      for (int i = 1; i < 3; ++i)
-        if (std::fabs(rec[i].d) < std::fabs(rec[best3].d)) best3 = i;
-      switch (best3)
+        if (vb >= 2)
+        {
+          const float bestAbs = (cpImproved && (!eaImproved || absCP <= absEA)) ? absCP : absEA;
+          std::cout << "  WINNER(η improved wrt RAW): "
+                    << (cpImproved && (!eaImproved || absCP <= absEA) ? "CLUS-CP" : "CLUS-CP(EA)")
+                    << "  |Δη|=" << std::fixed << std::setprecision(6) << bestAbs << '\n';
+        }
+      }
+      else
       {
-        case 0: ++m_nWinRAW_Eta;   break;
-        case 1: ++m_nWinCP_Eta;    break;
-        case 2: ++m_nWinBCorr_Eta; break;
+        if (cpNoChange || eaNoChange)
+        {
+          if (vb >= 2)
+          {
+            std::cout << "  NO-CHANGE(η): RAW=="
+                      << (cpNoChange ? "CP" : "")
+                      << (cpNoChange && eaNoChange ? "/" : "")
+                      << (eaNoChange ? "CP(EA)" : "")
+                      << " → no winner credited\n";
+          }
+        }
+        else
+        {
+          int   bestIdx = 0;
+          float bestAbs = validRAW ? absRAW : std::numeric_limits<float>::infinity();
+          if (validCP && absCP < bestAbs) { bestAbs = absCP; bestIdx = 1; }
+          if (validEA && absEA < bestAbs) { bestAbs = absEA; bestIdx = 5; }
+
+          switch (bestIdx)
+          {
+            case 0: ++m_etaWinCLUSraw;  break;
+            case 1: ++m_etaWinCLUScp;   break;
+            case 5: ++m_etaWinCLUScpEA; break;
+          }
+          ++m_etaWinByE[bestIdx][iE];
+
+          if (vb >= 2)
+          {
+            std::cout << "  WINNER(η 3-way, no improvement): "
+                      << (bestIdx==0 ? "CLUS-RAW" : bestIdx==1 ? "CLUS-CP" : "CLUS-CP(EA)")
+                      << "  |Δη|=" << std::fixed << std::setprecision(6) << bestAbs << '\n';
+          }
+        }
       }
-    }
-
-    // Print only for events we also filled into histograms
-    if (fillGlobal && vb >= 2)
-    {
-      std::cout << "  ── Δη summary table (|z|="<<std::fabs(vtxZ)<<" cm) ─────\n"
-                << "  tag         loc      η_SD       Δη        |Δη|   Δ|Δη| vs RAW\n";
-
-      const float absRaw = std::fabs(rec6[0].d);   // baseline = CLUS-RAW
-
-      for (const auto& r : rec6)
-      {
-        const float gain = absRaw - std::fabs(r.d);
-        std::cout << std::setw(10)<<r.tag<<"  "
-                  << std::setw(7)<<std::fixed<<std::setprecision(3)<<r.loc<<"  "
-                  << std::setw(10)<<r.eta<<"  "
-                  << std::setw(10)<<r.d<<"  "
-                  << std::setw(7)<<std::fabs(r.d)<<"  "
-                  << std::setw(11)<<std::showpos<<std::fixed<<std::setprecision(3)
-                  << gain << std::noshowpos << '\n';
-      }
-
-      std::cout << "  WINNER: " << rec6[best6].tag
-                << "   (|Δη| improved by "
-                << std::fixed<<std::setprecision(3)
-                << absRaw - std::fabs(rec6[best6].d)
-                << " vs CLUS-RAW)\n"
-                << "  ────────────────────────────────────────────────\n";
-    }
-
+   }
 }
 
 
@@ -3242,6 +3692,123 @@ void PositionDependentCorrection::finalClusterLoop(
 
     /* 4) find energy slice ........................................... */
     const int iEbin = getEnergySlice( clusE );
+      
+      {
+        // v2 read
+        const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
+        const bool has_v2 = (c2 != nullptr);
+
+        float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+        float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+        float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+        float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+
+        if (has_v2)
+        {
+          x_raw_v2 = c2->x_tower_raw();
+          y_raw_v2 = c2->y_tower_raw();
+          x_cor_v2 = c2->x_tower_corr();
+          y_cor_v2 = c2->y_tower_corr();
+        }
+
+        // property read (your existing path)
+        const bool has_raw =
+            clus1->has_property(RawCluster::prop_x_tower_raw) &&
+            clus1->has_property(RawCluster::prop_y_tower_raw);
+        const bool has_corr =
+            clus1->has_property(RawCluster::prop_x_tower_corr) &&
+            clus1->has_property(RawCluster::prop_y_tower_corr);
+
+        float x_raw_prop = std::numeric_limits<float>::quiet_NaN();
+        float y_raw_prop = std::numeric_limits<float>::quiet_NaN();
+        float x_cor_prop = std::numeric_limits<float>::quiet_NaN();
+        float y_cor_prop = std::numeric_limits<float>::quiet_NaN();
+
+        if (has_raw)
+        {
+          x_raw_prop = clus1->get_property_float(RawCluster::prop_x_tower_raw);
+          y_raw_prop = clus1->get_property_float(RawCluster::prop_y_tower_raw);
+        }
+        if (has_corr)
+        {
+          x_cor_prop = clus1->get_property_float(RawCluster::prop_x_tower_corr);
+          y_cor_prop = clus1->get_property_float(RawCluster::prop_y_tower_corr);
+        }
+
+        // recompute CoG (raw)
+        float x_cog = std::numeric_limits<float>::quiet_NaN();
+        float y_cog = std::numeric_limits<float>::quiet_NaN();
+        bool  got_cog = false;
+
+        if (m_bemcRec && m_geometry)
+        {
+          std::vector<EmcModule> hitlist;
+          hitlist.reserve(std::distance(clus1->get_towers().first,
+                                        clus1->get_towers().second));
+          const int Nx = m_bemcRec->GetNx();
+
+          auto range = clus1->get_towers();
+          for (auto it = range.first; it != range.second; ++it)
+          {
+            const auto tg = m_geometry->get_tower_geometry(it->first);
+            if (!tg) continue;
+            EmcModule m;
+            m.ich = tg->get_bineta() * Nx + tg->get_binphi();
+            m.amp = static_cast<float>(it->second);
+            m.tof = 0.0f;
+            hitlist.push_back(m);
+          }
+
+          if (!hitlist.empty())
+          {
+            float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
+            m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
+            if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
+          }
+        }
+
+        // keep your existing histos: prop − recalc
+        if (has_raw && got_cog)
+        {
+          if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_prop - x_cog);
+          if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_prop - y_cog);
+        }
+
+        // print comparison
+        if (m_print_first_N_clusters-- > 0)
+        {
+          std::cout << ANSI_BOLD << ANSI_GREEN
+                    << "[TEST] clusID=" << clus1->get_id()
+                    << "  E=" << clusE << " GeV"
+                    << ANSI_RESET << "\n";
+
+          std::cout << "  raw(prop):  (" << x_raw_prop << "," << y_raw_prop << ")  "
+                    << (has_raw ? "[OK]" : "[MISSING]") << "\n";
+          std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
+                    << (has_v2  ? "[OK]" : "[MISSING]") << "\n";
+
+          if (got_cog)
+            std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
+
+          if (has_raw && has_v2)
+            std::cout << "  Δ(raw v2 − prop): (" << (x_raw_v2 - x_raw_prop) << ","
+                      << (y_raw_v2 - y_raw_prop) << ")\n";
+
+          if (has_v2 && got_cog)
+            std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
+                      << (y_raw_v2 - y_cog) << ")\n";
+
+          std::cout << "  corr(prop): (" << x_cor_prop << "," << y_cor_prop << ")  "
+                    << (has_corr ? "[OK]" : "[MISSING]") << "\n";
+          std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
+                    << (has_v2 ? "[OK]" : "[MISSING]") << "\n";
+
+          if (has_v2 && has_corr)
+            std::cout << "  Δ(corr v2 − prop): (" << (x_cor_v2 - x_cor_prop) << ","
+                      << (y_cor_v2 - y_cor_prop) << ")\n";
+        }
+      }
+
 
     /* optional detailed print ........................................ */
     if (Verbosity() > 0)
@@ -3792,7 +4359,8 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
   return Fun4AllReturnCodes::EVENT_OK;
 }
 
-// ============================================================================
+
+
 int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 {
   /* ───────────────────────────────────────── File handling ─────────── */
@@ -3833,244 +4401,185 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
     if (Verbosity() > 0) std::cout << "[DEBUG] Output file closed.\n";
   }
   else if (Verbosity() > 0)
+  {
     std::cerr << "[ERROR] outfile pointer is null – nothing written!\n";
+  }
 
   /* Skip all End()-summary printing in first-pass b-values-only mode */
   if (m_firstPassBvaluesOnly)
   {
-      return 0;
+    return 0;
   }
 
-    
   /* ──────────────────────────────────────── helper: % formatting ───── */
   auto pct = [](std::uint64_t n, std::uint64_t d)->std::string
              { return d ? Form("%6.1f %%", 100.*double(n)/double(d))
                          : "   n/a "; };
 
-    /* ──────────────────────────────────────── 1) Δφ six‑way table ───── */
-    const std::uint64_t nTotPhi =
-          m_phiWinCLUSraw + m_phiWinCLUScp + m_phiWinCLUSbcorr +
-          m_phiWinPDCraw  + m_phiWinPDCcorr + m_phiWinCLUScpEA;
+  /* ───────────────────────── 1) Δφ three-way + TIE (CP↔EA) ───────── */
+  const std::uint64_t nWinPhiRAW   = m_phiWinCLUSraw;
+  const std::uint64_t nWinPhiCP    = m_phiWinCLUScp;
+  const std::uint64_t nWinPhiEA    = m_phiWinCLUScpEA;
+  const std::uint64_t nTiePhi      = m_phiTieCLUScpEA;
+  const std::uint64_t nTotPhiWins3 = nWinPhiRAW + nWinPhiCP + nWinPhiEA;
 
-      if (Verbosity() > 0)
-      {
-        std::cout << '\n' << ANSI_BOLD
-                  << "╭────────────────────────────────╮\n"
-                  << "│        Δφ   –   SIX‑WAY        │\n"
-                  << "╰────────────────────────────────╯" << ANSI_RESET << '\n'
-                  << std::left << std::setw(14) << "variant"
-                  << std::right<< std::setw(12)<< "wins"
-                  << std::setw(12)             << "share\n"
-                  << "────────────────────────────────────────────\n"
-                  << std::left << std::setw(14) << "CLUS-RAW"
-                  << std::right<< std::setw(12)<< m_phiWinCLUSraw
-                  << std::setw(12)             << pct(m_phiWinCLUSraw,nTotPhi) << '\n'
-                  << std::left << std::setw(14) << "CLUS-CP"
-                  << std::right<< std::setw(12)<< m_phiWinCLUScp
-                  << std::setw(12)             << pct(m_phiWinCLUScp ,nTotPhi) << '\n'
-                  << std::left << std::setw(14) << "CLUS-BCORR"
-                  << std::right<< std::setw(12)<< m_phiWinCLUSbcorr
-                  << std::setw(12)             << pct(m_phiWinCLUSbcorr,nTotPhi)<< '\n'
-                  << std::left << std::setw(14) << "PDC-RAW"
-                  << std::right<< std::setw(12)<< m_phiWinPDCraw
-                  << std::setw(12)             << pct(m_phiWinPDCraw ,nTotPhi) << '\n'
-                  << std::left << std::setw(14) << "PDC-CORR"
-                  << std::right<< std::setw(12)<< m_phiWinPDCcorr
-                  << std::setw(12)             << pct(m_phiWinPDCcorr,nTotPhi)<< '\n'
-                  << std::left << std::setw(14) << "CLUS-CP(EA)"
-                  << std::right<< std::setw(12)<< m_phiWinCLUScpEA
-                  << std::setw(12)             << pct(m_phiWinCLUScpEA,nTotPhi)<< '\n'
-                  << "────────────────────────────────────────────\n"
-                  << std::left << std::setw(14) << "TOTAL"
-                  << std::right<< std::setw(12)<< nTotPhi << "\n";
+  if (Verbosity() > 0)
+  {
+    std::cout << '\n' << ANSI_BOLD
+              << "╭────────────────────────────────╮\n"
+              << "│        Δφ   –   THREE‑WAY      │\n"
+              << "╰────────────────────────────────╯" << ANSI_RESET << '\n'
+              << std::left << std::setw(14) << "variant"
+              << std::right<< std::setw(12)<< "wins"
+              << std::setw(12)             << "share\n"
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "CLUS-RAW"
+              << std::right<< std::setw(12)<< nWinPhiRAW
+              << std::setw(12)             << pct(nWinPhiRAW, nTotPhiWins3) << '\n'
+              << std::left << std::setw(14) << "CLUS-CP"
+              << std::right<< std::setw(12)<< nWinPhiCP
+              << std::setw(12)             << pct(nWinPhiCP,  nTotPhiWins3) << '\n'
+              << std::left << std::setw(14) << "CLUS-CP(EA)"
+              << std::right<< std::setw(12)<< nWinPhiEA
+              << std::setw(12)             << pct(nWinPhiEA,  nTotPhiWins3) << '\n'
+              << std::left << std::setw(14) << "TIE CP↔EA"
+              << std::right<< std::setw(12)<< nTiePhi
+              << std::setw(12)             << pct(nTiePhi, nTotPhiWins3 + nTiePhi) << '\n'
+              << std::left << std::setw(14) << "NO-CHANGE CP=RAW"
+              << std::right<< std::setw(12)<< m_phiNoChange_CP_vs_RAW
+              << std::setw(12)             << pct(m_phiNoChange_CP_vs_RAW, nTotPhiWins3 + nTiePhi + m_phiNoChange_CP_vs_RAW + m_phiNoChange_EA_vs_RAW) << '\n'
+              << std::left << std::setw(14) << "NO-CHANGE EA=RAW"
+              << std::right<< std::setw(12)<< m_phiNoChange_EA_vs_RAW
+              << std::setw(12)             << pct(m_phiNoChange_EA_vs_RAW, nTotPhiWins3 + nTiePhi + m_phiNoChange_CP_vs_RAW + m_phiNoChange_EA_vs_RAW) << '\n'
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "TOTAL WINS"
+              << std::right<< std::setw(12)<< nTotPhiWins3 << "\n"
+              << std::left << std::setw(14) << "TOTAL+TIES"
+              << std::right<< std::setw(12)<< (nTotPhiWins3 + nTiePhi) << "\n";
 
-        /* quick verdicts */
-        if (m_phiWinCLUScp)
-        {
-          const double rel = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScp);
-          std::cout << "BCORR / CP (φ)    : " << std::fixed << std::setprecision(1)
-                    << rel << " %  →  "
-                    << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
-                    << '\n';
-        }
-        if (m_phiWinCLUScpEA)
-        {
-          const double relEA = 100.*double(m_phiWinCLUSbcorr)/double(m_phiWinCLUScpEA);
-          std::cout << "BCORR / CP(EA) (φ): " << std::fixed << std::setprecision(1)
-                    << relEA << " %  →  "
-                    << (relEA >= 100. ? "✅ matches/beats CP(EA)" : "⚠️ below CP(EA)")
-                    << '\n';
-        }
-
-
-        {
-          std::cout << "\n[Δφ outside ±0.025 rad]\n"
-                    << "  CLUS-RAW : +out = " << m_clusRawPos1Tw
-                    << " , -out = "          << m_clusRawNeg1Tw << '\n'
-                    << "  CLUS-CP  : +out = " << m_clusCPPos1Tw
-                    << " , -out = "          << m_clusCPNeg1Tw  << '\n'
-                    << "  PDC-RAW  : +out = " << m_pdcRawPos1Tw
-                    << " , -out = "          << m_pdcRawNeg1Tw  << '\n'
-                    << "  PDC-CORR : +out = " << m_pdcCorrPos1Tw
-                    << " , -out = "          << m_pdcCorrNeg1Tw  << "\n\n";
-
-          auto print_rows4 = [](const char* title,
-                                const std::vector<float>& dphis,
-                                const std::vector<float>& etas,
-                                const std::vector<float>& vzs,
-                                const std::vector<float>& Es)
-          {
-            const std::size_t N = std::min(std::min(dphis.size(), etas.size()),
-                                           std::min(vzs.size(),   Es.size()));
-            std::cout << title << "  (N=" << N << ")\n";
-            if (N == 0) { std::cout << "  (none)\n\n"; return; }
-
-            std::cout << std::left
-                      << std::setw(6)  << "idx"
-                      << std::setw(14) << "Δφ (rad)"
-                      << std::setw(12) << "eta"
-                      << std::setw(12) << "vtxZ(cm)"
-                      << std::setw(12) << "E(GeV)"
-                      << "\n"
-                      << "--------------------------------------------------------------\n";
-
-            for (std::size_t i = 0; i < N; ++i)
-            {
-              std::cout << std::left
-                        << std::setw(6)  << i
-                        << std::setw(14) << std::fixed << std::setprecision(5) << dphis[i]
-                        << std::setw(12) << std::fixed << std::setprecision(5) << etas[i]
-                        << std::setw(12) << std::fixed << std::setprecision(2) << vzs[i]
-                        << std::setw(12) << std::fixed << std::setprecision(2) << Es[i]
-                        << "\n";
-            }
-            std::cout << "\n";
-          };
-
-          // CLUS-RAW
-          print_rows4("CLUS-RAW  + OUT (|Δφ|>0.025, positive):",
-                      m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E);
-          print_rows4("CLUS-RAW  − OUT (|Δφ|>0.025, negative):",
-                      m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E);
-
-          // CLUS-CP
-          print_rows4("CLUS-CP   + OUT (|Δφ|>0.025, positive):",
-                      m_clusCPPos1Tw_dphi,  m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E);
-          print_rows4("CLUS-CP   − OUT (|Δφ|>0.025, negative):",
-                      m_clusCPNeg1Tw_dphi,  m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E);
-
-          // PDC-RAW
-          print_rows4("PDC-RAW   + OUT (|Δφ|>0.025, positive):",
-                      m_pdcRawPos1Tw_dphi,  m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E);
-          print_rows4("PDC-RAW   − OUT (|Δφ|>0.025, negative):",
-                      m_pdcRawNeg1Tw_dphi,  m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E);
-
-          // PDC-CORR
-          print_rows4("PDC-CORR  + OUT (|Δφ|>0.025, positive):",
-                      m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E);
-          print_rows4("PDC-CORR  − OUT (|Δφ|>0.025, negative):",
-                      m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E);
-        }
-    }
-
-    /* ──────────────────────────────────────── 2) Δη six‑way table ───── */
-    const std::uint64_t nTotEta =
-          m_etaWinCLUSraw + m_etaWinCLUScp + m_etaWinCLUSbcorr +
-          m_etaWinPDCraw  + m_etaWinPDCcorr + m_etaWinCLUScpEA;
-
-    if (Verbosity() > 0)
-    {
-      std::cout << '\n' << ANSI_BOLD
-                << "╭────────────────────────────────╮\n"
-                << "│        Δη   –   SIX‑WAY        │\n"
-                << "╰────────────────────────────────╯" << ANSI_RESET << '\n'
-                << std::left << std::setw(14) << "variant"
-                << std::right<< std::setw(12)<< "wins"
-                << std::setw(12)             << "share\n"
-                << "────────────────────────────────────────────\n"
-                << std::left << std::setw(14) << "CLUS-RAW"
-                << std::right<< std::setw(12)<< m_etaWinCLUSraw
-                << std::setw(12)             << pct(m_etaWinCLUSraw,nTotEta)<< '\n'
-                << std::left << std::setw(14) << "CLUS-CP"
-                << std::right<< std::setw(12)<< m_etaWinCLUScp
-                << std::setw(12)             << pct(m_etaWinCLUScp ,nTotEta)<< '\n'
-                << std::left << std::setw(14) << "CLUS-BCORR"
-                << std::right<< std::setw(12)<< m_etaWinCLUSbcorr
-                << std::setw(12)             << pct(m_etaWinCLUSbcorr,nTotEta)<< '\n'
-                << std::left << std::setw(14) << "PDC-RAW"
-                << std::right<< std::setw(12)<< m_etaWinPDCraw
-                << std::setw(12)             << pct(m_etaWinPDCraw ,nTotEta)<< '\n'
-                << std::left << std::setw(14) << "PDC-CORR"
-                << std::right<< std::setw(12)<< m_etaWinPDCcorr
-                << std::setw(12)             << pct(m_etaWinPDCcorr,nTotEta)<< '\n'
-                << std::left << std::setw(14) << "CLUS-CP(EA)"
-                << std::right<< std::setw(12)<< m_etaWinCLUScpEA
-                << std::setw(12)             << pct(m_etaWinCLUScpEA,nTotEta)<< '\n'
-                << "────────────────────────────────────────────\n"
-                << std::left << std::setw(14) << "TOTAL"
-                << std::right<< std::setw(12)<< nTotEta << "\n";
-
-      if (m_etaWinCLUScp)
-      {
-        const double rel = 100.*double(m_etaWinCLUSbcorr)/double(m_etaWinCLUScp);
-        std::cout << "BCORR / CP (η)    : " << std::fixed << std::setprecision(1)
-                  << rel << " %  →  "
-                  << (rel >= 100. ? "✅ matches/beats CP" : "⚠️ below CP")
-                  << '\n';
-      }
-      if (m_etaWinCLUScpEA)
-      {
-        const double relEA = 100.*double(m_etaWinCLUSbcorr)/double(m_etaWinCLUScpEA);
-        std::cout << "BCORR / CP(EA) (η): " << std::fixed << std::setprecision(1)
-                  << relEA << " %  →  "
-                  << (relEA >= 100. ? "✅ matches/beats CP(EA)" : "⚠️ below CP(EA)")
-                  << '\n';
-      }
-
-
+    // Keep your OUT-OF-WINDOW diagnostic (unchanged)
+    std::cout << "\n[Δφ outside ±0.025 rad]\n"
+              << "  CLUS-RAW : +out = " << m_clusRawPos1Tw
+              << " , -out = "          << m_clusRawNeg1Tw << '\n'
+              << "  CLUS-CP  : +out = " << m_clusCPPos1Tw
+              << " , -out = "          << m_clusCPNeg1Tw  << '\n'
+              << "  PDC-RAW  : +out = " << m_pdcRawPos1Tw
+              << " , -out = "          << m_pdcRawNeg1Tw  << '\n'
+              << "  PDC-CORR : +out = " << m_pdcCorrPos1Tw
+              << " , -out = "          << m_pdcCorrNeg1Tw  << "\n";
   }
-    
-    if (Verbosity() > 5)
+
+  /* ───────────────────────── 2) Δη three-way + TIE (CP↔EA) ───────── */
+  const std::uint64_t nWinEtaRAW   = m_etaWinCLUSraw;
+  const std::uint64_t nWinEtaCP    = m_etaWinCLUScp;
+  const std::uint64_t nWinEtaEA    = m_etaWinCLUScpEA;
+  const std::uint64_t nTieEta      = m_etaTieCLUScpEA;
+  const std::uint64_t nTotEtaWins3 = nWinEtaRAW + nWinEtaCP + nWinEtaEA;
+
+  if (Verbosity() > 0)
+  {
+    std::cout << '\n' << ANSI_BOLD
+              << "╭────────────────────────────────╮\n"
+              << "│        Δη   –   THREE‑WAY      │\n"
+              << "╰────────────────────────────────╯" << ANSI_RESET << '\n'
+              << std::left << std::setw(14) << "variant"
+              << std::right<< std::setw(12)<< "wins"
+              << std::setw(12)             << "share\n"
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "CLUS-RAW"
+              << std::right<< std::setw(12)<< nWinEtaRAW
+              << std::setw(12)             << pct(nWinEtaRAW, nTotEtaWins3) << '\n'
+              << std::left << std::setw(14) << "CLUS-CP"
+              << std::right<< std::setw(12)<< nWinEtaCP
+              << std::setw(12)             << pct(nWinEtaCP,  nTotEtaWins3) << '\n'
+              << std::left << std::setw(14) << "CLUS-CP(EA)"
+              << std::right<< std::setw(12)<< nWinEtaEA
+              << std::setw(12)             << pct(nWinEtaEA,  nTotEtaWins3) << '\n'
+              << std::left << std::setw(14) << "TIE CP↔EA"
+              << std::right<< std::setw(12)<< nTieEta
+              << std::setw(12)             << pct(nTieEta, nTotEtaWins3 + nTieEta) << '\n'
+              << std::left << std::setw(14) << "NO-CHANGE CP=RAW"
+              << std::right<< std::setw(12)<< m_etaNoChange_CP_vs_RAW
+              << std::setw(12)             << pct(m_etaNoChange_CP_vs_RAW, nTotEtaWins3 + nTieEta + m_etaNoChange_CP_vs_RAW + m_etaNoChange_EA_vs_RAW) << '\n'
+              << std::left << std::setw(14) << "NO-CHANGE EA=RAW"
+              << std::right<< std::setw(12)<< m_etaNoChange_EA_vs_RAW
+              << std::setw(12)             << pct(m_etaNoChange_EA_vs_RAW, nTotEtaWins3 + nTieEta + m_etaNoChange_CP_vs_RAW + m_etaNoChange_EA_vs_RAW) << '\n'
+
+              << "────────────────────────────────────────────\n"
+              << std::left << std::setw(14) << "TOTAL WINS"
+              << std::right<< std::setw(12)<< nTotEtaWins3 << "\n"
+              << std::left << std::setw(14) << "TOTAL+TIES"
+              << std::right<< std::setw(12)<< (nTotEtaWins3 + nTieEta) << "\n";
+  }
+
+  /* ───────────────────────── 3) Energy-sliced 3-way + TIE ─────────── */
+  if (Verbosity() > 5)
+  {
+    std::cout << '\n' << ANSI_BOLD
+              << "╭──────────────────────────────────────────────────────────╮\n"
+              << "│      ENERGY‑SLICED  Δφ & Δη  (RAW / CP / CP(EA) + TIE)   │\n"
+              << "╰──────────────────────────────────────────────────────────╯"
+              << ANSI_RESET << '\n';
+
+    for (int ie = 0; ie < N_Ebins; ++ie)
     {
-      const char* flav[6] = {"CLUS‑RAW","CLUS‑CP","CLUS‑BCORR",
-                             "PDC‑RAW","PDC‑CORR","CLUS‑CP(EA)"};
+      // φ slice totals (3 winners only)
+      const std::uint64_t phiRAW = m_phiWinByE[0][ie];
+      const std::uint64_t phiCP  = m_phiWinByE[1][ie];
+      const std::uint64_t phiEA  = m_phiWinByE[5][ie];
+      const std::uint64_t phiTIE = m_phiTieByE_CP_EA[ie];
+      const std::uint64_t phiTOT = phiRAW + phiCP + phiEA;
 
-      std::cout << '\n' << ANSI_BOLD
-                << "╭──────────────────────────────────────────────────────────╮\n"
-                << "│          ENERGY‑SLICED  Δφ   &   Δη   WINNERS            │\n"
-                << "╰──────────────────────────────────────────────────────────╯"
-                << ANSI_RESET << '\n';
+      // η slice totals (3 winners only)
+      const std::uint64_t etaRAW = m_etaWinByE[0][ie];
+      const std::uint64_t etaCP  = m_etaWinByE[1][ie];
+      const std::uint64_t etaEA  = m_etaWinByE[5][ie];
+      const std::uint64_t etaTIE = m_etaTieByE_CP_EA[ie];
+      const std::uint64_t etaTOT = etaRAW + etaCP + etaEA;
 
-      for (int ie = 0; ie < N_Ebins; ++ie)
-      {
-        std::uint64_t totPhi = 0, totEta = 0;
-        for (int f=0; f<6; ++f)
-        { totPhi += m_phiWinByE[f][ie];  totEta += m_etaWinByE[f][ie]; }
+      std::cout << ANSI_BOLD << "  • E‑slice " << ie << ANSI_RESET
+                << "   (entries: Δφ=" << phiTOT << ", Δη=" << etaTOT << ")\n";
 
-        std::cout << ANSI_BOLD << "  • E‑slice " << ie << ANSI_RESET
-                  << "   (entries: Δφ=" << totPhi << ", Δη=" << totEta << ")\n";
+      std::cout << std::left << std::setw(14) << "variant"
+                << std::right<< std::setw(12)<< "Δφ wins"
+                << std::setw(10)             << "%"
+                << std::setw(12)             << "Δη wins"
+                << std::setw(10)             << "%\n"
+                << "  ───────────────────────────────────────────────────────\n";
 
-        std::cout << std::left << std::setw(14) << "variant"
-                  << std::right<< std::setw(12)<< "Δφ wins"
-                  << std::setw(10)             << "%"
-                  << std::setw(12)             << "Δη wins"
-                  << std::setw(10)             << "%\n"
-                  << "  ───────────────────────────────────────────────────────\n";
+      auto P = [&](std::uint64_t n, std::uint64_t d){ return pct(n, d); };
 
-        for (int f=0; f<6; ++f)
-          std::cout << std::left << std::setw(14) << flav[f]
-                    << std::right<< std::setw(12)<< m_phiWinByE[f][ie]
-                    << std::setw(10)             << pct(m_phiWinByE[f][ie], totPhi)
-                    << std::setw(12)             << m_etaWinByE[f][ie]
-                    << std::setw(10)             << pct(m_etaWinByE[f][ie],  totEta)
-                    << '\n';
+      std::cout << std::left << std::setw(14) << "CLUS-RAW"
+                << std::right<< std::setw(12)<< phiRAW
+                << std::setw(10)             << P(phiRAW, phiTOT)
+                << std::setw(12)             << etaRAW
+                << std::setw(10)             << P(etaRAW, etaTOT) << '\n';
 
-        std::cout << "  ───────────────────────────────────────────────────────\n";
-      }
+      std::cout << std::left << std::setw(14) << "CLUS-CP"
+                << std::right<< std::setw(12)<< phiCP
+                << std::setw(10)             << P(phiCP, phiTOT)
+                << std::setw(12)             << etaCP
+                << std::setw(10)             << P(etaCP, etaTOT) << '\n';
+
+      std::cout << std::left << std::setw(14) << "CLUS-CP(EA)"
+                << std::right<< std::setw(12)<< phiEA
+                << std::setw(10)             << P(phiEA, phiTOT)
+                << std::setw(12)             << etaEA
+                << std::setw(10)             << P(etaEA, etaTOT) << '\n';
+
+      std::cout << std::left << std::setw(14) << "TIE CP↔EA"
+                << std::right<< std::setw(12)<< phiTIE
+                << std::setw(10)             << P(phiTIE, phiTOT + phiTIE)
+                << std::setw(12)             << etaTIE
+                << std::setw(10)             << P(etaTIE, etaTOT + etaTIE) << '\n';
+
+      std::cout << "  ───────────────────────────────────────────────────────\n";
     }
+  }
 
   return 0;
 }
+
 
 
 // ============================================================================

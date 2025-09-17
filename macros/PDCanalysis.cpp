@@ -5522,6 +5522,554 @@ void makeLegoGifHD(TH3          *h1,                /* mandatory          */
  }
 
 
+// Make this visible to any function that draws residual panels.
+struct ResidualSpec {
+    TH1F*       h;         // histogram to draw (original; caller controls lifetime)
+    const char* label;     // legend label
+    Color_t     col;       // marker/line color
+    Style_t     mk;        // marker style
+    int         ls;        // (unused in current panel, kept for completeness)
+};
+
+// Template parameters let us accept your existing lambdas by perfect forwarding.
+// No std::function, no indirection, no behavior change.
+template <class DrawResidualPanelT,
+          class MakeEqualPadsT,
+          class StatsFromHistRangeT>
+static void MakeFourWaySummaries(
+    const char* outDir,
+    const std::vector<std::pair<double,double>>& eEdges,
+    double xMin, double xMax,
+
+    // histogram sets
+    const std::vector<TH1F*>& Hphi,
+    const std::vector<TH1F*>& HphiCorr,
+    const std::vector<TH1F*>& HphiScratchRaw,
+    const std::vector<TH1F*>& HphiScratchCorr,
+    const std::vector<TH1F*>& Heta,
+    const std::vector<TH1F*>& HetaCorr,
+    const std::vector<TH1F*>& HetaScratchRaw,
+    const std::vector<TH1F*>& HetaScratchCorr,
+
+    // helpers you already defined above inside your playground
+    DrawResidualPanelT&&      drawResidualPanel,
+    MakeEqualPadsT&&          makeEqualHeightTwinPads,
+    StatsFromHistRangeT&&     statsFromHistRange)
+{
+    // =====================================================================
+    // NEW: 4WAY summary overlays (first/second non-empty E bin) + singlets
+    //       Outputs into: <outDir>/4WAYneededSUMMARIES
+    // =====================================================================
+    const std::string dir4Way = std::string(outDir) + "/4WAYneededSUMMARIES";
+    ensureDir(dir4Way.c_str());
+
+    // Find the N-th energy slice where BOTH hists in a pair are non-empty
+    auto nthNonEmptyPair = [&](const std::vector<TH1F*>& A,
+                               const std::vector<TH1F*>& B,
+                               int nth)->int
+    {
+        int count = 0;
+        for (std::size_t i=0; i<eEdges.size(); ++i) {
+            if (i<A.size() && i<B.size() && A[i] && B[i] &&
+                A[i]->Integral()>0 && B[i]->Integral()>0)
+            {
+                ++count;
+                if (count == nth) return static_cast<int>(i);
+            }
+        }
+        return -1;
+    };
+
+    // 2-series overlay for the N-th non-empty energy bin
+    auto overlayTwoSeriesNthBin = [&](const char* baseLabel,   // "Variable-b (Benchmark)" or "Constant-b (Production)"
+                                      Color_t color,           // kBlue+1 or kRed+1
+                                      bool isPhi,              // true: phi, false: eta
+                                      const std::vector<TH1F*>& Vraw,
+                                      const std::vector<TH1F*>& Vcor,
+                                      const std::string& outPngStemBase,
+                                      int nth)
+    {
+        const int iE = nthNonEmptyPair(Vraw, Vcor, nth);
+        if (iE < 0) {
+            std::cerr << "[Playground][WARN] 4WAY overlay skipped for "
+                      << baseLabel << (isPhi? " (phi)" : " (eta)")
+                      << " – no non-empty bin #" << nth << ".\n";
+            return;
+        }
+
+        const char* suffix =
+            (nth == 1) ? "_FirstBin" :
+            (nth == 2) ? "_SecondBin" : Form("_Bin%d", nth);
+
+        TCanvas c(Form("c4Way_%s_%s_bin%d", baseLabel, isPhi? "phi" : "eta", nth),
+                  "4WAY Nth-bin overlay", 1000, 750);
+
+        const char* symShort = isPhi ? "#phi" : "#eta";
+        std::vector<ResidualSpec> specs = {
+            { Vraw[iE], Form("%s Uncorr, %s", baseLabel, symShort),  color, (Style_t)20, 1 },
+            { Vcor[iE], Form("%s Corr, %s",   baseLabel, symShort),  color, (Style_t)24, 1 }
+        };
+
+        const char* residTitle = isPhi ? "#Delta#phi" : "#Delta#eta";
+        const bool  isConstB   = (std::string(baseLabel).find("Constant-b") != std::string::npos);
+        const char* familyTitle= isConstB ? "Constant b-Correction" : "Variable b-Correction";
+        std::string header     = Form("%s Uncorrected/Corrected Overlay for %s", residTitle, familyTitle);
+
+        drawResidualPanel(&c,
+                          header,
+                          eEdges[iE].first, eEdges[iE].second,
+                          specs, xMin, xMax, 1.0);
+
+        const std::string outPng = dir4Way + "/" + outPngStemBase + std::string(suffix) + ".png";
+        c.SaveAs(outPng.c_str());
+        c.Close();
+        std::cout << "[Playground] Wrote " << outPng << "\n";
+    };
+
+    // 1-series (stand-alone) plot(s) for the same N-th non-empty energy bin
+    auto singleSeriesNthBin = [&](const char* baseLabel,    // same labels as overlay
+                                  Color_t color,
+                                  bool isPhi,
+                                  const std::vector<TH1F*>& Vraw,
+                                  const std::vector<TH1F*>& Vcor,
+                                  const std::string& outPngStemBase,
+                                  int nth)
+    {
+        const int iE = nthNonEmptyPair(Vraw, Vcor, nth);
+        if (iE < 0) {
+            std::cerr << "[Playground][WARN] 4WAY singlet skipped for "
+                      << baseLabel << (isPhi? " (phi)" : " (eta)")
+                      << " – no non-empty bin #" << nth << ".\n";
+            return;
+        }
+
+        const char* suffix =
+            (nth == 1) ? "_FirstBin" :
+            (nth == 2) ? "_SecondBin" : Form("_Bin%d", nth);
+
+        const char* symShort   = isPhi ? "#phi" : "#eta";
+        const char* residTitle = isPhi ? "#Delta#phi" : "#Delta#eta";
+        const bool  isConstB   = (std::string(baseLabel).find("Constant-b") != std::string::npos);
+        const char* familyTitle= isConstB ? "Constant b-Correction" : "Variable b-Correction";
+
+        auto drawOne = [&](TH1F* H, const char* tag, const char* stemTag, Style_t mstyle)
+        {
+            if (!H || H->Integral() <= 0) return;
+
+            TCanvas c(Form("c4Way_%s_%s_%s_bin%d", baseLabel, isPhi? "phi":"eta", stemTag, nth),
+                      "4WAY Nth-bin single", 1000, 750);
+
+            std::vector<ResidualSpec> specs = {
+                { H, Form("%s %s, %s", baseLabel, tag, symShort), color, mstyle, 1 }
+            };
+
+            std::string header = Form("%s %s Only for %s", residTitle, tag, familyTitle);
+
+            drawResidualPanel(&c,
+                              header,
+                              eEdges[iE].first, eEdges[iE].second,
+                              specs, xMin, xMax, 1.0);
+
+            const std::string outPng = dir4Way + "/" + outPngStemBase + "_" + stemTag + std::string(suffix) + ".png";
+            c.SaveAs(outPng.c_str());
+            c.Close();
+            std::cout << "[Playground] Wrote " << outPng << "\n";
+        };
+
+        // Produce both stand-alone views
+        drawOne(Vraw[iE], "Uncorr", "Uncorr", (Style_t)20);
+        drawOne(Vcor[iE], "Corr",   "Corr",   (Style_t)24);
+    };
+
+    // ---- First and Second non-empty bin overlays + singlets ----
+
+    // PDC (2×2 Block-Local), φ and η
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 1);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 2);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  true,
+                           HphiScratchRaw,  HphiScratchCorr,
+                           "PDC_phi_RawVsCorr", 2);
+
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 1);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 2);
+    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  false,
+                           HetaScratchRaw,  HetaScratchCorr,
+                           "PDC_eta_RawVsCorr", 2);
+
+    // CLUS (Constant-b (Production)), φ and η
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 1);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 2);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  true,
+                           Hphi, HphiCorr,
+                           "CLUS_phi_RawVsCorr", 2);
+
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 1);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 1);
+
+    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 2);
+    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  false,
+                           Heta, HetaCorr,
+                           "CLUS_eta_RawVsCorr", 2);
+
+
+
+    // ---- Four-variant μ/σ vs E summary (φ and η) to the same folder ----
+    struct MuSigSeries { std::vector<double> E, mu, dmu, sg, dsg; };
+
+    auto makeMuSigSeries = [&](const std::vector<TH1F*>& V)->MuSigSeries {
+        MuSigSeries S;
+        for (std::size_t i=0; i<eEdges.size(); ++i){
+            if (i>=V.size() || !V[i] || V[i]->Integral()<=0) continue;
+            double m, me, r, re;
+            std::tie(m, me, r, re) = statsFromHistRange(V[i], xMin, xMax);
+            S.E .push_back(0.5*(eEdges[i].first + eEdges[i].second));
+            S.mu.push_back(m);  S.dmu.push_back(me);
+            S.sg.push_back(r);  S.dsg.push_back(re);
+        }
+        return S;
+    };
+
+    // Supports forced y-ranges so φ and η plots can share identical axes.
+    auto drawMuSigmaFour = [&](bool isPhi,
+                               const MuSigSeries& CLUSraw,
+                               const MuSigSeries& CLUScor,
+                               const MuSigSeries& PDCraw,
+                               const MuSigSeries& PDCcor,
+                               const std::string& outPng,
+                               bool forceMuRange, double muYmin, double muYmax,
+                               bool forceSgRange, double sgYmin, double sgYmax)
+    {
+        const double xMinE = 0.0;
+        const double xMaxE = eEdges.empty() ? 1.0 : eEdges.back().second;
+
+        TCanvas c(isPhi ? "c4Way_MuSig_Phi" : "c4Way_MuSig_Eta",
+                  "4WAY μ/σ vs E", 1000, 850);
+
+        auto pads = makeEqualHeightTwinPads(
+            c,
+            std::string("FourVarMuSig_") + (isPhi ? "phi" : "eta"),
+            0.15, 0.05, 0.14, 0.02, 0.04, 0.16
+        );
+        TPad* pTop = pads.first;
+        TPad* pBot = pads.second;
+
+        auto makeGE = [](const MuSigSeries& S, Color_t col, Style_t mk, bool useMu){
+            const size_t N = S.E.size();
+            std::vector<double> ex(N, 0.0);
+            auto* g = new TGraphErrors(
+                (int)N,
+                const_cast<double*>(S.E.data()),
+                const_cast<double*>((useMu ? S.mu : S.sg).data()),
+                ex.data(),
+                const_cast<double*>((useMu ? S.dmu : S.dsg).data())
+            );
+            g->SetMarkerStyle(mk);
+            g->SetMarkerSize(1.05);
+            g->SetMarkerColor(col);
+            g->SetLineColor(col);
+            return g;
+        };
+
+        // ---------- μ(E)
+        pTop->cd();
+        double muMin = 0.0, muMax = 0.0;
+        if (!forceMuRange)
+        {
+            double muLo = +1e30, muHi = -1e30;
+            auto updMu = [&](const MuSigSeries& S){
+                for (size_t i=0; i<S.mu.size(); ++i) {
+                    const double lo = S.mu[i] - (S.dmu.empty()?0.0:S.dmu[i]);
+                    const double hi = S.mu[i] + (S.dmu.empty()?0.0:S.dmu[i]);
+                    muLo = std::min(muLo, lo);
+                    muHi = std::max(muHi, hi);
+                }
+            };
+            updMu(CLUSraw); updMu(CLUScor); updMu(PDCraw); updMu(PDCcor);
+            if (muLo > muHi) { muLo = -1e-3; muHi = 1e-3; }
+
+            // Symmetric around zero; enforce at least ±3e-4 rad
+            const double absMax = std::max(std::fabs(muLo), std::fabs(muHi));
+            const double minHalfRange = 3e-4; // ±0.3×10⁻³ rad
+            const double half = std::max(absMax * 1.10, minHalfRange); // +10% headroom
+            muMin = -half; muMax = +half;
+        }
+        else
+        {
+            muMin = muYmin; muMax = muYmax;
+        }
+
+        TH1F frU("frU",";E  [GeV];#mu  [rad]",1,xMinE,xMaxE);
+        frU.SetMinimum(muMin);
+        frU.SetMaximum(muMax);
+        frU.GetXaxis()->SetLabelSize(0.0);
+        frU.GetXaxis()->SetTitleSize(0.0);
+        frU.GetXaxis()->SetTickLength(0.0);
+        frU.Draw("AXIS");
+        TLine l0(xMinE,0.0,xMaxE,0.0); l0.SetLineStyle(2); l0.Draw();
+
+        // Styles: CLUS=red, PDC=blue; Uncorr=filled (20), Corr=open (24)
+        TGraphErrors* gTCu = makeGE(CLUSraw, kRed+1,  20, true);
+        TGraphErrors* gTCc = makeGE(CLUScor, kRed+1,  24, true);
+        TGraphErrors* gBLu = makeGE(PDCraw,  kBlue+1, 20, true);
+        TGraphErrors* gBLc = makeGE(PDCcor,  kBlue+1, 24, true);
+        gBLu->Draw("P SAME"); gBLc->Draw("P SAME"); gTCu->Draw("P SAME"); gTCc->Draw("P SAME");
+
+        // ---------- σ(E)
+        pBot->cd();
+        double sgMinFinal = 0.0, sgMaxFinal = 0.0;
+        if (!forceSgRange)
+        {
+            double sgHi = 0.0;
+            auto updSg = [&](const MuSigSeries& S){ for (double v : S.sg) sgHi = std::max(sgHi, v); };
+            updSg(CLUSraw); updSg(CLUScor); updSg(PDCraw); updSg(PDCcor);
+            if (sgHi <= 0) sgHi = 1.0;
+            sgMinFinal = 0.0;
+            sgMaxFinal = 1.15*sgHi;
+        }
+        else
+        {
+            sgMinFinal = sgYmin;
+            sgMaxFinal = sgYmax;
+        }
+
+        TH1F frL("frL",";E  [GeV];#sigma_{RMS}  [rad]",1,xMinE,xMaxE);
+        frL.SetMinimum(sgMinFinal);
+        frL.SetMaximum(sgMaxFinal);
+        frL.Draw("AXIS");
+
+        TGraphErrors* hTCu = makeGE(CLUSraw, kRed+1,  20, false);
+        TGraphErrors* hTCc = makeGE(CLUScor, kRed+1,  24, false);
+        TGraphErrors* hBLu = makeGE(PDCraw,  kBlue+1, 20, false);
+        TGraphErrors* hBLc = makeGE(PDCcor,  kBlue+1, 24, false);
+        hBLu->Draw("P SAME"); hBLc->Draw("P SAME"); hTCu->Draw("P SAME"); hTCc->Draw("P SAME");
+
+        // Legend in the μ(E) panel (upper-right), 2 columns
+        pTop->cd();
+        TLegend lg(0.17, 0.73, 0.65, 0.86);
+        lg.SetBorderSize(0);
+        lg.SetFillStyle(0);
+        lg.SetTextSize(0.038);
+        lg.SetNColumns(2);
+        lg.AddEntry(gTCu, "Constant-b (Production) Uncorr", "p");
+        lg.AddEntry(gBLu, "Variable-b (Benchmark) Uncorr",  "p");
+        lg.AddEntry(gTCc, "Constant-b (Production) Corr",   "p");
+        lg.AddEntry(gBLc, "Variable-b (Benchmark) Corr",    "p");
+        lg.Draw();
+
+        // Header
+        c.cd();
+        TLatex hh; hh.SetNDC(); hh.SetTextAlign(22); hh.SetTextSize(0.028);
+        hh.DrawLatex(0.52,0.975,
+                     Form("%s  -  Mean / RMS vs E  (Constant-b (Production) & Variable-b (Benchmark): Uncorr vs Corr)",
+                          isPhi ? "#Delta#phi" : "#Delta#eta"));
+
+        c.SaveAs(outPng.c_str());
+        c.Close();
+        std::cout << "[Playground] Wrote " << outPng << "\n";
+    };
+
+    
+    // --- Copy of drawMuSigmaFour, but μ(E) y-axis is clamped to ±0.025 rad ---
+    auto drawMuSigmaFour_muClamp = [&](bool isPhi,
+                                       const MuSigSeries& CLUSraw,
+                                       const MuSigSeries& CLUScor,
+                                       const MuSigSeries& PDCraw,
+                                       const MuSigSeries& PDCcor,
+                                       const std::string& outPng)
+    {
+        const double xMinE = 0.0;
+        const double xMaxE = eEdges.empty() ? 1.0 : eEdges.back().second;
+
+        TCanvas c(isPhi ? "c4Way_MuSig_Phi_muClamp" : "c4Way_MuSig_Eta_muClamp",
+                  "4WAY μ/σ vs E (μ clamp ±0.025)", 1000, 850);
+
+        auto pads = makeEqualHeightTwinPads(
+            c,
+            std::string("FourVarMuSigClamp_") + (isPhi ? "phi" : "eta"),
+            0.15, 0.05, 0.14, 0.02, 0.04, 0.16
+        );
+        TPad* pTop = pads.first;
+        TPad* pBot = pads.second;
+
+        auto makeGE = [](const MuSigSeries& S, Color_t col, Style_t mk, bool useMu){
+            const size_t N = S.E.size();
+            std::vector<double> ex(N, 0.0);
+            auto* g = new TGraphErrors(
+                (int)N,
+                const_cast<double*>(S.E.data()),
+                const_cast<double*>((useMu ? S.mu : S.sg).data()),
+                ex.data(),
+                const_cast<double*>((useMu ? S.dmu : S.dsg).data())
+            );
+            g->SetMarkerStyle(mk);
+            g->SetMarkerSize(1.05);
+            g->SetMarkerColor(col);
+            g->SetLineColor(col);
+            return g;
+        };
+
+        // ---------- μ(E)  (CLAMPED to ±0.025 rad) ----------
+        pTop->cd();
+        TH1F frU("frU",";E  [GeV];#mu  [rad]",1,xMinE,xMaxE);
+        frU.SetMinimum(-0.025);
+        frU.SetMaximum(+0.025);
+        frU.GetXaxis()->SetLabelSize(0.0);
+        frU.GetXaxis()->SetTitleSize(0.0);
+        frU.GetXaxis()->SetTickLength(0.0);
+        frU.Draw("AXIS");
+        TLine l0(xMinE,0.0,xMaxE,0.0); l0.SetLineStyle(2); l0.Draw();
+
+        // Styles: CLUS=red, PDC=blue; Uncorr=filled (20), Corr=open (24)
+        TGraphErrors* gTCu = makeGE(CLUSraw, kRed+1,  20, true);
+        TGraphErrors* gTCc = makeGE(CLUScor, kRed+1,  24, true);
+        TGraphErrors* gBLu = makeGE(PDCraw,  kBlue+1, 20, true);
+        TGraphErrors* gBLc = makeGE(PDCcor,  kBlue+1, 24, true);
+        // draw order (blue first to keep red on top if overlapping)
+        gBLu->Draw("P SAME"); gBLc->Draw("P SAME"); gTCu->Draw("P SAME"); gTCc->Draw("P SAME");
+
+        // Put legend on the TOP pad (same as your revised version)
+        pTop->cd();
+        TLegend lg(0.37, 0.7, 0.92, 0.86);
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.041);
+        lg.SetNColumns(2);
+        lg.AddEntry(gTCu, "Constant-b (Production) Uncorr", "p");
+        lg.AddEntry(gBLu, "Variable-b (Benchmark) Uncorr",  "p");
+        lg.AddEntry(gTCc, "Constant-b (Production) Corr",   "p");
+        lg.AddEntry(gBLc, "Variable-b (Benchmark) Corr",    "p");
+        lg.Draw();
+
+        // ---------- σ(E) ----------
+        pBot->cd();
+        double sgHi = 0.0;
+        auto updSg = [&](const MuSigSeries& S){ for (double v : S.sg) sgHi = std::max(sgHi, v); };
+        updSg(CLUSraw); updSg(CLUScor); updSg(PDCraw); updSg(PDCcor);
+        if (sgHi <= 0) sgHi = 1.0;
+
+        TH1F frL("frL",";E  [GeV];#sigma_{RMS}  [rad]",1,xMinE,xMaxE);
+        frL.SetMinimum(0.0);
+        frL.SetMaximum(1.15*sgHi);
+        frL.Draw("AXIS");
+
+        TGraphErrors* hTCu = makeGE(CLUSraw, kRed+1,  20, false);
+        TGraphErrors* hTCc = makeGE(CLUScor, kRed+1,  24, false);
+        TGraphErrors* hBLu = makeGE(PDCraw,  kBlue+1, 20, false);
+        TGraphErrors* hBLc = makeGE(PDCcor,  kBlue+1, 24, false);
+        hBLu->Draw("P SAME"); hBLc->Draw("P SAME"); hTCu->Draw("P SAME"); hTCc->Draw("P SAME");
+
+        // Header
+        c.cd();
+        TLatex hh; hh.SetNDC(); hh.SetTextAlign(22); hh.SetTextSize(0.028);
+        hh.DrawLatex(0.52,0.975,
+                     Form("%s  -  Mean / RMS vs E  (Constant-b (Production) & Variable-b (Benchmark): Uncorr vs Corr)",
+                          isPhi ? "#Delta#phi" : "#Delta#eta"));
+
+        c.SaveAs(outPng.c_str());
+        c.Close();
+        std::cout << "[Playground] Wrote " << outPng << "\n";
+    };
+
+    // Build series for φ and η (both first so we can harmonize y-ranges)
+    MuSigSeries CLUSraw_phi = makeMuSigSeries(Hphi);
+    MuSigSeries CLUScor_phi = makeMuSigSeries(HphiCorr);
+    MuSigSeries PDCraw_phi  = makeMuSigSeries(HphiScratchRaw);
+    MuSigSeries PDCcor_phi  = makeMuSigSeries(HphiScratchCorr);
+
+    MuSigSeries CLUSraw_eta = makeMuSigSeries(Heta);
+    MuSigSeries CLUScor_eta = makeMuSigSeries(HetaCorr);
+    MuSigSeries PDCraw_eta  = makeMuSigSeries(HetaScratchRaw);
+    MuSigSeries PDCcor_eta  = makeMuSigSeries(HetaScratchCorr);
+
+    // ---- compute shared μ(E) range: symmetric, floor ±3e-4 rad, +10% headroom
+    auto muAbsMax = [&](const MuSigSeries& A, const MuSigSeries& B,
+                        const MuSigSeries& C, const MuSigSeries& D)->double {
+      double m = 0.0;
+      auto upd = [&](const MuSigSeries& S){
+        for (size_t i=0; i<S.mu.size(); ++i) {
+          const double lo = S.mu[i] - (S.dmu.empty()?0.0:S.dmu[i]);
+          const double hi = S.mu[i] + (S.dmu.empty()?0.0:S.dmu[i]);
+          m = std::max(m, std::max(std::fabs(lo), std::fabs(hi)));
+        }
+      };
+      upd(A); upd(B); upd(C); upd(D);
+      return m;
+    };
+
+    const double muAbsPhi = muAbsMax(CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi);
+    const double muHalf   = std::max(muAbsPhi * 1.10, 3e-4);
+    const double muYmin   = -muHalf;
+    const double muYmax   = +muHalf;
+
+    // ---- compute shared σ(E) range: 0 → 1.15 × max(σ) across φ and η
+    auto sgMax = [&](const MuSigSeries& A, const MuSigSeries& B,
+                     const MuSigSeries& C, const MuSigSeries& D)->double {
+      double s = 0.0;
+      auto upd = [&](const MuSigSeries& S){ for (double v : S.sg) s = std::max(s, v); };
+      upd(A); upd(B); upd(C); upd(D);
+      return s;
+    };
+
+    const double sgHiPhi = sgMax(CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi);
+    const double sgHiEta = sgMax(CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta);
+    const double sgYmin  = 0.0;
+    const double sgYmax  = 1.15 * std::max(sgHiPhi, sgHiEta);
+
+    // ---- draw with forced shared ranges (matches the 12-arg lambda signature)
+    drawMuSigmaFour(true,
+                    CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi,
+                    dir4Way + "/FourVariants_MeanSigmaVsE_Phi.png",
+                    /*forceMuRange=*/true, muYmin, muYmax,
+                    /*forceSgRange=*/true, sgYmin, sgYmax);
+
+    drawMuSigmaFour(false,
+                    CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta,
+                    dir4Way + "/FourVariants_MeanSigmaVsE_Eta.png",
+                    /*forceMuRange=*/true, muYmin, muYmax,
+                    /*forceSgRange=*/true, sgYmin, sgYmax);
+
+    // Parallel PNGs with μ(E) clamped to ±0.025 rad (top panel only)
+    drawMuSigmaFour_muClamp(true,
+                            CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi,
+                            dir4Way + "/FourVariants_MeanSigmaVsE_Phi_muClamp_pm0p025.png");
+
+    drawMuSigmaFour_muClamp(false,
+                            CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta,
+                            dir4Way + "/FourVariants_MeanSigmaVsE_Eta_muClamp_pm0p025.png");
+
+    // ---------------------------------------------------------------------
+}
+
+
+
 void MakeDeltaPhiEtaPlayground(
     const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
@@ -8598,516 +9146,19 @@ void MakeDeltaPhiEtaPlayground(
         }
     }
 
-    // =====================================================================
-    // NEW: 4WAY summary overlays (first/second non-empty E bin) + singlets
-    //       Outputs into: <outDir>/4WAYneededSUMMARIES
-    // =====================================================================
-    const std::string dir4Way = std::string(outDir) + "/4WAYneededSUMMARIES";
-    ensureDir(dir4Way.c_str());
-
-    // Find the N-th energy slice where BOTH hists in a pair are non-empty
-    auto nthNonEmptyPair = [&](const std::vector<TH1F*>& A,
-                               const std::vector<TH1F*>& B,
-                               int nth)->int
-    {
-        int count = 0;
-        for (std::size_t i=0; i<eEdges.size(); ++i) {
-            if (i<A.size() && i<B.size() && A[i] && B[i] &&
-                A[i]->Integral()>0 && B[i]->Integral()>0)
-            {
-                ++count;
-                if (count == nth) return static_cast<int>(i);
-            }
-        }
-        return -1;
-    };
-
-    // 2-series overlay for the N-th non-empty energy bin
-    auto overlayTwoSeriesNthBin = [&](const char* baseLabel,   // "Variable-b (Benchmark)" or "Constant-b (Production)"
-                                      Color_t color,           // kBlue+1 or kRed+1
-                                      bool isPhi,              // true: phi, false: eta
-                                      const std::vector<TH1F*>& Vraw,
-                                      const std::vector<TH1F*>& Vcor,
-                                      const std::string& outPngStemBase,
-                                      int nth)
-    {
-        const int iE = nthNonEmptyPair(Vraw, Vcor, nth);
-        if (iE < 0) {
-            std::cerr << "[Playground][WARN] 4WAY overlay skipped for "
-                      << baseLabel << (isPhi? " (phi)" : " (eta)")
-                      << " – no non-empty bin #" << nth << ".\n";
-            return;
-        }
-
-        const char* suffix =
-            (nth == 1) ? "_FirstBin" :
-            (nth == 2) ? "_SecondBin" : Form("_Bin%d", nth);
-
-        TCanvas c(Form("c4Way_%s_%s_bin%d", baseLabel, isPhi? "phi" : "eta", nth),
-                  "4WAY Nth-bin overlay", 1000, 750);
-
-        const char* symShort = isPhi ? "#phi" : "#eta";
-        std::vector<ResidualSpec> specs = {
-            { Vraw[iE], Form("%s Uncorr, %s", baseLabel, symShort),  color, (Style_t)20, 1 },
-            { Vcor[iE], Form("%s Corr, %s",   baseLabel, symShort),  color, (Style_t)24, 1 }
-        };
-
-        const char* residTitle = isPhi ? "#Delta#phi" : "#Delta#eta";
-        const bool  isConstB   = (std::string(baseLabel).find("Constant-b") != std::string::npos);
-        const char* familyTitle= isConstB ? "Constant b-Correction" : "Variable b-Correction";
-        std::string header     = Form("%s Uncorrected/Corrected Overlay for %s", residTitle, familyTitle);
-
-        drawResidualPanel(&c,
-                          header,
-                          eEdges[iE].first, eEdges[iE].second,
-                          specs, xMin, xMax, 1.0);
-
-        const std::string outPng = dir4Way + "/" + outPngStemBase + std::string(suffix) + ".png";
-        c.SaveAs(outPng.c_str());
-        c.Close();
-        std::cout << "[Playground] Wrote " << outPng << "\n";
-    };
-
-    // 1-series (stand-alone) plot(s) for the same N-th non-empty energy bin
-    auto singleSeriesNthBin = [&](const char* baseLabel,    // same labels as overlay
-                                  Color_t color,
-                                  bool isPhi,
-                                  const std::vector<TH1F*>& Vraw,
-                                  const std::vector<TH1F*>& Vcor,
-                                  const std::string& outPngStemBase,
-                                  int nth)
-    {
-        const int iE = nthNonEmptyPair(Vraw, Vcor, nth);
-        if (iE < 0) {
-            std::cerr << "[Playground][WARN] 4WAY singlet skipped for "
-                      << baseLabel << (isPhi? " (phi)" : " (eta)")
-                      << " – no non-empty bin #" << nth << ".\n";
-            return;
-        }
-
-        const char* suffix =
-            (nth == 1) ? "_FirstBin" :
-            (nth == 2) ? "_SecondBin" : Form("_Bin%d", nth);
-
-        const char* symShort   = isPhi ? "#phi" : "#eta";
-        const char* residTitle = isPhi ? "#Delta#phi" : "#Delta#eta";
-        const bool  isConstB   = (std::string(baseLabel).find("Constant-b") != std::string::npos);
-        const char* familyTitle= isConstB ? "Constant b-Correction" : "Variable b-Correction";
-
-        auto drawOne = [&](TH1F* H, const char* tag, const char* stemTag, Style_t mstyle)
-        {
-            if (!H || H->Integral() <= 0) return;
-
-            TCanvas c(Form("c4Way_%s_%s_%s_bin%d", baseLabel, isPhi? "phi":"eta", stemTag, nth),
-                      "4WAY Nth-bin single", 1000, 750);
-
-            std::vector<ResidualSpec> specs = {
-                { H, Form("%s %s, %s", baseLabel, tag, symShort), color, mstyle, 1 }
-            };
-
-            std::string header = Form("%s %s Only for %s", residTitle, tag, familyTitle);
-
-            drawResidualPanel(&c,
-                              header,
-                              eEdges[iE].first, eEdges[iE].second,
-                              specs, xMin, xMax, 1.0);
-
-            const std::string outPng = dir4Way + "/" + outPngStemBase + "_" + stemTag + std::string(suffix) + ".png";
-            c.SaveAs(outPng.c_str());
-            c.Close();
-            std::cout << "[Playground] Wrote " << outPng << "\n";
-        };
-
-        // Produce both stand-alone views
-        drawOne(Vraw[iE], "Uncorr", "Uncorr", (Style_t)20);
-        drawOne(Vcor[iE], "Corr",   "Corr",   (Style_t)24);
-    };
-
-    // ---- First and Second non-empty bin overlays + singlets ----
-
-    // PDC (2×2 Block-Local), φ and η
-    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  true,
-                           HphiScratchRaw,  HphiScratchCorr,
-                           "PDC_phi_RawVsCorr", 1);
-    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  true,
-                           HphiScratchRaw,  HphiScratchCorr,
-                           "PDC_phi_RawVsCorr", 1);
-
-    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  true,
-                           HphiScratchRaw,  HphiScratchCorr,
-                           "PDC_phi_RawVsCorr", 2);
-    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  true,
-                           HphiScratchRaw,  HphiScratchCorr,
-                           "PDC_phi_RawVsCorr", 2);
-
-    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  false,
-                           HetaScratchRaw,  HetaScratchCorr,
-                           "PDC_eta_RawVsCorr", 1);
-    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  false,
-                           HetaScratchRaw,  HetaScratchCorr,
-                           "PDC_eta_RawVsCorr", 1);
-
-    overlayTwoSeriesNthBin("Variable-b (Benchmark)", kBlue+1,  false,
-                           HetaScratchRaw,  HetaScratchCorr,
-                           "PDC_eta_RawVsCorr", 2);
-    singleSeriesNthBin     ("Variable-b (Benchmark)", kBlue+1,  false,
-                           HetaScratchRaw,  HetaScratchCorr,
-                           "PDC_eta_RawVsCorr", 2);
-
-    // CLUS (Constant-b (Production)), φ and η
-    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  true,
-                           Hphi, HphiCorr,
-                           "CLUS_phi_RawVsCorr", 1);
-    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  true,
-                           Hphi, HphiCorr,
-                           "CLUS_phi_RawVsCorr", 1);
-
-    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  true,
-                           Hphi, HphiCorr,
-                           "CLUS_phi_RawVsCorr", 2);
-    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  true,
-                           Hphi, HphiCorr,
-                           "CLUS_phi_RawVsCorr", 2);
-
-    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  false,
-                           Heta, HetaCorr,
-                           "CLUS_eta_RawVsCorr", 1);
-    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  false,
-                           Heta, HetaCorr,
-                           "CLUS_eta_RawVsCorr", 1);
-
-    overlayTwoSeriesNthBin("Constant-b (Production)", kRed+1,  false,
-                           Heta, HetaCorr,
-                           "CLUS_eta_RawVsCorr", 2);
-    singleSeriesNthBin     ("Constant-b (Production)", kRed+1,  false,
-                           Heta, HetaCorr,
-                           "CLUS_eta_RawVsCorr", 2);
-
-
-
-    // ---- Four-variant μ/σ vs E summary (φ and η) to the same folder ----
-    struct MuSigSeries { std::vector<double> E, mu, dmu, sg, dsg; };
-
-    auto makeMuSigSeries = [&](const std::vector<TH1F*>& V)->MuSigSeries {
-        MuSigSeries S;
-        for (std::size_t i=0; i<eEdges.size(); ++i){
-            if (i>=V.size() || !V[i] || V[i]->Integral()<=0) continue;
-            double m, me, r, re;
-            std::tie(m, me, r, re) = statsFromHistRange(V[i], xMin, xMax);
-            S.E .push_back(0.5*(eEdges[i].first + eEdges[i].second));
-            S.mu.push_back(m);  S.dmu.push_back(me);
-            S.sg.push_back(r);  S.dsg.push_back(re);
-        }
-        return S;
-    };
-
-    // Supports forced y-ranges so φ and η plots can share identical axes.
-    auto drawMuSigmaFour = [&](bool isPhi,
-                               const MuSigSeries& CLUSraw,
-                               const MuSigSeries& CLUScor,
-                               const MuSigSeries& PDCraw,
-                               const MuSigSeries& PDCcor,
-                               const std::string& outPng,
-                               bool forceMuRange, double muYmin, double muYmax,
-                               bool forceSgRange, double sgYmin, double sgYmax)
-    {
-        const double xMinE = 0.0;
-        const double xMaxE = eEdges.empty() ? 1.0 : eEdges.back().second;
-
-        TCanvas c(isPhi ? "c4Way_MuSig_Phi" : "c4Way_MuSig_Eta",
-                  "4WAY μ/σ vs E", 1000, 850);
-
-        auto pads = makeEqualHeightTwinPads(
-            c,
-            std::string("FourVarMuSig_") + (isPhi ? "phi" : "eta"),
-            0.15, 0.05, 0.14, 0.02, 0.04, 0.16
-        );
-        TPad* pTop = pads.first;
-        TPad* pBot = pads.second;
-
-        auto makeGE = [](const MuSigSeries& S, Color_t col, Style_t mk, bool useMu){
-            const size_t N = S.E.size();
-            std::vector<double> ex(N, 0.0);
-            auto* g = new TGraphErrors(
-                (int)N,
-                const_cast<double*>(S.E.data()),
-                const_cast<double*>((useMu ? S.mu : S.sg).data()),
-                ex.data(),
-                const_cast<double*>((useMu ? S.dmu : S.dsg).data())
-            );
-            g->SetMarkerStyle(mk);
-            g->SetMarkerSize(1.05);
-            g->SetMarkerColor(col);
-            g->SetLineColor(col);
-            return g;
-        };
-
-        // ---------- μ(E)
-        pTop->cd();
-        double muMin = 0.0, muMax = 0.0;
-        if (!forceMuRange)
-        {
-            double muLo = +1e30, muHi = -1e30;
-            auto updMu = [&](const MuSigSeries& S){
-                for (size_t i=0; i<S.mu.size(); ++i) {
-                    const double lo = S.mu[i] - (S.dmu.empty()?0.0:S.dmu[i]);
-                    const double hi = S.mu[i] + (S.dmu.empty()?0.0:S.dmu[i]);
-                    muLo = std::min(muLo, lo);
-                    muHi = std::max(muHi, hi);
-                }
-            };
-            updMu(CLUSraw); updMu(CLUScor); updMu(PDCraw); updMu(PDCcor);
-            if (muLo > muHi) { muLo = -1e-3; muHi = 1e-3; }
-
-            // Symmetric around zero; enforce at least ±3e-4 rad
-            const double absMax = std::max(std::fabs(muLo), std::fabs(muHi));
-            const double minHalfRange = 3e-4; // ±0.3×10⁻³ rad
-            const double half = std::max(absMax * 1.10, minHalfRange); // +10% headroom
-            muMin = -half; muMax = +half;
-        }
-        else
-        {
-            muMin = muYmin; muMax = muYmax;
-        }
-
-        TH1F frU("frU",";E  [GeV];#mu  [rad]",1,xMinE,xMaxE);
-        frU.SetMinimum(muMin);
-        frU.SetMaximum(muMax);
-        frU.GetXaxis()->SetLabelSize(0.0);
-        frU.GetXaxis()->SetTitleSize(0.0);
-        frU.GetXaxis()->SetTickLength(0.0);
-        frU.Draw("AXIS");
-        TLine l0(xMinE,0.0,xMaxE,0.0); l0.SetLineStyle(2); l0.Draw();
-
-        // Styles: CLUS=red, PDC=blue; Uncorr=filled (20), Corr=open (24)
-        TGraphErrors* gTCu = makeGE(CLUSraw, kRed+1,  20, true);
-        TGraphErrors* gTCc = makeGE(CLUScor, kRed+1,  24, true);
-        TGraphErrors* gBLu = makeGE(PDCraw,  kBlue+1, 20, true);
-        TGraphErrors* gBLc = makeGE(PDCcor,  kBlue+1, 24, true);
-        gBLu->Draw("P SAME"); gBLc->Draw("P SAME"); gTCu->Draw("P SAME"); gTCc->Draw("P SAME");
-
-        // ---------- σ(E)
-        pBot->cd();
-        double sgMinFinal = 0.0, sgMaxFinal = 0.0;
-        if (!forceSgRange)
-        {
-            double sgHi = 0.0;
-            auto updSg = [&](const MuSigSeries& S){ for (double v : S.sg) sgHi = std::max(sgHi, v); };
-            updSg(CLUSraw); updSg(CLUScor); updSg(PDCraw); updSg(PDCcor);
-            if (sgHi <= 0) sgHi = 1.0;
-            sgMinFinal = 0.0;
-            sgMaxFinal = 1.15*sgHi;
-        }
-        else
-        {
-            sgMinFinal = sgYmin;
-            sgMaxFinal = sgYmax;
-        }
-
-        TH1F frL("frL",";E  [GeV];#sigma_{RMS}  [rad]",1,xMinE,xMaxE);
-        frL.SetMinimum(sgMinFinal);
-        frL.SetMaximum(sgMaxFinal);
-        frL.Draw("AXIS");
-
-        TGraphErrors* hTCu = makeGE(CLUSraw, kRed+1,  20, false);
-        TGraphErrors* hTCc = makeGE(CLUScor, kRed+1,  24, false);
-        TGraphErrors* hBLu = makeGE(PDCraw,  kBlue+1, 20, false);
-        TGraphErrors* hBLc = makeGE(PDCcor,  kBlue+1, 24, false);
-        hBLu->Draw("P SAME"); hBLc->Draw("P SAME"); hTCu->Draw("P SAME"); hTCc->Draw("P SAME");
-
-        // Legend in the μ(E) panel (upper-right), 2 columns
-        pTop->cd();
-        TLegend lg(0.17, 0.73, 0.65, 0.86);
-        lg.SetBorderSize(0);
-        lg.SetFillStyle(0);
-        lg.SetTextSize(0.038);
-        lg.SetNColumns(2);
-        lg.AddEntry(gTCu, "Constant-b (Production) Uncorr", "p");
-        lg.AddEntry(gBLu, "Variable-b (Benchmark) Uncorr",  "p");
-        lg.AddEntry(gTCc, "Constant-b (Production) Corr",   "p");
-        lg.AddEntry(gBLc, "Variable-b (Benchmark) Corr",    "p");
-        lg.Draw();
-
-        // Header
-        c.cd();
-        TLatex hh; hh.SetNDC(); hh.SetTextAlign(22); hh.SetTextSize(0.028);
-        hh.DrawLatex(0.52,0.975,
-                     Form("%s  -  Mean / RMS vs E  (Constant-b (Production) & Variable-b (Benchmark): Uncorr vs Corr)",
-                          isPhi ? "#Delta#phi" : "#Delta#eta"));
-
-        c.SaveAs(outPng.c_str());
-        c.Close();
-        std::cout << "[Playground] Wrote " << outPng << "\n";
-    };
-
-    
-    // --- Copy of drawMuSigmaFour, but μ(E) y-axis is clamped to ±0.025 rad ---
-    auto drawMuSigmaFour_muClamp = [&](bool isPhi,
-                                       const MuSigSeries& CLUSraw,
-                                       const MuSigSeries& CLUScor,
-                                       const MuSigSeries& PDCraw,
-                                       const MuSigSeries& PDCcor,
-                                       const std::string& outPng)
-    {
-        const double xMinE = 0.0;
-        const double xMaxE = eEdges.empty() ? 1.0 : eEdges.back().second;
-
-        TCanvas c(isPhi ? "c4Way_MuSig_Phi_muClamp" : "c4Way_MuSig_Eta_muClamp",
-                  "4WAY μ/σ vs E (μ clamp ±0.025)", 1000, 850);
-
-        auto pads = makeEqualHeightTwinPads(
-            c,
-            std::string("FourVarMuSigClamp_") + (isPhi ? "phi" : "eta"),
-            0.15, 0.05, 0.14, 0.02, 0.04, 0.16
-        );
-        TPad* pTop = pads.first;
-        TPad* pBot = pads.second;
-
-        auto makeGE = [](const MuSigSeries& S, Color_t col, Style_t mk, bool useMu){
-            const size_t N = S.E.size();
-            std::vector<double> ex(N, 0.0);
-            auto* g = new TGraphErrors(
-                (int)N,
-                const_cast<double*>(S.E.data()),
-                const_cast<double*>((useMu ? S.mu : S.sg).data()),
-                ex.data(),
-                const_cast<double*>((useMu ? S.dmu : S.dsg).data())
-            );
-            g->SetMarkerStyle(mk);
-            g->SetMarkerSize(1.05);
-            g->SetMarkerColor(col);
-            g->SetLineColor(col);
-            return g;
-        };
-
-        // ---------- μ(E)  (CLAMPED to ±0.025 rad) ----------
-        pTop->cd();
-        TH1F frU("frU",";E  [GeV];#mu  [rad]",1,xMinE,xMaxE);
-        frU.SetMinimum(-0.025);
-        frU.SetMaximum(+0.025);
-        frU.GetXaxis()->SetLabelSize(0.0);
-        frU.GetXaxis()->SetTitleSize(0.0);
-        frU.GetXaxis()->SetTickLength(0.0);
-        frU.Draw("AXIS");
-        TLine l0(xMinE,0.0,xMaxE,0.0); l0.SetLineStyle(2); l0.Draw();
-
-        // Styles: CLUS=red, PDC=blue; Uncorr=filled (20), Corr=open (24)
-        TGraphErrors* gTCu = makeGE(CLUSraw, kRed+1,  20, true);
-        TGraphErrors* gTCc = makeGE(CLUScor, kRed+1,  24, true);
-        TGraphErrors* gBLu = makeGE(PDCraw,  kBlue+1, 20, true);
-        TGraphErrors* gBLc = makeGE(PDCcor,  kBlue+1, 24, true);
-        // draw order (blue first to keep red on top if overlapping)
-        gBLu->Draw("P SAME"); gBLc->Draw("P SAME"); gTCu->Draw("P SAME"); gTCc->Draw("P SAME");
-
-        // Put legend on the TOP pad (same as your revised version)
-        pTop->cd();
-        TLegend lg(0.37, 0.7, 0.92, 0.86);
-        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.041);
-        lg.SetNColumns(2);
-        lg.AddEntry(gTCu, "Constant-b (Production) Uncorr", "p");
-        lg.AddEntry(gBLu, "Variable-b (Benchmark) Uncorr",  "p");
-        lg.AddEntry(gTCc, "Constant-b (Production) Corr",   "p");
-        lg.AddEntry(gBLc, "Variable-b (Benchmark) Corr",    "p");
-        lg.Draw();
-
-        // ---------- σ(E) ----------
-        pBot->cd();
-        double sgHi = 0.0;
-        auto updSg = [&](const MuSigSeries& S){ for (double v : S.sg) sgHi = std::max(sgHi, v); };
-        updSg(CLUSraw); updSg(CLUScor); updSg(PDCraw); updSg(PDCcor);
-        if (sgHi <= 0) sgHi = 1.0;
-
-        TH1F frL("frL",";E  [GeV];#sigma_{RMS}  [rad]",1,xMinE,xMaxE);
-        frL.SetMinimum(0.0);
-        frL.SetMaximum(1.15*sgHi);
-        frL.Draw("AXIS");
-
-        TGraphErrors* hTCu = makeGE(CLUSraw, kRed+1,  20, false);
-        TGraphErrors* hTCc = makeGE(CLUScor, kRed+1,  24, false);
-        TGraphErrors* hBLu = makeGE(PDCraw,  kBlue+1, 20, false);
-        TGraphErrors* hBLc = makeGE(PDCcor,  kBlue+1, 24, false);
-        hBLu->Draw("P SAME"); hBLc->Draw("P SAME"); hTCu->Draw("P SAME"); hTCc->Draw("P SAME");
-
-        // Header
-        c.cd();
-        TLatex hh; hh.SetNDC(); hh.SetTextAlign(22); hh.SetTextSize(0.028);
-        hh.DrawLatex(0.52,0.975,
-                     Form("%s  -  Mean / RMS vs E  (Constant-b (Production) & Variable-b (Benchmark): Uncorr vs Corr)",
-                          isPhi ? "#Delta#phi" : "#Delta#eta"));
-
-        c.SaveAs(outPng.c_str());
-        c.Close();
-        std::cout << "[Playground] Wrote " << outPng << "\n";
-    };
-
-    // Build series for φ and η (both first so we can harmonize y-ranges)
-    MuSigSeries CLUSraw_phi = makeMuSigSeries(Hphi);
-    MuSigSeries CLUScor_phi = makeMuSigSeries(HphiCorr);
-    MuSigSeries PDCraw_phi  = makeMuSigSeries(HphiScratchRaw);
-    MuSigSeries PDCcor_phi  = makeMuSigSeries(HphiScratchCorr);
-
-    MuSigSeries CLUSraw_eta = makeMuSigSeries(Heta);
-    MuSigSeries CLUScor_eta = makeMuSigSeries(HetaCorr);
-    MuSigSeries PDCraw_eta  = makeMuSigSeries(HetaScratchRaw);
-    MuSigSeries PDCcor_eta  = makeMuSigSeries(HetaScratchCorr);
-
-    // ---- compute shared μ(E) range: symmetric, floor ±3e-4 rad, +10% headroom
-    auto muAbsMax = [&](const MuSigSeries& A, const MuSigSeries& B,
-                        const MuSigSeries& C, const MuSigSeries& D)->double {
-      double m = 0.0;
-      auto upd = [&](const MuSigSeries& S){
-        for (size_t i=0; i<S.mu.size(); ++i) {
-          const double lo = S.mu[i] - (S.dmu.empty()?0.0:S.dmu[i]);
-          const double hi = S.mu[i] + (S.dmu.empty()?0.0:S.dmu[i]);
-          m = std::max(m, std::max(std::fabs(lo), std::fabs(hi)));
-        }
-      };
-      upd(A); upd(B); upd(C); upd(D);
-      return m;
-    };
-
-    const double muAbsPhi = muAbsMax(CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi);
-    const double muHalf   = std::max(muAbsPhi * 1.10, 3e-4);
-    const double muYmin   = -muHalf;
-    const double muYmax   = +muHalf;
-
-    // ---- compute shared σ(E) range: 0 → 1.15 × max(σ) across φ and η
-    auto sgMax = [&](const MuSigSeries& A, const MuSigSeries& B,
-                     const MuSigSeries& C, const MuSigSeries& D)->double {
-      double s = 0.0;
-      auto upd = [&](const MuSigSeries& S){ for (double v : S.sg) s = std::max(s, v); };
-      upd(A); upd(B); upd(C); upd(D);
-      return s;
-    };
-
-    const double sgHiPhi = sgMax(CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi);
-    const double sgHiEta = sgMax(CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta);
-    const double sgYmin  = 0.0;
-    const double sgYmax  = 1.15 * std::max(sgHiPhi, sgHiEta);
-
-    // ---- draw with forced shared ranges (matches the 12-arg lambda signature)
-    drawMuSigmaFour(true,
-                    CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi,
-                    dir4Way + "/FourVariants_MeanSigmaVsE_Phi.png",
-                    /*forceMuRange=*/true, muYmin, muYmax,
-                    /*forceSgRange=*/true, sgYmin, sgYmax);
-
-    drawMuSigmaFour(false,
-                    CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta,
-                    dir4Way + "/FourVariants_MeanSigmaVsE_Eta.png",
-                    /*forceMuRange=*/true, muYmin, muYmax,
-                    /*forceSgRange=*/true, sgYmin, sgYmax);
-
-
-    // Parallel PNGs with μ(E) clamped to ±0.025 rad (top panel only)
-    drawMuSigmaFour_muClamp(true,
-                            CLUSraw_phi, CLUScor_phi, PDCraw_phi, PDCcor_phi,
-                            dir4Way + "/FourVariants_MeanSigmaVsE_Phi_muClamp_pm0p025.png");
-
-    drawMuSigmaFour_muClamp(false,
-                            CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta,
-                            dir4Way + "/FourVariants_MeanSigmaVsE_Eta_muClamp_pm0p025.png");
-    // ---------------------------------------------------------------------
+    MakeFourWaySummaries(
+        outDir,
+        eEdges,
+        xMin, xMax,
+        /* φ sets */
+        Hphi, HphiCorr, HphiScratchRaw, HphiScratchCorr,
+        /* η sets */
+        Heta, HetaCorr, HetaScratchRaw, HetaScratchCorr,
+        /* reuse your existing lambdas for identical rendering */
+        drawResidualPanel,
+        makeEqualHeightTwinPads,
+        statsFromHistRange
+    );
     std::cout << "[Playground] Completed Δφ & Δη outputs into: " << outDir << "\n";
 }
 

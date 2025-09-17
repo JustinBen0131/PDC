@@ -1,0 +1,237 @@
+#include "PHG4TpcSubsystem.h"
+#include "PHG4TpcDetector.h"
+#include "PHG4TpcDisplayAction.h"
+#include "PHG4TpcSteppingAction.h"
+
+#include <g4detectors/PHG4DetectorSubsystem.h>  // for PHG4DetectorSubsystem
+
+#include <phparameter/PHParameters.h>
+
+#include <g4main/PHG4DisplayAction.h>  // for PHG4DisplayAction
+#include <g4main/PHG4HitContainer.h>
+#include <g4main/PHG4SteppingAction.h>  // for PHG4SteppingAction
+
+#include <phool/PHCompositeNode.h>
+#include <phool/PHIODataNode.h>    // for PHIODataNode
+#include <phool/PHNode.h>          // for PHNode
+#include <phool/PHNodeIterator.h>  // for PHNodeIterator
+#include <phool/PHObject.h>        // for PHObject
+#include <phool/getClass.h>
+
+#include <iostream>  // for operator<<, basic_ost...
+#include <set>
+
+class PHG4Detector;
+
+//_______________________________________________________________________
+PHG4TpcSubsystem::PHG4TpcSubsystem(const std::string &name, const int lyr)
+  : PHG4DetectorSubsystem(name, lyr)
+{
+  InitializeParameters();
+}
+
+//_______________________________________________________________________
+PHG4TpcSubsystem::~PHG4TpcSubsystem()
+{
+  delete m_DisplayAction;
+}
+
+//_______________________________________________________________________
+int PHG4TpcSubsystem::InitRunSubsystem(PHCompositeNode *topNode)
+{
+  PHNodeIterator iter(topNode);
+  PHCompositeNode *dstNode = dynamic_cast<PHCompositeNode *>(iter.findFirst("PHCompositeNode", "DST"));
+
+  // create display settings before detector (detector adds its volumes to it)
+  m_DisplayAction = new PHG4TpcDisplayAction(Name());
+  // create detector
+  m_Detector = new PHG4TpcDetector(this, topNode, GetParams(), Name());
+  m_Detector->SuperDetector(SuperDetector());
+  m_Detector->OverlapCheck(CheckOverlap());
+  std::set<std::string> nodes;
+  if (GetParams()->get_int_param("active"))
+  {
+    PHNodeIterator dstIter(dstNode);
+    PHCompositeNode *DetNode = dstNode;
+    if (SuperDetector() != "NONE" && !SuperDetector().empty())
+    {
+      PHNodeIterator iter_dst(dstNode);
+      DetNode = dynamic_cast<PHCompositeNode *>(iter_dst.findFirst("PHCompositeNode", SuperDetector()));
+      if (!DetNode)
+      {
+        DetNode = new PHCompositeNode(SuperDetector());
+        dstNode->addNode(DetNode);
+      }
+    }
+    std::string detector_suffix = SuperDetector();
+    if (detector_suffix == "NONE" || detector_suffix.empty())
+    {
+      detector_suffix = Name();
+    }
+    m_HitNodeName = "G4HIT_" + detector_suffix;
+    nodes.insert(m_HitNodeName);
+    m_AbsorberNodeName = "G4HIT_ABSORBER_" + detector_suffix;
+    if (GetParams()->get_int_param("absorberactive"))
+    {
+      nodes.insert(m_AbsorberNodeName);
+    }
+    for (const auto &nodename : nodes)
+    {
+      PHG4HitContainer *g4_hits = findNode::getClass<PHG4HitContainer>(topNode, nodename);
+      if (!g4_hits)
+      {
+        g4_hits = new PHG4HitContainer(nodename);
+        DetNode->addNode(new PHIODataNode<PHObject>(g4_hits, nodename, "PHObject"));
+      }
+    }
+
+    // create stepping action
+    m_SteppingAction = new PHG4TpcSteppingAction(m_Detector, GetParams());
+    m_SteppingAction->SetHitNodeName("G4HIT", m_HitNodeName);
+    m_SteppingAction->SetHitNodeName("G4HIT_ABSORBER", m_AbsorberNodeName);
+  }
+  else
+  {
+    // if this is a black hole it does not have to be active
+    if (GetParams()->get_int_param("blackhole"))
+    {
+      m_SteppingAction = new PHG4TpcSteppingAction(m_Detector, GetParams());
+    }
+  }
+  return 0;
+}
+
+//_______________________________________________________________________
+int PHG4TpcSubsystem::process_event(PHCompositeNode *topNode)
+{
+  // pass top node to stepping action so that it gets
+  // relevant nodes needed internally
+  if (m_SteppingAction)
+  {
+    m_SteppingAction->SetInterfacePointers(topNode);
+  }
+  return 0;
+}
+
+void PHG4TpcSubsystem::Print(const std::string &what) const
+{
+  std::cout << Name() << " Parameters: " << std::endl;
+  GetParams()->Print();
+  if (m_Detector)
+  {
+    m_Detector->Print(what);
+  }
+  if (m_SteppingAction)
+  {
+    m_SteppingAction->Print(what);
+  }
+
+  return;
+}
+
+//_______________________________________________________________________
+PHG4Detector *PHG4TpcSubsystem::GetDetector() const
+{
+  return m_Detector;
+}
+
+void PHG4TpcSubsystem::SetDefaultParameters()
+{
+  set_default_double_param("gas_inner_radius", 21.6);
+  set_default_double_param("gas_outer_radius", 76.4);
+  set_default_double_param("place_x", 0.);
+  set_default_double_param("place_y", 0.);
+  set_default_double_param("place_z", 0.);
+  set_default_double_param("rot_x", 0.);
+  set_default_double_param("rot_y", 0.);
+  set_default_double_param("rot_z", 0.);
+  set_default_double_param("tpc_length", 211.);
+
+  set_default_double_param("steplimits", 1);  // 1cm by default
+
+  // material budget:
+  // Cu (all layers): 0.5 oz cu per square foot, 1oz == 0.0347mm --> 0.5 oz ==  0.00347cm/2.
+  // Kapton insulation 18 layers of * 5mil = 18*0.0127=0.2286
+  // 250 um FR4 (Substrate for Cu layers)
+  // HoneyComb (nomex) 1/2 inch=0.5*2.54 cm
+  set_default_string_param("cage_layer_1_material", "G4_Cu");
+  set_default_double_param("cage_layer_1_thickness", 0.00347 / 2.);
+
+  set_default_string_param("cage_layer_2_material", "FR4");
+  set_default_double_param("cage_layer_2_thickness", 0.025);
+
+  set_default_string_param("cage_layer_3_material", "NOMEX");
+  set_default_double_param("cage_layer_3_thickness", 0.5 * 2.54);
+
+  set_default_string_param("cage_layer_4_material", "G4_Cu");
+  set_default_double_param("cage_layer_4_thickness", 0.00347 / 2.);
+
+  set_default_string_param("cage_layer_5_material", "FR4");
+  set_default_double_param("cage_layer_5_thickness", 0.025);
+
+  set_default_string_param("cage_layer_6_material", "G4_KAPTON");
+  set_default_double_param("cage_layer_6_thickness", 0.2286);
+
+  set_default_string_param("cage_layer_7_material", "G4_Cu");
+  set_default_double_param("cage_layer_7_thickness", 0.00347 / 2.);
+
+  set_default_string_param("cage_layer_8_material", "G4_KAPTON");
+  set_default_double_param("cage_layer_8_thickness", 0.05);  // 50 um
+
+  set_default_string_param("cage_layer_9_material", "G4_Cu");
+  set_default_double_param("cage_layer_9_thickness", 0.00347 / 2.);
+
+  // Thomas K Hemmick <Thomas.Hemmick@stonybrook.edu>
+  //  The total thickness along Zed would be 5.6 millimeters (+/- 2.8 mm around Zed=0).
+  //  The outer surfaces would have 0.005 inches (125 um) FR4 coated with a negligible thickness of Al. (revised to Au as below)
+  //  The interior would be some stiffener of either honeycomb or rohacell.  The range of radiation lengths for this material are:
+  //  Large cell honeycomb:  1450 cm  (0.028 g/cm^3 density)
+  //  rohacell:  760 cm (0.052 g/cm^3 density)
+  //  Close cell honeycomb:  635 cm (0.064 g/cm^3 density)
+  //  I think a calculation just for the rohacell would be more than sufficient.
+  set_default_string_param("window_core_material", "ROHACELL_FOAM_51");
+  set_default_double_param("window_thickness", 0.56);  // overall thickness
+  // I just checked with PC manufacturers and we can get 8.9 micron thick copper in reasonably large sheets.
+  //  At normal incidence, 8.9 microns is 0.06% of a radiation length.
+  set_default_string_param("window_surface1_material", "G4_Cu");
+  set_default_double_param("window_surface1_thickness", 8.9e-4);  // 8.9  um outter shell thickness be default
+  // The FR4 should be either 5 or 10 mils thick.  10 mils is 254 microns and 5 mils is 0.127 microns.  I think either of these is mechanically fine...
+  set_default_string_param("window_surface2_material", "FR4");
+  set_default_double_param("window_surface2_thickness", 0.0127);  // 127  um 2nd shell thickness be default
+
+  // for geonode initialization
+  set_default_double_param("drift_velocity", 0.008);
+
+  set_default_int_param("ntpc_layers_inner", 16);
+  set_default_int_param("ntpc_layers_mid", 16);
+  set_default_int_param("ntpc_layers_outer", 16);
+  set_default_int_param("tpc_minlayer_inner", 7);
+
+  set_default_double_param("tpc_minradius_inner", 31.105);  // 30.0);  // cm
+  set_default_double_param("tpc_minradius_mid", 41.153);    // 40.0);
+  set_default_double_param("tpc_minradius_outer", 58.367);  // 60.0);
+
+  set_default_double_param("tpc_maxradius_inner", 40.249);  // 40.0);  // cm
+  set_default_double_param("tpc_maxradius_mid", 57.475);    // 60.0);
+  set_default_double_param("tpc_maxradius_outer", 75.911);  // 77.0);  // from Tom
+
+  set_default_double_param("maxdriftlength", 105.5);       // cm
+  set_default_double_param("extended_readout_time", 0.0);  // ns
+  set_default_double_param("tpc_adc_clock", 53.326184);         // ns, for 18.8 MHz clock
+
+  set_default_double_param("tpc_sector_phi_inner", 0.5024);  // 2 * M_PI / 12 );//sector size in phi for R1 sector
+  set_default_double_param("tpc_sector_phi_mid", 0.5087);    // 2 * M_PI / 12 );//sector size in phi for R2 sector
+  set_default_double_param("tpc_sector_phi_outer", 0.5097);  // 2 * M_PI / 12 );//sector size in phi for R3 sector
+
+  set_default_int_param("ntpc_phibins_inner", 1128);  // 94 * 12
+  set_default_int_param("ntpc_phibins_mid", 1536);    // 128 * 12
+  set_default_int_param("ntpc_phibins_outer", 2304);  // 192 * 12
+
+  set_default_double_param("TPC_gas_temperature", 15.0); //in celcius
+  set_default_double_param("TPC_gas_pressure", 1.0); //in atmospheres
+  set_default_double_param("Ne_frac", 0.00); 
+  set_default_double_param("Ar_frac", 0.75); 
+  set_default_double_param("CF4_frac", 0.20);
+  set_default_double_param("N2_frac", 0.00);
+  set_default_double_param("isobutane_frac", 0.05);
+}

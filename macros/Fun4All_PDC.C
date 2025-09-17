@@ -19,7 +19,6 @@
 #include <fun4all/Fun4AllUtils.h>
 #include <fun4all/Fun4AllInputManager.h>
 #include <fun4all/Fun4AllDstInputManager.h>
-#include <calobase/TowerInfoDefs.h>
 #include <fun4all/SubsysReco.h>
 #include <fun4all/Fun4AllServer.h>
 #include <fun4all/Fun4AllDstOutputManager.h>
@@ -29,43 +28,40 @@
 #include <phool/PHNodeIterator.h>
 #include <phool/PHRandomSeed.h>
 #include <phool/getClass.h>
-#include <caloreco/RawClusterDeadHotMask.h>
-#include <caloreco/CaloGeomMapping.h>
 
-#include <caloreco/RawClusterBuilderTemplate.h>   // Use the built-in template
-#include <caloreco/RawTowerCalibration.h>
-#include <caloreco/CaloTowerCalib.h>
-#include <caloreco/CaloTowerBuilder.h>
-#include <caloreco/CaloTowerStatus.h>
-#include <calobase/RawTowerGeom.h>
-#include <calobase/RawTowerGeomContainer_Cylinderv1.h>
-#include <caloreco/RawClusterPositionCorrection.h>
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/RawClusterDeadHotMask.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloGeomMapping.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/RawClusterBuilderTemplate.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/RawTowerCalibration.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloTowerCalib.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloTowerStatus.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloTowerBuilder.h"
+
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeom.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeomContainer_Cylinderv1.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfoDefs.h"
 
 #include <g4detectors/PHG4FullProjSpacalCellReco.h>
 #include <g4calo/RawTowerBuilder.h>
 #include <g4calo/RawTowerDigitizer.h>
 #include <calowaveformsim/CaloWaveformSim.h>
 #include <phparameter/PHParameterUtils.h>
-
-#include <globalvertex/GlobalVertexReco.h>   // For global vertex, e.g. MBD
-#include <globalvertex/GlobalVertex.h>       // if you need the enum VTXTYPE
-
+#include <globalvertex/GlobalVertexReco.h>
+#include <globalvertex/GlobalVertex.h>
 #include <ffamodules/CDBInterface.h>
 #include <ffaobjects/EventHeader.h>
 #include <Event/Event.h>
 #include <mbd/MbdReco.h>
 #include <GlobalVariables.C>
-
-////////////////////////////////////////////////////////////
-// Possibly your custom code
-////////////////////////////////////////////////////////////
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src/PositionDependentCorrection.h"
 
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
 #if defined(__GNUC__) && !defined(__clang__)
   #pragma GCC diagnostic pop
 #endif
 
+R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_io.so)    // <— CaloBase (your local)
+R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_reco.so)  // <— CaloReco (your local)
 R__LOAD_LIBRARY(libcdbobjects)
 R__LOAD_LIBRARY(libfun4all.so)
 R__LOAD_LIBRARY(libfun4allraw.so)
@@ -77,7 +73,8 @@ R__LOAD_LIBRARY(libCaloWaveformSim.so)
 R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 R__LOAD_LIBRARY(libcalibCaloEmc_pi0.so)
 R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libPDC.so)
-R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_reco.so)
+
+
 
 #endif // if ROOT_VERSION >= 6.00.0
 
@@ -216,18 +213,22 @@ void Fun4All_PDC(int nevents = 0,
     {
       std::cout << "Building clusters (using custom RawClusterBuilderTemplate)" << std::endl;
 
-      RawClusterBuilderTemplate *ClusterBuilder = new RawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
-      ClusterBuilder->Detector("CEMC");
-      ClusterBuilder->set_threshold_energy(0.030f);  // threshold in GeV
+        RawClusterBuilderTemplate *ClusterBuilder = new RawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
+        ClusterBuilder->Detector("CEMC");
+        ClusterBuilder->set_threshold_energy(0.030f);
 
-      std::string emc_prof = getenv("CALIBRATIONROOT");
-      emc_prof += "/EmcProfile/CEMCprof_Thresh30MeV.root";
-      ClusterBuilder->LoadProfile(emc_prof);
+        std::string emc_prof = getenv("CALIBRATIONROOT");
+        emc_prof += "/EmcProfile/CEMCprof_Thresh30MeV.root";
+        ClusterBuilder->LoadProfile(emc_prof);
 
-      ClusterBuilder->set_UseTowerInfo(1);  // Use TowerInfo
-      ClusterBuilder->Verbosity(1);
+        // If you want the base node to be CLUSTERINFO_CEMC → v2 becomes CLUSTERINFO_CEMC_V2
+        ClusterBuilder->set_UseTowerInfo(1);
 
-      se->registerSubsystem(ClusterBuilder);
+        // Write the v2 copy (with tower-space CoG) to a separate node with “_V2” suffix
+        ClusterBuilder->WriteClusterV2(true);
+
+        ClusterBuilder->Verbosity(1);
+        se->registerSubsystem(ClusterBuilder);
     }
     else
     {
