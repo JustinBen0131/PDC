@@ -104,6 +104,477 @@ static TH3F* GetTH3FByNames(TFile* f, const std::vector<TString>& names)
 }
 
 
+// ==========================================================================
+// π0 mass study (standalone). Call from PDCAnalysisPrime() like:
+//   RunPi0MassAnalysis(inFilePath.c_str(), outBaseDir.c_str());
+// ==========================================================================
+
+void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
+{
+  // ------------------------------ master switch ----------------------------
+  const bool didPi0Run = false;      // set false to disable without touching caller
+  if (!didPi0Run) return;
+
+  if (!inFilePath || !outBaseDir) {
+    std::cerr << "[Pi0MassAna] bad args\n"; return;
+  }
+
+  // ------------------------------ I/O & dirs -------------------------------
+  const TString baseOut = TString(outBaseDir) + "/pi0MassAna";
+  gSystem->mkdir(baseOut, true);
+  const TString outOver  = baseOut + "/Overlays";   gSystem->mkdir(outOver, true);
+  const TString outSum   = baseOut + "/Summaries";  gSystem->mkdir(outSum,  true);
+
+  std::unique_ptr<TFile> fin( TFile::Open(inFilePath, "READ") );
+  if (!fin || fin->IsZombie()) {
+    std::cerr << "[Pi0MassAna][ERROR] cannot open " << inFilePath << "\n";
+    return;
+  }
+
+  gStyle->SetOptStat(0);
+  gROOT->SetBatch(kTRUE);
+
+  // -------------------------- configuration --------------------------------
+  // Variant order and pretty labels. CLUS‑CP(EA) ≡ EAgeom here.
+  static const char* kVarTags[]   = {
+    "CLUSRAW","CLUSCP","EAgeom","EAetaE","EAEonly","EAmix","PDCraw","PDCcorr"
+  };
+  static const char* kVarPretty[] = {
+    "CLUS-RAW","CLUS-CP","CLUS-CP(EA)","EA-etaE","EA-E-only","EA-mix","PDC-raw","PDC-corr"
+  };
+  static const Color_t kVarColor[] = {
+    kBlack, kRed+1, kBlue+1, kGreen+2, kMagenta+1, kOrange+7, kCyan+2, kGray+2
+  };
+  constexpr int NVAR = sizeof(kVarTags)/sizeof(kVarTags[0]);
+
+  // Energy edges use your global E_edges / N_E
+  auto eLabel = [&](int i)->TString {
+    return Form("E_%g_to_%g", E_edges[i], E_edges[i+1]);
+  };
+  auto eCtrOf = [&](int i)->double { return 0.5*(E_edges[i] + E_edges[i+1]); };
+
+  // Generate robust name candidates for "h_m_pi0_TAG_Elo_Ehi"
+  auto nameCands = [&](const char* tag, double elo, double ehi) {
+    std::vector<TString> v;
+    const char* fmts[] = {"%g","%.0f","%.1f","%.2f","%.3f"};
+    for (auto f1 : fmts) for (auto f2 : fmts)
+      v.emplace_back( Form("h_m_pi0_%s_%s_%s", tag,
+                           Form(f1, elo), Form(f2, ehi)) );
+    return v;
+  };
+
+  // -------------------------- storage for results --------------------------
+  struct FitRes { double mean=std::numeric_limits<double>::quiet_NaN();
+                  double meanErr=0.0;
+                  double sig =std::numeric_limits<double>::quiet_NaN();
+                  double sigErr=0.0;
+                  bool   ok=false; };
+
+  std::vector<std::vector<FitRes>> res(NVAR, std::vector<FitRes>(N_E));  // [variant][Ebin]
+  // Optional: keep normalized copies for overlays per E‑bin
+  std::vector<std::vector<std::unique_ptr<TH1>>> hKeep(NVAR);
+  for (int v=0; v<NVAR; ++v) hKeep[v].resize(N_E);
+
+  // -------------------------- fitter helpers -------------------------------
+  // Decide whether to include η component (hist x‑max large enough)
+  auto willFitEta = [](TH1* h)->bool {
+    return h && h->GetXaxis()->GetXmax() >= 0.55;   // include η only if range reaches it
+  };
+
+  // Fit a single histogram; decorate canvas if requested
+  auto fitPi0 = [&](TH1* h, const TString& outPng,
+                    Color_t col)->FitRes
+  {
+    FitRes R;
+    if (!h || h->GetEntries() < 10) return R;
+
+    // pick ranges
+    const double xlo = std::max(0.040, h->GetXaxis()->GetXmin());
+    const double xhi = std::min(0.900, h->GetXaxis()->GetXmax());
+    const bool   withEta = willFitEta(h);
+
+    // Seed estimates
+    const double meanPi0Seed  = 0.135;
+    const double sigmaPi0Seed = 0.020;
+    const double ampPi0Seed   = h->GetBinContent(h->GetXaxis()->FindBin(meanPi0Seed));
+
+    // Build fit model
+    std::unique_ptr<TF1> fTot, fPi0, fEta, fBkg;
+    if (withEta) {
+      fTot.reset( new TF1("fTotPi0EtaB","gaus(0)+gaus(3)+pol4(6)", xlo, xhi) );
+      fTot->SetParameters( ampPi0Seed, meanPi0Seed, sigmaPi0Seed,   // pi0
+                           0.1*ampPi0Seed, 0.62, 0.04,              // eta
+                           0,0,0,0,0 );                              // pol4
+      fTot->SetParLimits(4, 0.55, 0.70);     // eta mean
+      fTot->SetParLimits(5, 0.02, 0.08);     // eta sigma
+    } else {
+      fTot.reset( new TF1("fTotPi0Bkg","gaus(0)+pol4(3)", xlo, xhi) );
+      fTot->SetParameters( ampPi0Seed, meanPi0Seed, sigmaPi0Seed,    // pi0
+                           0,0,0,0,0 );                              // pol4
+    }
+
+    ROOT::Math::MinimizerOptions::SetDefaultMinimizer("Minuit2");
+    ROOT::Math::MinimizerOptions::SetDefaultMaxFunctionCalls(10000);
+
+    TFitResultPtr fr = h->Fit(fTot.get(), "QRNS");
+    if (!(fr.Get() && fr->IsValid())) {
+      // one retry with looser seeds
+      fTot->SetParameter(0, std::max(1.0, 0.8*ampPi0Seed));
+      fTot->SetParameter(1, meanPi0Seed);
+      fTot->SetParameter(2, 1.2*sigmaPi0Seed);
+      fr = h->Fit(fTot.get(), "QRNS");
+    }
+
+    if (fr.Get() && fr->IsValid()) {
+      R.mean   = fTot->GetParameter(1);
+      R.meanErr= fTot->GetParError(1);
+      R.sig    = fTot->GetParameter(2);
+      R.sigErr = fTot->GetParError(2);
+      R.ok     = std::isfinite(R.mean) && std::isfinite(R.sig);
+    }
+
+    // draw & annotate
+    if (!outPng.IsNull()) {
+      TCanvas c("cM","pi0 mass fit",900,650);
+      c.SetLeftMargin(0.12); c.SetBottomMargin(0.12);
+      h->SetLineColor(kBlack); h->SetMarkerStyle(20); h->SetMarkerSize(0.9);
+      h->Draw("E1");
+      fTot->SetLineColor(kRed); fTot->SetLineWidth(2); fTot->Draw("SAME");
+
+      if (withEta) {
+        fPi0.reset( new TF1("fPi0","gaus", xlo, xhi) );
+        fPi0->SetParameters(fTot->GetParameter(0), fTot->GetParameter(1), fTot->GetParameter(2));
+        fPi0->SetLineColor(kBlue+1); fPi0->SetLineStyle(2); fPi0->Draw("SAME");
+
+        fEta.reset( new TF1("fEta","gaus", xlo, xhi) );
+        fEta->SetParameters(fTot->GetParameter(3), fTot->GetParameter(4), fTot->GetParameter(5));
+        fEta->SetLineColor(kGreen+2); fEta->SetLineStyle(2); fEta->Draw("SAME");
+        
+        fBkg.reset( new TF1("fBkg","pol4", xlo, xhi) );
+        for (int i=6;i<11;++i) fBkg->SetParameter(i-6, fTot->GetParameter(i));
+        fBkg->SetLineColor(kOrange+7); fBkg->SetLineStyle(2); fBkg->Draw("SAME");
+      } else {
+        fPi0.reset( new TF1("fPi0","gaus", xlo, xhi) );
+        fPi0->SetParameters(fTot->GetParameter(0), fTot->GetParameter(1), fTot->GetParameter(2));
+        fPi0->SetLineColor(kBlue+1); fPi0->SetLineStyle(2); fPi0->Draw("SAME");
+
+        fBkg.reset( new TF1("fBkg","pol4", xlo, xhi) );
+        for (int i=3;i<8;++i) fBkg->SetParameter(i-3, fTot->GetParameter(i));
+        fBkg->SetLineColor(kOrange+7); fBkg->SetLineStyle(2); fBkg->Draw("SAME");
+      }
+
+      // legend & text
+      TLegend L(0.58,0.70,0.88,0.88); L.SetBorderSize(0); L.SetFillStyle(0);
+      L.AddEntry(h,   "data","lep");
+      L.AddEntry(fPi0.get(), "#pi^{0} (gaus)","l");
+      if (withEta) L.AddEntry((TObject*)nullptr,"#eta included","");
+      L.AddEntry(fBkg.get(),"pol4 bkg","l");
+      L.AddEntry(fTot.get(),"total fit","l");
+      L.Draw();
+
+      TLatex tx; tx.SetNDC(); tx.SetTextSize(0.035);
+      if (R.ok)
+      {
+        tx.DrawLatex(0.14,0.88, Form("#mu_{#pi^{0}} = %.4f #pm %.4f GeV", R.mean, R.meanErr));
+        tx.DrawLatex(0.14,0.83, Form("#sigma_{#pi^{0}} = %.4f #pm %.4f GeV", R.sig,  R.sigErr));
+      }
+      c.SaveAs(outPng);
+    }
+
+    return R;
+  };
+
+  // -------------------------- main loop over variants -----------------------
+  for (int v=0; v<NVAR; ++v)
+  {
+    const TString vDir = baseOut + "/" + kVarTags[v];
+    gSystem->mkdir(vDir, true);
+
+    for (int i=0; i<N_E; ++i)
+    {
+      // locate histogram
+      TH1* h = nullptr;
+      for (const auto& nm : nameCands(kVarTags[v], E_edges[i], E_edges[i+1])) {
+        h = dynamic_cast<TH1*>( fin->Get(nm) );
+        if (h) break;
+      }
+      if (!h) {
+        // silently skip if missing
+        continue;
+      }
+
+      // clone (detach) and set axes
+      std::unique_ptr<TH1> hc( static_cast<TH1*>( h->Clone(
+                                 Form("h_%s_%s", kVarTags[v], eLabel(i).Data()) )) );
+      hc->SetDirectory(nullptr);
+      hc->GetXaxis()->SetTitle("M_{#gamma#gamma}  [GeV]");
+      hc->GetYaxis()->SetTitle("Counts");
+
+      // per‑variant per‑E output
+      TString outP = vDir + "/" + TString::Format("pi0Mass_%s_%s.png",
+                                                  kVarTags[v], eLabel(i).Data());
+
+      // fit & store
+      FitRes fr = fitPi0(hc.get(), outP, kVarColor[v]);
+      res[v][i] = fr;
+
+      // keep a normalized copy for overlays
+      std::unique_ptr<TH1> hn( static_cast<TH1*>(hc->Clone(
+                                  Form("hn_%s_%s", kVarTags[v], eLabel(i).Data()))) );
+      hn->SetDirectory(nullptr);
+      if (hn->Integral() > 0) hn->Scale( 1.0 / hn->Integral() );
+      hn->SetLineColor( kVarColor[v] );
+      hn->SetMarkerColor( kVarColor[v] );
+      hn->SetMarkerStyle( v==0 ? 20 : 24 );   // raw vs others
+      hKeep[v][i] = std::move(hn);
+    } // i (E)
+  }   // v (variant)
+
+  // -------------------------- per‑E overlays vs CLUS‑RAW --------------------
+  auto drawOverlayPair = [&](const char* tagA, const char* tagRAW,
+                             const char* outSub) {
+    int vA=-1, vR=-1;
+    for (int v=0; v<NVAR; ++v) { if (std::string(kVarTags[v])==tagA)  vA=v; }
+    for (int v=0; v<NVAR; ++v) { if (std::string(kVarTags[v])==tagRAW) vR=v; }
+    if (vA<0 || vR<0) return;
+
+    const TString od = outOver + "/" + outSub; gSystem->mkdir(od, true);
+
+    for (int i=0; i<N_E; ++i)
+    {
+      if (!hKeep[vA][i] || !hKeep[vR][i]) continue;
+
+      TCanvas c("cOv","overlay",900,650);
+      c.SetLeftMargin(0.12); c.SetBottomMargin(0.12);
+
+      TH1* hr = hKeep[vR][i].get();
+      TH1* ha = hKeep[vA][i].get();
+
+      // axis frame from RAW
+      hr->SetTitle(Form("%s vs %s   (%s)", kVarPretty[vA], kVarPretty[vR], eLabel(i).Data()));
+      hr->Draw("E1");
+      ha->Draw("E1 SAME");
+
+      TLegend L(0.58,0.74,0.88,0.89); L.SetBorderSize(0); L.SetFillStyle(0);
+      L.AddEntry(hr, kVarPretty[vR], "lep");
+      L.AddEntry(ha, kVarPretty[vA], "lep");
+      L.Draw();
+
+      TString outP = od + "/" + TString::Format("overlay_%s_vs_%s_%s.png",
+                      tagA, tagRAW, eLabel(i).Data());
+      c.SaveAs(outP);
+    }
+  };
+
+  // CLUSCP vs CLUSRAW
+  drawOverlayPair("CLUSCP", "CLUSRAW", "CLUSCP_vs_CLUSRAW");
+  // CLUS‑CP(EA) ≡ EAgeom vs CLUSRAW
+  drawOverlayPair("EAgeom", "CLUSRAW", "CLUSCPEA_vs_CLUSRAW");
+
+  // Also: all‑variants vs CLUSRAW, per E‑bin
+  const TString odAll = outOver + "/AllVariants_vs_CLUSRAW";
+  gSystem->mkdir(odAll, true);
+  int vRAW = -1; for (int v=0; v<NVAR; ++v) if (std::string(kVarTags[v])=="CLUSRAW") vRAW = v;
+  for (int i=0; i<N_E; ++i) {
+    if (vRAW<0 || !hKeep[vRAW][i]) continue;
+    TCanvas c("cAll","overlay all",900,650);
+    c.SetLeftMargin(0.12); c.SetBottomMargin(0.12);
+    TH1* hr = hKeep[vRAW][i].get();
+    hr->SetTitle(Form("All variants vs CLUS-RAW   (%s)", eLabel(i).Data()));
+    hr->Draw("E1");
+    for (int v=0; v<NVAR; ++v) {
+      if (v==vRAW || !hKeep[v][i]) continue;
+      hKeep[v][i]->Draw("E1 SAME");
+    }
+    TLegend L(0.58,0.60,0.88,0.89); L.SetBorderSize(0); L.SetFillStyle(0);
+    for (int v=0; v<NVAR; ++v) if (hKeep[v][i])
+      L.AddEntry(hKeep[v][i].get(), kVarPretty[v], "lep");
+    L.Draw();
+
+    TString outP = odAll + "/" + TString::Format("overlayAll_%s.png", eLabel(i).Data());
+    c.SaveAs(outP);
+  }
+
+  // -------------------------- summaries (mean/sigma vs E) -------------------
+  auto makeTwoSeries = [&](const char* tagB, const char* prettyB,
+                           const TString& baseName)
+  {
+    int vR=-1, vB=-1;
+    for (int v=0; v<NVAR; ++v) if (std::string(kVarTags[v])=="CLUSRAW") vR=v;
+    for (int v=0; v<NVAR; ++v) if (std::string(kVarTags[v])==tagB)       vB=v;
+    if (vR<0 || vB<0) return;
+
+    std::vector<double> x, ex, yR, eyR, yB, eyB, yRs, eyRs, yBs, eyBs;
+    x.reserve(N_E); ex.resize(N_E,0.0);
+
+    for (int i=0;i<N_E;++i)
+    {
+      x.push_back( eCtrOf(i) );
+      if (res[vR][i].ok) { yR.push_back(res[vR][i].mean);  eyR.push_back(res[vR][i].meanErr);
+                           yRs.push_back(res[vR][i].sig);  eyRs.push_back(res[vR][i].sigErr); }
+      else               { yR.push_back(NAN);              eyR.push_back(0.0);
+                           yRs.push_back(NAN);             eyRs.push_back(0.0); }
+      if (res[vB][i].ok) { yB.push_back(res[vB][i].mean);  eyB.push_back(res[vB][i].meanErr);
+                           yBs.push_back(res[vB][i].sig);  eyBs.push_back(res[vB][i].sigErr); }
+      else               { yB.push_back(NAN);              eyB.push_back(0.0);
+                           yBs.push_back(NAN);             eyBs.push_back(0.0); }
+    }
+
+    // helper to build graph
+    auto makeGE = [](const std::vector<double>& xs, const std::vector<double>& ys,
+                     const std::vector<double>& exs, const std::vector<double>& eys,
+                     Color_t col, int mstyle)->std::unique_ptr<TGraphErrors>
+    {
+      const int n = (int)xs.size();
+      auto g = std::make_unique<TGraphErrors>(n);
+      int k=0;
+      for (int i=0;i<n;++i) {
+        double xi=xs[i], yi=ys[i], exi=exs[i], eyi=eys[i];
+        if (!std::isfinite(yi)) continue;
+        g->SetPoint(k, xi, yi);
+        g->SetPointError(k, exi, eyi);
+        ++k;
+      }
+      g->SetMarkerStyle(mstyle);
+      g->SetMarkerSize(1.2);
+      g->SetMarkerColor(col);
+      g->SetLineColor(col);
+      return g;
+    };
+
+    // MEAN vs E
+    {
+      auto gR = makeGE(x,yR,ex,eyR, kBlack, 20);
+      auto gB = makeGE(x,yB,ex,eyB, kRed+1, 24);
+
+      TCanvas c("cMean","mean vs E",900,650);
+      c.SetLeftMargin(0.14); c.SetBottomMargin(0.14);
+
+      double yMin=+1e30,yMax=-1e30, X, Y;
+      for (int i=0;i<gR->GetN();++i){ gR->GetPoint(i,X,Y); yMin=std::min(yMin,Y); yMax=std::max(yMax,Y); }
+      for (int i=0;i<gB->GetN();++i){ gB->GetPoint(i,X,Y); yMin=std::min(yMin,Y); yMax=std::max(yMax,Y); }
+      if (!std::isfinite(yMin) || !std::isfinite(yMax)) { yMin=0.10; yMax=0.16; }
+      const double pad = 0.15*(yMax-yMin);
+
+      TH2F fr("frM","",100,E_edges[0]-0.5, E_edges[N_E]-0.5, 100, yMin-pad, yMax+pad);
+      fr.SetTitle(Form("#mu_{#pi^{0}}(E): %s vs %s;E  [GeV];#mu_{#pi^{0}}  [GeV]", "CLUS-RAW", prettyB));
+      fr.SetStats(0); fr.Draw();
+      gR->Draw("P SAME"); gB->Draw("P SAME");
+      TLegend L(0.60,0.74,0.88,0.89); L.SetBorderSize(0); L.SetFillStyle(0);
+      L.AddEntry(gR.get(),"CLUS-RAW","p");
+      L.AddEntry(gB.get(),prettyB,"p"); L.Draw();
+
+      TString outP = outSum + "/" + baseName + "_Mean_vs_E.png";
+      c.SaveAs(outP);
+    }
+
+    // SIGMA vs E
+    {
+      auto gR = makeGE(x,yRs,ex,eyRs, kBlack, 20);
+      auto gB = makeGE(x,yBs,ex,eyBs, kRed+1, 24);
+
+      TCanvas c("cSig","sigma vs E",900,650);
+      c.SetLeftMargin(0.14); c.SetBottomMargin(0.14);
+
+      double yMin=+1e30,yMax=-1e30, X, Y;
+      for (int i=0;i<gR->GetN();++i){ gR->GetPoint(i,X,Y); yMin=std::min(yMin,Y); yMax=std::max(yMax,Y); }
+      for (int i=0;i<gB->GetN();++i){ gB->GetPoint(i,X,Y); yMin=std::min(yMin,Y); yMax=std::max(yMax,Y); }
+      if (!std::isfinite(yMin) || !std::isfinite(yMax)) { yMin=0.010; yMax=0.030; }
+      const double pad = 0.20*(yMax-yMin);
+
+      TH2F fr("frS","",100,E_edges[0]-0.5, E_edges[N_E]-0.5, 100, std::max(0.0,yMin-pad), yMax+pad);
+      fr.SetTitle(Form("#sigma_{#pi^{0}}(E): %s vs %s;E  [GeV];#sigma_{#pi^{0}}  [GeV]", "CLUS-RAW", prettyB));
+      fr.SetStats(0); fr.Draw();
+      gR->Draw("P SAME"); gB->Draw("P SAME");
+      TLegend L(0.60,0.74,0.88,0.89); L.SetBorderSize(0); L.SetFillStyle(0);
+      L.AddEntry(gR.get(),"CLUS-RAW","p");
+      L.AddEntry(gB.get(),prettyB,"p"); L.Draw();
+
+      TString outP = outSum + "/" + baseName + "_Sigma_vs_E.png";
+      c.SaveAs(outP);
+    }
+  };
+
+  // CLUS-RAW vs CLUS-CP
+  makeTwoSeries("CLUSCP", "CLUS-CP", "CLUSRAW_vs_CLUSCP");
+  // CLUS-RAW vs CLUS-CP(EA) == EAgeom
+  makeTwoSeries("EAgeom", "CLUS-CP(EA)", "CLUSRAW_vs_CLUSCPEA");
+
+  // All-variants summaries (one PNG, two pads: mean & sigma)
+  {
+    std::vector<double> x; x.reserve(N_E);
+    for (int i=0;i<N_E;++i) x.push_back(eCtrOf(i));
+
+    // helper to build one graph per variant
+    auto makeG = [&](int v, bool isSigma)->std::unique_ptr<TGraphErrors>
+    {
+      auto g = std::make_unique<TGraphErrors>();
+      for (int i=0;i<N_E;++i) {
+        if (!res[v][i].ok) continue;
+        const double y  = isSigma ? res[v][i].sig    : res[v][i].mean;
+        const double ey = isSigma ? res[v][i].sigErr : res[v][i].meanErr;
+        g->SetPoint(g->GetN(), x[i], y);
+        g->SetPointError(g->GetN()-1, 0.0, ey);
+      }
+      g->SetMarkerStyle( (std::string(kVarTags[v])=="CLUSRAW") ? 20 : 24 );
+      g->SetMarkerSize(1.2);
+      g->SetMarkerColor(kVarColor[v]);
+      g->SetLineColor(kVarColor[v]);
+      return g;
+    };
+
+    TCanvas c("cAllVar","All variants vs CLUS-RAW (mean & sigma)",1400,650);
+    c.Divide(2,1);
+
+    // Left: mean
+    c.cd(1); gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14);
+    double yMinM=+1e30, yMaxM=-1e30, X, Y;
+    std::vector<std::unique_ptr<TGraphErrors>> gMean;
+    for (int v=0; v<NVAR; ++v) {
+      auto g = makeG(v, false);
+      for (int i=0;i<g->GetN();++i){ g->GetPoint(i,X,Y); yMinM=std::min(yMinM,Y); yMaxM=std::max(yMaxM,Y); }
+      gMean.emplace_back(std::move(g));
+    }
+    if (!std::isfinite(yMinM) || !std::isfinite(yMaxM)) { yMinM=0.10; yMaxM=0.16; }
+    {
+      const double pad = 0.15*(yMaxM-yMinM);
+      TH2F fr("frMA","",100,E_edges[0]-0.5,E_edges[N_E]-0.5,100,yMinM-pad,yMaxM+pad);
+      fr.SetTitle("All variants vs CLUS-RAW: #mu_{#pi^{0}}(E);E  [GeV];#mu_{#pi^{0}}  [GeV]");
+      fr.SetStats(0); fr.Draw();
+      TLegend L(0.58,0.20,0.90,0.88); L.SetBorderSize(0); L.SetFillStyle(0);
+      for (int v=0; v<NVAR; ++v) { gMean[v]->Draw("P SAME"); L.AddEntry(gMean[v].get(), kVarPretty[v], "p"); }
+      L.Draw();
+    }
+
+    // Right: sigma
+    c.cd(2); gPad->SetLeftMargin(0.14); gPad->SetBottomMargin(0.14);
+    double yMinS=+1e30, yMaxS=-1e30;
+    std::vector<std::unique_ptr<TGraphErrors>> gSig;
+    for (int v=0; v<NVAR; ++v) {
+      auto g = makeG(v, true);
+      for (int i=0;i<g->GetN();++i){ g->GetPoint(i,X,Y); yMinS=std::min(yMinS,Y); yMaxS=std::max(yMaxS,Y); }
+      gSig.emplace_back(std::move(g));
+    }
+    if (!std::isfinite(yMinS) || !std::isfinite(yMaxS)) { yMinS=0.010; yMaxS=0.030; }
+    {
+      const double pad = 0.20*(yMaxS-yMinS);
+      TH2F fr("frSA","",100,E_edges[0]-0.5,E_edges[N_E]-0.5,100,std::max(0.0,yMinS-pad),yMaxS+pad);
+      fr.SetTitle("All variants vs CLUS-RAW: #sigma_{#pi^{0}}(E);E  [GeV];#sigma_{#pi^{0}}  [GeV]");
+      fr.SetStats(0); fr.Draw();
+      TLegend L(0.58,0.20,0.90,0.88); L.SetBorderSize(0); L.SetFillStyle(0);
+      for (int v=0; v<NVAR; ++v) { gSig[v]->Draw("P SAME"); L.AddEntry(gSig[v].get(), kVarPretty[v], "p"); }
+      L.Draw();
+    }
+
+    TString outP = outSum + "/AllVariants_vs_CLUSRAW.png";
+    c.SaveAs(outP);
+  }
+
+  std::cout << "[Pi0MassAna] DONE. Outputs → " << baseOut << "\n";
+}
+
+
+
 static void SaveTH3Lego(TH3* h3, const char* outPNG, const char* etaLabelPretty)
 {
   if (!h3) return;
@@ -2101,14 +2572,12 @@ static void MakeFourWaySummaries(
     drawMuSigmaFour_muClamp(false,
                             CLUSraw_eta, CLUScor_eta, PDCraw_eta, PDCcor_eta,
                             dir4Way + "/FourVariants_MeanSigmaVsE_Eta_muClamp_pm0p025.png");
-
-    // ---------------------------------------------------------------------
 }
 
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_noPhiTiltCorr.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -4043,6 +4512,18 @@ void MakeDeltaPhiEtaPlayground(
             "CorrectPosition(EA E-only), cluster",
             "CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster"
         };
+        const std::array<const char*,NPHI> phiEnum = {
+            "ETiltVariant::PDC_RAW",                 // 0
+            "ETiltVariant::PDC_CORR",                // 1
+            "ETiltVariant::CLUS_RAW",                // 2
+            "ETiltVariant::CLUS_CP",                 // 3
+            "ETiltVariant::CLUS_BCORR",              // 4
+            "ETiltVariant::CLUS_CP_EA_GEOM",         // 5
+            "ETiltVariant::CLUS_CP_EA_FIT_ETADEP",   // 6
+            "ETiltVariant::CLUS_CP_EA_FIT_EONLY",    // 7
+            "ETiltVariant::CLUS_CP_EA_MIX"           // 8
+        };
+
 
         std::array<std::vector<TH1F*>,NPHI> PHI{};
         for (int v=0; v<NPHI; ++v) PHI[v] = loadSet(phiPat[v]);
@@ -4189,7 +4670,121 @@ void MakeDeltaPhiEtaPlayground(
                            Vlab,
                            std::vector<std::string>(Vlab.size(), "phi"),
                            EctrS, MUv, dMUv, SGv, dSGv);
+
+            // ---------------- μ vs ln(E) overlay and fits: ALL variants (no CLUS_CP_EA alias) ----------------
+            if (!eCtr.empty()) {
+                // Build ln(E)
+                std::vector<double> lnEAll(eCtr.size());
+                std::transform(eCtr.begin(), eCtr.end(), lnEAll.begin(),
+                               [](double e){ return std::log(e); });
+
+                const double xLoAll = *std::min_element(lnEAll.begin(), lnEAll.end()) - 0.05;
+                const double xHiAll = *std::max_element(lnEAll.begin(), lnEAll.end()) + 0.05;
+
+                // y-range across all MU[v]
+                double yLoAll = +1e30, yHiAll = -1e30;
+                for (int v = 0; v < NPHI; ++v) {
+                    if (MU[v].empty()) continue;
+                    yLoAll = std::min(yLoAll, *std::min_element(MU[v].begin(), MU[v].end()));
+                    yHiAll = std::max(yHiAll, *std::max_element(MU[v].begin(), MU[v].end()));
+                }
+                const double padAll = 0.15*(yHiAll - yLoAll);
+                yLoAll -= padAll;
+                yHiAll += 0.35*(yHiAll - yLoAll);
+
+                TCanvas cAll("cPhi_AllVar_mu_vs_lnE","Δφ – μ vs ln(E) (ALL variants)",1100,780);
+                cAll.SetLeftMargin(0.15); cAll.SetRightMargin(0.06);
+
+                TH1F frAll("frAll",";ln E  [GeV];#mu  [rad]",1,xLoAll,xHiAll);
+                frAll.SetMinimum(yLoAll); frAll.SetMaximum(yHiAll);
+                frAll.Draw("AXIS");
+
+                std::vector<double> ex0All(eCtr.size(), 0.0);
+                TLegend lgAll(0.17,0.72,0.92,0.90);
+                lgAll.SetBorderSize(0); lgAll.SetFillStyle(0); lgAll.SetTextSize(0.030);
+                lgAll.SetNColumns(2);
+
+                // -------- Fit all variants, cache (intercept, slope), then write in required order --------
+                std::array<double,NPHI> fitB{};     // intercepts
+                std::array<double,NPHI> fitM{};     // slopes
+                std::array<bool,  NPHI> haveFit{};  // availability
+
+                for (int v = 0; v < NPHI; ++v) {
+                    bool has = false;
+                    for (auto* h : PHI[v]) { if (h && h->Integral()>0) { has = true; break; } }
+                    if (!has) { haveFit[v] = false; continue; }
+
+                    TGraphErrors* g = new TGraphErrors((int)eCtr.size(),
+                                                       lnEAll.data(), MU[v].data(),
+                                                       ex0All.data(), dMU[v].data());
+                    g->SetMarkerStyle(mkByV[v]);
+                    g->SetMarkerColor(colByV[v]);
+                    g->SetLineColor  (colByV[v]);
+                    g->SetMarkerSize(1.05);
+                    g->Draw("P SAME");
+
+                    TF1 f(Form("fAll_%d",v), "pol1", xLoAll, xHiAll);
+                    f.SetLineColor (colByV[v]);
+                    f.SetLineStyle (2);
+                    f.SetLineWidth (2);
+                    g->Fit(&f, "Q");
+                    f.Draw("SAME");
+
+                    fitB[v]    = f.GetParameter(0);   // intercept
+                    fitM[v]    = f.GetParameter(1);   // slope
+                    haveFit[v] = true;
+
+                    lgAll.AddEntry(g, Form("%s  (m=%.2e, b=%.2e)", phiLab[v], fitM[v], fitB[v]), "p");
+                }
+
+                // Open the file fresh and write in the exact order & format you asked for
+                std::ofstream fAll(dirPhiLog + "/DeltaPhi_MuVsLogE_fit.txt", std::ios::trunc);
+                fAll << "# ---- Δφ: μ vs ln(E) linear fits (intercept first, slope second) ----\n";
+
+                // Pretty comment strings exactly as in your spec
+                const std::array<const char*,NPHI> outComment = {
+                    "no corr, scratch",                              // 0: PDC raw
+                    "b(E) corr, scratch",                            // 1: PDC corrected
+                    "no corr, cluster",                              // 2: CLUS raw
+                    "CorrectPosition, cluster",                      // 3: CLUS CP
+                    "b(E) corr, cluster",                            // 4: CLUS b(E)
+                    "CorrectPosition(EA geom), cluster",             // 5
+                    "CorrectPosition(EA |#eta|+E), cluster",         // 6
+                    "CorrectPosition(EA E-only), cluster",           // 7
+                    "CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster" // 8
+                };
+
+                // Required emission order:
+                //   CLUS_RAW, CLUS_CP, EA geom, EA |eta|+E, EA E-only, EA mix, CLUS_BCORR, PDC_RAW, PDC_CORR
+                const int vCLUSraw  = 2;
+                const int vCLUScp   = 3;
+                const int vEAgeom   = 5;
+                const int vEAetaE   = 6;
+                const int vEAeOnly  = 7;
+                const int vEAmix    = 8;
+                const int vBCorr    = 4;
+                const int vPDCraw   = 0;
+                const int vPDCcorr  = 1;
+
+                const std::vector<int> writeOrder = {
+                    vCLUSraw, vCLUScp, vEAgeom, vEAetaE, vEAeOnly, vEAmix, vBCorr, vPDCraw, vPDCcorr
+                };
+
+                for (int v : writeOrder) {
+                    if (!haveFit[v]) continue;  // skip if that variant has no data
+                    // Write as { intercept, slope } so the RHS entry (slope) is non-negative in your case
+                    fAll << "  {" << phiEnum[v] << ", { "
+                         << Form("%.6e", fitB[v]) << ", " << Form("%.6e", fitM[v])
+                         << " }},  // " << outComment[v] << "\n";
+                }
+
+                fAll.close();
+                lgAll.Draw();
+                cAll.SaveAs((dirPhiLog + "/DeltaPhi_MuVsLogE_AllVariants.png").c_str());
+                cAll.Close();
+            }
         }
+
 
         // ==================== CLUS-only overlays (RAW, CORR, CORR(EA_geom)) + EA fits ====================
         {
@@ -4310,10 +4905,7 @@ void MakeDeltaPhiEtaPlayground(
                 TLegend lg3(0.17,0.74,0.92,0.90);
                 lg3.SetBorderSize(0); lg3.SetFillStyle(0); lg3.SetTextSize(0.032);
 
-                // Append fits for 3-way (RAW/CP/EA_geom)
-                std::ofstream fapp(dirPhiLog + "/DeltaPhi_MuVsLogE_fit.txt", std::ios::app);
-                if (fapp.tellp() > 0) fapp << "\n# ---- Clusterizer 3-way (cpRaw / cpCorr / cpCorrEA_geom) ----\n";
-
+                // Draw the three series with linear fits; no file writes here (consolidated block handles all).
                 for (int v : use3) {
                     TGraphErrors* g = new TGraphErrors((int)eCtr.size(),
                                                        lnE.data(), MU[v].data(),
@@ -4331,33 +4923,14 @@ void MakeDeltaPhiEtaPlayground(
                     g->Fit(&f, "Q");
                     f.Draw("SAME");
 
-                    fapp << Form("%-44s % .6e   % .6e\n",
-                                 phiLab[v], f.GetParameter(0), f.GetParameter(1));
-
+                    // Legend as before
                     lg3.AddEntry(g, Form("%s  (m=%.2e, b=%.2e)",
                                          phiLab[v], f.GetParameter(1), f.GetParameter(0)), "p");
                 }
+
                 lg3.Draw();
                 c3ln.SaveAs((dirPhiLog + "/DeltaPhi_MuVsLogE_Clusterizer3.png").c_str());
                 c3ln.Close();
-
-                // ---------------- EXTRA: μ vs ln(E) fits for all EA flavours ----------------
-                std::vector<int> eaList;
-                for (int v : {vEA_geom, vEA_etaDep, vEA_eOnly, vEA_mix}) if (hasAny(v)) eaList.push_back(v);
-                if (!eaList.empty()) {
-                    std::ofstream fea(dirPhiLog + "/DeltaPhi_MuVsLogE_fit.txt", std::ios::app);
-                    fea << "\n# ---- CLUS-CP(EA) 4-way (geom / |eta|+E / E-only / mix) ----\n";
-                    for (int v : eaList) {
-                        TF1 f(Form("fEA_%d",v), "pol1", xLo, xHi);
-                        // make a throwaway graph just to run the fit consistently (no draw)
-                        TGraphErrors gEA((int)eCtr.size(),
-                                         lnE.data(), MU[v].data(),
-                                         ex0.data(), dMU[v].data());
-                        gEA.Fit(&f, "Q");
-                        fea << Form("%-44s % .6e   % .6e\n",
-                                    phiLab[v], f.GetParameter(0), f.GetParameter(1));
-                    }
-                }
             }
         }
 
@@ -4427,6 +5000,7 @@ void MakeDeltaPhiEtaPlayground(
                 std::vector<std::unique_ptr<TF1>> fits;
                 fits.reserve(useV.size());
 
+                // Plot-only fits (no file writes here; consolidated ALL-variants block handles the file).
                 for (int v : useV) {
                     TGraphErrors* g = new TGraphErrors((int)eCtr.size(),
                                                        lnE.data(), MU[v].data(),
@@ -4447,6 +5021,8 @@ void MakeDeltaPhiEtaPlayground(
 
                     const double b = f->GetParameter(0); // intercept
                     const double m = f->GetParameter(1); // slope
+
+                    // Legend unchanged
                     lg4.AddEntry(g, Form("%s  (m=%.2e, b=%.2e)", prettyLabel(v), m, b), "p");
                 }
 
@@ -4582,6 +5158,526 @@ void MakeDeltaPhiEtaPlayground(
         }
     }
     
+    // =====================================================================================
+    // NEW: CLUSEAvariantsVSRAW — CLUS-RAW vs CLUS-CP and vs each CLUS-CP(EA) variant
+    //      • First-bin overlays, all-bins tables, μ/σ vs E summaries, and σ ratios
+    //      • Plus: single μ/σ(E) overlays with ALL variants over RAW
+    //      • Outputs go to:  outDir/CLUSEAvariantsVSRAW
+    // =====================================================================================
+    auto MakeClusEAvariantsVsRaw =
+    [&](const std::vector<TH1F*>& Hphi_raw,
+        const std::vector<TH1F*>& Hphi_cp,
+        const std::vector<TH1F*>& Heta_raw,
+        const std::vector<TH1F*>& Heta_cp)
+    {
+        const std::string dir = std::string(outDir) + "/CLUSEAvariantsVSRAW";
+        const std::string dirFirstBin = dir + "/firstBinOverlays";
+        const std::string dirMean     = dir + "/meanSummaries";
+        ensureDir(dir.c_str());
+        ensureDir(dirFirstBin.c_str());
+        ensureDir(dirMean.c_str());
+
+        const double eLo = eEdges.front().first;
+        const double eHi = eEdges.front().second;
+
+        // ---------------- Robust ratio maker: match by energy-bin index ----------------
+        auto makeRatioSeriesByIndex =
+        [&](const std::vector<TH1F*>& A, const std::vector<TH1F*>& B)->SigSeries
+        {
+            SigSeries R;
+            if (A.empty() || B.empty()) return R;
+            const std::size_t n = std::min(A.size(), B.size());
+            R.E.reserve(n); R.S.reserve(n); R.dS.reserve(n);
+
+            for (std::size_t i=0; i<n; ++i) {
+                TH1F* hA = A[i];
+                TH1F* hB = B[i];
+                if (!hA || !hB) continue;
+                if (hA->Integral()<=0 || hB->Integral()<=0) continue;
+
+                double mA, meA, sA, seA;
+                double mB, meB, sB, seB;
+                std::tie(mA, meA, sA, seA) = statsFromHistRange(hA, xMin, xMax);
+                std::tie(mB, meB, sB, seB) = statsFromHistRange(hB, xMin, xMax);
+                if (sA<=0.0 || sB<=0.0) continue;
+
+                const double Ectr = 0.5*(eEdges[i].first + eEdges[i].second);
+                const double r    = sA / sB;
+                const double dr   = r * std::sqrt( (seA>0 ? (seA/sA)*(seA/sA) : 0.0) +
+                                                   (seB>0 ? (seB/sB)*(seB/sB) : 0.0) );
+                R.E .push_back(Ectr);
+                R.S .push_back(r);
+                R.dS.push_back(dr);
+            }
+            return R;
+        };
+
+        // ---- small helpers (custom legend text) ----
+        auto drawFirstBinOverlayCustom =
+        [&](TH1F* hA, TH1F* hB,
+            const char* title,
+            const char* residLatex,
+            const char* labelA,
+            const char* labelB,
+            Color_t col,
+            const std::string& outPng)
+        {
+            if (!hA || !hB) return;
+            if (hA->Integral()<=0 || hB->Integral()<=0) return;
+
+            TCanvas c("cEA_FB","",1000,750);
+            std::vector<ResidualSpec> specs = {
+                { hA, Form("%s, %s", labelA, residLatex), col, (Style_t)20, 1 },
+                { hB, Form("%s, %s", labelB, residLatex), col, (Style_t)24, 1 }
+            };
+            drawResidualPanel(&c, title, eLo, eHi, specs, xMin, xMax, 1.0);
+            c.SaveAs(outPng.c_str());
+            c.Close();
+            std::cout << "[Playground] Wrote " << outPng << "\n";
+        };
+
+        auto drawTableOverlayCustom =
+        [&](const std::vector<TH1F*>& A,
+            const std::vector<TH1F*>& B,
+            const char* panelTitle,
+            const char* residLatex,
+            const char* labelA,
+            const char* labelB,
+            Color_t col,
+            const std::string& outPng)
+        {
+            const int nCol=4, nRow=2, maxPads=nCol*nRow;
+            TCanvas cT("cEA_Table","",1600,900);
+            cT.SetTopMargin(0.10);
+            cT.Divide(nCol,nRow,0,0);
+
+            int pad=1;
+            for (std::size_t iE=0; iE<eEdges.size() && pad<=maxPads; ++iE)
+            {
+                if (!A[iE] || !B[iE] || A[iE]->Integral()==0 || B[iE]->Integral()==0) { ++pad; continue; }
+                cT.cd(pad++);
+                setPadMargins();
+
+                std::vector<ResidualSpec> specs = {
+                    { A[iE], Form("%s, %s", labelA, residLatex), col, (Style_t)20, 1 },
+                    { B[iE], Form("%s, %s", labelB, residLatex), col, (Style_t)24, 1 }
+                };
+                drawResidualPanel(gPad, panelTitle,
+                                  eEdges[iE].first, eEdges[iE].second,
+                                  specs, xMin, xMax, 0.85);
+            }
+            cT.cd(0);
+            drawHeaderNDC(Form("%s  –  %s", residLatex, panelTitle), 0.975, 0.045);
+            cT.SaveAs(outPng.c_str());
+            cT.Close();
+            std::cout << "[Playground] Wrote " << outPng << "\n";
+        };
+
+        auto doPair =
+        [&](const std::vector<TH1F*>& RAW,
+            const std::vector<TH1F*>& VAR,
+            const char* residLatex,
+            Color_t col,
+            const char* labelRaw,
+            const char* labelVar,
+            const char* stem)
+        {
+            if (RAW.empty() || VAR.empty()) return;
+
+            // first bin
+            if (RAW[0] && VAR[0] && RAW[0]->Integral()>0 && VAR[0]->Integral()>0) {
+                drawFirstBinOverlayCustom(RAW[0], VAR[0],
+                    "Clusterizer: RAW vs variant",
+                    residLatex, labelRaw, labelVar, col,
+                    dirFirstBin + "/" + std::string(stem) + "_FirstBin.png");
+            }
+
+            // table (kept in the CLUSEAvariantsVSRAW root)
+            drawTableOverlayCustom(RAW, VAR,
+                "Clusterizer: RAW vs variant (all energy bins)",
+                residLatex, labelRaw, labelVar, col,
+                dir + "/" + std::string(stem) + "_AllBins_Table.png");
+
+            // μ/σ vs E
+            makeMuSigmaVariantOverlayWithLabels(RAW, VAR, col, 20, 24, "#mu",
+                (dirMean + "/" + std::string(stem) + "_MeanSigmaVsE.png").c_str(),
+                labelRaw, labelVar,
+                Form("%s  –  %s vs %s  –  Mean / RMS vs E",
+                     residLatex, labelRaw, labelVar));
+        };
+
+        // ---------------- CLUS-CP vs CLUS-RAW ----------------
+        doPair(Hphi_raw, Hphi_cp,
+               "#Delta#phi", kRed+1,
+               "Constant-b (Production) Uncorr",
+               "Constant-b (Production) Corr",
+               "CLUSvsCP_DeltaPhi");
+        doPair(Heta_raw, Heta_cp,
+               "#Delta#eta", kBlue+1,
+               "Constant-b (Production) Uncorr",
+               "Constant-b (Production) Corr",
+               "CLUSvsCP_DeltaEta");
+
+        // ---------------- Each CLUS-CP(EA) variant vs CLUS-RAW ----------------
+        struct EAdef { const char* key; const char* pretty; };
+        const std::vector<EAdef> eaDefs = {
+            {"geom",              "Constant-b (Production) CP(EA geom)"},
+            {"fitEtaDep",         "Constant-b (Production) CP(EA |#eta|+E)"},
+            {"fitEnergyOnly",     "Constant-b (Production) CP(EA E-only)"},
+            {"fitPhiE_etaEtaDep", "Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E)"}
+        };
+
+        std::vector<std::tuple<SigSeries,const char*,Color_t,Style_t>> phiRatioEAseries;
+        std::vector<std::tuple<SigSeries,const char*,Color_t,Style_t>> etaRatioEAseries;
+
+        // Also cache EA sets so we can make an "all variants over RAW" μ/σ overlay.
+        struct SeriesSet { std::string label; std::vector<TH1F*> H; };
+        std::vector<SeriesSet> phiEAsets, etaEAsets;
+
+        auto pickColorForIdx = [](int i)->Color_t {
+            switch(i){ case 0: return kRed+2; case 1: return kGreen+2; case 2: return kMagenta+1; default: return kOrange+7; }
+        };
+        auto pickMarkerForIdx = [](int i)->Style_t {
+            switch(i){ case 0: return 24; case 1: return 25; case 2: return 27; default: return 28; }
+        };
+
+        for (std::size_t iv=0; iv<eaDefs.size(); ++iv)
+        {
+            const auto& d = eaDefs[iv];
+            const std::string patP = std::string("h_phi_diff_cpCorrEA_") + d.key + "_%s";
+            const std::string patE = std::string("h_eta_diff_cpCorrEA_") + d.key + "_%s";
+            auto P = loadSet(patP.c_str());
+            auto E = loadSet(patE.c_str());
+
+            bool anyP=false; for (auto* h : P) if (h && h->Integral()>0) { anyP=true; break; }
+            bool anyE=false; for (auto* h : E) if (h && h->Integral()>0) { anyE=true; break; }
+
+            if (anyP) {
+                doPair(Hphi_raw, P, "#Delta#phi", kRed+1,
+                       "Constant-b (Production) Uncorr", d.pretty,
+                       (std::string("CLUSEA_") + d.key + "_vs_RAW_DeltaPhi").c_str());
+
+                // Try index-based ratio; if empty, fall back to σ(E) ratio
+                SigSeries r = makeRatioSeriesByIndex(P, Hphi_raw);
+                if (r.E.empty()) {
+                    SigSeries sEA = buildSigmaSeries(P);
+                    SigSeries sR  = buildSigmaSeries(Hphi_raw);
+                    // classic centre-match ratio (already in your code base)
+                    r = makeRatioSeries(sEA, sR);
+                }
+                if (!r.E.empty())
+                    phiRatioEAseries.push_back({r, d.pretty, pickColorForIdx((int)iv), pickMarkerForIdx((int)iv)});
+                phiEAsets.push_back({d.pretty, P});
+            }
+
+            if (anyE) {
+                doPair(Heta_raw, E, "#Delta#eta", kBlue+1,
+                       "Constant-b (Production) Uncorr", d.pretty,
+                       (std::string("CLUSEA_") + d.key + "_vs_RAW_DeltaEta").c_str());
+
+                SigSeries r = makeRatioSeriesByIndex(E, Heta_raw);
+                if (r.E.empty()) {
+                    SigSeries sEA = buildSigmaSeries(E);
+                    SigSeries sR  = buildSigmaSeries(Heta_raw);
+                    r = makeRatioSeries(sEA, sR);
+                }
+                if (!r.E.empty())
+                    etaRatioEAseries.push_back({r, d.pretty, pickColorForIdx((int)iv), pickMarkerForIdx((int)iv)});
+                etaEAsets.push_back({d.pretty, E});
+            }
+        }
+
+        // Build CP/RAW ratios (to be added alongside all EA/RAW ratios) — with the same fallback
+        SigSeries rCP_phi = makeRatioSeriesByIndex(Hphi_cp, Hphi_raw);
+        if (rCP_phi.E.empty()) {
+            SigSeries sCP = buildSigmaSeries(Hphi_cp);
+            SigSeries sR  = buildSigmaSeries(Hphi_raw);
+            rCP_phi       = makeRatioSeries(sCP, sR);
+        }
+
+        SigSeries rCP_eta = makeRatioSeriesByIndex(Heta_cp, Heta_raw);
+        if (rCP_eta.E.empty()) {
+            SigSeries sCP = buildSigmaSeries(Heta_cp);
+            SigSeries sR  = buildSigmaSeries(Heta_raw);
+            rCP_eta       = makeRatioSeries(sCP, sR);
+        }
+
+        // Helper: draw ALL ratios (CP and every EA) on ONE canvas (graphs kept alive)
+        auto drawAllRatiosOneCanvas =
+        [&](const std::vector<std::tuple<SigSeries,const char*,Color_t,Style_t>>& eaSeriesIn,
+            const SigSeries& rCPIn,
+            const char* lblCP,
+            const char* yTitle,
+            const std::string& outPngStem)
+        {
+            // Build a filtered list that only contains non-empty series
+            std::vector<std::tuple<SigSeries,const char*,Color_t,Style_t>> eaSeries;
+            eaSeries.reserve(eaSeriesIn.size());
+            for (const auto& t : eaSeriesIn) {
+                const SigSeries& R = std::get<0>(t);
+                if (!R.E.empty()) eaSeries.push_back(t);
+            }
+            const bool hasCP = !rCPIn.E.empty();
+            if (!hasCP && eaSeries.empty()) {
+                std::cerr << "[Playground][WARN] No ratio points to draw for " << outPngStem << "\n";
+                return;
+            }
+
+            // X range from binning
+            const double xMinE = 0.0;
+            const double xMaxE = eEdges.empty() ? 1.0 : eEdges.back().second;
+
+            // Y range from actually available points; fallback → [0.85, 1.15]
+            double yLo = +1e30, yHi = -1e30;
+            auto scan = [&](const SigSeries& R){
+                for (std::size_t i=0;i<R.S.size();++i){
+                    const double err = (R.dS.empty()?0.0:R.dS[i]);
+                    yLo = std::min(yLo, R.S[i] - err);
+                    yHi = std::max(yHi, R.S[i] + err);
+                }
+            };
+            if (hasCP) scan(rCPIn);
+            for (const auto& t : eaSeries) scan(std::get<0>(t));
+
+            if (!(yLo < yHi)) { yLo = 0.85; yHi = 1.15; }
+            else {
+                const double pad = 0.10*(yHi - yLo + 1e-9);
+                yLo -= pad; yHi += pad;
+            }
+
+            TCanvas c("cEA_RatioAll","All ratios over RAW",900,600);
+            c.SetLeftMargin(0.15);
+            c.SetRightMargin(0.06);
+            c.SetTopMargin(0.10);
+            c.SetBottomMargin(0.18);
+
+            TH1F fr("fr","",1,xMinE,xMaxE);
+            fr.SetTitle("");
+            fr.GetXaxis()->SetTitle("E  [GeV]");
+            fr.GetYaxis()->SetTitle(yTitle);
+            fr.GetXaxis()->SetTitleSize(0.050);
+            fr.GetXaxis()->SetLabelSize(0.038);
+            fr.GetXaxis()->SetTitleOffset(1.05);
+            fr.GetYaxis()->SetTitleSize(0.050);
+            fr.GetYaxis()->SetLabelSize(0.038);
+            fr.SetMinimum(yLo); fr.SetMaximum(yHi);
+            fr.Draw("AXIS");
+
+            TLine l1(xMinE,1.0,xMaxE,1.0); l1.SetLineStyle(2); l1.SetLineColor(kGray+2); l1.Draw();
+
+            TLegend lg(0.12,0.72,0.90,0.92);
+            lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.033); lg.SetNColumns(2);
+
+            std::vector<std::unique_ptr<TGraphErrors>> keep;
+
+            auto drawOne = [&](const SigSeries& R, Color_t col, Style_t mk, const char* lab){
+                if (R.E.empty()) return;
+                std::vector<double> ex(R.E.size(), 0.0);
+                auto g = std::make_unique<TGraphErrors>((int)R.E.size(),
+                                const_cast<double*>(R.E.data()),
+                                const_cast<double*>(R.S.data()),
+                                ex.data(),
+                                const_cast<double*>(R.dS.data()));
+                g->SetMarkerStyle(mk);
+                g->SetMarkerSize(1.15);
+                g->SetMarkerColor(col);
+                g->SetLineColor(col);
+                g->Draw("LP SAME");    // lines + points ⇒ easier to see
+                lg.AddEntry(g.get(), lab, "lp");
+                keep.emplace_back(std::move(g));
+            };
+
+            if (hasCP) drawOne(rCPIn, kRed+1, 24, lblCP);
+            for (const auto& t : eaSeries) {
+                drawOne(std::get<0>(t), std::get<2>(t), std::get<3>(t), std::get<1>(t));
+            }
+
+            lg.Draw();
+            TLatex h; h.SetNDC(); h.SetTextAlign(13); h.SetTextSize(0.040);
+            h.DrawLatex(0.16,0.955,"RMS Ratio: CP & EA variants over RAW");
+
+            c.SaveAs((dir + "/" + outPngStem).c_str());
+            c.Close();
+            std::cout << "[Playground] Wrote " << dir + "/" + outPngStem << "\n";
+        };
+
+        // One canvas for Δφ
+        drawAllRatiosOneCanvas(
+            phiRatioEAseries,
+            rCP_phi,
+            "Constant-b (Production) Corr / RAW",
+            "Ratio  #sigma_{RMS}(#Delta#phi) / #sigma_{RMS}(#Delta#phi)_{RAW}",
+            "Ratio_AllVariants_over_RAW_DeltaPhi.png"
+        );
+
+        // One canvas for Δη
+        drawAllRatiosOneCanvas(
+            etaRatioEAseries,
+            rCP_eta,
+            "Constant-b (Production) Corr / RAW",
+            "Ratio  #sigma_{RMS}(#Delta#eta) / #sigma_{RMS}(#Delta#eta)_{RAW}",
+            "Ratio_AllVariants_over_RAW_DeltaEta.png"
+        );
+
+        // ---------------- μ/σ(E) overlays with ALL variants over RAW (single canvas per residual) ---------
+        auto drawAllVariantsMuSigmaOverRaw =
+        [&](const std::vector<TH1F*>& RAW,
+            const std::vector<TH1F*>& CP,
+            const std::vector<SeriesSet>& EAsets,
+            const char* residLatex,
+            Color_t baseColor,
+            const std::string& outPng)
+        {
+            // Build μ/σ arrays for RAW and CP
+            std::vector<double> eCtr; eCtr.reserve(eEdges.size());
+            std::vector<double> muR, dmuR, sgR, dsgR;
+            std::vector<double> muC, dmuC, sgC, dsgC;
+
+            auto pushIf = [&](TH1F* h, std::vector<double>& mu, std::vector<double>& dmu,
+                              std::vector<double>& sg, std::vector<double>& dsg, std::size_t i){
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(h, xMin, xMax);
+                mu.push_back(m);  dmu.push_back(me);
+                sg.push_back(r);  dsg.push_back(re);
+                if (eCtr.size() < i+1) eCtr.push_back(0.5*(eEdges[i].first + eEdges[i].second));
+            };
+
+            const std::size_t N = eEdges.size();
+            for (std::size_t i=0;i<N;++i){
+                if (RAW[i] && RAW[i]->Integral()>0){
+                    pushIf(RAW[i], muR, dmuR, sgR, dsgR, i);
+                } else { continue; }
+                if (CP[i] && CP[i]->Integral()>0){
+                    pushIf(CP[i],  muC, dmuC, sgC, dsgC, i);
+                } else {
+                    // keep vector sizes aligned with RAW positions
+                    muC.push_back(0); dmuC.push_back(0); sgC.push_back(0); dsgC.push_back(0);
+                }
+            }
+
+            // Pre-compute EA series μ/σ
+            struct SeriesMU { std::string label; std::vector<double> mu, dmu, sg, dsg; };
+            std::vector<SeriesMU> eaMU; eaMU.reserve(EAsets.size());
+            for (const auto& s : EAsets){
+                SeriesMU S; S.label = s.label;
+                S.mu.reserve(N); S.dmu.reserve(N); S.sg.reserve(N); S.dsg.reserve(N);
+                for (std::size_t i=0;i<N;++i){
+                    if (!s.H[i] || s.H[i]->Integral()<=0) { S.mu.push_back(0); S.dmu.push_back(0); S.sg.push_back(0); S.dsg.push_back(0); continue; }
+                    double m, me, r, re; std::tie(m, me, r, re) = statsFromHistRange(s.H[i], xMin, xMax);
+                    S.mu.push_back(m); S.dmu.push_back(me); S.sg.push_back(r); S.dsg.push_back(re);
+                }
+                eaMU.push_back(std::move(S));
+            }
+
+            if (eCtr.empty()) return;
+
+            const double xAxisMin = 0.0;
+            const double xAxisMax = eCtr.back() + 0.5*(eEdges.back().second - eEdges.back().first);
+            std::vector<double> ex(eCtr.size(), 0.0);
+
+            TCanvas c("cAllVar_MuSig","All variants over RAW – Mean/RMS",1000,850);
+            auto pads = makeEqualHeightTwinPads(c, "AllVarMuSig", 0.15,0.05, 0.14,0.02, 0.04,0.16);
+            TPad* pTop = pads.first; TPad* pBot = pads.second;
+
+            // ---------------- μ(E)
+            pTop->cd();
+            double muLo=+1e30, muHi=-1e30;
+            for (std::size_t i=0;i<muR.size();++i){
+                muLo = std::min(muLo, muR[i]-dmuR[i]); muHi = std::max(muHi, muR[i]+dmuR[i]);
+                muLo = std::min(muLo, muC[i]-dmuC[i]); muHi = std::max(muHi, muC[i]+dmuC[i]);
+            }
+            for (const auto& S : eaMU){
+                for (std::size_t i=0;i<S.mu.size();++i){
+                    muLo = std::min(muLo, S.mu[i]-S.dmu[i]); muHi = std::max(muHi, S.mu[i]+S.dmu[i]);
+                }
+            }
+            const double padMu = 0.25*(muHi-muLo);
+            TH1F frU("frU",";E  [GeV];#mu  [rad]",1,xAxisMin,xAxisMax);
+            frU.SetMinimum(muLo - padMu);
+            frU.SetMaximum(muHi + padMu);
+            frU.GetXaxis()->SetLabelSize(0.0);
+            frU.GetXaxis()->SetTitleSize(0.0);
+            frU.GetXaxis()->SetTickLength(0.0);
+            frU.Draw("AXIS");
+            TLine l0(xAxisMin,0.0,xAxisMax,0.0); l0.SetLineStyle(2); l0.Draw();
+
+            // Keep graphs alive
+            std::vector<std::unique_ptr<TGraphErrors>> keepMu, keepSg;
+
+            // RAW and CP (baseline color)
+            auto gMuR = std::make_unique<TGraphErrors>((int)eCtr.size(), eCtr.data(), muR.data(), ex.data(), dmuR.data());
+            gMuR->SetMarkerStyle(20); gMuR->SetMarkerColor(baseColor); gMuR->SetLineColor(baseColor); gMuR->SetMarkerSize(1.0); gMuR->Draw("P SAME");
+            keepMu.emplace_back(std::move(gMuR));
+            auto gMuC = std::make_unique<TGraphErrors>((int)eCtr.size(), eCtr.data(), muC.data(), ex.data(), dmuC.data());
+            gMuC->SetMarkerStyle(24); gMuC->SetMarkerColor(baseColor); gMuC->SetLineColor(baseColor); gMuC->SetMarkerSize(1.0); gMuC->Draw("P SAME");
+            keepMu.emplace_back(std::move(gMuC));
+
+            // EA variants
+            for (std::size_t iv=0; iv<eaMU.size(); ++iv){
+                auto g = std::make_unique<TGraphErrors>((int)eCtr.size(), eCtr.data(), eaMU[iv].mu.data(), ex.data(), eaMU[iv].dmu.data());
+                g->SetMarkerStyle(pickMarkerForIdx((int)iv));
+                g->SetMarkerColor(pickColorForIdx((int)iv));
+                g->SetLineColor  (pickColorForIdx((int)iv));
+                g->SetMarkerSize(1.0);
+                g->Draw("P SAME");
+                keepMu.emplace_back(std::move(g));
+            }
+
+            TLegend legU(0.54,0.70,0.93,0.92);
+            legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.033); legU.SetNColumns(2);
+            legU.AddEntry(keepMu[0].get(), "Constant-b (Production) Uncorr", "p");
+            legU.AddEntry(keepMu[1].get(), "Constant-b (Production) Corr",   "p");
+            for (std::size_t iv=0; iv<eaMU.size(); ++iv)
+                legU.AddEntry(keepMu[2+iv].get(), eaMU[iv].label.c_str(), "p");
+            legU.Draw();
+
+            // ---------------- σ(E)
+            pBot->cd();
+            double sgHi = -1e30;
+            for (double v : sgR) sgHi = std::max(sgHi, v);
+            for (double v : sgC) sgHi = std::max(sgHi, v);
+            for (const auto& S : eaMU) for (double v : S.sg) sgHi = std::max(sgHi, v);
+
+            TH1F frL("frL",";E  [GeV];#sigma_{RMS}  [rad]",1,xAxisMin,xAxisMax);
+            frL.SetMinimum(0.0); frL.SetMaximum(1.15*sgHi); frL.Draw("AXIS");
+
+            auto gSgR = std::make_unique<TGraphErrors>((int)eCtr.size(), eCtr.data(), sgR.data(), ex.data(), dsgR.data());
+            gSgR->SetMarkerStyle(20); gSgR->SetMarkerColor(baseColor); gSgR->SetLineColor(baseColor); gSgR->SetMarkerSize(1.0); gSgR->Draw("P SAME");
+            keepSg.emplace_back(std::move(gSgR));
+            auto gSgC = std::make_unique<TGraphErrors>((int)eCtr.size(), eCtr.data(), sgC.data(), ex.data(), dsgC.data());
+            gSgC->SetMarkerStyle(24); gSgC->SetMarkerColor(baseColor); gSgC->SetLineColor(baseColor); gSgC->SetMarkerSize(1.0); gSgC->Draw("P SAME");
+            keepSg.emplace_back(std::move(gSgC));
+
+            for (std::size_t iv=0; iv<eaMU.size(); ++iv){
+                auto g = std::make_unique<TGraphErrors>((int)eCtr.size(), eCtr.data(), eaMU[iv].sg.data(), ex.data(), eaMU[iv].dsg.data());
+                g->SetMarkerStyle(pickMarkerForIdx((int)iv));
+                g->SetMarkerColor(pickColorForIdx((int)iv));
+                g->SetLineColor  (pickColorForIdx((int)iv));
+                g->SetMarkerSize(1.0);
+                g->Draw("P SAME");
+                keepSg.emplace_back(std::move(g));
+            }
+
+            c.cd();
+            TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.038);
+            h.DrawLatex(0.50,0.985,Form("%s  –  RAW (filled) vs all variants (open/custom)  –  Mean / RMS vs E", residLatex));
+
+            c.SaveAs(outPng.c_str());
+            c.Close();
+            std::cout << "[Playground] Wrote " << outPng << "\n";
+        };
+
+        // Emit the “all variants over RAW” μ/σ overlays
+        drawAllVariantsMuSigmaOverRaw(Hphi_raw, Hphi_cp, phiEAsets,
+            "#Delta#phi", kRed+1,  dirMean + "/AllVariantsOverRAW_DeltaPhi_MeanSigmaVsE.png");
+        drawAllVariantsMuSigmaOverRaw(Heta_raw, Heta_cp, etaEAsets,
+            "#Delta#eta", kBlue+1, dirMean + "/AllVariantsOverRAW_DeltaEta_MeanSigmaVsE.png");
+    };
+
+    // Invoke the new block (uses the CLUS raw/corrected sets we already loaded)
+    MakeClusEAvariantsVsRaw(Hphi, HphiCorr, Heta, HetaCorr);
+
+    // ---------------- existing summary calls remain unchanged ----------------
     MakeThreeWaySummaries(
         outDir,
         eEdges,
@@ -4609,8 +5705,303 @@ void MakeDeltaPhiEtaPlayground(
         makeEqualHeightTwinPads,
         statsFromHistRange
     );
+
+    // =====================================================================
+    // NEW: Two summary tables of "smallest RMS per energy bin"
+    //      Table A: Across *all* variants that are loaded/read in this job
+    //      Table B: Restricted to CLUS-RAW, CLUS-CP, CLUS-CP(EA*) variants
+    //      Both are printed to stdout and written as CSV in outDir.
+    // =====================================================================
+
+    auto pushIfAny = [&](std::vector<std::pair<std::string, std::vector<TH1F*>>>& dst,
+                         const std::string& label, const char* pat)
+    {
+        auto S = loadSet(pat);
+        bool any=false;
+        for (auto* h : S) { if (h && h->Integral()>0) { any = true; break; } }
+        if (any) dst.emplace_back(label, std::move(S));
+    };
+
+    auto computeMinRMSPerBin = [&](const std::vector<std::pair<std::string, std::vector<TH1F*>>>& V,
+                                   std::vector<std::string>& bestLabel,
+                                   std::vector<double>&     bestSigma)
+    {
+        bestLabel.assign(eEdges.size(), "--");
+        bestSigma.assign(eEdges.size(),  0.0);
+        for (std::size_t iE=0; iE<eEdges.size(); ++iE) {
+            double best = 1e30; std::string lab = "--";
+            for (const auto& kv : V) {
+                const auto& label = kv.first;
+                const auto& vecH  = kv.second;
+                if (iE >= vecH.size()) continue;
+                TH1F* h = vecH[iE];
+                if (!h || h->Integral()==0) continue;
+                double m, me, r, re;
+                std::tie(m, me, r, re) = statsFromHistRange(h, xMin, xMax);
+                if (r>0.0 && r < best) { best = r; lab = label; }
+            }
+            if (best < 1e29) { bestSigma[iE] = best; bestLabel[iE] = lab; }
+        }
+    };
+
+    // ---------- ANSI styles (kept subtle; works in most terminals) ----------
+    constexpr const char* RST  = "\033[0m";
+    constexpr const char* BOLD = "\033[1m";
+    constexpr const char* DIM  = "\033[2m";
+    constexpr const char* CYAN = "\033[36m";
+    constexpr const char* YELL = "\033[33m";
+    constexpr const char* GRN  = "\033[32m";
+    constexpr const char* MAG  = "\033[35m";
+
+    auto printMinRMSTable = [&](const char* title,
+                                const std::vector<double>&     sPhi,
+                                const std::vector<std::string>& lPhi,
+                                const std::vector<double>&     sEta,
+                                const std::vector<std::string>& lEta)
+    {
+        const std::string bar(118,'─');
+        std::cout << "\n" << CYAN << BOLD << "┌" << bar << "┐" << RST << "\n";
+        std::cout << CYAN << BOLD << "│ " << title << RST << "\n";
+        std::cout << CYAN << BOLD << "├" << bar << "┤" << RST << "\n";
+
+        // Header
+        std::cout << BOLD
+                  << "│ " << std::left  << std::setw(15) << "E bin [GeV]"
+                  << "│ " << std::right << std::setw(18) << "σ_RMS(Δφ)"
+                  << " │ " << std::left << std::setw(42) << "variant (phi)"
+                  << "│ " << std::right<< std::setw(18) << "σ_RMS(Δη)"
+                  << " │ " << std::left << std::setw(42) << "variant (eta)"
+                  << RST << "\n";
+        std::cout << DIM << "│ " << std::string(15,'-') << "│ "
+                  << std::string(18,'-') << " │ " << std::string(42,'-')
+                  << "│ " << std::string(18,'-') << " │ " << std::string(42,'-')
+                  << RST << "\n";
+
+        for (std::size_t iE=0; iE<eEdges.size(); ++iE) {
+            const double eLo = eEdges[iE].first;
+            const double eHi = eEdges[iE].second;
+            const double p = (iE<sPhi.size()? sPhi[iE] : 0.0);
+            const double e = (iE<sEta.size()? sEta[iE] : 0.0);
+            const std::string lp = (iE<lPhi.size()? lPhi[iE] : "--");
+            const std::string le = (iE<lEta.size()? lEta[iE] : "--");
+
+            std::ostringstream eb;
+            eb << "[" << std::fixed << std::setprecision(0) << eLo << "," << eHi << ")";
+
+            std::cout << "│ " << std::left  << std::setw(15) << eb.str()
+                      << "│ " << std::right << std::setw(18) << std::setprecision(6) << p
+                      << " │ " << std::left << std::setw(42) << lp
+                      << "│ " << std::right << std::setw(18) << std::setprecision(6) << e
+                      << " │ " << std::left << std::setw(42) << le
+                      << "\n";
+        }
+        std::cout << CYAN << BOLD << "└" << bar << "┘" << RST << "\n";
+    };
+
+    // Pretty, ranked table (smallest → largest) per energy bin for Δφ and Δη
+    auto printTableWithSecond = [&](const char* title,
+                                    const std::vector<std::vector<std::pair<std::string,double>>>& phiSorted,
+                                    const std::vector<std::vector<std::pair<std::string,double>>>& etaSorted)
+    {
+        const std::string bar(118,'─');
+        std::cout << "\n" << CYAN << BOLD << "╔" << bar << "╗" << RST << "\n";
+        std::cout << CYAN << BOLD << "║ " << title << RST << "\n";
+        std::cout << CYAN << BOLD << "╠" << bar << "╣" << RST << "\n";
+
+        for (std::size_t iE=0;iE<eEdges.size();++iE)
+        {
+            // Side-by-side ranking lists
+            const auto& P = phiSorted[iE];
+            const auto& E = etaSorted[iE];
+            const std::size_t nRows = std::max(P.size(), E.size());
+
+            // Energy-bin banner
+            std::ostringstream eb;
+            eb << "[" << std::fixed << std::setprecision(0)
+               << eEdges[iE].first << "," << eEdges[iE].second << ") GeV";
+
+            std::cout << YELL << BOLD << "  " << eb.str() << RST << "\n";
+            std::cout << BOLD
+                      << "  " << std::setw(4)  << "idx"
+                      << "  " << std::setw(42) << "Δφ variant"
+                      << "  " << std::setw(12) << "σ_RMS(Δφ)"
+                      << "   │  "
+                      << std::setw(4)  << "idx"
+                      << "  " << std::setw(42) << "Δη variant"
+                      << "  " << std::setw(12) << "σ_RMS(Δη)"
+                      << RST << "\n";
+            std::cout << DIM
+                      << "  " << std::string(4,'-')  << "  " << std::string(42,'-') << "  "
+                      << std::string(12,'-') << "   │  "
+                      << std::string(4,'-')  << "  " << std::string(42,'-') << "  "
+                      << std::string(12,'-')
+                      << RST << "\n";
+
+            for (std::size_t r=0; r<nRows; ++r)
+            {
+                auto drawCell = [&](const std::vector<std::pair<std::string,double>>& v,
+                                    std::size_t idx, bool isPhi)
+                {
+                    if (idx >= v.size()) {
+                        std::cout << std::setw(4)  << ""
+                                  << "  " << std::setw(42) << ""
+                                  << "  " << std::setw(12) << "";
+                        return;
+                    }
+                    const bool isBest = (idx==0);
+                    const bool is2nd  = (idx==1);
+                    const char* color = isBest ? GRN : (is2nd ? MAG : RST);
+
+                    std::ostringstream val; val << std::setprecision(6) << v[idx].second;
+
+                    std::cout << color
+                              << std::setw(4)  << idx+1 << RST
+                              << "  " << color << std::left  << std::setw(42) << v[idx].first << RST
+                              << "  " << color << std::right << std::setw(12) << val.str() << RST;
+                };
+
+                std::cout << "  ";
+                drawCell(P, r, true);
+                std::cout << "   │  ";
+                drawCell(E, r, false);
+                std::cout << "\n";
+            }
+
+            // Gap line (2nd - best) if we have at least two entries
+            auto gapIf = [&](const std::vector<std::pair<std::string,double>>& v)->std::string{
+                if (v.size()<2) return "n/a";
+                std::ostringstream oss; oss << std::setprecision(6) << (v[1].second - v[0].second);
+                return oss.str();
+            };
+            std::cout << DIM
+                      << "  gap(Δφ) = " << gapIf(P)
+                      << "   |   gap(Δη) = " << gapIf(E)
+                      << RST << "\n";
+
+            std::cout << CYAN << DIM << std::string(118,'─') << RST << "\n";
+        }
+
+        std::cout << CYAN << BOLD << "╚" << bar << "╝" << RST << "\n";
+    };
+
+    auto writeCSVwithSecond = [&](const std::string& path,
+                                  const std::vector<std::vector<std::pair<std::string,double>>>& phiSorted,
+                                  const std::vector<std::vector<std::pair<std::string,double>>>& etaSorted)
+    {
+        std::ofstream ofs(path);
+        ofs << "E_lo,E_hi,"
+               "phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,"
+               "eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap\n";
+        for (std::size_t iE=0;iE<eEdges.size();++iE){
+            auto get = [&](const std::vector<std::pair<std::string,double>>& v)->std::tuple<std::string,double,std::string,double,double>{
+                if (v.empty()) return {"",NAN,"",NAN,NAN};
+                const auto& b = v[0];
+                if (v.size()<2) return {b.first,b.second,"",NAN,NAN};
+                const auto& s = v[1]; return {b.first,b.second,s.first,s.second,s.second-b.second};
+            };
+            auto [pl,ps,pl2,ps2,pd] = get(phiSorted[iE]);
+            auto [el,es,el2,es2,ed] = get(etaSorted[iE]);
+
+            ofs << std::fixed << std::setprecision(3) << eEdges[iE].first << ","
+                << eEdges[iE].second << ","
+                << "\"" << pl << "\"," << std::setprecision(6) << ps << ","
+                << "\"" << pl2 << "\"," << ps2 << "," << (std::isfinite(pd)?pd:NAN) << ","
+                << "\"" << el << "\"," << es << ","
+                << "\"" << el2 << "\"," << es2 << "," << (std::isfinite(ed)?ed:NAN) << "\n";
+        }
+        ofs.close();
+    };
+
+    // ---------------- Collect ALL available variants (phi & eta) ----------------
+    std::vector<std::pair<std::string, std::vector<TH1F*>>> phiAll, etaAll;
+
+    // PDC (from scratch)
+    pushIfAny(phiAll, "no corr, scratch",     "h_phi_diff_raw_%s");
+    pushIfAny(phiAll, "b(E) corr, scratch",   "h_phi_diff_corr_%s");
+    pushIfAny(etaAll, "no corr, scratch",     "h_eta_diff_raw_%s");
+    pushIfAny(etaAll, "b(E) corr, scratch",   "h_eta_diff_corr_%s");
+
+    // CLUS: RAW / CP / b(E)
+    pushIfAny(phiAll, "no corr, cluster",     "h_phi_diff_cpRaw_%s");
+    pushIfAny(phiAll, "CorrectPosition, cluster", "h_phi_diff_cpCorr_%s");
+    pushIfAny(phiAll, "b(E) corr, cluster",   "h_phi_diff_cpBcorr_%s");
+    pushIfAny(etaAll, "no corr, cluster",     "h_eta_diff_cpRaw_%s");
+    pushIfAny(etaAll, "CorrectPosition, cluster", "h_eta_diff_cpCorr_%s");
+    pushIfAny(etaAll, "b(E) corr, cluster",   "h_eta_diff_cpBcorr_%s");
+
+    // CLUS: CP(EA) generic + explicit EA flavors
+    pushIfAny(phiAll, "CP(EA), cluster",                          "h_phi_diff_cpCorrEA_%s");
+    pushIfAny(phiAll, "CP(EA geom), cluster",                     "h_phi_diff_cpCorrEA_geom_%s");
+    pushIfAny(phiAll, "CP(EA |#eta|+E), cluster",                 "h_phi_diff_cpCorrEA_fitEtaDep_%s");
+    pushIfAny(phiAll, "CP(EA E-only), cluster",                   "h_phi_diff_cpCorrEA_fitEnergyOnly_%s");
+    pushIfAny(phiAll, "CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",
+                       "h_phi_diff_cpCorrEA_fitPhiE_etaEtaDep_%s");
+
+    pushIfAny(etaAll, "CP(EA), cluster",                          "h_eta_diff_cpCorrEA_%s");
+    pushIfAny(etaAll, "CP(EA geom), cluster",                     "h_eta_diff_cpCorrEA_geom_%s");
+    pushIfAny(etaAll, "CP(EA |#eta|+E), cluster",                 "h_eta_diff_cpCorrEA_fitEtaDep_%s");
+    pushIfAny(etaAll, "CP(EA E-only), cluster",                   "h_eta_diff_cpCorrEA_fitEnergyOnly_%s");
+    pushIfAny(etaAll, "CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",
+                       "h_eta_diff_cpCorrEA_fitPhiE_etaEtaDep_%s");
+
+    // --------- Sort all candidates per E-bin (ALL variants) ----------
+    auto phiSorted_All = sortCandidatesPerBin(phiAll);
+    auto etaSorted_All = sortCandidatesPerBin(etaAll);
+
+    // ---------------- Collect CLUS-only family (RAW, CP, CP(EA*)) ----------------
+    std::vector<std::pair<std::string, std::vector<TH1F*>>> phiClus, etaClus;
+    pushIfAny(phiClus, "no corr, cluster",         "h_phi_diff_cpRaw_%s");
+    pushIfAny(phiClus, "CorrectPosition, cluster", "h_phi_diff_cpCorr_%s");
+    pushIfAny(phiClus, "CP(EA), cluster",          "h_phi_diff_cpCorrEA_%s");
+    pushIfAny(phiClus, "CP(EA geom), cluster",     "h_phi_diff_cpCorrEA_geom_%s");
+    pushIfAny(phiClus, "CP(EA |#eta|+E), cluster", "h_phi_diff_cpCorrEA_fitEtaDep_%s");
+    pushIfAny(phiClus, "CP(EA E-only), cluster",   "h_phi_diff_cpCorrEA_fitEnergyOnly_%s");
+    pushIfAny(phiClus, "CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",
+                        "h_phi_diff_cpCorrEA_fitPhiE_etaEtaDep_%s");
+
+    pushIfAny(etaClus, "no corr, cluster",         "h_eta_diff_cpRaw_%s");
+    pushIfAny(etaClus, "CorrectPosition, cluster", "h_eta_diff_cpCorr_%s");
+    pushIfAny(etaClus, "CP(EA), cluster",          "h_eta_diff_cpCorrEA_%s");
+    pushIfAny(etaClus, "CP(EA geom), cluster",     "h_eta_diff_cpCorrEA_geom_%s");
+    pushIfAny(etaClus, "CP(EA |#eta|+E), cluster", "h_eta_diff_cpCorrEA_fitEtaDep_%s");
+    pushIfAny(etaClus, "CP(EA E-only), cluster",   "h_eta_diff_cpCorrEA_fitEnergyOnly_%s");
+    pushIfAny(etaClus, "CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",
+                        "h_eta_diff_cpCorrEA_fitPhiE_etaEtaDep_%s");
+
+    // --------- Sort per E-bin (CLUS-only family) ----------
+    auto phiSorted_Clus = sortCandidatesPerBin(phiClus);
+    auto etaSorted_Clus = sortCandidatesPerBin(etaClus);
+
+    // --------- Pick best & second; compute gaps ----------
+    std::vector<std::string> bestLabPhi_All, bestLabEta_All, secLabPhi_All, secLabEta_All;
+    std::vector<double>      bestSigPhi_All, bestSigEta_All, secSigPhi_All, secSigEta_All, gapPhi_All, gapEta_All;
+    pickBestAndSecond(phiSorted_All, bestLabPhi_All, bestSigPhi_All, secLabPhi_All, secSigPhi_All, gapPhi_All);
+    pickBestAndSecond(etaSorted_All, bestLabEta_All, bestSigEta_All, secLabEta_All, secSigEta_All, gapEta_All);
+
+    std::vector<std::string> bestLabPhi_Clus, bestLabEta_Clus, secLabPhi_Clus, secLabEta_Clus;
+    std::vector<double>      bestSigPhi_Clus, bestSigEta_Clus, secSigPhi_Clus, secSigEta_Clus, gapPhi_Clus, gapEta_Clus;
+    pickBestAndSecond(phiSorted_Clus, bestLabPhi_Clus, bestSigPhi_Clus, secLabPhi_Clus, secSigPhi_Clus, gapPhi_Clus);
+    pickBestAndSecond(etaSorted_Clus, bestLabEta_Clus, bestSigEta_Clus, secLabEta_Clus, secSigEta_Clus, gapEta_Clus);
+
+    // --------- Print tables (with 2nd & gap) + full rankings ----------
+    printTableWithSecond("TABLE A — Minimum RMS per energy bin across ALL variants (phi & eta)",
+                         phiSorted_All, etaSorted_All);
+
+    printTableWithSecond("TABLE B — Minimum RMS per energy bin within CLUS-RAW / CLUS-CP / CLUS-CP(EA*) family (phi & eta)",
+                         phiSorted_Clus, etaSorted_Clus);
+
+    // --------- Write CSVs (with 2nd & gap) ----------
+    const std::string csvAll  = std::string(outDir) + "/MinRMS_ALL_variants.csv";
+    const std::string csvClus = std::string(outDir) + "/MinRMS_CLUS_only.csv";
+    writeCSVwithSecond(csvAll,  phiSorted_All,  etaSorted_All);
+    writeCSVwithSecond(csvClus, phiSorted_Clus, etaSorted_Clus);
+
+    std::cout << "[Playground] Wrote CSV: " << csvAll  << "\n";
+    std::cout << "[Playground] Wrote CSV: " << csvClus << "\n";
     std::cout << "[Playground] Completed Δφ & Δη outputs into: " << outDir << "\n";
+
 }
+
 
 
 static inline std::string SanitizeForPath(TString s)
@@ -4909,8 +6300,541 @@ void AnalyzeBvsResCLUSCPEA(const char* inFilePath, const char* outBaseDir)
 }
 
 
+// ==================== ASH/LOG RAW‑RMS scan reader & plots ====================
+//
+// This block reads the per‑parameter scan histograms produced by your macro:
+//   • ASH:  h_dx_ash_b{bVal4dec}_{E‑label}
+//   • LOG:  h_dx_log_w0{w0Val2dec}_{E‑label}
+// and produces publication‑style overlays using **RAW RMS** only (no Gaussians).
+//
+// All outputs are written under:  <outBaseDir>/ashLogScans
+// It is self‑contained; nothing else in your file is modified.
+//
+
+// Small palette for E‑bin overlays
+static const Color_t kAshPaletteRMS[5] =
+{ kBlue+1, kRed+1, kGreen+2, kMagenta+1, kOrange+7 };
+
+/* ---------- helpers to format labels and find histograms ---------- */
+static inline TString fmtElabelRange(int iE, const double* edges)
+{
+  // Example: E_2to4, E_4to6, ...
+  const int lo = static_cast<int>(std::lround(edges[iE]));
+  const int hi = static_cast<int>(std::lround(edges[iE+1]));
+  return Form("E_%dto%d", lo, hi);
+}
+
+static inline TString fmtElabelEbin(int iE)
+{
+  // Example: Ebin0, Ebin1, ...
+  return Form("Ebin%d", iE);
+}
+
+static inline TString fmtB4(double b)  { return Form("%.4f", std::round(b*10000.)/10000.); }
+static inline TString fmtW2(double w0) { return Form("%.2f",  std::round(w0*100.)/100.);   }
+
+static TH1* tryGet1D(TFile* f, const std::vector<TString>& names)
+{
+  for (const auto& n : names)
+  {
+    if (TH1* h = dynamic_cast<TH1*>( f->Get(n) ))
+    {
+      if (h->GetEntries() > 0 && h->Integral() > 0) return h;
+    }
+  }
+  return nullptr;
+}
+
+/* ----------------------- RAW‑RMS metric (no fits) ----------------------- */
+double rawRMS(TH1* h, const TString& /*debugPNG*/)
+{
+  if (!h) return 0.0;
+  if (h->GetEntries() < 2) return 0.0;
+  return h->GetRMS();
+}
+
+/* -------------- containers for scan results (one TGraph per E bin) ------ */
+struct ScanResultsRMS
+{
+  std::vector<TGraph*> tgVec;      // one TGraph per E bin
+  std::vector<double>  bestParam;  // best b or best w0 per E bin
+  std::vector<double>  bestSigma;  // minimal RMS per E bin
+  double minY = DBL_MAX, maxY = -DBL_MAX;
+  int totalHist=0, missingHist=0, zeroEntry=0, usedHist=0;
+};
+
+/* --------------------------- do ASH (RAW‑RMS) --------------------------- */
+static ScanResultsRMS
+doAshScan_RMS(TFile* f,
+              int N_E,
+              const double* E_edges,
+              const std::vector<double>& bScan_vals,
+              const TString& suffixLabel,
+              const TString& histOutDir,
+              bool skipLowest3)
+{
+  const int iE_start = skipLowest3 ? 3 : 0;
+
+  ScanResultsRMS R;
+  R.tgVec.resize(N_E);
+
+  for (int iE = iE_start; iE < N_E; ++iE)
+  {
+    TGraph* g = new TGraph;
+    g->SetName(Form("gAsh_%s_E%d", suffixLabel.Data(), iE));
+
+    for (double bValRaw : bScan_vals)
+    {
+      R.totalHist++;
+
+      const TString bStr = fmtB4(bValRaw);
+      const TString el1  = fmtElabelRange(iE, E_edges);
+      const TString el2  = fmtElabelEbin(iE);
+
+      // Try a few common naming patterns used across macros
+      std::vector<TString> cands = {
+        Form("h_dx_ash_b%s_%s", bStr.Data(), el1.Data()),
+        Form("h_dx_ash_b%s_%s", bStr.Data(), el2.Data()),
+        Form("h_dx_ash_b%s_E%d", bStr.Data(), iE),
+        Form("h_dx_ash_b%s",    bStr.Data()) // last‑ditch
+      };
+
+      TH1* h = tryGet1D(f, cands);
+      if (!h) { R.missingHist++; continue; }
+      if (h->GetEntries() <= 0 || h->Integral() <= 0) { R.zeroEntry++; continue; }
+      R.usedHist++;
+
+      const double sVal = rawRMS(h, "");
+      if (sVal > 0.0)
+      {
+        g->SetPoint(g->GetN(), bValRaw, sVal);
+        R.minY = std::min(R.minY, sVal);
+        R.maxY = std::max(R.maxY, sVal);
+
+        if ((int)R.bestSigma.size() < N_E) { R.bestSigma.resize(N_E, DBL_MAX); R.bestParam.resize(N_E, 0.0); }
+        if (sVal < R.bestSigma[iE]) { R.bestSigma[iE] = sVal; R.bestParam[iE] = bValRaw; }
+      }
+    }
+
+    const int idx = (iE - iE_start) % 5;
+    const int col = kAshPaletteRMS[idx];
+    g->SetMarkerStyle(20 + idx);
+    g->SetMarkerColor(col);
+    g->SetLineColor  (col);
+    g->SetMarkerSize(1.2);
+
+    R.tgVec[iE] = g;
+  }
+
+  if (R.minY == DBL_MAX) { R.minY = 0.0; R.maxY = 1.0; }
+  return R;
+}
+
+/* --------------------------- do LOG (RAW‑RMS) --------------------------- */
+static ScanResultsRMS
+doLogScan_RMS(TFile* f,
+              int N_E,
+              const double* E_edges,
+              const std::vector<double>& w0Scan_vals,
+              const TString& suffixLabel,
+              const TString& histOutDir,
+              bool skipLowest3)
+{
+  const int iE_start = skipLowest3 ? 3 : 0;
+
+  ScanResultsRMS R;
+  R.tgVec.resize(N_E);
+
+  for (int iE = iE_start; iE < N_E; ++iE)
+  {
+    TGraph* g = new TGraph;
+    g->SetName(Form("gLog_%s_E%d", suffixLabel.Data(), iE));
+
+    for (double w0Raw : w0Scan_vals)
+    {
+      R.totalHist++;
+
+      const TString wStr = fmtW2(w0Raw);
+      const TString el1  = fmtElabelRange(iE, E_edges);
+      const TString el2  = fmtElabelEbin(iE);
+
+      std::vector<TString> cands = {
+        Form("h_dx_log_w0%s_%s", wStr.Data(), el1.Data()),
+        Form("h_dx_log_w0%s_%s", wStr.Data(), el2.Data()),
+        Form("h_dx_log_w0%s_E%d", wStr.Data(), iE),
+        Form("h_dx_log_w0%s",    wStr.Data())
+      };
+
+      TH1* h = tryGet1D(f, cands);
+      if (!h) { R.missingHist++; continue; }
+      if (h->GetEntries() <= 0 || h->Integral() <= 0) { R.zeroEntry++; continue; }
+      R.usedHist++;
+
+      const double sVal = rawRMS(h, "");
+      if (sVal > 0.0)
+      {
+        g->SetPoint(g->GetN(), w0Raw, sVal);
+        R.minY = std::min(R.minY, sVal);
+        R.maxY = std::max(R.maxY, sVal);
+
+        if ((int)R.bestSigma.size() < N_E) { R.bestSigma.resize(N_E, DBL_MAX); R.bestParam.resize(N_E, 0.0); }
+        if (sVal < R.bestSigma[iE]) { R.bestSigma[iE] = sVal; R.bestParam[iE] = w0Raw; }
+      }
+    }
+
+    const int idx = (iE - iE_start) % 5;
+    const int col = kAshPaletteRMS[idx];
+    g->SetMarkerStyle(20 + idx);
+    g->SetMarkerColor(col);
+    g->SetLineColor  (col);
+    g->SetMarkerSize(1.2);
+
+    R.tgVec[iE] = g;
+  }
+
+  if (R.minY == DBL_MAX) { R.minY = 0.0; R.maxY = 1.0; }
+  return R;
+}
+
+/* --------------------- side‑by‑side overlay (RAW‑RMS) --------------------- */
+static void drawAshLogSideBySide_RMS( const ScanResultsRMS& ashRes,
+                                      const ScanResultsRMS& logRes,
+                                      const double* E_edges,
+                                      int N_E,
+                                      const TString& outBaseDir,
+                                      bool skipLowest3 )
+{
+  const int iE_start = skipLowest3 ? 3 : 0;
+
+  // Canvas with two pads
+  TCanvas cSide("cSideBySide_RMS","ASH vs LOG — RAW RMS",1600,600);
+  cSide.Divide(2,1);
+
+  // ---- Left: ASH ----
+  cSide.cd(1);
+  gPad->SetLeftMargin(0.12); gPad->SetBottomMargin(0.12); gPad->SetGrid();
+
+  TGraph* gAshRef = nullptr;
+  for (int iE=iE_start;iE<N_E && !gAshRef;++iE) if (ashRes.tgVec[iE] && ashRes.tgVec[iE]->GetN()) gAshRef = ashRes.tgVec[iE];
+  if (gAshRef)
+  {
+    gAshRef->Draw("ALP");
+    gAshRef->GetXaxis()->SetTitle("b  (local tower units)");
+    gAshRef->GetYaxis()->SetTitle("#sigma_{RMS}_{x}  (local tower units)");
+    gAshRef->GetYaxis()->SetRangeUser(std::max(0.0, ashRes.minY*0.90), ashRes.maxY*1.10);
+    for (int iE=iE_start;iE<N_E;++iE) if (ashRes.tgVec[iE] && ashRes.tgVec[iE]->GetN()) ashRes.tgVec[iE]->Draw("LP SAME");
+  }
+
+  TLegend LA(0.13,0.65,0.48,0.88); LA.SetBorderSize(0); LA.SetFillStyle(0);
+  for (int iE=iE_start;iE<N_E;++iE)
+  {
+    TGraph* g = ashRes.tgVec[iE];
+    const double bBest = (iE < (int)ashRes.bestParam.size()) ? ashRes.bestParam[iE] : 0.0;
+    const double sBest = (iE < (int)ashRes.bestSigma.size()) ? ashRes.bestSigma[iE] : 0.0;
+    if (!g || !g->GetN())
+      LA.AddEntry((TObject*)nullptr, Form("%.0f #leq E < %.0f GeV — no data", E_edges[iE], E_edges[iE+1]), "");
+    else
+      LA.AddEntry(g, Form("%.0f #leq E < %.0f GeV  (b=%.2f,  #sigma_{RMS}=%.3f)",
+                          E_edges[iE], E_edges[iE+1], bBest, sBest), "lp");
+  }
+  LA.Draw();
+  TLatex tA; tA.SetNDC(); tA.SetTextSize(0.035); tA.DrawLatex(0.12,0.93,"Ash scan [RMS]");
+
+  // ---- Right: LOG ----
+  cSide.cd(2);
+  gPad->SetLeftMargin(0.12); gPad->SetBottomMargin(0.12); gPad->SetGrid();
+
+  TGraph* gLogRef = nullptr;
+  for (int iE=iE_start;iE<N_E && !gLogRef;++iE) if (logRes.tgVec[iE] && logRes.tgVec[iE]->GetN()) gLogRef = logRes.tgVec[iE];
+  if (gLogRef)
+  {
+    gLogRef->Draw("ALP");
+    gLogRef->GetXaxis()->SetTitle("w_{0}");
+    gLogRef->GetYaxis()->SetTitle("#sigma_{RMS}_{x}  (local tower units)");
+    gLogRef->GetYaxis()->SetRangeUser(std::max(0.0, logRes.minY*0.90), logRes.maxY*1.10);
+    for (int iE=iE_start;iE<N_E;++iE) if (logRes.tgVec[iE] && logRes.tgVec[iE]->GetN()) logRes.tgVec[iE]->Draw("LP SAME");
+  }
+
+  TLegend LB(0.60,0.65,0.85,0.88); LB.SetBorderSize(0); LB.SetFillStyle(0);
+  for (int iE=iE_start;iE<N_E;++iE)
+  {
+    TGraph* g = logRes.tgVec[iE];
+    const double wBest = (iE < (int)logRes.bestParam.size()) ? logRes.bestParam[iE] : 0.0;
+    const double sBest = (iE < (int)logRes.bestSigma.size()) ? logRes.bestSigma[iE] : 0.0;
+    if (!g || !g->GetN())
+      LB.AddEntry((TObject*)nullptr, Form("%.0f #leq E < %.0f GeV — no data", E_edges[iE], E_edges[iE+1]), "");
+    else
+      LB.AddEntry(g, Form("%.0f #leq E < %.0f GeV  (w_{0}=%.2f,  #sigma_{RMS}=%.3f)",
+                          E_edges[iE], E_edges[iE+1], wBest, sBest), "lp");
+  }
+  LB.Draw();
+  TLatex tB; tB.SetNDC(); tB.SetTextSize(0.040); tB.DrawLatex(0.15,0.93,"Log scan [RMS]");
+
+  TString out = outBaseDir + "/ashLogScans/SideBySide_RMS.png";
+  gSystem->mkdir(outBaseDir + "/ashLogScans", true);
+  cSide.SaveAs(out);
+  std::cout << "[ASH/LOG‑RMS] wrote " << out << "\n";
+
+  // Single‑panel publication style (ASH then LOG)
+  auto makeSingle = [&](const ScanResultsRMS& R, const char* tag, const char* xTit, const char* yTit, double xMaxCut)
+  {
+    TGraph* gRef = nullptr;
+    for (int iE=iE_start;iE<N_E && !gRef;++iE) if (R.tgVec[iE] && R.tgVec[iE]->GetN()) gRef = R.tgVec[iE];
+    if (!gRef) return;
+
+    TCanvas c(Form("c%sScan_RMS",tag), Form("%s scan (RMS)",tag), 900,650);
+    c.SetLeftMargin(0.13); c.SetBottomMargin(0.18);
+    gRef->Draw("ALP");
+    gRef->GetXaxis()->SetTitle(xTit);
+    gRef->GetYaxis()->SetTitle(yTit);
+
+    double yMin=1e30,yMax=-1e30,x,y;
+    for (int i=iE_start;i<N_E;++i)
+      if (R.tgVec[i] && R.tgVec[i]->GetN())
+        for (int j=0;j<R.tgVec[i]->GetN();++j)
+        { R.tgVec[i]->GetPoint(j,x,y);
+          if (x<=xMaxCut){ yMin=std::min(yMin,y); yMax=std::max(yMax,y);} }
+    const double pad = 0.05*(yMax-yMin);
+    gRef->GetYaxis()->SetRangeUser(std::max(0.0,yMin-pad), yMax+pad);
+
+    for (int iE=iE_start;iE<N_E;++iE) if (R.tgVec[iE] && R.tgVec[iE]->GetN()) R.tgVec[iE]->Draw("LP SAME");
+
+
+    TLegend L(0.63, 0.70, 0.90, 0.92);
+    L.SetBorderSize(0);  L.SetFillStyle(0);  L.SetTextSize(0.022);
+    for (int iE=iE_start;iE<N_E;++iE) if (R.tgVec[iE] && R.tgVec[iE]->GetN())
+        L.AddEntry(R.tgVec[iE], Form("%.0f #leq E < %.0f GeV", E_edges[iE], E_edges[iE+1]), "lp");
+
+    L.Draw();
+
+    TString out1 = outBaseDir + "/ashLogScans/" + TString::Format("%sScan_RMS.png",tag);
+    c.SaveAs(out1);
+    std::cout << "[ASH/LOG‑RMS] wrote " << out1 << "\n";
+  };
+
+  makeSingle(ashRes, "Ash", "b  (local tower units)", "#sigma_{RMS}_{x}  (local tower units)", 1e9 /* no cut */);
+  makeSingle(logRes, "Log", "w_{0}",                  "#sigma_{RMS}_{x}  (local tower units)",  5.5);
+}
+
+/* ---- Min‑RMS b(E) overlay vs “no |η| dep” best‑fit b(E) from bValues.txt ---- */
+static void drawMinBOverlay_RMS_vs_OriginalEta( const ScanResultsRMS& ashRes,
+                                                const double* E_edges, int N_E,
+                                                const TString& outBaseDir,
+                                                bool skipLowest3 )
+{
+  const int iE_start = skipLowest3 ? 3 : 0;
+
+  // Read reference b(E) for originalEta from the existing text file
+  std::vector<double> bPhiOrig(N_E, std::numeric_limits<double>::quiet_NaN());
+  std::vector<double> bEtaOrig(N_E, std::numeric_limits<double>::quiet_NaN());
+
+  const std::string bfile = std::string(outBaseDir) + "/bValues.txt";
+  std::ifstream fin(bfile);
+  if (fin.is_open())
+  {
+    std::string line;
+    while (std::getline(fin, line))
+    {
+      if (line.empty() || line[0]=='#') continue;
+      char axis[8] = {0}, key[128] = {0};
+      double eLo=0, eHi=0, bval=0;
+      int n = std::sscanf(line.c_str(), " %7s [%lf , %lf ) %lf %127s", axis, &eLo, &eHi, &bval, key);
+      if (n != 5) continue;
+      if (std::string(key) != "originalEta") continue;
+
+      int idx = -1;
+      for (int i=0;i<N_E;++i)
+        if (std::fabs(E_edges[i]-eLo)<1e-6 && std::fabs(E_edges[i+1]-eHi)<1e-6) { idx = i; break; }
+      if (idx<0) continue;
+
+      if      (std::string(axis) == "PHI") bPhiOrig[idx] = bval;
+      else if (std::string(axis) == "ETA") bEtaOrig[idx] = bval;
+    }
+  }
+  else
+  {
+    std::cerr << "[ASH/LOG‑RMS] WARNING: cannot open " << bfile << " — overlays will show RMS only.\n";
+  }
+
+  auto makeOverlay = [&](const char* tag, const std::vector<double>& bFitOrig)
+  {
+    std::vector<double> eC, bMin, bRef;
+    for (int i=iE_start;i<N_E;++i)
+    {
+      const double eCtr = 0.5*(E_edges[i] + E_edges[i+1]);
+      const bool haveMin = (i < (int)ashRes.bestParam.size()) && std::isfinite(ashRes.bestParam[i]);
+      const bool haveRef = (i < (int)bFitOrig.size())        && std::isfinite(bFitOrig[i]);
+      if (!haveMin && !haveRef) continue;
+      eC.push_back(eCtr);
+      bMin.push_back(haveMin ? ashRes.bestParam[i] : std::numeric_limits<double>::quiet_NaN());
+      bRef.push_back(haveRef ? bFitOrig[i]         : std::numeric_limits<double>::quiet_NaN());
+    }
+    if (eC.empty()) return;
+
+    // Build graphs
+    TGraph gRMS((int)eC.size());
+    TGraph gFit((int)eC.size());
+    int ip=0, jf=0;
+    for (std::size_t k=0;k<eC.size();++k)
+    {
+      if (std::isfinite(bMin[k])) { gRMS.SetPoint(ip++, eC[k], bMin[k]); }
+      if (std::isfinite(bRef[k])) { gFit.SetPoint(jf++, eC[k], bRef[k]); }
+    }
+    gRMS.SetMarkerStyle(24); gRMS.SetMarkerSize(1.2); gRMS.SetMarkerColor(kBlue+1); gRMS.SetLineColor(kBlue+1);
+    gFit.SetMarkerStyle(20); gFit.SetMarkerSize(1.2); gFit.SetMarkerColor(kBlack);  gFit.SetLineColor(kBlack);
+
+    // Frame
+    double xMin = E_edges[iE_start]-0.5, xMax = E_edges[N_E]-0.5;
+    double yMin = +1e30, yMax = -1e30;
+    for (int i=0;i<gRMS.GetN();++i){ double x,y; gRMS.GetPoint(i,x,y); yMin=std::min(yMin,y); yMax=std::max(yMax,y); }
+    for (int i=0;i<gFit.GetN();++i){ double x,y; gFit.GetPoint(i,x,y); yMin=std::min(yMin,y); yMax=std::max(yMax,y); }
+    if (!std::isfinite(yMin) || !std::isfinite(yMax)) { yMin=0.0; yMax=1.0; }
+    const double pad = 0.10*(yMax-yMin);
+    yMin = std::max(0.0, yMin - pad);
+    yMax += pad;
+
+    TCanvas c(Form("cMinB_%s",tag), Form("Min‑RMS b vs E — %s",tag), 900,650);
+    c.SetLeftMargin(0.13); c.SetBottomMargin(0.15);
+    TH2F fr("fr","",100,xMin,xMax,100,yMin,yMax);
+    fr.SetStats(0);
+    fr.GetXaxis()->SetTitle("E  [GeV]");
+    fr.GetYaxis()->SetTitle("b  (local tower units)");
+    fr.Draw();
+
+    gRMS.Draw("P SAME");
+    if (gFit.GetN()>0) gFit.Draw("P SAME");
+
+    TLegend L(0.52,0.74,0.88,0.89);
+    L.SetBorderSize(0); L.SetFillStyle(0); L.SetTextSize(0.033);
+    L.AddEntry(&gRMS, "Min RMS b (Ash, RAW RMS)", "p");
+    if (gFit.GetN()>0)
+      L.AddEntry(&gFit, "no |#eta| dep fit  b(E)", "p");
+    L.Draw();
+
+    gSystem->mkdir(outBaseDir + "/ashLogScans", true);
+    TString outP = outBaseDir + "/ashLogScans/MinRMS_b_vs_E_OVERLAY_";
+    outP += tag; outP += ".png";
+    c.SaveAs(outP);
+    std::cout << "[ASH/LOG‑RMS] wrote " << outP << "\n";
+  };
+
+  makeOverlay("phi", bPhiOrig);
+  makeOverlay("eta", bEtaOrig);
+}
+
+/* ------------ PHENIX‑style σx(E) summary from ASH minima (RAW‑RMS) --------- */
+static void makePhenixLikeSummary_RMS( const ScanResultsRMS& ashRes,
+                                       const double* E_edges, int N_E,
+                                       double cellSize_cm,
+                                       const TString& outBaseDir,
+                                       bool skipLowest3 )
+{
+  const int iE_start = skipLowest3 ? 3 : 0;
+
+  TGraph gAsh; gAsh.SetName("gAshBest_RMS");
+  int nGood = 0; double xMin=1e30, xMax=-1e30;
+
+  for (int iE=iE_start;iE<N_E;++iE)
+  {
+    const bool has = (iE < (int)ashRes.bestSigma.size() && std::isfinite(ashRes.bestSigma[iE]));
+    if (!has) continue;
+    const double eCtr   = 0.5*(E_edges[iE]+E_edges[iE+1]);
+    const double sigma_mm = ashRes.bestSigma[iE] * cellSize_cm * 10.0; // tower→cm→mm
+    gAsh.SetPoint(gAsh.GetN(), eCtr, sigma_mm);
+    ++nGood; xMin=std::min(xMin,eCtr); xMax=std::max(xMax,eCtr);
+  }
+  if (nGood < 3) { std::cerr << "[ASH/LOG‑RMS] PHENIX summary needs ≥3 points.\n"; return; }
+
+  TCanvas c("cPhenixAshOnly_RMS","PHENIX σx(E) – Ash (RMS)",600,600);
+  c.SetLeftMargin(0.17); c.SetBottomMargin(0.15);
+  gAsh.SetMarkerStyle(24); gAsh.SetMarkerSize(1.4);
+  gAsh.SetMarkerColor(kBlack); gAsh.SetLineColor(kBlack);
+
+  gAsh.Draw("AP");
+  gAsh.GetXaxis()->SetTitle("E  (GeV)");
+  gAsh.GetYaxis()->SetTitle("#sigma_{RMS}_{x}  (mm)");
+  gAsh.GetXaxis()->SetLimits(xMin*0.9, xMax*1.1);
+
+  double yMin=1e30,yMax=-1e30,x,y;
+  for (int i=0;i<gAsh.GetN();++i){ gAsh.GetPoint(i,x,y); yMin=std::min(yMin,y); yMax=std::max(yMax,y); }
+  const double pad = 0.15*(yMax-yMin);
+  gAsh.GetYaxis()->SetRangeUser(std::max(0.0,yMin-pad), yMax+pad);
+
+  // Optional illustrative fit p0 + p1/sqrt(E) to the **RMS** trend
+  TF1 fFit("fFit_RMS","[0]+[1]/TMath::Sqrt(x)", xMin*0.9 , xMax*1.1);
+  fFit.SetParameters(1.0,6.0);
+  TFitResultPtr fr = gAsh.Fit(&fFit,"QRNS");
+  if (fr && fr->IsValid()) { fFit.SetLineStyle(2); fFit.Draw("SAME"); }
+
+  if (fr && fr->IsValid())
+  {
+    TLatex tl; tl.SetNDC(); tl.SetTextSize(0.037);
+    tl.DrawLatex(0.18,0.25, Form("#sigma_{RMS}_{x}=%.2f + %.2f E^{-1/2}  (mm)",
+                                 fFit.GetParameter(0), fFit.GetParameter(1)));
+  }
+
+  gSystem->mkdir(outBaseDir + "/ashLogScans", true);
+  TString out = outBaseDir + "/ashLogScans/PhenixSummary_AshOnly_RMS.png";
+  c.SaveAs(out);
+  std::cout << "[ASH/LOG‑RMS] wrote " << out << "\n";
+}
+
+/* ---------------- orchestrator (RMS‑only) called from MAIN ---------------- */
+static void runAshLogRMSOnly(const char* inFilePath, const char* outBaseDir)
+{
+  if (!inFilePath || !outBaseDir) return;
+
+  // Build scans (match booking granularity)
+  std::vector<double> bScan;
+  for (double b = 0.01; b <= 0.50 + 1e-9; b += 0.01)
+    bScan.push_back( std::round(b*10000.)/10000. );
+
+  std::vector<double> w0Scan;
+  for (double w = 1.5; w <= 7.0 + 1e-9; w += 0.1)
+    w0Scan.push_back( std::round(w*100.)/100. );
+
+  std::unique_ptr<TFile> fIn( TFile::Open(inFilePath,"READ") );
+  if (!fIn || fIn->IsZombie())
+  {
+    std::cerr << "[ASH/LOG‑RMS] Cannot open '" << inFilePath << "'. Skip RMS scans.\n";
+    return;
+  }
+
+  const TString baseDir = TString(outBaseDir) + "/ashLogScans";
+  gSystem->mkdir(baseDir, true);
+  const TString debugDir = baseDir + "/DEBUG"; gSystem->mkdir(debugDir, true);
+
+  // Scans (skip the lowest 3 E bins as in your example; set false if you want all)
+  const bool skipLowest3 = true;
+  auto ashRMS = doAshScan_RMS(fIn.get(), N_E, E_edges, bScan, "rms", debugDir, skipLowest3);
+  auto logRMS = doLogScan_RMS(fIn.get(), N_E, E_edges, w0Scan, "rms", debugDir, skipLowest3);
+
+  drawAshLogSideBySide_RMS(ashRMS, logRMS, E_edges, N_E, outBaseDir, skipLowest3);
+  makePhenixLikeSummary_RMS(ashRMS, E_edges, N_E, 5.55 /*cell cm*/, outBaseDir, skipLowest3);
+  drawMinBOverlay_RMS_vs_OriginalEta(ashRMS, E_edges, N_E, outBaseDir, skipLowest3);
+
+  // Also emit a tiny look‑up table: E_center → b_opt (RMS)
+  std::ofstream lut( std::string(outBaseDir) + "/ashLogScans/bRMS_opt_vs_E.txt" );
+  if (lut.is_open())
+  {
+    lut << "# E_center_GeV   b_opt_towerUnits   sigma_RMS_towerUnits\n";
+    for (int i=0;i<N_E;++i)
+    {
+      const double eCtr = 0.5*(E_edges[i] + E_edges[i+1]);
+      const bool ok = (i < (int)ashRMS.bestParam.size() && i < (int)ashRMS.bestSigma.size()
+                       && std::isfinite(ashRMS.bestParam[i]) && std::isfinite(ashRMS.bestSigma[i]));
+      lut << std::fixed << std::setprecision(3) << eCtr << "  "
+          << std::setprecision(4) << (ok?ashRMS.bestParam[i]:NAN) << "  "
+          << std::setprecision(6) << (ok?ashRMS.bestSigma[i]:NAN) << "\n";
+    }
+    lut.close();
+    std::cout << "[ASH/LOG‑RMS] wrote LUT → " << (std::string(outBaseDir) + "/ashLogScans/bRMS_opt_vs_E.txt") << "\n";
+  }
+}
 
 // ================================ MAIN ======================================
+
+
 
 void PDCAnalysisPrime()
 {
@@ -4918,8 +6842,8 @@ void PDCAnalysisPrime()
   gStyle->SetOptStat(0);
 
   // ——— paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/PositionDep_sim_ALL_noPhiTiltCorr.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SinglePhoton/SimOutputPrimeNoPhiTilt";
 
   EnsureDir(outBaseDir);
 
@@ -5022,9 +6946,9 @@ void PDCAnalysisPrime()
   // Global overlays across variants (in base path)
   SaveOverlayAcrossVariants(outBaseDir, eCent, phiByVariant, phiErrByVariant, /*isPhi*/true);
   SaveOverlayAcrossVariants(outBaseDir, eCent, etaByVariant, etaErrByVariant, /*isPhi*/false);
-
-
   AnalyzeBvsResCLUSCPEA(inFilePath.c_str(), outBaseDir.c_str());
+  RunPi0MassAnalysis(inFilePath.c_str(), outBaseDir.c_str());
+    
   std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
 }
 

@@ -496,7 +496,20 @@ submit_sim_condor() {
   local checkOnly=false           # when true, only count inputs; no submission
   local doAll=false               # when true, submit ALL pairs in one go
 
+  # NEW: targeted resubmission of specific groups (no cleanup)
+  local resubmitMode=false
+  local resubmitFile=""
+  local expectResubmitPath=false
+
+  # NEW: MINBIAS selector (switch input lists + output base when present)
+  local useMinBias=false
+
   for tok in "$@"; do
+      if $expectResubmitPath; then
+          resubmitFile="$tok"
+          expectResubmitPath=false
+          continue
+      fi
       case "$tok" in
           local|condor)
               execMode="$tok"
@@ -506,6 +519,13 @@ submit_sim_condor() {
               ;;
           doAll)
               doAll=true          # submit ALL pairs in one submission
+              ;;
+          doAllResSubmit)
+              resubmitMode=true   # NEW: targeted resubmission mode
+              expectResubmitPath=true
+              ;;
+          MINBIAS|minbias|MinBias)
+              useMinBias=true     # activate MinBias inputs/outputs
               ;;
           firstRound|secondRound|thirdRound|fourthRound|testSubmit|sample)
               roundArg="$tok"
@@ -525,6 +545,21 @@ submit_sim_condor() {
   # numeric without “sample” ⇒ treat as   sample <N>
   if [[ -n "$sampleN" && "$roundArg" != "sample" ]]; then
       roundArg="sample"
+  fi
+
+  if $useMinBias; then
+      SIM_LIST_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/simListFiles/run21_type30_MB_nopileup"
+      SIM_DST_LIST="${SIM_LIST_DIR}/DST_CALO_CLUSTER.list"
+      SIM_HITS_LIST="${SIM_LIST_DIR}/G4HITS.list"
+      OUTDIR_SIM="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOutMinBias"
+      # keep Condor logs shared, but use a separate round-tracking file to avoid interference
+      TRACK_FILE="${TRACK_DIR}/sim_pairs_remaining_minbias.txt"
+      # segregate Condor listfiles staging dir so MINBIAS and gamma can run concurrently
+      CONDOR_LISTFILES_DIR="${CONDOR_LISTFILES_DIR}_minbias"
+      echo "[MODE] MINBIAS active → SIM_LIST_DIR=${SIM_LIST_DIR}"
+      echo "[MODE] MINBIAS active → OUTDIR_SIM=${OUTDIR_SIM}"
+      echo "[MODE] MINBIAS active → TRACK_FILE=${TRACK_FILE}"
+      echo "[MODE] MINBIAS active → CONDOR_LISTFILES_DIR=${CONDOR_LISTFILES_DIR}"
   fi
 
   # ─────────────── 2) DETERMINE OFFSET & CHUNK SIZE ───────────────────────
@@ -552,7 +587,7 @@ submit_sim_condor() {
   echo "######################################################################"
 
   # ─────────────── 3) CLEAN-UP PRIOR TO SUBMISSION ────────────────────────
-  if [[ "$execMode" == "condor" ]]; then
+  if [[ "$execMode" == "condor" && "$resubmitMode" != true ]]; then
       if [[ "$wipe_outputs" == true ]]; then
           echo "[STEP] Removing previous ROOT outputs from $OUTDIR_SIM"
           [[ -d "$OUTDIR_SIM" ]] && find "$OUTDIR_SIM" -mindepth 1 -delete
@@ -580,6 +615,95 @@ submit_sim_condor() {
   fi
 
   # ─────────────── 4) BUILD THE LIST OF (DST,G4) PAIRS ───────────────────
+  # NEW BRANCH: targeted resubmission without any cleanup or slicing
+  if [[ "$resubmitMode" == true ]]; then
+      [[ -n "$resubmitFile" ]] || { echo "[ERROR] doAllResSubmit: missing list file path"; return 1; }
+      [[ -f "$resubmitFile" ]] || { echo "[ERROR] doAllResSubmit: file not found → $resubmitFile"; return 1; }
+
+      # Support BOTH Condor and Local execution for doAllResSubmit.
+      if [[ "$execMode" == "local" ]]; then
+          echo "[RESUBMIT][LOCAL] Sequentially running pairs listed in: $resubmitFile"
+          mkdir -p "$OUTDIR_SIM"
+
+          local idx=0
+          while IFS= read -r line; do
+              [[ -z "$line" || "$line" =~ ^# ]] && continue
+              # Allow either "DST HITS" on one line, or only DST (then derive HITS)
+              set -- $line
+              local dstPath="$1"
+              local hitPath="${2:-}"
+
+              if [[ -z "$hitPath" ]]; then
+                  hitPath="${dstPath/sim_group_DST_/sim_group_HITS_}"
+              fi
+
+              if [[ ! -f "$dstPath" ]]; then echo "[WARN] Missing DST list:  $dstPath (skip)"; continue; fi
+              if [[ ! -f "$hitPath" ]]; then echo "[WARN] Missing HITS list: $hitPath (skip)"; continue; fi
+
+              # Derive a stable output filename from the group indices, e.g. 945_950
+              local base; base="$(basename "$dstPath")"                         # sim_group_DST_945_950.list
+              local stampPart="${base#sim_group_DST_}"                          # 945_950.list
+              stampPart="${stampPart%.list}"                                    # 945_950
+              local outRoot="${OUTDIR_SIM}/PositionDep_sim_resubmit_${stampPart}.root"
+
+              echo "------------------------------------------------------------------"
+              echo "[RUN][LOCAL] idx=${idx}  DST=$(basename "$dstPath")"
+              echo "             HITS=$(basename "$hitPath")"
+              echo "             OUT =$(basename "$outRoot")"
+              echo "------------------------------------------------------------------"
+
+              rm -f "$outRoot" 2>/dev/null || true
+              # nevents=0 → process all events across all files in the lists
+              root -b -q -l "${MACRO_PATH}(0, \"${dstPath}\", \"${hitPath}\", \"${outRoot}\")"
+
+              (( ++idx ))
+          done < "$resubmitFile"
+
+          (( idx > 0 )) || { echo "[ERROR] doAllResSubmit: no valid lines in $resubmitFile"; return 1; }
+          echo "[RESUBMIT][LOCAL] Completed ${idx} local run(s)."
+          return 0
+      fi
+
+      # Default: Condor resubmission (original behavior)
+      local submitFile="PositionDependentCorrect_sim_resubmit.sub"
+      cat > "$submitFile" <<EOL
+universe   = vanilla
+executable = PositionDependentCorrect_Condor.sh
+log        = ${LOG_DIR_LOG}/job.\$(Cluster).\$(Process).log
+output     = ${LOG_DIR_OUT}/job.\$(Cluster).\$(Process).out
+error      = ${LOG_DIR_ERR}/job.\$(Cluster).\$(Process).err
+request_memory = 1500MB
+# Args: <runNum=9999> <listFileData> <sim> <Cluster> <nEvents=0> <processID> [<listFileHits>]
+EOL
+
+      local idx=0
+      while IFS= read -r line; do
+          [[ -z "$line" || "$line" =~ ^# ]] && continue
+          # Allow either "DST HITS" on one line, or only DST (then derive HITS)
+          set -- $line
+          local dstPath="$1"
+          local hitPath="${2:-}"
+
+          if [[ -z "$hitPath" ]]; then
+              hitPath="${dstPath/sim_group_DST_/sim_group_HITS_}"
+          fi
+
+          if [[ ! -f "$dstPath" ]]; then echo "[WARN] Missing DST list:  $dstPath (skip)"; continue; fi
+          if [[ ! -f "$hitPath" ]]; then echo "[WARN] Missing HITS list: $hitPath (skip)"; continue; fi
+
+          printf 'arguments = 9999 %s sim $(Cluster) 0 %d %s\nqueue\n\n' \
+                 "$dstPath" "$idx" "$hitPath" >> "$submitFile"
+          (( ++idx ))
+      done < "$resubmitFile"
+
+      (( idx > 0 )) || { echo "[ERROR] doAllResSubmit: no valid lines in $resubmitFile"; return 1; }
+
+      echo "[STEP] condor_submit (resubmit) → $submitFile  (jobs=$idx)"
+      condor_submit "$submitFile"
+      return 0
+  fi
+
+  # ORIGINAL PATH (unchanged below)
   [[ -f "$SIM_DST_LIST"  ]] || { echo "[ERROR] Missing DST list $SIM_DST_LIST";  return 1; }
   [[ -f "$SIM_HITS_LIST" ]] || { echo "[ERROR] Missing G4 list  $SIM_HITS_LIST"; return 1; }
 
@@ -676,52 +800,89 @@ submit_sim_condor() {
   if [[ "$execMode" == "local" ]]; then
       echo "[STEP] LOCAL mode – bundling $nJobs pair(s) into one macro run"
 
+      # Ensure staging dir exists & is writable
+      if [[ ! -d "$CONDOR_LISTFILES_DIR" ]]; then
+        echo "[DEBUG] Creating CONDOR_LISTFILES_DIR: $CONDOR_LISTFILES_DIR"
+        mkdir -p "$CONDOR_LISTFILES_DIR" || { echo "[ERROR] mkdir failed: $CONDOR_LISTFILES_DIR"; return 1; }
+      fi
+      if [[ ! -w "$CONDOR_LISTFILES_DIR" ]]; then
+        echo "[ERROR] Not writable: $CONDOR_LISTFILES_DIR"; return 1
+      fi
+
       # Build temp list files for this local bundle
       local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
-      local dstList="${CONDOR_LISTFILES_DIR}/local_bundle_DST_${offset}_${endIndex}_${stamp}.list"
-      local hitsList="${CONDOR_LISTFILES_DIR}/local_bundle_HITS_${offset}_${endIndex}_${stamp}.list"
+      local tag=""
+      if $useMinBias; then tag="_MinBias"; fi
+      local dstList="${CONDOR_LISTFILES_DIR}/local_bundle_DST${tag}_${offset}_${endIndex}_${stamp}.list"
+      local hitsList="${CONDOR_LISTFILES_DIR}/local_bundle_HITS${tag}_${offset}_${endIndex}_${stamp}.list"
+
       rm -f "$dstList" "$hitsList" 2>/dev/null || true
+
+      echo "[DEBUG] Writing list files:"
+      echo "       DST  → $dstList"
+      echo "       HITS → $hitsList"
 
       local idx=0
       for (( i=offset; i<endIndex; i++ )); do
           idx=$(( idx + 1 ))
           IFS=' ' read -r dstFile hitFile <<< "${simPairs[$i]}"
 
-          [[ -f "$dstFile" ]] || { echo "[WARN] Missing DST  $dstFile – skip"; continue; }
-          [[ -f "$hitFile" ]] || { echo "[WARN] Missing HITS $hitFile – skip"; continue; }
+          # Avoid slow Lustre metadata checks; just enqueue the paths.
+          # The ROOT macro will report any missing/corrupt files.
+          if [[ -z "$dstFile" || -z "$hitFile" ]]; then
+              echo "[ERROR] Malformed pair at index $i: '${simPairs[$i]}'"
+              return 1
+          fi
 
-          echo "$dstFile"  >> "$dstList"
-          echo "$hitFile"  >> "$hitsList"
+          printf '%s\n' "$dstFile"  >> "$dstList"  || { echo "[ERROR] write failed: $dstList"; return 1; }
+          printf '%s\n' "$hitFile"  >> "$hitsList" || { echo "[ERROR] write failed: $hitsList"; return 1; }
       done
 
-      # Quick sanity
-      local nd=$(wc -l < "$dstList"  || echo 0)
-      local nh=$(wc -l < "$hitsList" || echo 0)
+      sync
+
+      # Quick sanity with visible counts + heads
+      local nd nh
+      nd=$(wc -l < "$dstList"  2>/dev/null || echo 0)
+      nh=$(wc -l < "$hitsList" 2>/dev/null || echo 0)
+      echo "[DEBUG] Sanity counts: DST=$nd  HITS=$nh"
       if (( nd == 0 || nh == 0 || nd != nh )); then
           echo "[ERROR] Local bundle lists invalid (DST=$nd, HITS=$nh) – abort local run"
+          echo "[DEBUG] Head of $dstList:";  head -n 3 "$dstList" || true
+          echo "[DEBUG] Head of $hitsList:"; head -n 3 "$hitsList" || true
           return 1
       fi
 
-      # If user requested "doAll" in local mode, write the final ALL file directly
+      # Choose output location
       local finalOutDir="/sphenix/u/patsfan753/scratch/PDCrun24pp/output"
       local outRoot
       if $FAST_SUBMIT; then
-          mkdir -p "$finalOutDir"
-          outRoot="${finalOutDir}/PositionDep_sim_ALL.root"
-          rm -f "$outRoot" 2>/dev/null || true
+          mkdir -p "$finalOutDir" || { echo "[ERROR] mkdir failed: $finalOutDir"; return 1; }
+          if $useMinBias; then
+              outRoot="${finalOutDir}/PositionDep_sim_ALL_MinBias.root"
+          else
+              outRoot="${finalOutDir}/PositionDep_sim_ALL.root"
+          fi
       else
+          mkdir -p "$OUTDIR_SIM" || { echo "[ERROR] mkdir failed: $OUTDIR_SIM"; return 1; }
           outRoot="${OUTDIR_SIM}/PositionDep_sim_bundle_${offset}_${endIndex}_${stamp}.root"
       fi
+      rm -f "$outRoot" 2>/dev/null || true
 
       echo "------------------------------------------------------------------"
-      echo "[RUN]  single macro call over ${nd} pairs"
-      echo "   DST-LIST : $(basename "$dstList")"
-      echo "   HITS-LIST: $(basename "$hitsList")"
-      echo "   OUT      : $(basename "$outRoot")"
+      echo "[RUN][LOCAL]  pairs=${nd}"
+      echo "  ROOT macro : $MACRO_PATH"
+      echo "  DST list   : $dstList"
+      echo "  HITS list  : $hitsList"
+      echo "  OUT file   : $outRoot"
       echo "------------------------------------------------------------------"
 
       # nevents=0 → process all events across all files in the lists
       root -b -q -l "${MACRO_PATH}(0, \"${dstList}\", \"${hitsList}\", \"${outRoot}\")"
+      local rc=$?
+      if (( rc != 0 )); then
+          echo "[ERROR] ROOT returned non-zero exit code: $rc"
+          return $rc
+      fi
 
       if $FAST_SUBMIT; then
           echo "[INFO] LOCAL doAll complete → $outRoot"
@@ -731,8 +892,16 @@ submit_sim_condor() {
       return 0
   fi
 
+
   # ─────────────── 6) CONDOR SUBMISSION (group N pairs per job) ───────────
   local submitFile="PositionDependentCorrect_sim.sub"
+
+  # If MINBIAS is active, propagate the output base to the job environment
+  local ENV_OUTDIR_LINE=""
+  if $useMinBias; then
+      ENV_OUTDIR_LINE="environment = OUTDIR_SIM=/sphenix/tg/tg01/bulk/jbennett/PDC/SimOutMinBias"
+  fi
+
   cat > "$submitFile" <<EOL
 universe   = vanilla
 executable = PositionDependentCorrect_Condor.sh
@@ -740,9 +909,9 @@ log        = ${LOG_DIR_LOG}/job.\$(Cluster).\$(Process).log
 output     = ${LOG_DIR_OUT}/job.\$(Cluster).\$(Process).out
 error      = ${LOG_DIR_ERR}/job.\$(Cluster).\$(Process).err
 request_memory = 1500MB
+${ENV_OUTDIR_LINE}
 # Args: <runNum=9999> <listFileData> <sim> <Cluster> <nEvents=0> <processID> [<listFileHits>]
 EOL
-
   # How many (DST,G4) pairs per Condor job:
   local GROUP_SIZE_SIM=5
 

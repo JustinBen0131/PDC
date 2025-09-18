@@ -1,0 +1,33 @@
+series,variant,residual,E,mu,dmu,sigma,dsigma
+0,b(E) corr, scratch,phi,3,-0.00141278,1.60963e-05,0.00373968,1.13818e-05
+0,b(E) corr, scratch,phi,5,-0.000902087,1.4033e-05,0.00332002,9.92284e-06
+0,b(E) corr, scratch,phi,7,-0.000655626,1.28399e-05,0.00315075,9.07919e-06
+0,b(E) corr, scratch,phi,9,-0.0004747,1.30557e-05,0.00326161,9.23179e-06
+0,b(E) corr, scratch,phi,11,-0.000287348,1.37038e-05,0.00343036,9.69004e-06
+0,b(E) corr, scratch,phi,13.5,-5.85575e-05,1.16823e-05,0.00356855,8.26061e-06
+0,b(E) corr, scratch,phi,17.5,0.000176761,8.82344e-06,0.00347417,6.23912e-06
+0,b(E) corr, scratch,phi,25,0.000383244,5.33247e-06,0.00298286,3.77063e-06
+1,CorrectPosition, cluster,phi,3,-0.00112035,1.66817e-05,0.00387569,1.17958e-05
+1,CorrectPosition, cluster,phi,5,-0.000638513,1.44916e-05,0.00342851,1.02471e-05
+1,CorrectPosition, cluster,phi,7,-0.000397667,1.31684e-05,0.00323135,9.31144e-06
+1,CorrectPosition, cluster,phi,9,-0.000222293,1.32452e-05,0.00330895,9.36579e-06
+1,CorrectPosition, cluster,phi,11,-4.8156e-05,1.38401e-05,0.00346449,9.78646e-06
+1,CorrectPosition, cluster,phi,13.5,0.000167538,1.18443e-05,0.00361803,8.37515e-06
+1,CorrectPosition, cluster,phi,17.5,0.000400557,8.9356e-06,0.00351833,6.31842e-06
+1,CorrectPosition, cluster,phi,25,0.000597251,5.4138e-06,0.00302835,3.82814e-06
+2,b(E) corr, scratch,eta,3,1.02634e-05,1.70229e-05,0.00395495,1.2037e-05
+2,b(E) corr, scratch,eta,5,1.29795e-05,1.50667e-05,0.00356456,1.06537e-05
+2,b(E) corr, scratch,eta,7,-9.21697e-07,1.37154e-05,0.00336559,9.69827e-06
+2,b(E) corr, scratch,eta,9,-2.31289e-05,1.31094e-05,0.00327501,9.26973e-06
+2,b(E) corr, scratch,eta,11,-2.00683e-05,1.27329e-05,0.00318732,9.0035e-06
+2,b(E) corr, scratch,eta,13.5,2.86143e-06,1.02969e-05,0.00314537,7.28102e-06
+2,b(E) corr, scratch,eta,17.5,6.28249e-06,7.81347e-06,0.0030765,5.52496e-06
+2,b(E) corr, scratch,eta,25,2.95621e-07,5.16959e-06,0.00289174,3.65546e-06
+3,CorrectPosition, cluster,eta,3,-1.05969e-05,1.83008e-05,0.00425186,1.29406e-05
+3,CorrectPosition, cluster,eta,5,4.73443e-07,1.60853e-05,0.00380556,1.1374e-05
+3,CorrectPosition, cluster,eta,7,-2.23117e-05,1.4599e-05,0.0035824,1.0323e-05
+3,CorrectPosition, cluster,eta,9,-3.80141e-05,1.39985e-05,0.00349713,9.89843e-06
+3,CorrectPosition, cluster,eta,11,-2.16642e-05,1.36068e-05,0.00340608,9.62146e-06
+3,CorrectPosition, cluster,eta,13.5,-2.03194e-05,1.10139e-05,0.00336438,7.788e-06
+3,CorrectPosition, cluster,eta,17.5,-1.01204e-05,8.3873e-06,0.00330245,5.93072e-06
+3,CorrectPosition, cluster,eta,25,-2.35106e-05,5.56644e-06,0.00311373,3.93607e-06

@@ -127,24 +127,68 @@ usage() {
   exit 1
 }
 
-[[ $# -lt 1 || $# -gt 3 ]] && usage
+# Allow up to 4 tokens so we can add an independent 'minbias' flag
+[[ $# -lt 1 || $# -gt 4 ]] && usage
 MODE="$1"
 SUB1="${2:-}"
 SUB2="${3:-}"
-# Preserve existing two-arg behavior; allow combined submodes for addChunks
-SUBMODE="$SUB1"
-[[ -n "$SUB2" ]] && SUBMODE="$SUB1 $SUB2"
+SUB3="${4:-}"
+
+# Detect 'minbias' anywhere (case-insensitive), but DO NOT include it in SUBMODE
+MINBIAS=false
+for tok in "$SUB1" "$SUB2" "$SUB3"; do
+  case "$tok" in
+    MINBIAS|minbias|MinBias) MINBIAS=true ;;
+  esac
+done
+
+# Build SUBMODE from remaining tokens (exclude MINBIAS tokens)
+SUBMODE=""
+for tok in "$SUB1" "$SUB2" "$SUB3"; do
+  case "$tok" in
+    ""|MINBIAS|minbias|MinBias) continue ;;
+    *) SUBMODE="${SUBMODE:+$SUBMODE }$tok" ;;
+  esac
+done
+
+
 [[ "$MODE" != "condor" && "$MODE" != "local" && "$MODE" != "addChunks" && "$MODE" != "checkFileOutput" ]] && usage
 
 
 # asManyAsCan ⇒ 1 000-file groups
 [[ "$MODE" == "condor" && "$SUBMODE" == "asManyAsCan" ]] && FILES_PER_GROUP=1000
 
+# Apply 'minbias' overrides before creating directories
+if $MINBIAS; then
+  # Separate produced chunk inputs
+  SIM_CHUNK_DIR="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOutMinBias/9999"
+
+  # Separate expected-input lists for integrity checks
+  SIM_LIST_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/simListFiles/run21_type30_MB_nopileup"
+  SIM_DST_LIST="${SIM_LIST_DIR}/DST_CALO_CLUSTER.list"
+  SIM_HITS_LIST="${SIM_LIST_DIR}/G4HITS.list"
+
+  # Separate all output artifacts by directory (keep Condor logs shared)
+  OUTPUT_DIR="${OUTPUT_DIR%/}/minbias"
+  TMP_SUBDIR="${TMP_SUBDIR%/}/minbias"
+  TMP_SUPERDIR="${TMP_SUPERDIR%/}/minbias"
+
+  # Avoid cross-run clobbering of the master list file
+  LISTFILE="${OUTPUT_DIR%/}/sim_chunks_fulllist_minbias.txt"
+fi
+
 echo "============================================================================"
 echo "[mergeSimOutputs.sh] START  $(date)"
-echo "[INFO] Mode = $MODE $SUBMODE  |  FILES_PER_GROUP=$FILES_PER_GROUP"
+echo "[INFO] Mode = $MODE ${SUBMODE:-<none>}  |  FILES_PER_GROUP=$FILES_PER_GROUP  |  MINBIAS=$MINBIAS"
+echo "[INFO] SIM_CHUNK_DIR = $SIM_CHUNK_DIR"
+echo "[INFO] OUTPUT_DIR    = $OUTPUT_DIR"
 echo "============================================================================"
-mkdir -p "$OUTPUT_DIR" || { echo "[ERROR] Cannot create $OUTPUT_DIR"; exit 1; }
+
+# Ensure all destination directories exist (needed if minbias appended paths are new)
+mkdir -p "$OUTPUT_DIR" "$CONDOR_OUTDIR" "$CONDOR_ERRDIR" "$CONDOR_LOGDIR" || {
+  echo "[ERROR] Cannot create output/log directories"; exit 1;
+}
+
 
 ###############################################################################
 # 1) CHECKFILEOUTPUT OR CONDOR  ----------------------------------------------
@@ -365,16 +409,17 @@ if [[ "$DO_FILE_CHECK" == true ]]; then
 fi
 
   # -------------------------------------------------------------------------
-  # PLAN: For plain 'condor' with no sub-mode, use 1000 files per job (60k -> 60 jobs)
+  # PLAN: For plain 'condor' with no sub-mode, use 300 files per job (~40 partials for 12k files)
   # -------------------------------------------------------------------------
   if ! $testMode && ! $firstHalf && ! $asMany; then
-    FILES_PER_GROUP=1000
-    echo "[PLAN] No sub-mode supplied → forcing FILES_PER_GROUP=${FILES_PER_GROUP}"
-    echo "       With ${presentOutputs} outputs, expected sublists ≈ $(( (presentOutputs + FILES_PER_GROUP - 1) / FILES_PER_GROUP ))"
+    FILES_PER_GROUP=300
+    echo "[PLAN] No sub-mode supplied → forcing FILES_PER_GROUP=${FILES_PER_GROUP} (target ~40 partials for 12k files)"
+    echo "       With ${totalToMerge:-0} outputs, expected sublists ≈ $(( (totalToMerge + FILES_PER_GROUP - 1) / FILES_PER_GROUP ))"
   else
     # keep whatever FILES_PER_GROUP is (default 100 or 1000 for asManyAsCan)
     echo "[PLAN] Sub-mode='$SUBMODE' → FILES_PER_GROUP=${FILES_PER_GROUP}"
   fi
+
 
   # -------------------------------------------------------------------------
   # CLEAN old outputs (partials, superchunks, final) only after successful precheck
@@ -608,4 +653,3 @@ fi
 echo "[INFO] Running local hadd -> $FINAL"
 hadd -v 3 -f "$FINAL" @"$LIST" || { echo "[ERROR] local hadd failed"; exit 1; }
 echo "[INFO] Created $(ls -lh "$FINAL")"
-
