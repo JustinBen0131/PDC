@@ -1695,27 +1695,27 @@ RawClusterContainer* PositionDependentCorrection::retrieveClusterContainer(PHCom
   if (Verbosity() > 0)
   {
     std::cout << "PositionDependentCorrection::retrieveClusterContainer - START" << std::endl;
-    std::cout << "  --> Attempting to retrieve 'CLUSTERINFO_CEMC_V2' from the node tree." << std::endl;
+    std::cout << "  --> Attempting to retrieve 'CLUSTERINFO_CEMC' from the node tree." << std::endl;
   }
 
   RawClusterContainer* clusterContainer =
-      findNode::getClass<RawClusterContainer>(topNode, "CLUSTERINFO_CEMC_V2");
+      findNode::getClass<RawClusterContainer>(topNode, "CLUSTERINFO_CEMC");
 
   if (!clusterContainer)
   {
-    std::cerr << "[FATAL] CLUSTERINFO_CEMC_V2 node is missing.\n";
-    std::cerr << "        Ensure the builder calls WriteClusterV2(true)." << std::endl;
+    std::cerr << "[FATAL] CLUSTERINFO_CEMC node is missing." << std::endl;
     gSystem->Exit(1);
     return nullptr;
   }
 
   if (Verbosity() > 0)
   {
-    std::cout << "  --> Successfully retrieved 'CLUSTERINFO_CEMC_V2' container." << std::endl;
+    std::cout << "  --> Successfully retrieved 'CLUSTERINFO_CEMC' container." << std::endl;
     std::cout << "PositionDependentCorrection::retrieveClusterContainer - END" << std::endl << std::endl;
   }
   return clusterContainer;
 }
+
 
 // ----------------------------------------------------------------------------
 
@@ -3907,72 +3907,72 @@ void PositionDependentCorrection::finalClusterLoop(
     /* 4) find energy slice ........................................... */
     const int iEbin = getEnergySlice( clusE );
       
-      {
-          const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
-          float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-          float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-          float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-          float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-          if (c2) {
-              x_raw_v2 = c2->x_tower_raw();
-              y_raw_v2 = c2->y_tower_raw();
-              x_cor_v2 = c2->x_tower_corr();
-              y_cor_v2 = c2->y_tower_corr();
-          }
-          
-          // recompute CoG (raw) for a sanity check
-          float x_cog = std::numeric_limits<float>::quiet_NaN();
-          float y_cog = std::numeric_limits<float>::quiet_NaN();
-          bool  got_cog = false;
-          if (m_bemcRec && m_geometry)
-          {
-              std::vector<EmcModule> hitlist;
-              hitlist.reserve(std::distance(clus1->get_towers().first, clus1->get_towers().second));
-              const int Nx = m_bemcRec->GetNx();
-              
-              auto range = clus1->get_towers();
-              for (auto it = range.first; it != range.second; ++it)
-              {
-                  const auto tg = m_geometry->get_tower_geometry(it->first);
-                  if (!tg) continue;
-                  EmcModule m;
-                  m.ich = tg->get_bineta() * Nx + tg->get_binphi();
-                  m.amp = static_cast<float>(it->second);
-                  m.tof = 0.0f;
-                  hitlist.push_back(m);
-              }
-              if (!hitlist.empty())
-              {
-                  float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
-                  m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
-                  if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
-              }
-          }
-          
-          // reuse your existing histos to track v2 − recalc
-          if (c2 && got_cog)
-          {
-              if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_v2 - x_cog);
-              if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_v2 - y_cog);
-          }
-          
-          if (m_print_first_N_clusters-- > 0)
-          {
-              std::cout << ANSI_BOLD << ANSI_GREEN
-              << "[V2] clusID=" << clus1->get_id()
-              << "  E=" << clusE << " GeV"
-              << ANSI_RESET << "\n";
-              std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
-              << (c2 ? "[OK]" : "[MISSING]") << "\n";
-              if (got_cog)
-                  std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
-              if (c2 && got_cog)
-                  std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
-                  << (y_raw_v2 - y_cog) << ")\n";
-              std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
-              << (c2 ? "[OK]" : "[MISSING]") << "\n";
-          }
-      }
+//      {
+//          const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
+//          float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+//          float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+//          float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+//          float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+//          if (c2) {
+//              x_raw_v2 = c2->x_tower_raw();
+//              y_raw_v2 = c2->y_tower_raw();
+//              x_cor_v2 = c2->x_tower_corr();
+//              y_cor_v2 = c2->y_tower_corr();
+//          }
+//          
+//          // recompute CoG (raw) for a sanity check
+//          float x_cog = std::numeric_limits<float>::quiet_NaN();
+//          float y_cog = std::numeric_limits<float>::quiet_NaN();
+//          bool  got_cog = false;
+//          if (m_bemcRec && m_geometry)
+//          {
+//              std::vector<EmcModule> hitlist;
+//              hitlist.reserve(std::distance(clus1->get_towers().first, clus1->get_towers().second));
+//              const int Nx = m_bemcRec->GetNx();
+//              
+//              auto range = clus1->get_towers();
+//              for (auto it = range.first; it != range.second; ++it)
+//              {
+//                  const auto tg = m_geometry->get_tower_geometry(it->first);
+//                  if (!tg) continue;
+//                  EmcModule m;
+//                  m.ich = tg->get_bineta() * Nx + tg->get_binphi();
+//                  m.amp = static_cast<float>(it->second);
+//                  m.tof = 0.0f;
+//                  hitlist.push_back(m);
+//              }
+//              if (!hitlist.empty())
+//              {
+//                  float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
+//                  m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
+//                  if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
+//              }
+//          }
+//          
+//          // reuse your existing histos to track v2 − recalc
+//          if (c2 && got_cog)
+//          {
+//              if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_v2 - x_cog);
+//              if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_v2 - y_cog);
+//          }
+//          
+//          if (m_print_first_N_clusters-- > 0)
+//          {
+//              std::cout << ANSI_BOLD << ANSI_GREEN
+//              << "[V2] clusID=" << clus1->get_id()
+//              << "  E=" << clusE << " GeV"
+//              << ANSI_RESET << "\n";
+//              std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
+//              << (c2 ? "[OK]" : "[MISSING]") << "\n";
+//              if (got_cog)
+//                  std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
+//              if (c2 && got_cog)
+//                  std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
+//                  << (y_raw_v2 - y_cog) << ")\n";
+//              std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
+//              << (c2 ? "[OK]" : "[MISSING]") << "\n";
+//          }
+//      }
 
 
     /* optional detailed print ........................................ */

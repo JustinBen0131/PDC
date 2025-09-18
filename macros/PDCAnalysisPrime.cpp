@@ -4018,34 +4018,43 @@ void MakeDeltaPhiEtaPlayground(
     {
         const std::string dirPhiLog = std::string(outDir) + "/PhiLogFitSummary";
         ensureDir(dirPhiLog.c_str());
+        // ---- All Δφ variants: PDC (raw/corr), CLUS (raw/corr/b-corr), and 4× EA flavours
+        constexpr int NPHI = 9;
 
-        const std::array<const char*,6> phiPat = {
-            "h_phi_diff_raw_%s",
-            "h_phi_diff_corr_%s",
-            "h_phi_diff_cpRaw_%s",
-            "h_phi_diff_cpCorr_%s",
-            "h_phi_diff_cpBcorr_%s",
-            "h_phi_diff_cpCorrEA_%s"
+        const std::array<const char*,NPHI> phiPat = {
+            "h_phi_diff_raw_%s",                       // 0: PDC raw
+            "h_phi_diff_corr_%s",                      // 1: PDC corrected
+            "h_phi_diff_cpRaw_%s",                     // 2: CLUS raw (no corr)
+            "h_phi_diff_cpCorr_%s",                    // 3: CLUS CorrectPosition
+            "h_phi_diff_cpBcorr_%s",                   // 4: CLUS b(E) corr
+            "h_phi_diff_cpCorrEA_geom_%s",             // 5: CLUS-CP(EA geom)
+            "h_phi_diff_cpCorrEA_fitEtaDep_%s",        // 6: CLUS-CP(EA |eta|+E fits)
+            "h_phi_diff_cpCorrEA_fitEnergyOnly_%s",    // 7: CLUS-CP(EA E-only fits)
+            "h_phi_diff_cpCorrEA_fitPhiE_etaEtaDep_%s" // 8: CLUS-CP(EA φ:E-only, η:|η|+E)
         };
-        const std::array<const char*,6> phiLab = {
+        const std::array<const char*,NPHI> phiLab = {
             "PDC raw",
             "PDC corrected",
             "no corr, cluster",
             "CorrectPosition, cluster",
             "b(E) corr, cluster",
-            "CorrectPosition(EA), cluster"
+            "CorrectPosition(EA geom), cluster",
+            "CorrectPosition(EA |#eta|+E), cluster",
+            "CorrectPosition(EA E-only), cluster",
+            "CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster"
         };
 
-        std::array<std::vector<TH1F*>,6> PHI{};
-        for (int v=0; v<6; ++v) PHI[v] = loadSet(phiPat[v]);
+        std::array<std::vector<TH1F*>,NPHI> PHI{};
+        for (int v=0; v<NPHI; ++v) PHI[v] = loadSet(phiPat[v]);
+
         std::vector<double> eCtr; eCtr.reserve(eEdges.size());
         for (std::size_t iE=0; iE<eEdges.size(); ++iE)
             eCtr.push_back(0.5*(eEdges[iE].first + eEdges[iE].second));
 
-        std::array<std::vector<double>,6> MU, dMU, SG, dSG;
-        std::vector<int> shown; shown.reserve(6);
+        std::array<std::vector<double>,NPHI> MU, dMU, SG, dSG;
+        std::vector<int> shown; shown.reserve(NPHI);
 
-        for (int v=0; v<6; ++v) {
+        for (int v=0; v<NPHI; ++v) {
             MU[v].reserve(eEdges.size());
             dMU[v].reserve(eEdges.size());
             SG[v].reserve(eEdges.size());
@@ -4067,9 +4076,30 @@ void MakeDeltaPhiEtaPlayground(
             if (any) shown.push_back(v);
         }
 
-        // Local style maps for up to 6 series (avoid indexing global kCol/kMk[5])
-        const Color_t colByV[6] = { kBlue+1, kBlue+1, kRed+1, kRed+1, kRed+1, kRed+3 };
-        const Style_t mkByV [6] = { 20,      24,      20,      24,      21,      24   };
+        // Local style maps for up to 9 series
+        const Color_t colByV[NPHI] = {
+            kBlue+1,  // PDC raw
+            kBlue+1,  // PDC corrected
+            kRed+1,   // CLUS raw
+            kRed+1,   // CLUS CP
+            kRed+1,   // CLUS b(E)
+            kRed+3,   // EA geom
+            kRed+2,   // EA |eta|+E
+            kRed+4,   // EA E-only
+            kMagenta+1// EA mix
+        };
+        const Style_t mkByV [NPHI] = {
+            20,       // PDC raw     (filled)
+            24,       // PDC corr    (open)
+            20,       // CLUS raw    (filled)
+            24,       // CLUS CP     (open)
+            21,       // CLUS b(E)   (filled square)
+            24,       // EA geom     (open)
+            25,       // EA |eta|+E  (open diamond)
+            27,       // EA E-only   (open triangle)
+            28        // EA mix      (open star)
+        };
+
 
 
         // μ/σ vs E overlay (all available variants)
@@ -4141,7 +4171,8 @@ void MakeDeltaPhiEtaPlayground(
             c.cd();
             TLatex h; h.SetNDC(); h.SetTextAlign(22); h.SetTextSize(0.040);
             h.DrawLatex(0.50,0.985,"#Delta#phi  –  Mean / RMS vs E  (variants)");
-            const std::string outP = dirPhiLog + "/DeltaPhi_MeanSigmaVsE_5Variants.png";
+            const std::string outP = dirPhiLog + "/DeltaPhi_MeanSigmaVsE_9Variants.png";
+
             c.SaveAs(outP.c_str());
             c.Close();
 
@@ -4160,19 +4191,24 @@ void MakeDeltaPhiEtaPlayground(
                            EctrS, MUv, dMUv, SGv, dSGv);
         }
 
-        // ==================== NEW: 3-way CLUS-only overlays (RAW, CORR, CORR(EA)) ====================
+        // ==================== CLUS-only overlays (RAW, CORR, CORR(EA_geom)) + EA fits ====================
         {
-            // indices in phiPat/phiLab: (2) cpRaw, (3) cpCorr, (5) cpCorrEA
-            const int vCLUSraw   = 2;
-            const int vCLUScorr  = 3;
-            const int vCLUScorrEA= 5;
+            // indices in our expanded variant table
+            const int vCLUSraw    = 2; // no corr, cluster
+            const int vCLUScorr   = 3; // CorrectPosition, cluster
+            const int vEA_geom    = 5; // EA geometry
+            const int vEA_etaDep  = 6; // EA |eta|+E fits
+            const int vEA_eOnly   = 7; // EA E-only fits
+            const int vEA_mix     = 8; // EA mixed (phi:E-only, eta:|eta|+E)
 
             auto hasAny = [&](int vidx)->bool {
                 for (auto* h : PHI[vidx]) if (h && h->Integral()>0) return true;
                 return false;
             };
+
+            // 3-way plot uses: CLUS RAW / CLUS CP / EA_geom as representative
             std::vector<int> use3;
-            for (int v : {vCLUSraw, vCLUScorr, vCLUScorrEA}) if (hasAny(v)) use3.push_back(v);
+            for (int v : {vCLUSraw, vCLUScorr, vEA_geom}) if (hasAny(v)) use3.push_back(v);
 
             if (!use3.empty() && eCtr.size() >= 2) {
                 // ---------------- μ/σ vs E (3-way) ----------------
@@ -4180,7 +4216,7 @@ void MakeDeltaPhiEtaPlayground(
                 const double xMaxE = eCtr.back() + 0.5*(eEdges.back().second - eEdges.back().first);
                 std::vector<double> ex(eCtr.size(), 0.0);
 
-                TCanvas c3("cPhiVar_MuSig_3","DeltaPhi – CLUS RAW/CORR/CORR(EA) μ/σ vs E",1000,850);
+                TCanvas c3("cPhiVar_MuSig_3","DeltaPhi – CLUS RAW/CORR/CORR(EA_geom) μ/σ vs E",1000,850);
                 auto pads3 = makeEqualHeightTwinPads(c3, "PhiVarMuSig3", 0.15,0.05, 0.14,0.02, 0.04,0.16);
                 TPad* pTop3 = pads3.first; TPad* pBot3 = pads3.second;
 
@@ -4243,27 +4279,11 @@ void MakeDeltaPhiEtaPlayground(
 
                 c3.cd();
                 TLatex h3; h3.SetNDC(); h3.SetTextAlign(22); h3.SetTextSize(0.038);
-                h3.DrawLatex(0.50,0.985,"#Delta#phi  –  Clusterizer RAW / CORR / CORR(EA)  –  Mean / RMS vs E");
+                h3.DrawLatex(0.50,0.985,"#Delta#phi  –  Clusterizer RAW / CORR / CORR(EA_{geom})  –  Mean / RMS vs E");
 
                 const std::string outP3 = dirPhiLog + "/DeltaPhi_MeanSigmaVsE_Clusterizer3.png";
                 c3.SaveAs(outP3.c_str());
                 c3.Close();
-
-                // (optional) CSV for the three series
-                {
-                    std::vector<std::string> Vlab; Vlab.reserve(use3.size());
-                    std::vector<std::vector<double>> EctrS, MUv, dMUv, SGv, dSGv;
-                    for (int v : use3) {
-                        Vlab.emplace_back(phiLab[v]);
-                        EctrS.push_back(eCtr);
-                        MUv.push_back(MU[v]); dMUv.push_back(dMU[v]);
-                        SGv.push_back(SG[v]); dSGv.push_back(dSG[v]);
-                    }
-                    saveMuSigmaCSV(outP3,
-                                   Vlab,
-                                   std::vector<std::string>(Vlab.size(), "phi"),
-                                   EctrS, MUv, dMUv, SGv, dSGv);
-                }
 
                 // ---------------- μ vs ln(E) with fits (3-way) ----------------
                 std::vector<double> lnE(eCtr.size());
@@ -4280,7 +4300,7 @@ void MakeDeltaPhiEtaPlayground(
                 }
                 const double pad=0.15*(yHi-yLo); yLo-=pad; yHi+=0.35*(yHi-yLo);
 
-                TCanvas c3ln("cLn3","μ vs lnE (CLUS RAW/CORR/CORR(EA))",900,640);
+                TCanvas c3ln("cLn3","μ vs lnE (CLUS RAW/CORR/CORR(EA_geom))",900,640);
                 c3ln.SetLeftMargin(0.15); c3ln.SetRightMargin(0.06);
 
                 TH1F fr3("",";ln E  [GeV];#mu  [rad]",1,xLo,xHi);
@@ -4290,9 +4310,9 @@ void MakeDeltaPhiEtaPlayground(
                 TLegend lg3(0.17,0.74,0.92,0.90);
                 lg3.SetBorderSize(0); lg3.SetFillStyle(0); lg3.SetTextSize(0.032);
 
-                // Append to the same fit text file to "ensure" cpCorrEA is present even if the “All” block was skipped earlier
+                // Append fits for 3-way (RAW/CP/EA_geom)
                 std::ofstream fapp(dirPhiLog + "/DeltaPhi_MuVsLogE_fit.txt", std::ios::app);
-                if (fapp.tellp() > 0) fapp << "\n# ---- Clusterizer 3-way (cpRaw / cpCorr / cpCorrEA) ----\n";
+                if (fapp.tellp() > 0) fapp << "\n# ---- Clusterizer 3-way (cpRaw / cpCorr / cpCorrEA_geom) ----\n";
 
                 for (int v : use3) {
                     TGraphErrors* g = new TGraphErrors((int)eCtr.size(),
@@ -4311,20 +4331,33 @@ void MakeDeltaPhiEtaPlayground(
                     g->Fit(&f, "Q");
                     f.Draw("SAME");
 
-                    // Write (a,b) for each of the three, including cpCorrEA (v==5)
-                    fapp << Form("%-28s % .6e   % .6e\n",
+                    fapp << Form("%-44s % .6e   % .6e\n",
                                  phiLab[v], f.GetParameter(0), f.GetParameter(1));
 
                     lg3.AddEntry(g, Form("%s  (m=%.2e, b=%.2e)",
                                          phiLab[v], f.GetParameter(1), f.GetParameter(0)), "p");
                 }
-                fapp.close();
-
-                TLatex t3; t3.SetNDC(); t3.SetTextSize(0.044); t3.SetTextAlign(13);
-                t3.DrawLatex(0.68, 0.24, "#mu(E) = b + m #upoint ln E");
-
+                lg3.Draw();
                 c3ln.SaveAs((dirPhiLog + "/DeltaPhi_MuVsLogE_Clusterizer3.png").c_str());
                 c3ln.Close();
+
+                // ---------------- EXTRA: μ vs ln(E) fits for all EA flavours ----------------
+                std::vector<int> eaList;
+                for (int v : {vEA_geom, vEA_etaDep, vEA_eOnly, vEA_mix}) if (hasAny(v)) eaList.push_back(v);
+                if (!eaList.empty()) {
+                    std::ofstream fea(dirPhiLog + "/DeltaPhi_MuVsLogE_fit.txt", std::ios::app);
+                    fea << "\n# ---- CLUS-CP(EA) 4-way (geom / |eta|+E / E-only / mix) ----\n";
+                    for (int v : eaList) {
+                        TF1 f(Form("fEA_%d",v), "pol1", xLo, xHi);
+                        // make a throwaway graph just to run the fit consistently (no draw)
+                        TGraphErrors gEA((int)eCtr.size(),
+                                         lnE.data(), MU[v].data(),
+                                         ex0.data(), dMU[v].data());
+                        gEA.Fit(&f, "Q");
+                        fea << Form("%-44s % .6e   % .6e\n",
+                                    phiLab[v], f.GetParameter(0), f.GetParameter(1));
+                    }
+                }
             }
         }
 

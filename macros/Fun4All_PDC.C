@@ -233,9 +233,6 @@ void Fun4All_PDC(int nevents = 0,
         // TowerInfo mode → node name becomes CLUSTERINFO_CEMC, v2 → CLUSTERINFO_CEMC_V2
         ClusterBuilder->set_UseTowerInfo(1);
 
-        // Stamp v2 with tower-space CoG (raw & corrected)
-        ClusterBuilder->WriteClusterV2(true);
-
         ClusterBuilder->Verbosity(1);
         se->registerSubsystem(ClusterBuilder);
 
@@ -266,8 +263,8 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
   pdc->setIsSimulation(isSimulation);
-  pdc->setFirstPassBvaluesOnly(true);
-  pdc->UseSurveyGeometry(false);      // load barrel-tilt from CDB (recommended)
+  pdc->setFirstPassBvaluesOnly(false);
+  pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
   pdc->UseSignedVz(false);
   /*------------------------------------------------------------
       2)  π0-mass-window support
