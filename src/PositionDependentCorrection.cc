@@ -9,6 +9,7 @@
 #include <g4main/PHG4Particle.h>
 #include <g4main/PHG4VtxPoint.h>
 #include <TKey.h>
+#include <cstdint>
 #include <array>
 #include <g4detectors/PHG4Cell.h>
 #include <g4detectors/PHG4CellContainer.h>
@@ -69,6 +70,7 @@
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
 
 using namespace PDC_detail;
+PositionDependentCorrection::Pi0CutCounters PositionDependentCorrection::s_cuts{};
 
 constexpr const char* ANSI_BOLD  = "\033[1m";
 constexpr const char* ANSI_RESET = "\033[0m";
@@ -300,35 +302,76 @@ void PositionDependentCorrection::bookCommonHistograms
   if (!h_InvMass_w)      { h_InvMass_w      = new TH1F("h_InvMass_w","Invariant Mass",500,0,1.0); }
   if (!h_InvMassMix)     { h_InvMassMix     = new TH1F("h_InvMassMix","Invariant Mass",120,0,1.2); }
 
-  if (!h_mE_raw)
-  {
-    h_mE_raw = new TH2F("h_mE_raw",
-                        "π^{0} mass vs E_{#gamma}^{max} – RAW;M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
-                        120,0.00,0.30, N_Ebins, eEdge);
-    if (hm) { hm->registerHisto(h_mE_raw); }
-  }
-  if (!h_mE_corr)
-  {
-    h_mE_corr = new TH2F("h_mE_corr",
-                         "π^{0} mass vs E_{#gamma}^{max} – φ-corr.;M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
-                         120,0.00,0.30, N_Ebins, eEdge);
-    if (hm) { hm->registerHisto(h_mE_corr); }
-  }
+    if (!h_mE_corr)
+    {
+      h_mE_corr = new TH2F("h_mE_corr",
+                           "π^{0} mass vs E_{#gamma}^{max} – φ-corr.;M_{γγ} [GeV];E_{#gamma}^{max} [GeV]",
+                           120,0.00,0.30, N_Ebins, eEdge);
+      if (hm) { hm->registerHisto(h_mE_corr); }
+    }
 
-  if (!h_m_blk_raw)
-  {
-    h_m_blk_raw = new TH3F("h_m_blk_raw",
-                           "π^{0} mass – RAW;η_{loc};φ_{loc};M_{γγ} [GeV]",
-                           14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
-    if (hm) { hm->registerHisto(h_m_blk_raw); }
-  }
-  if (!h_m_blk_corr)
-  {
-    h_m_blk_corr = new TH3F("h_m_blk_corr",
-                            "π^{0} mass – φ-corr.;η_{loc};φ_{loc};M_{γγ} [GeV]",
-                            14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
-    if (hm) { hm->registerHisto(h_m_blk_corr); }
-  }
+    // Book per-variant π0 mass histograms (8 variants × N_Ebins) — COMMON (data & MC)
+    {
+      const char* vtag[] = {
+        "CLUSRAW", "CLUSCP",
+        "EAgeom", "EAetaE", "EAEonly", "EAmix",
+        "PDCraw", "PDCcorr"
+      };
+      // pretty η-view titles and tags for names
+      const char* viewTag   [kNEtaViews] = {"fullEta","etaCore","etaMid","etaEdge"};
+      const char* viewTitle [kNEtaViews] = {
+        "|#eta| #leq 1.10",      // fullEta
+        "|#eta| #leq 0.20",      // etaCore
+        "0.20 < |#eta| #leq 0.70",// etaMid
+        "0.70 < |#eta| #leq 1.10" // etaEdge
+      };
+
+      // Base (η-agnostic) per-variant histograms
+      for (int v = 0; v < static_cast<int>(VarPi0::NVAR); ++v) {
+        for (int i = 0; i < N_Ebins; ++i) {
+          if (!h_m_pi0_var[v][i]) {
+            h_m_pi0_var[v][i] = new TH1F(
+              Form("h_m_pi0_%s_%g_%g", vtag[v], eEdge[i], eEdge[i+1]),
+              Form("#pi^{0} mass (%s);M_{#gamma#gamma} [GeV];Counts", vtag[v]),
+              120, 0.00, 0.30
+            );
+            if (hm) hm->registerHisto(h_m_pi0_var[v][i]);
+          }
+        }
+      }
+
+      // NEW: η-sliced per-variant histograms, parallel to the uncorrected 3D maps
+      for (int v = 0; v < static_cast<int>(VarPi0::NVAR); ++v) {
+        for (int i = 0; i < N_Ebins; ++i) {
+          for (int vi = 0; vi < kNEtaViews; ++vi) {
+            if (!h_m_pi0_var_eta[vi][v][i]) {
+              h_m_pi0_var_eta[vi][v][i] = new TH1F(
+                Form("h_m_pi0_%s_%s_%g_%g", vtag[v], viewTag[vi], eEdge[i], eEdge[i+1]),
+                Form("#pi^{0} mass (%s, %s);M_{#gamma#gamma} [GeV];Counts",
+                     vtag[v], viewTitle[vi]),
+                120, 0.00, 0.30
+              );
+              if (hm) hm->registerHisto(h_m_pi0_var_eta[vi][v][i]);
+            }
+          }
+        }
+      }
+    }
+    
+    if (!h_m_blk_raw)
+    {
+      h_m_blk_raw = new TH3F("h_m_blk_raw",
+                             "π^{0} mass – RAW;η_{loc};φ_{loc};M_{γγ} [GeV]",
+                             14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
+      if (hm) { hm->registerHisto(h_m_blk_raw); }
+    }
+    if (!h_m_blk_corr)
+    {
+      h_m_blk_corr = new TH3F("h_m_blk_corr",
+                              "π^{0} mass – φ-corr.;η_{loc};φ_{loc};M_{γγ} [GeV]",
+                              14,-0.5,1.5, 14,-0.5,1.5, 60,0.00,0.30);
+      if (hm) { hm->registerHisto(h_m_blk_corr); }
+    }
 
   // Full-mode scalar/2D/3D histos (guard against double-booking)
   if (!h_tower_e)     { h_tower_e     = new TH1F("h_tower_e","",1000,-1,5); }
@@ -492,25 +535,6 @@ PositionDependentCorrection::bookSimulationHistograms
   h_delR_recTrth   = new TH1F("h_delR_recTrth","",500,0,5);
 
   h_truthE         = new TH1F("h_truthE","",10000,0,30);
-    
-    // Book per-variant π0 mass histograms (8 variants × N_Ebins)
-    {
-      const char* vtag[] = {
-        "CLUSRAW", "CLUSCP",
-        "EAgeom", "EAetaE", "EAEonly", "EAmix",
-        "PDCraw", "PDCcorr"
-      };
-      for (int v = 0; v < static_cast<int>(VarPi0::NVAR); ++v) {
-        for (int i = 0; i < N_Ebins; ++i) {
-          h_m_pi0_var[v][i] = new TH1F(
-            Form("h_m_pi0_%s_%g_%g", vtag[v], eEdge[i], eEdge[i+1]),
-            Form("#pi^{0} mass (%s);M_{#gamma#gamma} [GeV];Counts", vtag[v]),
-            120, 0.00, 0.30
-          );
-          if (hm) hm->registerHisto(h_m_pi0_var[v][i]);
-        }
-      }
-    }
 
     /* ──────────────────────────────────────────────────────────────────────
        (I)  Per‑E‑slice histograms that existed before
@@ -3328,20 +3352,10 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                   << tags[which] << "  |Δη|=" << std::fixed << std::setprecision(6) << best << '\n';
       }
     }
-
 }
 
 
 
-// ============================================================================
-// Helper • loop over ALL “other” clusters, build π0 candidates, apply cuts
-//         and fill (reco + truth) histograms.
-//
-//
-//    – Always fill h_mE_raw / h_mE_corr  (input for pass‑1 μ/σ fits)
-//    – If m_massFitsDone==true apply slice‑specific μ±3σ window
-//      and populate the block–space maps h_m_blk_raw / h_m_blk_corr.
-// ============================================================================
 void PositionDependentCorrection::processClusterPairs(
         RawClusterContainer               *clusterContainer,
         RawClusterContainer::ConstIterator cIt1,
@@ -3363,337 +3377,389 @@ void PositionDependentCorrection::processClusterPairs(
         const std::vector<TLorentzVector> &truth_meson_photons,
         bool                               isSimulation)
 {
-  const bool vb = (Verbosity() > 4);            // detailed debug switch
-  (void) lt_phi;
+    const bool vb = (Verbosity() > 4);   // fine-grained per-pair logging
+    const bool v1 = (Verbosity() > 0);   // end-of-call summary
+    (void) lt_phi;                       // unused
 
-  RawClusterContainer::ConstRange cRange2 = clusterContainer->getClusters();
+    // Local gate: run truth-only code IFF both the module and the caller are in MC mode
+    const bool isMC = (m_isSimulation && isSimulation);
 
-    // Early-out for single-photon (0 or 1 cluster) events
-    {
-        auto it = cRange2.first;
-        if (it == cRange2.second) return;       // no clusters
-        auto it_next = it; ++it_next;
-        if (it_next == cRange2.second) return;  // only one cluster → no pairs to build
-    }
+  // ---------- small local accounting for transparent summary ----------
+  struct Counters {
+    size_t totalSeen   = 0;  // all secondary clusters iterated
+    size_t selfSkip    = 0;  // skipped because c2==c1 or null
+    size_t kinematic   = 0;  // failed basic kinematics (pt, chi2, alpha)
+    size_t lowPi0pt    = 0;  // reco π0 pt below pi0ptcut (MC only)
+    size_t outOfSlice  = 0;  // energy slice out of table (iSlice<0)
+    size_t filledPass1 = 0;  // h_mE_raw / h_mE_corr fills
+    size_t filledBlkR  = 0;  // block RAW map fills (mass in μ±3σ)
+    size_t filledBlkC  = 0;  // block CORR map fills (mass in μ±3σ)
+    size_t truthPairOK = 0;  // both photons matched to same truth π0
+    size_t varMassFills= 0;  // per-variant mass hist fills (MC truth)
+    size_t finalFills  = 0;  // legacy mass histogram fills reached
+  } ct;
 
-    // Materialize the "first" cluster for this pairing pass
-  RawCluster* clus1 = cIt1->second;
-  if (!clus1) return;
+  // ---------- cluster range & anchor cluster ----------
+  if (!clusterContainer) {
+    if (v1) std::cerr << "[PDC::processClusterPairs] clusterContainer==nullptr → return\n";
+    return;
+  }
 
+  const auto cRange2 = clusterContainer->getClusters();
+  {
+    auto it = cRange2.first;
+    if (it == cRange2.second) { if (v1) std::cout << "[PDC::processClusterPairs] no clusters → return\n"; return; }
+    auto it2 = it; ++it2;
+    if (it2 == cRange2.second) { if (v1) std::cout << "[PDC::processClusterPairs] only one cluster → no pairs\n"; return; }
+  }
+
+  RawCluster* clus1 = (cIt1 != cRange2.second ? cIt1->second : nullptr);
+  if (!clus1) { if (v1) std::cerr << "[PDC::processClusterPairs] clus1==nullptr → return\n"; return; }
+
+  // ---------- loop over “other” clusters ----------
   for (auto cIt2 = cRange2.first; cIt2 != cRange2.second; ++cIt2)
   {
+    ++ct.totalSeen;
+    s_cuts.pairs_seen++;
 
-    // ----------------------------------------------------------------------
-    // 0)  Guard: do not pair a cluster with itself
-    // ----------------------------------------------------------------------
-    if (cIt2 == cIt1) continue;
-    RawCluster *clus2 = cIt2->second;
-    if (!clus2)       continue;
+    // 0) do not pair a cluster with itself
+    if (cIt2 == cIt1) { ++ct.selfSkip; s_cuts.pairs_self_or_null++; if (vb) std::cout << "  [skip] same cluster\n"; continue; }
+    RawCluster* clus2 = cIt2->second;
+    if (!clus2)       { ++ct.selfSkip; s_cuts.pairs_self_or_null++; if (vb) std::cout << "  [skip] clus2=null\n"; continue; }
 
-    // ----------------------------------------------------------------------
-    // 1)  Basic 4‑vector of the second cluster and quality cuts
-    // ----------------------------------------------------------------------
-    const CLHEP::Hep3Vector eVec2 = RawClusterUtility::GetEVec(*clus2, vertex);
+      // 1) kinematics for the second cluster + quality cuts
+      const CLHEP::Hep3Vector eVec2 = RawClusterUtility::GetEVec(*clus2, vertex);
+      const float clus2E    = eVec2.mag();
+      const float clus2Pt   = eVec2.perp();
+      const float clus2Eta  = eVec2.pseudoRapidity();
+      const float clus2Phi  = eVec2.phi();
+      const float clus2Chi2 = clus2->get_chi2();
 
-    const float clus2E    = eVec2.mag();
-    const float clus2Pt   = eVec2.perp();
-    const float clus2Eta  = eVec2.pseudoRapidity();
-    const float clus2Phi  = eVec2.phi();
-    const float clus2Chi2 = clus2->get_chi2();
+      // Partner pT window (unchanged)
+      if (clus2Pt < pt2ClusCut || clus2Pt > ptMaxCut) {
+        ++ct.kinematic; s_cuts.pairs_pt2++;
+        if (vb) std::cout << "  [cut] pt2=" << clus2Pt << "\n";
+        continue;
+      }
 
-    if (clus2Pt <  pt2ClusCut || clus2Pt >  ptMaxCut)   continue;
-    if (clus2Chi2 > 1.0e4)                              continue;
+      // Pathological χ² guard (kept as a sanity check)
+      if (clus2Chi2 > 1.0e4f) {
+        ++ct.kinematic; s_cuts.pairs_chi2++;
+        if (vb) std::cout << "  [cut] chi2=" << clus2Chi2 << "\n";
+        continue;
+      }
 
-    const float alpha = std::fabs(clusE - clus2E) / (clusE + clus2E);
-    if (alpha   >  maxAlpha)                           continue;
-
-    TLorentzVector photon2;  photon2.SetPtEtaPhiE(clus2Pt, clus2Eta,
-                                                  clus2Phi, clus2E);
-
-    // ----------------------------------------------------------------------
-    // 2)  Optional meson‑decay truth matching (unchanged)
-    // ----------------------------------------------------------------------
-    bool           match2       = false;
-    TLorentzVector ph2_trEtaPhi(0,0,0,0);
-
-    if (isSimulation)
-    {
-      for (const auto &trPhot : truth_meson_photons)
-      {
-        const float dR    = photon2.DeltaR(trPhot);
-        const float ratio = photon2.E() / trPhot.E();
-        if (dR < 0.02f && ratio > 0.7f && ratio < 1.5f)
-        {
-          ph2_trEtaPhi.SetPtEtaPhiE( clus2E / TMath::CosH(trPhot.Eta()),
-                                     trPhot.Eta(), trPhot.Phi(), clus2E );
-          if (match1) match2 = true;
-          break;
+      // Optional, configurable partner χ² gate (e.g. χ² < 10)
+      if (m_enableC2Chi2Cut) {
+        const float thr = m_pairChi2Max;   // or use getAnchorChi2Cut() to tie to anchor
+        if (!std::isfinite(clus2Chi2) || clus2Chi2 > thr) {
+          ++ct.kinematic;
+          s_cuts.pairs_chi2_gate++;        // if you didn't add this counter, use: s_cuts.pairs_chi2++;
+          if (vb) std::cout << "  [cut] c2 chi2=" << clus2Chi2 << " > " << thr << "\n";
+          continue;
         }
       }
-    }
 
-    // ----------------------------------------------------------------------
-    // 3)  Build the π0 candidate (reco‑based) and truth variant
-    // ----------------------------------------------------------------------
+      // Partner cluster probability cut (optional; counted separately)
+      if (m_enableC2ProbCut) {
+        const float c2Prob = clus2->get_prob();  // use get_probability() if that's your accessor
+        if (!std::isfinite(c2Prob) || c2Prob < m_pairProbMin) {
+          ++ct.kinematic;
+          s_cuts.pairs_prob2++;  // dedicated counter for partner prob failures
+          if (vb) std::cout << "  [cut] c2 prob=" << c2Prob << " < " << m_pairProbMin << "\n";
+          continue;
+        }
+      }
+
+    const float alpha = (clusE + clus2E > 0.f) ? std::fabs(clusE - clus2E) / (clusE + clus2E) : 1e9f;
+    if (!(alpha <= maxAlpha))                         { ++ct.kinematic; s_cuts.pairs_alpha++; if (vb) std::cout<<"  [cut] alpha="<<alpha<<"\n"; continue; }
+
+    TLorentzVector photon2;  photon2.SetPtEtaPhiE(clus2Pt, clus2Eta, clus2Phi, clus2E);
+
+      // 2) optional truth matching (MC)
+      bool           match2       = false;
+      TLorentzVector ph2_trEtaPhi(0,0,0,0);
+      if (isMC) {
+        for (const auto& trPhot : truth_meson_photons) {
+          const float dR    = photon2.DeltaR(trPhot);
+          const float ratio = (trPhot.E()>0 ? photon2.E()/trPhot.E() : 1e9f);
+          if (dR < 0.02f && ratio > 0.7f && ratio < 1.5f) {
+            ph2_trEtaPhi.SetPtEtaPhiE( clus2E / TMath::CosH(trPhot.Eta()),
+                                       trPhot.Eta(), trPhot.Phi(), clus2E );
+            if (match1) match2 = true;  // require both photons matched
+            break;
+          }
+        }
+        if (vb) std::cout << "  [truth] match1="<<match1<<" match2="<<match2<<"\n";
+      }
+
+    // 3) π0 candidate (reco) and “truth-kinematics” variant
     const TLorentzVector pi0Reco   = photon1 + photon2;
     const TLorentzVector pi0TruthK = ph1_trEtaPhi + ph2_trEtaPhi;
 
-    if (m_isSimulation && pi0Reco.Pt() < pi0ptcut)       continue;
+      if (isMC && pi0Reco.Pt() < pi0ptcut) { ++ct.lowPi0pt; s_cuts.pairs_pi0pt++; if (vb) std::cout<<"  [cut] pi0 Pt="<<pi0Reco.Pt()<<"\n"; continue; }
 
-    // ----------------------------------------------------------------------
-    // 4)  Energy‑slice index (use **leading‑γ** energy!)
-    // ----------------------------------------------------------------------
+    if (!std::isfinite(pi0Reco.M()))              { ++ct.kinematic; s_cuts.pairs_mass_nan++; if (vb) std::cout<<"  [skip] pi0 mass NaN\n"; continue; }
+
+    // 4) energy-slice index — use LEADING γ energy
     const float  eLead  = std::max(clusE, clus2E);
-    const int    iSlice = getEnergySlice(eLead);     // −1 ⇒ outside table
+    const int    iSlice = getEnergySlice(eLead);      // −1 ⇒ outside table
+    if (iSlice < 0 || iSlice >= N_Ebins) { ++ct.outOfSlice; s_cuts.pairs_outOfSlice++; if (vb) std::cout<<"  [info] eLead="<<eLead<<" slice=out\n"; }
 
-      // ----------------------------------------------------------------------
-      // 5)  -- ALWAYS -- fill slice histograms (pass-1 input)
-      // ----------------------------------------------------------------------
-      if (h_mE_raw )
-        h_mE_raw ->Fill(pi0Reco.M(), eLead);
-      if (h_mE_corr)
-        h_mE_corr->Fill(pi0Reco.M(), eLead);
+    // 5) PASS-1 inputs: always fill (guarded)
+    if (h_mE_raw)  { h_mE_raw ->Fill(pi0Reco.M(), eLead);  ++ct.filledPass1; s_cuts.pass1_fills++; }
+    if (h_mE_corr) { h_mE_corr->Fill(pi0Reco.M(), eLead);  /* same counter */ }
 
-      // --- NEW: per-variant π0 mass histograms for truth-matched π0 pairs ---
-      const int i = iSlice;
-      if (isSimulation && i >= 0 && i < N_Ebins)
+      // --- Per-variant π0 mass hists for ALL reconstructed pairs that land in a valid E-slice.
+      if (iSlice >= 0 && iSlice < N_Ebins)
       {
-        // Vertex Z to mimic your fillDPhi/DEta projections
-        const float vtxZ = static_cast<float>(vertex.z());
-
-        // (a) get mother ids for both photons by matching to stored π0 daughters
-        auto motherIdFor = [&](const TLorentzVector& pReco)->int {
-          for (const auto& tp : m_truth_pi0_photons) {
-            const float dR    = pReco.DeltaR(tp.p4);
-            const float ratio = pReco.E() / tp.p4.E();
-            if (dR < 0.02f && ratio > 0.7f && ratio < 1.5f) return tp.mother_id;
-          }
-          return -1;
-        };
-        const int mother1 = motherIdFor(photon1);
-        const int mother2 = motherIdFor(photon2);
-
-        if (mother1 >= 0 && mother1 == mother2)
-        {
-          // (b) compute block coords for clus2 (like you do for clus1)
-          std::pair<float,float> blkCoord2{0.5f,0.5f};
-          int blkPhiCoarse2 = 0, blkEtaCoarse2 = 0;
-          {
-            std::vector<int> towerEtas2, towerPhis2; std::vector<float> towerEs2;
-            RawCluster::TowerConstRange tcr2 = clus2->get_towers();
-            for (auto it = tcr2.first; it != tcr2.second; ++it) {
-              const auto tg = m_geometry->get_tower_geometry(it->first);
-              if (!tg) continue;
-              towerEtas2.push_back(tg->get_bineta());
-              towerPhis2.push_back(tg->get_binphi());
-              towerEs2  .push_back(static_cast<float>(it->second));
-            }
-            blkCoord2 = getBlockCord(towerEtas2, towerPhis2, towerEs2, blkPhiCoarse2, blkEtaCoarse2);
-          }
-
-            // (c) local builder for TLVs per variant (reuses your geometry transforms)
-            auto buildPhotonTLV = [&](RawCluster* clus,
-                                     VarPi0 variant,
-                                     const std::pair<float,float>& blk,
-                                     int blkPhiCoarseArg)->TLorentzVector
-            {
-              TLorentzVector out(0,0,0,0);
-              float xCG=0, yCG=0;
-              PDC_detail::clusterCentreOfGravity(clus, m_geometry, m_bemcRec, xCG, yCG);
-              const float E = clus->get_energy();
-
-              float etaSD = std::numeric_limits<float>::quiet_NaN();
-              float phiSD = std::numeric_limits<float>::quiet_NaN();
-
-              switch (variant) {
-                case VarPi0::CLUS_RAW: {
-                  etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xCG, yCG, vtxZ);
-                  phiSD = PDC_detail::cg2GlobalPhi(m_bemcRec, E, xCG, yCG);
-                  break;
-                }
-                case VarPi0::CLUS_CP: {
-                  float xC=xCG, yC=yCG;
-                  m_bemcRec->CorrectPosition(E, xCG, yCG, xC, yC);
-                  etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xC, yC, vtxZ);
-                  phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xC, yC);
-                  break;
-                }
-                case VarPi0::EA_GEOM: {
-                  float xEA=xCG, yEA=yCG; float bphiEA=0.f, betaEA=0.f;
-                  m_bemcRec->CorrectPositionEnergyAwareFromGeometry(E, xCG, yCG, xEA, yEA, &bphiEA, &betaEA);
-                  etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
-                  phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
-                  break;
-                }
-                case VarPi0::EA_FIT_ETADEP: {
-                  float xEA=xCG, yEA=yCG;
-                  m_bemcRec->CorrectPositionEnergyAwareEtaAndEnergyDep(E, xCG, yCG, xEA, yEA);
-                  etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
-                  phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
-                  break;
-                }
-                case VarPi0::EA_FIT_EONLY: {
-                  float xEA=xCG, yEA=yCG;
-                  m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(E, xCG, yCG, xEA, yEA);
-                  etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
-                  phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
-                  break;
-                }
-                case VarPi0::EA_MIX: {
-                  float xEA=xCG, yEA=yCG;
-                  m_bemcRec->CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(E, xCG, yCG, xEA, yEA);
-                  etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
-                  phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
-                  break;
-                }
-                case VarPi0::PDC_RAW:
-                case VarPi0::PDC_CORR: {
-                  std::pair<float,float> blkLoc = blk;
-                  const int sliceIdx = iSlice; // capture outer slice index
-                  if (variant == VarPi0::PDC_CORR) {
-                    if (isFitDoneForEta && m_bValsEta[sliceIdx] > 1e-9f) blkLoc.first  = doEtaBlockCorr(blkLoc.first,  m_bValsEta[sliceIdx]);
-                    if (isFitDoneForPhi && m_bValsPhi[sliceIdx] > 1e-9f) blkLoc.second = doPhiBlockCorr(blkLoc.second, m_bValsPhi[sliceIdx]);
-                  }
-
-                  auto ixFromBlockCenter = [](int blkCoarse, float local)->int {
-                    float l = local;
-                    if (l <= -0.5f || l > 1.5f) l = std::fmod(l + 2.0f, 2.0f);
-                    int ix = blkCoarse * 2 + int(std::floor(l + 0.5f));
-                    if (ix >= 256) ix -= 256;
-                    if (ix < 0)    ix += 256;
-                    return ix;
-                  };
-
-                  const auto lead = std::max_element(clus->get_towers().first, clus->get_towers().second,
-                                                     [](const auto& lhs, const auto& rhs){ return lhs.second < rhs.second; });
-                  if (lead == clus->get_towers().second) return out;
-                  const auto* tgLead = m_geometry->get_tower_geometry(lead->first);
-                  const int iyFineLead = tgLead ? tgLead->get_bineta() : 0;
-                  const int blkEtaCoarseFromLead = iyFineLead / 2;
-
-                  const int ixFineBlk = ixFromBlockCenter(blkPhiCoarseArg, blkLoc.second);
-                  const int iyFineBlk = blkEtaCoarseFromLead * 2 + ((blkLoc.first < 0.5f) ? 0 : 1);
-
-                  RawTowerDefs::keytype keyBlk = RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iyFineBlk, ixFineBlk);
-                  const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
-                  if (!geomBlk) return out;
-
-                  const double rFrontBlk = geomBlk->get_center_radius();
-                  const double zFrontBlk = geomBlk->get_center_z();
-
-                  const float phiFront = convertBlockToGlobalPhi(blkPhiCoarseArg, blkLoc.second);
-                  const float etaFront = convertBlockToGlobalEta(blkEtaCoarseFromLead,  blkLoc.first);
-
-                  phiSD = PDC_detail::front2ShowerPhi(m_bemcRec, E, rFrontBlk, zFrontBlk, phiFront, ixFineBlk, iyFineBlk);
-                  etaSD = PDC_detail::front2ShowerEta(m_bemcRec, E, rFrontBlk, ixFineBlk, iyFineBlk, etaFront, phiFront, vtxZ);
-                  break;
-                }
-                default: return out;
+          // Optional: truth diagnostics (does NOT gate filling)
+          if (isMC) {
+            auto motherIdFor = [&](const TLorentzVector& pReco)->int {
+              for (const auto& tp : m_truth_pi0_photons) {
+                const float dR    = pReco.DeltaR(tp.p4);
+                const float ratio = (tp.p4.E()>0 ? pReco.E()/tp.p4.E() : 1e9f);
+                if (dR < 0.02f && ratio > 0.7f && ratio < 1.5f) return tp.mother_id;
               }
-
-              const double pt = E / std::cosh(etaSD);
-              out.SetPtEtaPhiE(pt, etaSD, phiSD, E);
-              return out;
+              return -1;
             };
+            const int mother1 = motherIdFor(photon1);
+            const int mother2 = motherIdFor(photon2);
+            if (mother1 >= 0 && mother1 == mother2) { ++ct.truthPairOK; s_cuts.truth_pairs_ok++; }
+          }
 
-
-            // Build eight variants for each cluster
-            TLorentzVector p1[static_cast<int>(VarPi0::NVAR)], p2v[static_cast<int>(VarPi0::NVAR)];
-            p1[static_cast<int>(VarPi0::CLUS_RAW)]  = buildPhotonTLV(clus1, VarPi0::CLUS_RAW,  blkCoord,  blkPhiCoarse);
-            p1[static_cast<int>(VarPi0::CLUS_CP)]   = buildPhotonTLV(clus1, VarPi0::CLUS_CP,   blkCoord,  blkPhiCoarse);
-            p1[static_cast<int>(VarPi0::EA_GEOM)]   = buildPhotonTLV(clus1, VarPi0::EA_GEOM,   blkCoord,  blkPhiCoarse);
-            p1[static_cast<int>(VarPi0::EA_FIT_ETADEP)] = buildPhotonTLV(clus1, VarPi0::EA_FIT_ETADEP, blkCoord,  blkPhiCoarse);
-            p1[static_cast<int>(VarPi0::EA_FIT_EONLY)]  = buildPhotonTLV(clus1, VarPi0::EA_FIT_EONLY,  blkCoord,  blkPhiCoarse);
-            p1[static_cast<int>(VarPi0::EA_MIX)]    = buildPhotonTLV(clus1, VarPi0::EA_MIX,    blkCoord,  blkPhiCoarse);
-            p1[static_cast<int>(VarPi0::PDC_RAW)]   = buildPhotonTLV(clus1, VarPi0::PDC_RAW,   blkCoord,  blkPhiCoarse);
-            p1[static_cast<int>(VarPi0::PDC_CORR)]  = buildPhotonTLV(clus1, VarPi0::PDC_CORR,  blkCoord,  blkPhiCoarse);
-
-            p2v[static_cast<int>(VarPi0::CLUS_RAW)]  = buildPhotonTLV(clus2, VarPi0::CLUS_RAW,  blkCoord2, blkPhiCoarse2);
-            p2v[static_cast<int>(VarPi0::CLUS_CP)]   = buildPhotonTLV(clus2, VarPi0::CLUS_CP,   blkCoord2, blkPhiCoarse2);
-            p2v[static_cast<int>(VarPi0::EA_GEOM)]   = buildPhotonTLV(clus2, VarPi0::EA_GEOM,   blkCoord2, blkPhiCoarse2);
-            p2v[static_cast<int>(VarPi0::EA_FIT_ETADEP)] = buildPhotonTLV(clus2, VarPi0::EA_FIT_ETADEP, blkCoord2, blkPhiCoarse2);
-            p2v[static_cast<int>(VarPi0::EA_FIT_EONLY)]  = buildPhotonTLV(clus2, VarPi0::EA_FIT_EONLY,  blkCoord2, blkPhiCoarse2);
-            p2v[static_cast<int>(VarPi0::EA_MIX)]    = buildPhotonTLV(clus2, VarPi0::EA_MIX,    blkCoord2, blkPhiCoarse2);
-            p2v[static_cast<int>(VarPi0::PDC_RAW)]   = buildPhotonTLV(clus2, VarPi0::PDC_RAW,   blkCoord2, blkPhiCoarse2);
-            p2v[static_cast<int>(VarPi0::PDC_CORR)]  = buildPhotonTLV(clus2, VarPi0::PDC_CORR,  blkCoord2, blkPhiCoarse2);
-
-            for (int v = 0; v < static_cast<int>(VarPi0::NVAR); ++v) {
-              const double m = (p1[v] + p2v[v]).M();
-              if (std::isfinite(m) && h_m_pi0_var[v][i]) h_m_pi0_var[v][i]->Fill(m);
-            }
-
+        // Build block coord for clus2 (like clus1 did upstream)
+        std::pair<float,float> blkCoord2{0.5f,0.5f};
+        int blkPhiCoarse2 = 0, blkEtaCoarse2 = 0;
+        {
+          std::vector<int>   towerEtas2, towerPhis2;
+          std::vector<float> towerEs2;
+          RawCluster::TowerConstRange tcr2 = clus2->get_towers();
+          for (auto it = tcr2.first; it != tcr2.second; ++it) {
+            const auto tg = m_geometry->get_tower_geometry(it->first);
+            if (!tg) continue;
+            towerEtas2.push_back(tg->get_bineta());
+            towerPhis2.push_back(tg->get_binphi());
+            towerEs2  .push_back(static_cast<float>(it->second));
+          }
+          blkCoord2 = getBlockCord(towerEtas2, towerPhis2, towerEs2, blkPhiCoarse2, blkEtaCoarse2);
         }
-      }
+
+        auto buildPhotonTLV = [&](RawCluster* clus,
+                                 VarPi0 variant,
+                                 const std::pair<float,float>& blk,
+                                 int blkPhiCoarseArg)->TLorentzVector
+        {
+          TLorentzVector out(0,0,0,0);
+          if (!clus || !m_geometry || !m_bemcRec) return out;
+
+          float xCG=0, yCG=0; PDC_detail::clusterCentreOfGravity(clus, m_geometry, m_bemcRec, xCG, yCG);
+          const float E = clus->get_energy();
+          const float vtxZ = static_cast<float>(vertex.z());
+
+          float etaSD = std::numeric_limits<float>::quiet_NaN();
+          float phiSD = std::numeric_limits<float>::quiet_NaN();
+
+          auto ixFromBlockCenter = [](int blkCoarse, float local)->int {
+            float l = local;
+            if (l <= -0.5f || l > 1.5f) l = std::fmod(l + 2.0f, 2.0f);
+            int ix = blkCoarse * 2 + int(std::floor(l + 0.5f));
+            if (ix >= 256) ix -= 256;
+            if (ix < 0)    ix += 256;
+            return ix;
+          };
+
+          switch (variant) {
+            case VarPi0::CLUS_RAW: {
+              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xCG, yCG, vtxZ);
+              phiSD = PDC_detail::cg2GlobalPhi(m_bemcRec, E, xCG, yCG);
+              break;
+            }
+            case VarPi0::CLUS_CP: {
+              float xC=xCG, yC=yCG; m_bemcRec->CorrectPosition(E, xCG, yCG, xC, yC);
+              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xC, yC, vtxZ);
+              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xC, yC);
+              break;
+            }
+            case VarPi0::EA_GEOM: {
+              float xEA=xCG, yEA=yCG; float bphiEA=0.f, betaEA=0.f;
+              m_bemcRec->CorrectPositionEnergyAwareFromGeometry(E, xCG, yCG, xEA, yEA, &bphiEA, &betaEA);
+              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+              break;
+            }
+            case VarPi0::EA_FIT_ETADEP: {
+              float xEA=xCG, yEA=yCG; m_bemcRec->CorrectPositionEnergyAwareEtaAndEnergyDep(E, xCG, yCG, xEA, yEA);
+              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+              break;
+            }
+            case VarPi0::EA_FIT_EONLY: {
+              float xEA=xCG, yEA=yCG; m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(E, xCG, yCG, xEA, yEA);
+              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+              break;
+            }
+            case VarPi0::EA_MIX: {
+              float xEA=xCG, yEA=yCG; m_bemcRec->CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(E, xCG, yCG, xEA, yEA);
+              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+              break;
+            }
+            case VarPi0::PDC_RAW:
+            case VarPi0::PDC_CORR: {
+              std::pair<float,float> blkLoc = blk;
+              if (variant == VarPi0::PDC_CORR) {
+                if (isFitDoneForEta && m_bValsEta[iSlice] > 1e-9f) blkLoc.first  = doEtaBlockCorr(blkLoc.first,  m_bValsEta[iSlice]);
+                if (isFitDoneForPhi && m_bValsPhi[iSlice] > 1e-9f) blkLoc.second = doPhiBlockCorr(blkLoc.second, m_bValsPhi[iSlice]);
+              }
+              const auto lead = std::max_element(clus->get_towers().first, clus->get_towers().second,
+                                                 [](const auto& L, const auto& R){ return L.second < R.second; });
+              if (lead == clus->get_towers().second) return out;
+              const auto* tgLead = m_geometry->get_tower_geometry(lead->first);
+              const int iyFineLead = tgLead ? tgLead->get_bineta() : 0;
+              const int blkEtaCoarseFromLead = iyFineLead / 2;
+
+              const int ixFineBlk = ixFromBlockCenter(blkPhiCoarseArg, blkLoc.second);
+              const int iyFineBlk = blkEtaCoarseFromLead * 2 + ((blkLoc.first < 0.5f) ? 0 : 1);
+
+              RawTowerDefs::keytype keyBlk = RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iyFineBlk, ixFineBlk);
+              const auto* geomBlk = m_geometry->get_tower_geometry(keyBlk);
+              if (!geomBlk) return out;
+
+              const double rFrontBlk = geomBlk->get_center_radius();
+              const double zFrontBlk = geomBlk->get_center_z();
+
+              const float phiFront = convertBlockToGlobalPhi(blkPhiCoarseArg, blkLoc.second);
+              const float etaFront = convertBlockToGlobalEta(blkEtaCoarseFromLead,  blkLoc.first);
+
+              phiSD = PDC_detail::front2ShowerPhi(m_bemcRec, E, rFrontBlk, zFrontBlk, phiFront, ixFineBlk, iyFineBlk);
+              etaSD = PDC_detail::front2ShowerEta(m_bemcRec, E, rFrontBlk, ixFineBlk, iyFineBlk, etaFront, phiFront, vtxZ);
+              break;
+            }
+            default: return out;
+          }
+
+          const double pt = (std::isfinite(etaSD) ? E / std::cosh(etaSD) : 0.0);
+          if (pt<=0.0 || !std::isfinite(pt)) return out;
+          out.SetPtEtaPhiE(pt, etaSD, phiSD, E);
+          return out;
+        };
+
+          TLorentzVector p1v[static_cast<int>(VarPi0::NVAR)], p2v[static_cast<int>(VarPi0::NVAR)];
+          const int NV = static_cast<int>(VarPi0::NVAR);
+
+          // Anchor cluster |eta| for η-view gating (match 3D map logic)
+          const double absEta1 = std::fabs(photon1.Eta());
+
+          for (int v = 0; v < NV; ++v) {
+            p1v[v] = buildPhotonTLV(clus1, static_cast<VarPi0>(v), blkCoord,  blkPhiCoarse);
+            p2v[v] = buildPhotonTLV(clus2, static_cast<VarPi0>(v), blkCoord2, blkPhiCoarse2);
+            const double m = (p1v[v] + p2v[v]).M();
+
+            if (std::isfinite(m) && h_m_pi0_var[v][iSlice]) {
+              // Always fill the base (η-agnostic) per-variant histogram
+              h_m_pi0_var[v][iSlice]->Fill(m);
+              ++ct.varMassFills; s_cuts.variant_mass_fills++;
+
+              // NEW: Fill η-sliced per-variant histograms with the same gating
+              // used for the uncorrected 3D block-coordinate maps.
+              if (absEta1 <= 1.10 && h_m_pi0_var_eta[0][v][iSlice]) {
+                h_m_pi0_var_eta[0][v][iSlice]->Fill(m); // fullEta
+              }
+              if (absEta1 <= 0.20 && h_m_pi0_var_eta[1][v][iSlice]) {
+                h_m_pi0_var_eta[1][v][iSlice]->Fill(m); // etaCore
+              } else if (absEta1 > 0.20 && absEta1 <= 0.70 && h_m_pi0_var_eta[2][v][iSlice]) {
+                h_m_pi0_var_eta[2][v][iSlice]->Fill(m); // etaMid
+              } else if (absEta1 > 0.70 && absEta1 <= 1.10 && h_m_pi0_var_eta[3][v][iSlice]) {
+                h_m_pi0_var_eta[3][v][iSlice]->Fill(m); // etaEdge
+              }
+            }
+          }
+
+      } // end: per-variant fill for all pairs in-slice
 
 
-    // ----------------------------------------------------------------------
-    // 6)  Conditional (pass‑2) block‑map filling
-    // ----------------------------------------------------------------------
+    // 6) PASS-2 block maps (μ±3σ cuts) if available
     if (m_massFitsDone && iSlice >= 0 && iSlice < N_Ebins)
     {
-      /* ---------- 6a) RAW window ------------------------------------- */
-      const auto& winR = m_winRaw [iSlice];
-      if (winR.sigma > 1e-6f)
-      {
+      // RAW window
+      const auto& winR = m_winRaw[iSlice];
+      if (winR.sigma > 1e-6f) {
         const float lo = winR.mu - 3.f*winR.sigma;
         const float hi = winR.mu + 3.f*winR.sigma;
-        if (pi0Reco.M() >= lo && pi0Reco.M() <= hi)
-          if (h_m_blk_raw)
-            h_m_blk_raw->Fill(blkCoord.first, blkCoord.second, pi0Reco.M());
+        if (pi0Reco.M() >= lo && pi0Reco.M() <= hi) {
+          if (h_m_blk_raw) { h_m_blk_raw->Fill(blkCoord.first, blkCoord.second, pi0Reco.M()); ++ct.filledBlkR; s_cuts.block_raw_fills++; }
+        }
       }
-
-      /* ---------- 6b) CORR window  (needs corrected coords) ---------- */
+      // CORR window
       const auto& winC = m_winCorr[iSlice];
-      if (winC.sigma > 1e-6f)
-      {
+      if (winC.sigma > 1e-6f) {
         float locEtaCorr = blkCoord.first;
         float locPhiCorr = blkCoord.second;
-
-        if (isFitDoneForEta && m_bValsEta[iSlice] > 1e-9f)
-          locEtaCorr = doEtaBlockCorr(locEtaCorr, m_bValsEta[iSlice]);
-        if (isFitDoneForPhi && m_bValsPhi[iSlice] > 1e-9f)
-          locPhiCorr = doPhiBlockCorr(locPhiCorr, m_bValsPhi[iSlice]);
+        if (isFitDoneForEta && m_bValsEta[iSlice] > 1e-9f) locEtaCorr = doEtaBlockCorr(locEtaCorr, m_bValsEta[iSlice]);
+        if (isFitDoneForPhi && m_bValsPhi[iSlice] > 1e-9f) locPhiCorr = doPhiBlockCorr(locPhiCorr, m_bValsPhi[iSlice]);
 
         const float lo = winC.mu - 3.f*winC.sigma;
         const float hi = winC.mu + 3.f*winC.sigma;
-        if (pi0Reco.M() >= lo && pi0Reco.M() <= hi)
-          if (h_m_blk_corr)
-            h_m_blk_corr->Fill(locEtaCorr, locPhiCorr, pi0Reco.M());
+        if (pi0Reco.M() >= lo && pi0Reco.M() <= hi) {
+          if (h_m_blk_corr) { h_m_blk_corr->Fill(locEtaCorr, locPhiCorr, pi0Reco.M()); ++ct.filledBlkC; s_cuts.block_corr_fills++; }
+        }
       }
     }
 
-    // ----------------------------------------------------------------------
-    // 7)  Legacy histogramming (unchanged)
-    // ----------------------------------------------------------------------
-    h_pt1            ->Fill(photon1.Pt());
-    h_pt2            ->Fill(photon2.Pt());
-    h_InvMass        ->Fill(pi0Reco.M());
-    h_InvMass_w      ->Fill(pi0Reco.M(), weight);
-    h_mass_eta_lt    ->Fill(pi0Reco.M(), lt_eta);
-    h_mass_eta_lt_rw ->Fill(pi0Reco.M(), lt_eta, weight);
-    h_m_pt_eta       ->Fill(pi0Reco.M(), pi0Reco.E(), lt_eta);
+    // 7) Legacy histogramming (original behavior preserved)
+    if (h_pt1)            h_pt1->Fill(photon1.Pt());
+    if (h_pt2)            h_pt2->Fill(photon2.Pt());
+    if (h_InvMass)        h_InvMass->Fill(pi0Reco.M());
+    if (h_InvMass_w)      h_InvMass_w->Fill(pi0Reco.M(), weight);
+    if (h_mass_eta_lt)    h_mass_eta_lt->Fill(pi0Reco.M(), lt_eta);
+    if (h_mass_eta_lt_rw) h_mass_eta_lt_rw->Fill(pi0Reco.M(), lt_eta, weight);
+    if (h_m_pt_eta)       h_m_pt_eta->Fill(pi0Reco.M(), pi0Reco.E(), lt_eta);
+    s_cuts.pairs_final++; ct.finalFills++;
 
     if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
         blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
     {
-      h_mass_block_pt[blkEtaCoarse][blkPhiCoarse]
-            ->Fill(pi0Reco.M(), pi0Reco.E());
+      if (h_mass_block_pt[blkEtaCoarse][blkPhiCoarse])
+        h_mass_block_pt[blkEtaCoarse][blkPhiCoarse]->Fill(pi0Reco.M(), pi0Reco.E());
     }
+      // MC truth summaries
+      if (isMC && match2 && pi0TruthK.M() > 1e-3f) {
+        if (h_m_ptTr_eta)        h_m_ptTr_eta       ->Fill(pi0Reco.M(),   pi0TruthK.E(), lt_eta);
+        if (h_m_ptTr_eta_trKin)  h_m_ptTr_eta_trKin ->Fill(pi0TruthK.M(), pi0TruthK.E(), lt_eta);
+      }
 
-    if (isSimulation && match2 && pi0TruthK.M() > 1e-3f)
-    {
-      h_m_ptTr_eta      ->Fill(pi0Reco.M(), pi0TruthK.E(), lt_eta);
-      h_m_ptTr_eta_trKin->Fill(pi0TruthK.M(), pi0TruthK.E(), lt_eta);
+
+    if (vb) {
+      std::cout << "  [pair] m=" << pi0Reco.M()
+                << " eLead=" << eLead
+                << " slice=" << iSlice
+                << " pass1=" << (h_mE_raw||h_mE_corr ? "yes":"no")
+                << " winR/C=" << (m_massFitsDone ? "on":"off")
+                << "\n";
     }
+  } // end loop over cIt2
 
-    if (vb)
-      std::cout << "[PDC::processClusterPairs]  "
-                << "π0 mass=" << pi0Reco.M()
-                << "  slice=" << iSlice
-                << "  filled (RAW/CORR) = "
-                << (m_massFitsDone ? "yes" : "no") << '\n';
+  // ---------- end-of-call compact summary ----------
+  if (v1) {
+    std::cout << "[PDC::processClusterPairs] summary:"
+              << " total="     << ct.totalSeen
+              << " self/null=" << ct.selfSkip
+              << " kinCuts="   << ct.kinematic
+              << " lowPt="     << ct.lowPi0pt
+              << " outSlice="  << ct.outOfSlice
+              << " pass1="     << ct.filledPass1
+              << " blkR="      << ct.filledBlkR
+              << " blkC="      << ct.filledBlkC
+              << " final="     << ct.finalFills;
+      if (isMC)
+        std::cout << " truthPairs=" << ct.truthPairOK
+                  << " varMassFills=" << ct.varMassFills;
+    std::cout << "\n";
   }
 }
+
 
 
 // ============================================================================
@@ -3732,19 +3798,19 @@ void PositionDependentCorrection::finalClusterLoop(
   if (!m_firstPassBvaluesOnly && h_nclusters)
       h_nclusters->Fill(nClusCount);
 
-  // If the number of clusters is too large => skip
-  if (nClusCount > max_nClusCount)
-  {
-    if (Verbosity() > 0)
+    if (nClusCount > max_nClusCount)
     {
-      std::cout << ANSI_BOLD << ANSI_YELLOW
-                << "[DEBUG] finalClusterLoop: nClusCount=" << nClusCount
-                << " > max_nClusCount=" << max_nClusCount
-                << " => SKIPPING event"
-                << ANSI_RESET << std::endl;
+      if (Verbosity() > 0)
+      {
+        std::cout << ANSI_BOLD << ANSI_YELLOW
+                  << "[DEBUG] finalClusterLoop: nClusCount=" << nClusCount
+                  << " > max_nClusCount=" << max_nClusCount
+                  << " => SKIPPING event"
+                  << ANSI_RESET << std::endl;
+      }
+      s_cuts.ev_nClusTooLarge++;
+      return;
     }
-    return;
-  }
 
   RawClusterContainer::ConstRange clusterRange = clusterContainer->getClusters();
   RawClusterContainer::ConstIterator cIt1, cIt2;
@@ -3764,24 +3830,26 @@ void PositionDependentCorrection::finalClusterLoop(
   // -----------------------------------------------------------------
   for (cIt1 = clusterRange.first; cIt1 != clusterRange.second; ++cIt1)
   {
-    RawCluster* clus1 = cIt1->second;
-    if (!clus1) continue;
+      RawCluster* clus1 = cIt1->second;
+      if (!clus1) continue;
+      s_cuts.c1_seen++;
 
     CLHEP::Hep3Vector vertex(0,0,vtx_z);
 
     CLHEP::Hep3Vector E_vec_1 = RawClusterUtility::GetEVec(*clus1, vertex);
       
 
-    if (std::isnan(E_vec_1.mag()))
-    {
-        if (Verbosity() > 0)
-        {
-          std::cout << "[DEBUG] finalClusterLoop: WARNING - E_vec_1.mag() is NaN!\n"
-                    << " -> cluster ID=" << clus1->get_id()
-                    << "  vtx_z=" << vtx_z
-                    << std::endl;
-        }
-        continue;
+      if (std::isnan(E_vec_1.mag()))
+      {
+          if (Verbosity() > 0)
+          {
+            std::cout << "[DEBUG] finalClusterLoop: WARNING - E_vec_1.mag() is NaN!\n"
+                      << " -> cluster ID=" << clus1->get_id()
+                      << "  vtx_z=" << vtx_z
+                      << std::endl;
+          }
+          s_cuts.c1_E_nan++;
+          continue;
       }
       else if (E_vec_1.mag() < 1e-9)
       {
@@ -3793,8 +3861,10 @@ void PositionDependentCorrection::finalClusterLoop(
                     << "  vtx_z=" << vtx_z
                     << std::endl;
         }
+        s_cuts.c1_E_zero++;
         continue;
-    }
+      }
+
     float clusE   = E_vec_1.mag();
     float clusEta = E_vec_1.pseudoRapidity();
     float clusPhi = E_vec_1.phi();
@@ -3818,45 +3888,90 @@ void PositionDependentCorrection::finalClusterLoop(
     if (!m_firstPassBvaluesOnly && h2_chi2_tot_etaPhi)
         h2_chi2_tot_etaPhi->Fill(lt_eta, lt_phi);
 
-    if (clusE < 0.1f)
-    {
-      if (Verbosity() > 11)
+      if (clusE < 0.1f)
       {
-        std::cout << "[DEBUG]  => Skipping cluster with E=" << clusE
-                  << " (<0.1). \n";
-      }
-      continue;
-    }
-      constexpr float kChi2Cut = 10.0f;   // keep the magic number centralised
-
-      if (clusChi2 > kChi2Cut)
-      {
-        if (!m_firstPassBvaluesOnly)
+        if (Verbosity() > 11)
         {
-          if (h2_chi2_rej_etaPhi)  h2_chi2_rej_etaPhi->Fill(lt_eta, lt_phi);
-          if (p_chi2_pass_etaPhi)  p_chi2_pass_etaPhi->Fill(lt_eta, lt_phi, 0.0);
+          std::cout << "[DEBUG]  => Skipping cluster with E=" << clusE
+                    << " (<0.1). \n";
         }
-        if (Verbosity() > 0)
-          std::cout << "[χ²-CUT]  cluster Chi2=" << clusChi2
-                    << "  (lead η,φ)=" << lt_eta << ',' << lt_phi
-                    << "  REJECTED\n";
+        s_cuts.c1_E_below++;
         continue;
       }
-      else
+      // --- Unified anchor quality gate (configurable: χ², prob, both, none)
+      const float clusProb = clus1->get_prob();  // use get_probability() if that is your accessor
+
+      auto mark_anchor_reject = [&](const char* tag){
+        if (!m_firstPassBvaluesOnly)
+        {
+          if (h2_chi2_rej_etaPhi) h2_chi2_rej_etaPhi->Fill(lt_eta, lt_phi); // reuse map
+          if (p_chi2_pass_etaPhi) p_chi2_pass_etaPhi->Fill(lt_eta, lt_phi, 0.0);
+        }
+        if (Verbosity() > 0)
+          std::cout << "[" << tag << "] anchor cluster REJECTED"
+                    << "  (chi2=" << clusChi2 << ", prob=" << clusProb
+                    << ", LT η,φ=" << lt_eta << "," << lt_phi << ")\n";
+      };
+
+      switch (m_anchorQMode)
       {
-        if (!m_firstPassBvaluesOnly && p_chi2_pass_etaPhi)
-          p_chi2_pass_etaPhi->Fill(lt_eta, lt_phi, 1.0);
-    }
-    // 3) If lead tower index is out of range
-    if (lt_eta > 95)
-    {
-      if (Verbosity() > 5)
-      {
-        std::cout << "[DEBUG]  => Skipping cluster lead_tower eta="
-                  << lt_eta << " (>95). \n";
+        case AnchorQualityMode::kChi2:
+        {
+          if (!std::isfinite(clusChi2) || clusChi2 > m_anchorChi2Cut)
+          {
+            s_cuts.c1_chi2++;
+            mark_anchor_reject("CHI2-CUT");
+            continue;
+          }
+          break;
+        }
+        case AnchorQualityMode::kProb:
+        {
+          if (!std::isfinite(clusProb) || clusProb < m_anchorProbMin)
+          {
+            s_cuts.c1_prob++;
+            mark_anchor_reject("PROB-CUT");
+            continue;
+          }
+          break;
+        }
+        case AnchorQualityMode::kBoth:
+        {
+          if (!std::isfinite(clusChi2) || clusChi2 > m_anchorChi2Cut)
+          {
+            s_cuts.c1_chi2++;
+            mark_anchor_reject("CHI2-CUT");
+            continue;
+          }
+          if (!std::isfinite(clusProb) || clusProb < m_anchorProbMin)
+          {
+            s_cuts.c1_prob++;
+            mark_anchor_reject("PROB-CUT");
+            continue;
+          }
+          break;
+        }
+        case AnchorQualityMode::kNone:
+        default:
+          // accept; no anchor quality gate
+          break;
       }
-      continue;
-    }
+
+      // Passed anchor quality gate: mark pass (η,φ) map
+      if (!m_firstPassBvaluesOnly && p_chi2_pass_etaPhi)
+        p_chi2_pass_etaPhi->Fill(lt_eta, lt_phi, 1.0);
+      
+    // 3) If lead tower index is out of range
+      if (lt_eta > 95)
+      {
+        if (Verbosity() > 5)
+        {
+          std::cout << "[DEBUG]  => Skipping cluster lead_tower eta="
+                    << lt_eta << " (>95). \n";
+        }
+        s_cuts.c1_ltEta_oob++;
+        continue;
+      }
     if (!m_firstPassBvaluesOnly && h_clusE)
         h_clusE->Fill(clusE);
 
@@ -3884,17 +3999,6 @@ void PositionDependentCorrection::finalClusterLoop(
     TLorentzVector photon1;
     photon1.SetPtEtaPhiE(clusPt, clusEta, clusPhi, clusE);
 
-    if (clusPt < pt1ClusCut || clusPt > ptMaxCut)
-    {
-      if (Verbosity() > 11)
-      {
-        std::cout << "[DEBUG]  => cluster #1 pT=" << clusPt
-                  << " fails cut ( <" << pt1ClusCut << " or >" << ptMaxCut
-                  << "). \n";
-      }
-      continue;
-    }
-
     // -----------------------------------------------------------------
     // (C) Determine block coordinates (coarse & local)
     // -----------------------------------------------------------------
@@ -3907,72 +4011,72 @@ void PositionDependentCorrection::finalClusterLoop(
     /* 4) find energy slice ........................................... */
     const int iEbin = getEnergySlice( clusE );
       
-//      {
-//          const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
-//          float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-//          float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-//          float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-//          float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-//          if (c2) {
-//              x_raw_v2 = c2->x_tower_raw();
-//              y_raw_v2 = c2->y_tower_raw();
-//              x_cor_v2 = c2->x_tower_corr();
-//              y_cor_v2 = c2->y_tower_corr();
-//          }
-//          
-//          // recompute CoG (raw) for a sanity check
-//          float x_cog = std::numeric_limits<float>::quiet_NaN();
-//          float y_cog = std::numeric_limits<float>::quiet_NaN();
-//          bool  got_cog = false;
-//          if (m_bemcRec && m_geometry)
-//          {
-//              std::vector<EmcModule> hitlist;
-//              hitlist.reserve(std::distance(clus1->get_towers().first, clus1->get_towers().second));
-//              const int Nx = m_bemcRec->GetNx();
-//              
-//              auto range = clus1->get_towers();
-//              for (auto it = range.first; it != range.second; ++it)
-//              {
-//                  const auto tg = m_geometry->get_tower_geometry(it->first);
-//                  if (!tg) continue;
-//                  EmcModule m;
-//                  m.ich = tg->get_bineta() * Nx + tg->get_binphi();
-//                  m.amp = static_cast<float>(it->second);
-//                  m.tof = 0.0f;
-//                  hitlist.push_back(m);
-//              }
-//              if (!hitlist.empty())
-//              {
-//                  float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
-//                  m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
-//                  if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
-//              }
-//          }
-//          
-//          // reuse your existing histos to track v2 − recalc
-//          if (c2 && got_cog)
-//          {
-//              if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_v2 - x_cog);
-//              if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_v2 - y_cog);
-//          }
-//          
-//          if (m_print_first_N_clusters-- > 0)
-//          {
-//              std::cout << ANSI_BOLD << ANSI_GREEN
-//              << "[V2] clusID=" << clus1->get_id()
-//              << "  E=" << clusE << " GeV"
-//              << ANSI_RESET << "\n";
-//              std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
-//              << (c2 ? "[OK]" : "[MISSING]") << "\n";
-//              if (got_cog)
-//                  std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
-//              if (c2 && got_cog)
-//                  std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
-//                  << (y_raw_v2 - y_cog) << ")\n";
-//              std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
-//              << (c2 ? "[OK]" : "[MISSING]") << "\n";
-//          }
-//      }
+      {
+          const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
+          float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+          float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+          float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+          float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+          if (c2) {
+              x_raw_v2 = c2->x_tower_raw();
+              y_raw_v2 = c2->y_tower_raw();
+              x_cor_v2 = c2->x_tower_corr();
+              y_cor_v2 = c2->y_tower_corr();
+          }
+          
+          // recompute CoG (raw) for a sanity check
+          float x_cog = std::numeric_limits<float>::quiet_NaN();
+          float y_cog = std::numeric_limits<float>::quiet_NaN();
+          bool  got_cog = false;
+          if (m_bemcRec && m_geometry)
+          {
+              std::vector<EmcModule> hitlist;
+              hitlist.reserve(std::distance(clus1->get_towers().first, clus1->get_towers().second));
+              const int Nx = m_bemcRec->GetNx();
+              
+              auto range = clus1->get_towers();
+              for (auto it = range.first; it != range.second; ++it)
+              {
+                  const auto tg = m_geometry->get_tower_geometry(it->first);
+                  if (!tg) continue;
+                  EmcModule m;
+                  m.ich = tg->get_bineta() * Nx + tg->get_binphi();
+                  m.amp = static_cast<float>(it->second);
+                  m.tof = 0.0f;
+                  hitlist.push_back(m);
+              }
+              if (!hitlist.empty())
+              {
+                  float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
+                  m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
+                  if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
+              }
+          }
+          
+          // reuse your existing histos to track v2 − recalc
+          if (c2 && got_cog)
+          {
+              if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_v2 - x_cog);
+              if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_v2 - y_cog);
+          }
+          
+          if (m_print_first_N_clusters-- > 0)
+          {
+              std::cout << ANSI_BOLD << ANSI_GREEN
+              << "[V2] clusID=" << clus1->get_id()
+              << "  E=" << clusE << " GeV"
+              << ANSI_RESET << "\n";
+              std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
+              << (c2 ? "[OK]" : "[MISSING]") << "\n";
+              if (got_cog)
+                  std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
+              if (c2 && got_cog)
+                  std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
+                  << (y_raw_v2 - y_cog) << ")\n";
+              std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
+              << (c2 ? "[OK]" : "[MISSING]") << "\n";
+          }
+      }
 
 
     /* optional detailed print ........................................ */
@@ -4138,125 +4242,127 @@ void PositionDependentCorrection::finalClusterLoop(
         prevCorEntries = totCor;
       }
     }
+      // QA: fill pT vs leadTower, fill cluster-level eta/phi
+      h_pt_eta->Fill(clusPt, lt_eta);
+      h_pt_eta_rw->Fill(clusPt, lt_eta, weight);
+      h_etaphi_clus->Fill(clusEta, clusPhi);
 
-
-
-    // QA: fill pT vs leadTower, fill cluster-level eta/phi
-    h_pt_eta->Fill(clusPt, lt_eta);
-    h_pt_eta_rw->Fill(clusPt, lt_eta, weight);
-    h_etaphi_clus->Fill(clusEta, clusPhi);
-
-    for (auto& trPhoton : truth_photons)
-    {
-        const float dR    = photon1.DeltaR(trPhoton);          // ΔR(reco,truth)
-        const float ratio = photon1.E() / trPhoton.E();        // Ereco / Etruth
-
-        if (dR   > 0.03f)                    continue;
-        if (ratio < 0.30f || ratio > 1.30f)  continue;
-
-        const float dPhi = TVector2::Phi_mpi_pi(
-                               photon1.Phi() - trPhoton.Phi() );
-        h_delR_recTrth->Fill(dR);
-
-        if (Verbosity() > 0)
-        {
-            std::cout << "[DEBUG] => cluster1 E=" << photon1.E()
-                      << " matched to truthE="    << trPhoton.E()
-                      << "  dR="   << dR
-                      << "  dPhi=" << dPhi
-                      << "  ratio="<< ratio << '\n';
-        }
-        h_matched_res   ->Fill(ratio, photon1.Eta());
-        h_res_e         ->Fill(ratio, photon1.E());
-        h_res           ->Fill(ratio);
-
-        int iLTeta = lt_eta, iLTphi = lt_phi;
-
-        h_res_e_eta     ->Fill(ratio, trPhoton.E(), iLTeta);
-        h_res_e_phi     ->Fill(ratio, trPhoton.E(), iLTphi);
-        h_delEta_e_eta  ->Fill(photon1.Eta()-trPhoton.Eta(), trPhoton.E(), iLTeta);
-        h_delR_e_eta    ->Fill(dR, trPhoton.E(), iLTeta);
-        h_delPhi_e_eta  ->Fill(dPhi, trPhoton.E(), iLTeta);
-        h_delPhi_e_phi  ->Fill(dPhi, trPhoton.E(), iLTphi);
-        h_truthE        ->Fill(trPhoton.E());
-
-        fillDPhiAllVariants(
-            clus1,
-            photon1,                       // reco photon
-            trPhoton,                      // truth photon
-            blkCoord,                      // (ηloc , φloc)
-            blkPhiCoarse,                  // coarse φ index
-            vtx_z,                         // vertex‑z (only wrapped through)
-            h_phi_diff_cpRaw_E,            // Δφ(CLUS‑RAW)  → truth
-            h_phi_diff_cpCorr_E,           // Δφ(CLUS‑CP)   → truth
-            fillGlobal                     // NEW: apply 10 cm cut inside
-        );
-        
-        fillDEtaAllVariants(
-            clus1,
-            photon1,
-            trPhoton,
-            blkCoord,
-            blkEtaCoarse,
-            blkPhiCoarse,
-            vtx_z,
-            h_eta_diff_cpRaw_E,            // Δη(CLUS‑RAW)  → truth
-            h_eta_diff_cpCorr_E,           // Δη(CLUS‑CP)   → truth
-            fillGlobal
-        );
-        fillAshLogDx(clus1, photon1, trPhoton,
-                       vtx_z,
-                       blkCoord, blkPhiCoarse,
-                       towerPhis, towerEs);
-
-        if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
-              blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
-        {
-              h_res_block_E[blkEtaCoarse][blkPhiCoarse]
-                  ->Fill(ratio, trPhoton.E());
-        }
-    }
-      match1 = false;
+      // Default for data: no truth matching, no truth residuals
       TLorentzVector ph1_trEtaPhi(0,0,0,0);
+      match1 = false;
 
-      // Prefer exact π0 daughter match (mother pid=111)
-      bool matched_pi0 = false;
-      for (const auto& tp : m_truth_pi0_photons)
+      // Run truth-based residuals and matching ONLY on simulation
+      if (m_isSimulation)
       {
-        const float dR    = photon1.DeltaR(tp.p4);
-        const float ratio = photon1.E() / tp.p4.E();
-        if (dR < 0.03f && ratio > 0.7f && ratio < 1.5f)
+        for (auto& trPhoton : truth_photons)
         {
-          ph1_trEtaPhi.SetPtEtaPhiE( clusE / TMath::CosH(tp.p4.Eta()),
-                                     tp.p4.Eta(), tp.p4.Phi(), clusE );
-          match1 = true;
-          matched_pi0 = true;
-          if (Verbosity() > 0)
-          {
-            std::cout << "[DEBUG] => π0 daughter match (clus1) e=" << ph1_trEtaPhi.E()
-                      << "  eta=" << ph1_trEtaPhi.Eta() << "\n";
-          }
-          break;
-        }
-      }
-      // Fallback: any meson photon (old behavior) if π0 match not found
-      if (!matched_pi0)
-      {
-        for (const auto& trPhot : truth_meson_photons)
-        {
-          const float dR    = photon1.DeltaR(trPhot);
-          const float ratio = photon1.E() / trPhot.E();
-          if (dR < 0.03f && ratio > 0.7f && ratio < 1.5f)
-          {
-            ph1_trEtaPhi.SetPtEtaPhiE( clusE / TMath::CosH(trPhot.Eta()),
-                                       trPhot.Eta(), trPhot.Phi(), clusE );
-            match1 = true;
+            const float dR    = photon1.DeltaR(trPhoton);          // ΔR(reco,truth)
+            const float ratio = photon1.E() / trPhoton.E();        // Ereco / Etruth
+
+            if (dR   > 0.03f)                    continue;
+            if (ratio < 0.30f || ratio > 1.30f)  continue;
+
+            const float dPhi = TVector2::Phi_mpi_pi(
+                                   photon1.Phi() - trPhoton.Phi() );
+            h_delR_recTrth->Fill(dR);
+
             if (Verbosity() > 0)
             {
-              std::cout << "[DEBUG] => meson-decay match (fallback), e=" << ph1_trEtaPhi.E()
+                std::cout << "[DEBUG] => cluster1 E=" << photon1.E()
+                          << " matched to truthE="    << trPhoton.E()
+                          << "  dR="   << dR
+                          << "  dPhi=" << dPhi
+                          << "  ratio="<< ratio << '\n';
+            }
+            h_matched_res   ->Fill(ratio, photon1.Eta());
+            h_res_e         ->Fill(ratio, photon1.E());
+            h_res           ->Fill(ratio);
+
+            int iLTeta = lt_eta, iLTphi = lt_phi;
+
+            h_res_e_eta     ->Fill(ratio, trPhoton.E(), iLTeta);
+            h_res_e_phi     ->Fill(ratio, trPhoton.E(), iLTphi);
+            h_delEta_e_eta  ->Fill(photon1.Eta()-trPhoton.Eta(), trPhoton.E(), iLTeta);
+            h_delR_e_eta    ->Fill(dR, trPhoton.E(), iLTeta);
+            h_delPhi_e_eta  ->Fill(dPhi, trPhoton.E(), iLTeta);
+            h_delPhi_e_phi  ->Fill(dPhi, trPhoton.E(), iLTphi);
+            h_truthE        ->Fill(trPhoton.E());
+
+            fillDPhiAllVariants(
+                clus1,
+                photon1,                       // reco photon
+                trPhoton,                      // truth photon
+                blkCoord,                      // (ηloc , φloc)
+                blkPhiCoarse,                  // coarse φ index
+                vtx_z,                         // vertex‑z (only wrapped through)
+                h_phi_diff_cpRaw_E,            // Δφ(CLUS‑RAW)  → truth
+                h_phi_diff_cpCorr_E,           // Δφ(CLUS‑CP)   → truth
+                fillGlobal                     // apply 10 cm cut inside
+            );
+            
+            fillDEtaAllVariants(
+                clus1,
+                photon1,
+                trPhoton,
+                blkCoord,
+                blkEtaCoarse,
+                blkPhiCoarse,
+                vtx_z,
+                h_eta_diff_cpRaw_E,            // Δη(CLUS‑RAW)  → truth
+                h_eta_diff_cpCorr_E,           // Δη(CLUS‑CP)   → truth
+                fillGlobal
+            );
+            fillAshLogDx(clus1, photon1, trPhoton,
+                           vtx_z,
+                           blkCoord, blkPhiCoarse,
+                           towerPhis, towerEs);
+
+            if (blkEtaCoarse >= 0 && blkEtaCoarse < NBinsBlock &&
+                  blkPhiCoarse >= 0 && blkPhiCoarse < NBinsBlock)
+            {
+                  h_res_block_E[blkEtaCoarse][blkPhiCoarse]
+                      ->Fill(ratio, trPhoton.E());
+            }
+        }
+
+        // Compute match1 / ph1_trEtaPhi only on MC
+        bool matched_pi0 = false;
+        for (const auto& tp : m_truth_pi0_photons)
+        {
+          const float dR    = photon1.DeltaR(tp.p4);
+          const float ratio = photon1.E() / tp.p4.E();
+          if (dR < 0.03f && ratio > 0.7f && ratio < 1.5f)
+          {
+            ph1_trEtaPhi.SetPtEtaPhiE( clusE / TMath::CosH(tp.p4.Eta()),
+                                       tp.p4.Eta(), tp.p4.Phi(), clusE );
+            match1 = true;
+            matched_pi0 = true;
+            if (Verbosity() > 0)
+            {
+              std::cout << "[DEBUG] => π0 daughter match (clus1) e=" << ph1_trEtaPhi.E()
                         << "  eta=" << ph1_trEtaPhi.Eta() << "\n";
             }
             break;
+          }
+        }
+        if (!matched_pi0)
+        {
+          for (const auto& trPhot : truth_meson_photons)
+          {
+            const float dR    = photon1.DeltaR(trPhot);
+            const float ratio = photon1.E() / trPhot.E();
+            if (dR < 0.03f && ratio > 0.7f && ratio < 1.5f)
+            {
+              ph1_trEtaPhi.SetPtEtaPhiE( clusE / TMath::CosH(trPhot.Eta()),
+                                         trPhot.Eta(), trPhot.Phi(), clusE );
+              match1 = true;
+              if (Verbosity() > 0)
+              {
+                std::cout << "[DEBUG] => meson-decay match (fallback), e=" << ph1_trEtaPhi.E()
+                          << "  eta=" << ph1_trEtaPhi.Eta() << "\n";
+              }
+              break;
+            }
           }
         }
       }
@@ -4265,9 +4371,25 @@ void PositionDependentCorrection::finalClusterLoop(
     {
       std::cout << "[DEBUG] => Starting INNER loop for cluster pairs.\n";
     }
+      // Count anchor clusters that reach the pair stage regardless of |vz|.
+      s_cuts.c1_pass++;
 
-    if (fillGlobal)
-        processClusterPairs(clusterContainer,
+      // Run pair loop whenever the tight-|z| gate passes.
+      // On data: always run (no truth). On MC: honor single-photon specialization.
+      if (fillGlobal)
+      {
+        const bool runPairs = m_isSimulation ? (!m_isSinglePhoton) : true;
+
+        // Prepare truth arguments: empty on data
+        std::vector<TLorentzVector> emptyTruth;
+        const std::vector<TLorentzVector>& truthArg = m_isSimulation ? truth_meson_photons : emptyTruth;
+        TLorentzVector zeroTruthK(0,0,0,0);
+        const TLorentzVector& ph1Arg = m_isSimulation ? ph1_trEtaPhi : zeroTruthK;
+        const bool matchArg = m_isSimulation ? match1 : false;
+
+        if (runPairs)
+        {
+            processClusterPairs(clusterContainer,
                                 cIt1,
                                 vertex,
                                 photon1,
@@ -4281,12 +4403,17 @@ void PositionDependentCorrection::finalClusterLoop(
                                 pt2ClusCut,
                                 pi0ptcut,
                                 weight,
-                                match1,
-                                ph1_trEtaPhi,
-                                truth_meson_photons,
+                                matchArg,
+                                ph1Arg,
+                                truthArg,
                                 m_isSimulation);
-
-
+        }
+        else if (Verbosity() > 1)
+        {
+          std::cout << "[finalClusterLoop] single-photon MC mode → skipping processClusterPairs for anchor cluster "
+                    << clus1->get_id() << "\n";
+        }
+      }
 
   } // end cluster1 loop
 
@@ -4306,20 +4433,22 @@ void PositionDependentCorrection::finalClusterLoop(
 // ============================================================================
 int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 {
-  if (Verbosity() > 0)
-  {
-    std::cout << ANSI_BOLD << ANSI_CYAN
-              << "[process_towers] START" << ANSI_RESET
-              << "  => event counter: " << _eventcounter
-              << std::endl;
-  }
-  if ((_eventcounter % 1000) == 0)
-  {
-    std::cout << ANSI_BOLD << ANSI_YELLOW
-              << "[Info] Processing event " << _eventcounter
-              << ANSI_RESET << std::endl;
-  }
+    // Job‑wide accounting
+    s_cuts.ev_total++;
 
+    if (Verbosity() > 0)
+    {
+      std::cout << ANSI_BOLD << ANSI_CYAN
+                << "[process_towers] START" << ANSI_RESET
+                << "  => event counter: " << _eventcounter
+                << std::endl;
+    }
+    if ((_eventcounter % 1000) == 0)
+    {
+      std::cout << ANSI_BOLD << ANSI_YELLOW
+                << "[Info] Processing event " << _eventcounter
+                << ANSI_RESET << std::endl;
+    }
   float emcal_hit_threshold = 0.5;  // GeV
 
   if (debug)
@@ -4327,9 +4456,9 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
     std::cout << ANSI_BOLD << "[DEBUG] " << ANSI_RESET
               << "-----------------------------------" << std::endl;
   }
-  float maxAlpha       = 0.6;
-  float clus_chisq_cut = 4.0;
-  float nClus_ptCut    = 0.5;
+    float maxAlpha       = 0.6;
+    float clus_chisq_cut = 10.0f;   // match anchor χ² gate downstream
+    float nClus_ptCut    = 0.0f;    // do not reject anchors by pT at this stage
   int   max_nClusCount = 3000000;
 
   // ------------------------------------------------------------------------
@@ -4363,14 +4492,24 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
     
   float weight = 1;
 
-  // ------------------------------------------------------------------------
-  // 3) Retrieve truth info
-  // ------------------------------------------------------------------------
-  std::vector<TLorentzVector> truth_photons;
-  std::vector<TLorentzVector> truth_meson_photons;
-  fillTruthInfo(topNode, vtx_z, truth_photons, truth_meson_photons);
-  h2_truthReco_vz->Fill(truth_vz, vtx_z);
-
+    /* ------------------------------------------------------------------------
+     * 3) Retrieve truth info  (simulation only; skip entirely on data)
+     * ------------------------------------------------------------------------ */
+    std::vector<TLorentzVector> truth_photons;
+    std::vector<TLorentzVector> truth_meson_photons;
+    if (m_isSimulation)
+    {
+      fillTruthInfo(topNode, truth_vz, truth_photons, truth_meson_photons);
+      if (h2_truthReco_vz && std::isfinite(truth_vz) && std::isfinite(vtx_z)) {
+        h2_truthReco_vz->Fill(truth_vz, vtx_z);
+      }
+    }
+    else
+    {
+      truth_vz = std::numeric_limits<float>::quiet_NaN();  // explicit on data
+    }
+    
+    
   if (Verbosity() > 0)
   {
       std::cout << "[process_towers] => fillTruthInfo done.\n"
@@ -4379,20 +4518,24 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
                 << std::endl;
   }
 
-  /* ------------------------------------------------------------------
-   * Vertex‑Z acceptance
-   *   – discard events only when |vz| exceeds the widest histogram bin
-   *   – remember whether “physics” (tight‑|z|) histograms are allowed
-  * ------------------------------------------------------------------ */
-  if (std::fabs(vtx_z) > m_vzSliceMax)
-  {
+    /* Vertex-Z acceptance
+       *  – If running on simulation, use truth_vz when available.
+       *  – If running on data (m_isSimulation == false), force reco vtx_z.
+    */
+    const float vz_gate = m_isSimulation ? truth_vz : vtx_z;
+
+  if (std::fabs(vz_gate) > m_vzSliceMax)
+    {
       if (Verbosity() > 1)
-        std::cout << "[process_towers] |vz|=" << vtx_z
-                  << " cm > " << m_vzSliceMax
-                  << " cm – event skipped.\n";
+        std::cout << "[process_towers] |vz|=" << vz_gate
+                  << " cm > " << m_vzSliceMax
+                  << " cm – event skipped.\n";
+      s_cuts.ev_vz_skipped++;
       return Fun4AllReturnCodes::EVENT_OK;
   }
-  const bool allowGlobal = (std::fabs(vtx_z) <= m_vzTightCut);
+  s_cuts.ev_processed++;
+  const bool allowGlobal = (std::fabs(vz_gate) <= m_vzTightCut);
+
     
   m_geometry = checkTowerGeometry(topNode);
 
@@ -4498,10 +4641,10 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 
   int nClusContainer = 0;
   int nClusCount = countClusters(clusterContainer,
-                                 vtx_z,
-                                 nClus_ptCut,
-                                 clus_chisq_cut,
-                                 nClusContainer);
+                                     m_isSimulation ? truth_vz : vtx_z,
+                                     nClus_ptCut,
+                                     clus_chisq_cut,
+                                     nClusContainer);
 
   if (Verbosity() > 0)
   {
@@ -4511,14 +4654,17 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
               << std::endl;
   }
 
-  float ptMaxCut   = 100;
-  float pt1ClusCut = 0.9;  // 1.3
-  float pt2ClusCut = 0.9;  // 0.7
-  float pi0ptcut   = 0.f; // was 0 by default
+    float ptMaxCut   = 100.f;
+    const bool isMB = m_isSimulation; // simple heuristic for sim MB
+    float pt1ClusCut = isMB ? 0.5f : 0.9f;
+    float pt2ClusCut = isMB ? 0.5f : 0.9f;
 
-  finalClusterLoop(topNode,
+    // π0 pT threshold used in the pair loop (0 = no additional cut)
+    const float pi0ptcut = 0.f;
+
+    finalClusterLoop(topNode,
                      clusterContainer,
-                     vtx_z,
+                     vz_gate,          // <- truth (single-photon) or reco (default)
                      truth_photons,
                      truth_meson_photons,
                      tower_tot_e,
@@ -4607,161 +4753,294 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
              { return d ? Form("%6.1f %%", 100.*double(n)/double(d))
                          : "   n/a "; };
 
-    // ----- Δφ – CORRECTED 6-WAY (RAW / CP / EA variants) -----
-    {
-      const std::uint64_t nTot6 =
-        m_phi6WayWin_RAW + m_phi6WayWin_CP + m_phi6WayWin_EA_geom +
-        m_phi6WayWin_EA_fitEta + m_phi6WayWin_EA_fitE + m_phi6WayWin_EA_mix;
-
-      if (Verbosity() > 0 && nTot6)
-      {
-        std::cout << '\n' << ANSI_BOLD
-                  << "╭──────────────────────────────────────────────╮\n"
-                  << "│   Δφ  –  CORRECTED 6-WAY (RAW / CP / EA*)     │\n"
-                  << "╰──────────────────────────────────────────────╯" << ANSI_RESET << '\n'
-                  << std::left << std::setw(26) << "variant"
-                  << std::right<< std::setw(12)<< "wins"
-                  << std::setw(12)             << "share\n"
-                  << "──────────────────────────────────────────────────────\n"
-                  << std::left << std::setw(26) << "CLUS-RAW"
-                  << std::right<< std::setw(12)<< m_phi6WayWin_RAW
-                  << std::setw(12)             << pct(m_phi6WayWin_RAW, nTot6) << '\n'
-                  << std::left << std::setw(26) << "CLUS-CP"
-                  << std::right<< std::setw(12)<< m_phi6WayWin_CP
-                  << std::setw(12)             << pct(m_phi6WayWin_CP, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (geometry)"
-                  << std::right<< std::setw(12)<< m_phi6WayWin_EA_geom
-                  << std::setw(12)             << pct(m_phi6WayWin_EA_geom, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (|eta|+E fits)"
-                  << std::right<< std::setw(12)<< m_phi6WayWin_EA_fitEta
-                  << std::setw(12)             << pct(m_phi6WayWin_EA_fitEta, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (E-only fits)"
-                  << std::right<< std::setw(12)<< m_phi6WayWin_EA_fitE
-                  << std::setw(12)             << pct(m_phi6WayWin_EA_fitE, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
-                  << std::right<< std::setw(12)<< m_phi6WayWin_EA_mix
-                  << std::setw(12)             << pct(m_phi6WayWin_EA_mix, nTot6) << '\n';
-      }
-    }
-
-
-    // ----- Δη – CORRECTED 6-WAY (RAW / CP / EA variants) -----
-    {
-      const std::uint64_t nTot6 =
-        m_eta6WayWin_RAW + m_eta6WayWin_CP + m_eta6WayWin_EA_geom +
-        m_eta6WayWin_EA_fitEta + m_eta6WayWin_EA_fitE + m_eta6WayWin_EA_mix;
-
-      if (Verbosity() > 0 && nTot6)
-      {
-        std::cout << '\n' << ANSI_BOLD
-                  << "╭──────────────────────────────────────────────╮\n"
-                  << "│   Δη  –  CORRECTED 6-WAY (RAW / CP / EA*)     │\n"
-                  << "╰──────────────────────────────────────────────╯" << ANSI_RESET << '\n'
-                  << std::left << std::setw(26) << "variant"
-                  << std::right<< std::setw(12)<< "wins"
-                  << std::setw(12)             << "share\n"
-                  << "──────────────────────────────────────────────────────\n"
-                  << std::left << std::setw(26) << "CLUS-RAW"
-                  << std::right<< std::setw(12)<< m_eta6WayWin_RAW
-                  << std::setw(12)             << pct(m_eta6WayWin_RAW, nTot6) << '\n'
-                  << std::left << std::setw(26) << "CLUS-CP"
-                  << std::right<< std::setw(12)<< m_eta6WayWin_CP
-                  << std::setw(12)             << pct(m_eta6WayWin_CP, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (geometry)"
-                  << std::right<< std::setw(12)<< m_eta6WayWin_EA_geom
-                  << std::setw(12)             << pct(m_eta6WayWin_EA_geom, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (|eta|+E fits)"
-                  << std::right<< std::setw(12)<< m_eta6WayWin_EA_fitEta
-                  << std::setw(12)             << pct(m_eta6WayWin_EA_fitEta, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (E-only fits)"
-                  << std::right<< std::setw(12)<< m_eta6WayWin_EA_fitE
-                  << std::setw(12)             << pct(m_eta6WayWin_EA_fitE, nTot6) << '\n'
-                  << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
-                  << std::right<< std::setw(12)<< m_eta6WayWin_EA_mix
-                  << std::setw(12)             << pct(m_eta6WayWin_EA_mix, nTot6) << '\n';
-      }
-    }
-
-    /* ───────────────────────── 3) Energy-sliced 6-way (RAW / CP / EA×4) ─────────── */
-    if (Verbosity() > 5)
-    {
+  // ────────────────────────────────────────────────────────────────────
+  // NEW: Job‑wide π0 pipeline accounting (why pairs never reached mass fills)
+  // ────────────────────────────────────────────────────────────────────
+  if (Verbosity() > 0)
+  {
+    using std::setw; using std::left; using std::right;
       std::cout << '\n' << ANSI_BOLD
                 << "╭──────────────────────────────────────────────────────────╮\n"
-                << "│   ENERGY-SLICED  Δφ & Δη  (RAW / CP / EA_geom / EA_|η|+E / EA_E-only / EA_mix) │\n"
+                << "│   π⁰ pair pipeline – job summary of rejections and fills │\n"
                 << "╰──────────────────────────────────────────────────────────╯"
                 << ANSI_RESET << '\n';
 
-      for (int ie = 0; ie < N_Ebins; ++ie)
-      {
-        // φ slice totals (6-way)
-        const std::uint64_t phiRAW   = m_phi6WayWinByE_RAW[ie];
-        const std::uint64_t phiCP    = m_phi6WayWinByE_CP[ie];
-        const std::uint64_t phiGeom  = m_phi6WayWinByE_EA_geom[ie];
-        const std::uint64_t phiFitEta= m_phi6WayWinByE_EA_fitEta[ie];
-        const std::uint64_t phiFitE  = m_phi6WayWinByE_EA_fitE[ie];
-        const std::uint64_t phiMix   = m_phi6WayWinByE_EA_mix[ie];
-        const std::uint64_t phiTOT   = phiRAW + phiCP + phiGeom + phiFitEta + phiFitE + phiMix;
+      // Cut configuration (so the table is self-describing)
+      auto modeName = [this](){
+        switch (m_anchorQMode)
+        {
+          case AnchorQualityMode::kNone: return "None";
+          case AnchorQualityMode::kChi2: return "Chi2";
+          case AnchorQualityMode::kProb: return "Probability";
+          case AnchorQualityMode::kBoth: return "Chi2+Probability";
+          default: return "?";
+        }
+      }();
+      std::cout << ANSI_BOLD << "Cut configuration" << ANSI_RESET << "\n"
+                << "  Anchor quality gate : " << modeName
+                << "  (chi2<= " << m_anchorChi2Cut
+                << ", prob>= "   << m_anchorProbMin  << ")\n"
+                << "  Second‑cluster prob : " << (m_enableC2ProbCut ? "ON" : "OFF")
+                << (m_enableC2ProbCut ? Form("  (prob>= %.3f)", m_pairProbMin) : "")
+                << "\n"
+                << "  Second‑cluster χ²   : " << (m_enableC2Chi2Cut ? "ON" : "OFF")
+                << (m_enableC2Chi2Cut ? Form("  (chi2<= %.2f)", m_pairChi2Max) : "")
+                << "\n";
 
-        // η slice totals (6-way)
-        const std::uint64_t etaRAW   = m_eta6WayWinByE_RAW[ie];
-        const std::uint64_t etaCP    = m_eta6WayWinByE_CP[ie];
-        const std::uint64_t etaGeom  = m_eta6WayWinByE_EA_geom[ie];
-        const std::uint64_t etaFitEta= m_eta6WayWinByE_EA_fitEta[ie];
-        const std::uint64_t etaFitE  = m_eta6WayWinByE_EA_fitE[ie];
-        const std::uint64_t etaMix   = m_eta6WayWinByE_EA_mix[ie];
-        const std::uint64_t etaTOT   = etaRAW + etaCP + etaGeom + etaFitEta + etaFitE + etaMix;
+      // Events
+      std::cout << ANSI_BOLD << "Events" << ANSI_RESET << '\n';
+    std::cout << "  total          : " << s_cuts.ev_total
+              << "   processed     : " << s_cuts.ev_processed
+              << "   |vz| skipped  : " << s_cuts.ev_vz_skipped
+              << "   nClus>cap skip: " << s_cuts.ev_nClusTooLarge
+              << '\n';
 
-        std::cout << ANSI_BOLD << "  • E-slice " << ie << ANSI_RESET
-                  << "   (entries: Δφ=" << phiTOT << ", Δη=" << etaTOT << ")\n";
+    // Cluster‑1 screening
+      // Cluster‑1 screening
+      std::cout << ANSI_BOLD << "Cluster‑1 screening (anchor)" << ANSI_RESET << '\n';
+      const auto C1 = s_cuts.c1_seen ? s_cuts.c1_seen : 1ULL;
+      const bool anchorChi2Active = (m_anchorQMode == AnchorQualityMode::kChi2 ||
+                                     m_anchorQMode == AnchorQualityMode::kBoth);
+      const bool anchorProbActive = (m_anchorQMode == AnchorQualityMode::kProb ||
+                                     m_anchorQMode == AnchorQualityMode::kBoth);
+      auto lbl = [](const char* base, bool active){
+        return std::string(base) + (active ? " [active]" : " [off]");
+      };
 
-        std::cout << std::left << std::setw(26) << "variant"
-                  << std::right<< std::setw(12)<< "Δφ wins"
-                  << std::setw(10)             << "%"
-                  << std::setw(12)             << "Δη wins"
-                  << std::setw(10)             << "%\n"
-                  << "  ───────────────────────────────────────────────────────\n";
+      std::cout << left << setw(26) << "  seen"
+                << right<< setw(12)<< s_cuts.c1_seen
+                << setw(10)         << pct(s_cuts.c1_seen, s_cuts.c1_seen) << '\n';
+      std::cout << left << setw(26) << "  E NaN"
+                << right<< setw(12)<< s_cuts.c1_E_nan
+                << setw(10)         << pct(s_cuts.c1_E_nan, C1) << '\n';
+      std::cout << left << setw(26) << "  E ~ 0"
+                << right<< setw(12)<< s_cuts.c1_E_zero
+                << setw(10)         << pct(s_cuts.c1_E_zero, C1) << '\n';
+      std::cout << left << setw(26) << "  E < 0.1 GeV"
+                << right<< setw(12)<< s_cuts.c1_E_below
+                << setw(10)         << pct(s_cuts.c1_E_below, C1) << '\n';
+      std::cout << left << setw(26) << lbl("  χ² cut", anchorChi2Active)
+                << right<< setw(12)<< s_cuts.c1_chi2
+                << setw(10)         << pct(s_cuts.c1_chi2, C1) << '\n';
+      std::cout << left << setw(26) << lbl("  prob < min", anchorProbActive)
+                << right<< setw(12)<< s_cuts.c1_prob
+                << setw(10)         << pct(s_cuts.c1_prob, C1) << '\n';
+      std::cout << left << setw(26) << "  lead η > 95"
+                << right<< setw(12)<< s_cuts.c1_ltEta_oob
+                << setw(10)         << pct(s_cuts.c1_ltEta_oob, C1) << '\n';
+      std::cout << left << setw(26) << "  pt1 outside"
+                << right<< setw(12)<< s_cuts.c1_pt1_outside
+                << setw(10)         << pct(s_cuts.c1_pt1_outside, C1) << '\n';
+      std::cout << left << setw(26) << "  passed to pairs"
+                << right<< setw(12)<< s_cuts.c1_pass
+                << setw(10)         << pct(s_cuts.c1_pass, C1) << '\n';
+      
+      
+      // Pair‑level
+      std::cout << ANSI_BOLD << "Pair‑level screening" << ANSI_RESET << '\n';
+      const auto P = s_cuts.pairs_seen ? s_cuts.pairs_seen : 1ULL;
+      const bool c2ProbActive = m_enableC2ProbCut;
+      const bool c2Chi2Active = m_enableC2Chi2Cut;
 
-        auto P = [&](std::uint64_t n, std::uint64_t d){ return pct(n, d); };
-
-        std::cout << std::left << std::setw(26) << "CLUS-RAW"
-                  << std::right<< std::setw(12)<< phiRAW
-                  << std::setw(10)             << P(phiRAW, phiTOT)
-                  << std::setw(12)             << etaRAW
-                  << std::setw(10)             << P(etaRAW, etaTOT) << '\n';
-
-        std::cout << std::left << std::setw(26) << "CLUS-CP"
-                  << std::right<< std::setw(12)<< phiCP
-                  << std::setw(10)             << P(phiCP, phiTOT)
-                  << std::setw(12)             << etaCP
-                  << std::setw(10)             << P(etaCP, etaTOT) << '\n';
-
-        std::cout << std::left << std::setw(26) << "EA (geometry)"
-                  << std::right<< std::setw(12)<< phiGeom
-                  << std::setw(10)             << P(phiGeom, phiTOT)
-                  << std::setw(12)             << etaGeom
-                  << std::setw(10)             << P(etaGeom, etaTOT) << '\n';
-
-        std::cout << std::left << std::setw(26) << "EA (|eta|+E fits)"
-                  << std::right<< std::setw(12)<< phiFitEta
-                  << std::setw(10)             << P(phiFitEta, phiTOT)
-                  << std::setw(12)             << etaFitEta
-                  << std::setw(10)             << P(etaFitEta, etaTOT) << '\n';
-
-        std::cout << std::left << std::setw(26) << "EA (E-only fits)"
-                  << std::right<< std::setw(12)<< phiFitE
-                  << std::setw(10)             << P(phiFitE, phiTOT)
-                  << std::setw(12)             << etaFitE
-                  << std::setw(10)             << P(etaFitE, etaTOT) << '\n';
-
-        std::cout << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
-                  << std::right<< std::setw(12)<< phiMix
-                  << std::setw(10)             << P(phiMix, phiTOT)
-                  << std::setw(12)             << etaMix
-                  << std::setw(10)             << P(etaMix, etaTOT) << '\n';
-
-        std::cout << "  ───────────────────────────────────────────────────────\n";
-      }
+      std::cout << left << setw(26) << "  pairs seen"
+                << right<< setw(12)<< s_cuts.pairs_seen
+                << setw(10)         << pct(s_cuts.pairs_seen, s_cuts.pairs_seen) << '\n';
+      std::cout << left << setw(26) << "  self/null"
+                << right<< setw(12)<< s_cuts.pairs_self_or_null
+                << setw(10)         << pct(s_cuts.pairs_self_or_null, P) << '\n';
+      std::cout << left << setw(26) << "  pt2 outside"
+                << right<< setw(12)<< s_cuts.pairs_pt2
+                << setw(10)         << pct(s_cuts.pairs_pt2, P) << '\n';
+      std::cout << left << setw(26) << lbl("  prob(c2) < min", c2ProbActive)
+                << right<< setw(12)<< s_cuts.pairs_prob2
+                << setw(10)         << pct(s_cuts.pairs_prob2, P) << '\n';
+      std::cout << left << setw(26) << "  χ²(c2) guard"
+                << right<< setw(12)<< s_cuts.pairs_chi2
+                << setw(10)         << pct(s_cuts.pairs_chi2, P) << '\n';
+      std::cout << left << setw(26) << lbl("  χ²(c2) gate", c2Chi2Active)
+                << right<< setw(12)<< s_cuts.pairs_chi2_gate
+                << setw(10)         << pct(s_cuts.pairs_chi2_gate, P) << '\n';
+      std::cout << left << setw(26) << "  α > maxAlpha"
+                << right<< setw(12)<< s_cuts.pairs_alpha
+                << setw(10)         << pct(s_cuts.pairs_alpha, P) << '\n';
+      std::cout << left << setw(26) << "  π⁰ pT cut (MC)"
+                << right<< setw(12)<< s_cuts.pairs_pi0pt
+                << setw(10)         << pct(s_cuts.pairs_pi0pt, P) << '\n';
+      std::cout << left << setw(26) << "  mass NaN"
+                << right<< setw(12)<< s_cuts.pairs_mass_nan
+                << setw(10)         << pct(s_cuts.pairs_mass_nan, P) << '\n';
+      std::cout << left << setw(26) << "  eLead out‑of‑slice"
+                << right<< setw(12)<< s_cuts.pairs_outOfSlice
+                << setw(10)         << pct(s_cuts.pairs_outOfSlice, P) << '\n';
+      std::cout << left << setw(26) << "  reached mass fills"
+                << right<< setw(12)<< s_cuts.pairs_final
+                << setw(10)         << pct(s_cuts.pairs_final, P) << '\n';
+    // Side fills (diagnostics)
+    std::cout << ANSI_BOLD << "Auxiliary fills" << ANSI_RESET << '\n';
+    std::cout << left << setw(26) << "  m–E pass‑1 fills"
+              << right<< setw(12)<< s_cuts.pass1_fills << '\n';
+    std::cout << left << setw(26) << "  block RAW fills"
+              << right<< setw(12)<< s_cuts.block_raw_fills << '\n';
+    std::cout << left << setw(26) << "  block CORR fills"
+              << right<< setw(12)<< s_cuts.block_corr_fills << '\n';
+    if (m_isSimulation) {
+      std::cout << left << setw(26) << "  truth pair OK"
+                << right<< setw(12)<< s_cuts.truth_pairs_ok << '\n';
+      std::cout << left << setw(26) << "  variant mass fills"
+                << right<< setw(12)<< s_cuts.variant_mass_fills << '\n';
     }
+  }
+
+  // ----- Δφ – CORRECTED 6-WAY (RAW / CP / EA variants) -----
+  {
+    const std::uint64_t nTot6 =
+      m_phi6WayWin_RAW + m_phi6WayWin_CP + m_phi6WayWin_EA_geom +
+      m_phi6WayWin_EA_fitEta + m_phi6WayWin_EA_fitE + m_phi6WayWin_EA_mix;
+
+    if (Verbosity() > 0 && nTot6)
+    {
+      std::cout << '\n' << ANSI_BOLD
+                << "╭──────────────────────────────────────────────╮\n"
+                << "│   Δφ  –  CORRECTED 6-WAY (RAW / CP / EA*)     │\n"
+                << "╰──────────────────────────────────────────────╯" << ANSI_RESET << '\n'
+                << std::left << std::setw(26) << "variant"
+                << std::right<< std::setw(12)<< "wins"
+                << std::setw(12)             << "share\n"
+                << "──────────────────────────────────────────────────────\n"
+                << std::left << std::setw(26) << "CLUS-RAW"
+                << std::right<< std::setw(12)<< m_phi6WayWin_RAW
+                << std::setw(12)             << pct(m_phi6WayWin_RAW, nTot6) << '\n'
+                << std::left << std::setw(26) << "CLUS-CP"
+                << std::right<< std::setw(12)<< m_phi6WayWin_CP
+                << std::setw(12)             << pct(m_phi6WayWin_CP, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (geometry)"
+                << std::right<< std::setw(12)<< m_phi6WayWin_EA_geom
+                << std::setw(12)             << pct(m_phi6WayWin_EA_geom, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (|eta|+E fits)"
+                << std::right<< std::setw(12)<< m_phi6WayWin_EA_fitEta
+                << std::setw(12)             << pct(m_phi6WayWin_EA_fitEta, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (E-only fits)"
+                << std::right<< std::setw(12)<< m_phi6WayWin_EA_fitE
+                << std::setw(12)             << pct(m_phi6WayWin_EA_fitE, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
+                << std::right<< std::setw(12)<< m_phi6WayWin_EA_mix
+                << std::setw(12)             << pct(m_phi6WayWin_EA_mix, nTot6) << '\n';
+    }
+  }
+
+  // ----- Δη – CORRECTED 6-WAY (RAW / CP / EA variants) -----
+  {
+    const std::uint64_t nTot6 =
+      m_eta6WayWin_RAW + m_eta6WayWin_CP + m_eta6WayWin_EA_geom +
+      m_eta6WayWin_EA_fitEta + m_eta6WayWin_EA_fitE + m_eta6WayWin_EA_mix;
+
+    if (Verbosity() > 0 && nTot6)
+    {
+      std::cout << '\n' << ANSI_BOLD
+                << "╭──────────────────────────────────────────────╮\n"
+                << "│   Δη  –  CORRECTED 6-WAY (RAW / CP / EA*)     │\n"
+                << "╰──────────────────────────────────────────────╯" << ANSI_RESET << '\n'
+                << std::left << std::setw(26) << "variant"
+                << std::right<< std::setw(12)<< "wins"
+                << std::setw(12)             << "share\n"
+                << "──────────────────────────────────────────────────────\n"
+                << std::left << std::setw(26) << "CLUS-RAW"
+                << std::right<< std::setw(12)<< m_eta6WayWin_RAW
+                << std::setw(12)             << pct(m_eta6WayWin_RAW, nTot6) << '\n'
+                << std::left << std::setw(26) << "CLUS-CP"
+                << std::right<< std::setw(12)<< m_eta6WayWin_CP
+                << std::setw(12)             << pct(m_eta6WayWin_CP, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (geometry)"
+                << std::right<< std::setw(12)<< m_eta6WayWin_EA_geom
+                << std::setw(12)             << pct(m_eta6WayWin_EA_geom, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (|eta|+E fits)"
+                << std::right<< std::setw(12)<< m_eta6WayWin_EA_fitEta
+                << std::setw(12)             << pct(m_eta6WayWin_EA_fitEta, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (E-only fits)"
+                << std::right<< std::setw(12)<< m_eta6WayWin_EA_fitE
+                << std::setw(12)             << pct(m_eta6WayWin_EA_fitE, nTot6) << '\n'
+                << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
+                << std::right<< std::setw(12)<< m_eta6WayWin_EA_mix
+                << std::setw(12)             << pct(m_eta6WayWin_EA_mix, nTot6) << '\n';
+    }
+  }
+
+  /* ───────────────────────── 3) Energy-sliced 6-way (RAW / CP / EA×4) ─────────── */
+  if (Verbosity() > 5)
+  {
+    std::cout << '\n' << ANSI_BOLD
+              << "╭──────────────────────────────────────────────────────────╮\n"
+              << "│   ENERGY-SLICED  Δφ & Δη  (RAW / CP / EA_geom / EA_|η|+E / EA_E-only / EA_mix) │\n"
+              << "╰──────────────────────────────────────────────────────────╯"
+              << ANSI_RESET << '\n';
+
+    for (int ie = 0; ie < N_Ebins; ++ie)
+    {
+      // φ slice totals (6-way)
+      const std::uint64_t phiRAW   = m_phi6WayWinByE_RAW[ie];
+      const std::uint64_t phiCP    = m_phi6WayWinByE_CP[ie];
+      const std::uint64_t phiGeom  = m_phi6WayWinByE_EA_geom[ie];
+      const std::uint64_t phiFitEta= m_phi6WayWinByE_EA_fitEta[ie];
+      const std::uint64_t phiFitE  = m_phi6WayWinByE_EA_fitE[ie];
+      const std::uint64_t phiMix   = m_phi6WayWinByE_EA_mix[ie];
+      const std::uint64_t phiTOT   = phiRAW + phiCP + phiGeom + phiFitEta + phiFitE + phiMix;
+
+      // η slice totals (6-way)
+      const std::uint64_t etaRAW   = m_eta6WayWinByE_RAW[ie];
+      const std::uint64_t etaCP    = m_eta6WayWinByE_CP[ie];
+      const std::uint64_t etaGeom  = m_eta6WayWinByE_EA_geom[ie];
+      const std::uint64_t etaFitEta= m_eta6WayWinByE_EA_fitEta[ie];
+      const std::uint64_t etaFitE  = m_eta6WayWinByE_EA_fitE[ie];
+      const std::uint64_t etaMix   = m_eta6WayWinByE_EA_mix[ie];
+      const std::uint64_t etaTOT   = etaRAW + etaCP + etaGeom + etaFitEta + etaFitE + etaMix;
+
+      std::cout << ANSI_BOLD << "  • E-slice " << ie << ANSI_RESET
+                << "   (entries: Δφ=" << phiTOT << ", Δη=" << etaTOT << ")\n";
+
+      std::cout << std::left << std::setw(26) << "variant"
+                << std::right<< std::setw(12)<< "Δφ wins"
+                << std::setw(10)             << "%"
+                << std::setw(12)             << "Δη wins"
+                << std::setw(10)             << "%\n"
+                << "  ───────────────────────────────────────────────────────\n";
+
+      auto P = [&](std::uint64_t n, std::uint64_t d){ return pct(n, d); };
+
+      std::cout << std::left << std::setw(26) << "CLUS-RAW"
+                << std::right<< std::setw(12)<< phiRAW
+                << std::setw(10)             << P(phiRAW, phiTOT)
+                << std::setw(12)             << etaRAW
+                << std::setw(10)             << P(etaRAW, etaTOT) << '\n';
+
+      std::cout << std::left << std::setw(26) << "CLUS-CP"
+                << std::right<< std::setw(12)<< phiCP
+                << std::setw(10)             << P(phiCP, phiTOT)
+                << std::setw(12)             << etaCP
+                << std::setw(10)             << P(etaCP, etaTOT) << '\n';
+
+      std::cout << std::left << std::setw(26) << "EA (geometry)"
+                << std::right<< std::setw(12)<< phiGeom
+                << std::setw(10)             << P(phiGeom, phiTOT)
+                << std::setw(12)             << P(etaGeom, etaTOT) << '\n';
+
+      std::cout << std::left << std::setw(26) << "EA (|eta|+E fits)"
+                << std::right<< std::setw(12)<< phiFitEta
+                << std::setw(10)             << P(phiFitEta, phiTOT)
+                << std::setw(12)             << P(etaFitEta, etaTOT) << '\n';
+
+      std::cout << std::left << std::setw(26) << "EA (E-only fits)"
+                << std::right<< std::setw(12)<< phiFitE
+                << std::setw(10)             << P(phiFitE, phiTOT)
+                << std::setw(12)             << P(etaFitE, etaTOT) << '\n';
+
+      std::cout << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
+                << std::right<< std::setw(12)<< phiMix
+                << std::setw(10)             << P(phiMix, phiTOT)
+                << std::setw(12)             << P(etaMix, etaTOT) << '\n';
+
+      std::cout << "  ───────────────────────────────────────────────────────\n";
+    }
+  }
 
   return 0;
 }

@@ -1,0 +1,11 @@
+series,variant,residual,E,mu,dmu,sigma,dsigma
+0,from scratch (corr),eta,3,7.25514e-05,0.000120877,0.00983196,8.54726e-05
+0,from scratch (corr),eta,5,-0.000166667,0.000712271,0.0100982,0.000503652
+0,from scratch (corr),eta,7,0.00121429,0.00167471,0.00443087,0.0011842
+0,from scratch (corr),eta,9,0.0045,0.00424264,0.006,0.003
+0,from scratch (corr),eta,11,-0.0045,0,0,0
+1,clusterizer (corr),eta,3,-2.36512e-05,0.000120913,0.00983563,8.54982e-05
+1,clusterizer (corr),eta,5,-0.000674129,0.000719227,0.0101968,0.00050857
+1,clusterizer (corr),eta,7,0.00178571,0.00157421,0.00416497,0.00111313
+1,clusterizer (corr),eta,9,0.0045,0.00494975,0.007,0.0035
+1,clusterizer (corr),eta,11,-0.0045,0,0,0

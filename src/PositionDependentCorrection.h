@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 #include <TLorentzVector.h>
+#include <cstdint>
+#include <atomic>
 
 #include <CLHEP/Vector/ThreeVector.h>   // Hep3Vector in inline helpers
 #include <fun4all/SubsysReco.h>
@@ -69,28 +71,50 @@ class PositionDependentCorrection : public SubsysReco
   int process_event (PHCompositeNode*) override;
   int End           (PHCompositeNode*) override;
 
-  /* ----------------------------------------------------------------
-   *  Utility setters
-   * -------------------------------------------------------------- */
-  void setIsSimulation(bool sim)              { m_isSimulation = sim; }
-  void Detector(const std::string& n)         { detector = n; }
-  void set_timing_cut_width(int t)            { _range   = t; }
-  void set_vertex_cut(float v)                { _vz      = v; }
-  void apply_vertex_cut(bool on=true)         { m_vtxCut = on; }
-  void setMassFitsDone(bool done) { m_massFitsDone = done; }
-  void UseSignedVz(bool v = true) { m_useSignedVz = v; }
-  void UseSurveyGeometry(bool v=true)         { m_useSurveyGeometry = v; }
-    
-    
-  // First-pass switch: when true, only uncorrected TH3 views are booked/filled
-  void setFirstPassBvaluesOnly(bool v=true)   { m_firstPassBvaluesOnly = v; }
+    /* ----------------------------------------------------------------
+     *  Utility setters
+     * -------------------------------------------------------------- */
+    void setIsSimulation(bool sim)              { m_isSimulation = sim; }
+    void Detector(const std::string& n)         { detector = n; }
+    void set_timing_cut_width(int t)            { _range   = t; }
 
-  enum class EBinningMode { kRange , kDiscrete };
-  void setBinningMode(EBinningMode m)         { m_binningMode = m; }
-  EBinningMode getBinningMode() const         { return m_binningMode; }
+    // NEW: single-photon steering (truth-only projections, skip pair loop)
+    void setIsSinglePhoton(bool on = true)      { m_isSinglePhoton = on; }
 
-  void setBEmcRec(BEmcRecCEMC* p)             { m_bemcRec = p; }
-  void setTightVzCut(float cm)                { m_vzTightCut = std::fabs(cm); }
+    void set_vertex_cut(float v)                { _vz      = v; }
+    void apply_vertex_cut(bool on=true)         { m_vtxCut = on; }
+    void setMassFitsDone(bool done)             { m_massFitsDone = done; }
+    void UseSignedVz(bool v = true)             { m_useSignedVz = v; }
+    void UseSurveyGeometry(bool v=true)         { m_useSurveyGeometry = v; }
+      
+    // First-pass switch: when true, only uncorrected TH3 views are booked/filled
+    void setFirstPassBvaluesOnly(bool v=true)   { m_firstPassBvaluesOnly = v; }
+
+    enum class EBinningMode { kRange , kDiscrete };
+    void setBinningMode(EBinningMode m)         { m_binningMode = m; }
+    EBinningMode getBinningMode() const         { return m_binningMode; }
+
+    void setBEmcRec(BEmcRecCEMC* p)             { m_bemcRec = p; }
+    void setTightVzCut(float cm)                { m_vzTightCut = std::fabs(cm); }
+
+    // --- Quality gates steering ---
+    enum class AnchorQualityMode { kNone, kChi2, kProb, kBoth };
+
+    // Choose which anchor-cluster gate to use
+    void setAnchorQualityMode(AnchorQualityMode m) { m_anchorQMode = m; }
+    void setAnchorChi2Cut(float v)                 { m_anchorChi2Cut = v; }   // default 10
+    void setAnchorProbMin(float v)                 { m_anchorProbMin  = v; }   // default 0.05
+
+    // Enable/disable partner (second cluster) probability cut and set its threshold
+    void enableSecondClusterProbCut(bool on = true){ m_enableC2ProbCut = on; } // default ON
+    void setSecondClusterProbMin(float v)          { m_pairProbMin     = v; }  // default 0.05
+
+    // Enable/disable partner (second cluster) χ² cut and set its threshold
+    void enableSecondClusterChi2Cut(bool on = true) { m_enableC2Chi2Cut = on; } // default OFF
+    void setSecondClusterChi2Max(float v)           { m_pairChi2Max     = v; }  // default 10.0
+
+    // Optional convenience: expose anchor χ² (useful to tie partner thr to anchor)
+    float getAnchorChi2Cut() const                  { return m_anchorChi2Cut; }
 
   /* ----------------------------------------------------------------
    *  Stand‑alone helpers that macros might call
@@ -126,6 +150,17 @@ class PositionDependentCorrection : public SubsysReco
     bool m_printed_prop_header    = false;
     TH2F* h_dx_prop_vsE = nullptr;        // (optional) quick QA
     TH2F* h_dy_prop_vsE = nullptr;
+    
+    AnchorQualityMode m_anchorQMode{AnchorQualityMode::kChi2}; // default: χ² gate
+    float m_anchorChi2Cut{10.0f};   // χ² threshold when χ² gate is enabled
+    float m_anchorProbMin{0.05f};   // probability threshold for anchor (used if kProb/kBoth)
+
+    bool  m_enableC2ProbCut{false}; // default: partner probability cut OFF
+    float m_pairProbMin{0.05f};     // threshold if partner-prob cut is enabled
+
+    bool  m_enableC2Chi2Cut{false}; // default: partner χ² cut OFF
+    float m_pairChi2Max{10.0f};     // threshold if partner-χ² cut is enabled
+    
     
   static constexpr std::array<float,19> vzEdge = {
          0.f,  5.f, 10.f, 15.f, 20.f, 25.f, 30.f,
@@ -164,7 +199,7 @@ class PositionDependentCorrection : public SubsysReco
                       std::vector<float>& ht_eta,
                       std::vector<float>& ht_phi);
 
-  void  fillTruthInfo(PHCompositeNode*, float& vtx_z,
+  void  fillTruthInfo(PHCompositeNode*, float& truth_vz,
                       std::vector<TLorentzVector>& truth_photons,
                       std::vector<TLorentzVector>& truth_meson_photons);
 
@@ -188,8 +223,8 @@ class PositionDependentCorrection : public SubsysReco
   double xAtShowerDepth  (float energy,double rF,double zF,
                           float phiF,int ix,int iy)                   const;
 
-    float doAshShift(float xTower, float b);
-    float doLogWeightCoord(const std::vector<int>& towerPhi,
+  float doAshShift(float xTower, float b);
+  float doLogWeightCoord(const std::vector<int>& towerPhi,
                            const std::vector<float>& towerE,
                            float w0);
   void  bookCommonHistograms      (const std::function<std::string(int)>& makeLabel);
@@ -276,14 +311,60 @@ class PositionDependentCorrection : public SubsysReco
 
   /* --------------------  data members ----------------------------- */
   /* steering / run‑environment */
-  bool              m_isSimulation{false};
-  bool              m_useSurveyGeometry{false};
-  bool  m_massFitsDone{false};
-  EBinningMode      m_binningMode{EBinningMode::kRange};
-  bool              m_vtxCut{true};
-  bool              alreadyDeclaredHistograms{false};
-  bool              m_firstPassBvaluesOnly{false};   ///< fast path: only book/fill uncorrected TH3s
+    bool              m_isSimulation{false};
+    bool              m_useSurveyGeometry{false};
+    bool              m_massFitsDone{false};
+    EBinningMode      m_binningMode{EBinningMode::kRange};
 
+    // NEW: when true, use truth vertex everywhere and skip pair loop
+    bool              m_isSinglePhoton{false};
+
+    bool              m_vtxCut{true};
+    bool              alreadyDeclaredHistograms{false};
+    bool              m_firstPassBvaluesOnly{false};   ///< fast path: only book/fill uncorrected TH3s
+
+    struct Pi0CutCounters {
+      // Event accounting
+      std::uint64_t ev_total        = 0;   // all events entering process_towers
+      std::uint64_t ev_processed    = 0;   // events that pass |vz| acceptance
+      std::uint64_t ev_vz_skipped   = 0;   // events rejected by |vz| > m_vzSliceMax
+      std::uint64_t ev_nClusTooLarge= 0;   // events rejected by nClusCount > max_nClusCount
+        
+        // NEW: explicit, separate counters
+        std::uint64_t c1_prob         = 0; // anchor rejected by probability
+        std::uint64_t pairs_prob2     = 0; // partner rejected by probability
+
+
+      // Cluster‑1 (anchor) screening
+      std::uint64_t c1_seen         = 0;   // clusters iterated in OUTER loop
+      std::uint64_t c1_E_nan        = 0;   // E_vec_1.mag() NaN
+      std::uint64_t c1_E_zero       = 0;   // E_vec_1.mag() ~ 0
+      std::uint64_t c1_E_below      = 0;   // clusE < 0.1
+      std::uint64_t c1_chi2         = 0;   // χ² (anchor) cut
+      std::uint64_t c1_ltEta_oob    = 0;   // lead tower eta > 95
+      std::uint64_t c1_pt1_outside  = 0;   // pt1 outside [pt1ClusCut, ptMaxCut]
+      std::uint64_t c1_pass         = 0;   // clusters that reached pair loop
+
+        // Pair‑level screening (after a cluster1 passed)
+        std::uint64_t pairs_seen        = 0; // all pair trials (including self/null)
+        std::uint64_t pairs_self_or_null= 0; // self pairing or null c2
+        std::uint64_t pairs_pt2         = 0; // pt2 outside [pt2ClusCut, ptMaxCut]
+        std::uint64_t pairs_chi2        = 0; // χ²(c2) pathological guard
+        std::uint64_t pairs_chi2_gate   = 0; // χ²(c2) failed configured partner-χ² gate
+        std::uint64_t pairs_alpha       = 0; // asymmetry > maxAlpha
+        std::uint64_t pairs_mass_nan    = 0; // π0 mass NaN
+        std::uint64_t pairs_pi0pt       = 0; // π0 pt cut (simulation mode only)
+        std::uint64_t pairs_outOfSlice  = 0; // eLead outside energy slice table (info)
+        std::uint64_t pairs_final       = 0; // pairs that reached “legacy” mass fills
+
+      // Side fills (diagnostics)
+      std::uint64_t pass1_fills       = 0; // h_mE_raw/h_mE_corr fills
+      std::uint64_t block_raw_fills   = 0; // block raw map fills (μ±3σ)
+      std::uint64_t block_corr_fills  = 0; // block corr map fills (μ±3σ)
+      std::uint64_t truth_pairs_ok    = 0; // both reco photons matched to same truth π0
+      std::uint64_t variant_mass_fills= 0; // per‑variant π0 mass histogram fills
+    };
+    static Pi0CutCounters s_cuts;
 
   std::string       detector;
   std::string       outfilename;
@@ -402,6 +483,11 @@ class PositionDependentCorrection : public SubsysReco
 
     // Per-variant, per-slice π0 mass histograms (8 variants × N_Ebins)
     TH1F* h_m_pi0_var[static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
+
+    // NEW: Per-η-view, per-variant, per-slice π0 mass histograms
+    // view index: 0=fullEta (|η|≤1.10), 1=etaCore (|η|≤0.20),
+    //             2=etaMid (0.20<|η|≤0.70), 3=etaEdge (0.70<|η|≤1.10)
+    TH1F* h_m_pi0_var_eta[kNEtaViews][static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
 
   TH1F* h_phi_diff_raw_E        [N_Ebins]{};
   TH1F* h_phi_diff_cpRaw_E      [N_Ebins]{};

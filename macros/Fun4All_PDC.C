@@ -21,6 +21,7 @@
 #include <fun4all/Fun4AllDstInputManager.h>
 #include <fun4all/SubsysReco.h>
 #include <fun4all/Fun4AllServer.h>
+#include <fstream>
 #include <fun4all/Fun4AllDstOutputManager.h>
 #include <fun4allraw/Fun4AllPrdfInputManager.h>
 #include <phool/recoConsts.h>
@@ -110,39 +111,87 @@ void Fun4All_PDC(int nevents = 0,
   }
   // We want the "MDC2" global tag
   rc->set_StringFlag("CDB_GLOBALTAG", "MDC2");
-  // We'll guess that the "TIMESTAMP" or run # is 21 (or parse from the file)
-  rc->set_uint64Flag("TIMESTAMP", 24);
-  rc->set_IntFlag("RUNNUMBER", 24);
-    
-  CDBInterface::instance()->getUrl("EMCTOWERCALIB");
+    // --- decide runyear and mode up front ---
+    // default assumptions
+    int  runNo        = 24;     // run-24 data default
+    bool isSimulation = false;
 
-  ////////////////////////////////////////////////////////////
-  // 2) Register TWO input managers:
-  //    (a) 'in0' for the calo DST list
-  //    (b) 'in1' for G4Hits
-  ////////////////////////////////////////////////////////////
-  if (verbosity > 0)
+    // 0) explicit overrides from the environment
+    if (const char* pm = gSystem->Getenv("PDC_MODE")) {
+      std::string m(pm); for (auto& c: m) c = std::tolower(c);
+      if (m=="sim" || m=="simulation") isSimulation = true;
+      if (m=="data")                    isSimulation = false;
+    }
+    if (const char* er = gSystem->Getenv("PDC_RUNNUMBER")) {
+      if (*er) runNo = std::atoi(er);
+    }
+
+    // 1) fallbacks if nothing was exported
+    if (!gSystem->Getenv("PDC_MODE")) {
+      // Heuristic: readable G4Hits list ⇒ sim
+      isSimulation =
+          !g4HitsListFile.empty() &&
+          g4HitsListFile != "g4hits.list" &&
+          gSystem->AccessPathName(g4HitsListFile.c_str(), kReadPermission) == kFALSE;
+    }
+    if (!gSystem->Getenv("PDC_RUNNUMBER")) {
+      // Light sniff for minbias ⇒ run21
+      auto toLower = [](std::string s){ for (auto& c : s) c = std::tolower(c); return s; };
+      const std::string a = toLower(caloListFile);
+      const std::string b = toLower(g4HitsListFile);
+      const bool looksMB =
+          a.find("minbias") != std::string::npos || a.find("_mb") != std::string::npos ||
+          b.find("minbias") != std::string::npos || b.find("_mb") != std::string::npos ||
+          a.find("run21")   != std::string::npos || b.find("run21")   != std::string::npos;
+      if (looksMB) runNo = 21;
+    }
+
+    // Conditions DB flags (standard pattern in sPHENIX)
+    rc->set_StringFlag("CDB_GLOBALTAG","MDC2");
+    rc->set_uint64Flag("TIMESTAMP",    runNo);
+    rc->set_IntFlag   ("RUNNUMBER",    runNo);
+    std::cout << "[CFG] Using RUNNUMBER/TIMESTAMP = " << runNo
+              << "  | isSimulation=" << (isSimulation?"true":"false") << std::endl;
+
+    // Optional: touch one known key to prove we can reach the CDB (debug)
+    CDBInterface::instance()->getUrl("EMCTOWERCALIB");
+
+
+    if (verbosity > 0)
     {
       std::cout << "[DEBUG] Registering input managers for calo='"
-                << caloListFile << "'  and hits='" << g4HitsListFile << "'" << std::endl;
-  }
+                << caloListFile << "'  and hits='" << g4HitsListFile << "'\n"
+                << "[CFG] isSimulation = " << (isSimulation ? "true" : "false") << std::endl;
+    }
 
-
-  // (a) for the calo cluster DST
-  auto* in0 = new Fun4AllDstInputManager("in0");
-  if (caloListFile.size() > 5 && caloListFile.substr(caloListFile.size()-5) == ".list")
-      in0->AddListFile(caloListFile);
-  else
-    in0->AddFile(caloListFile);
+    auto* in0 = new Fun4AllDstInputManager("in0");
+    bool looksList = (caloListFile.size() > 5 && caloListFile.substr(caloListFile.size()-5) == ".list");
+    if (!looksList) {
+      std::ifstream fin(caloListFile);
+      std::string first;
+      if (fin && std::getline(fin, first)) {
+        // if the first line looks like a ROOT file path, treat it as a list
+        looksList = (first.find(".root") != std::string::npos);
+      }
+    }
+    if (looksList) in0->AddListFile(caloListFile);
+    else           in0->AddFile(caloListFile);
     se->registerInputManager(in0);
 
-  // (b) for G4Hits
-  auto* in1 = new Fun4AllDstInputManager("in1");
-  if (g4HitsListFile.size() > 5 && g4HitsListFile.substr(g4HitsListFile.size()-5) == ".list")
-      in1->AddListFile(g4HitsListFile);
-  else
-    in1->AddFile(g4HitsListFile);
-    se->registerInputManager(in1);
+    // (b) for G4Hits (only in simulation)
+    if (isSimulation)
+    {
+      auto* in1 = new Fun4AllDstInputManager("in1");
+      if (g4HitsListFile.size() > 5 && g4HitsListFile.substr(g4HitsListFile.size()-5) == ".list")
+        in1->AddListFile(g4HitsListFile);
+      else
+        in1->AddFile(g4HitsListFile);
+      se->registerInputManager(in1);
+    }
+    else
+    {
+      std::cout << "[INFO] Data run detected: not registering a G4Hits input manager." << std::endl;
+    }
 
   GlobalVertexReco *gvertex = new GlobalVertexReco("GlobalVertexReco");
   gvertex->Verbosity(0);
@@ -197,19 +246,14 @@ void Fun4All_PDC(int nevents = 0,
       bemcPtr->CompleteTowerGeometry();   // derive dX/dY/dZ once
   }
     
-  ////////////////////////////////////////////////////////////
-  // 6) Our PositionDependentCorrection code
-  ////////////////////////////////////////////////////////////
-  const bool isSimulation =
-          !g4HitsListFile.empty() &&
-          g4HitsListFile != "g4hits.list" &&       // the default placeholder
-          gSystem->AccessPathName( g4HitsListFile.c_str(), kReadPermission ) == kFALSE;
-
-    
-  string finalOut = outFileName.empty()
-                    ? (isSimulation ? "output_PositionDep_sim.root"
-                                    : "output_PositionDep_data.root")
-                    : outFileName;
+    ////////////////////////////////////////////////////////////
+    // 6) Our PositionDependentCorrection code
+    ////////////////////////////////////////////////////////////
+    // isSimulation was decided above; reuse it here.
+    string finalOut = outFileName.empty()
+                      ? (isSimulation ? "output_PositionDep_sim.root"
+                                      : "output_PositionDep_data.root")
+                      : outFileName;
     
     
   if (useCustomClusterizer)
@@ -222,6 +266,7 @@ void Fun4All_PDC(int nevents = 0,
         // Make builder geometry match PDC bemc: cylinder + detailed
         ClusterBuilder->SetCylindricalGeometry();
         ClusterBuilder->set_UseDetailedGeometry(true);
+        ClusterBuilder->WriteClusterV2(true);
 
         // Use the same tower threshold you want PDC to see (optional but keeps Momenta identical)
         ClusterBuilder->set_threshold_energy(0.030f);
@@ -242,21 +287,6 @@ void Fun4All_PDC(int nevents = 0,
       std::cout << "Skipping custom cluster builder (useCustomClusterizer = false)" << std::endl;
   }
 
-    
-  // ========================================================================
-  //  Position-dependent π0-correction module
-  //  ----------------------------------------------------------------------
-  //  How to drive the two most common switches from your macro:
-  //
-  //      • Simulation / Data
-  //          pdc->setIsSimulation(true);   // Monte-Carlo
-  //          pdc->setIsSimulation(false);  // Real data
-  //
-  //      • π0-mass windows (only after you have the pass-1 μ/σ table!)
-  //          pdc->setMassFitsDone(true);   // enable mass-window cuts (pass-2)
-  //          pdc->setMassFitsDone(false);  // disable  (default / pass-1)
-  // ========================================================================
-
   auto* pdc = new PositionDependentCorrection("PositionDepCorr", finalOut);
   /*------------------------------------------------------------
       1)  Mandatory hooks and global switches
@@ -266,6 +296,11 @@ void Fun4All_PDC(int nevents = 0,
   pdc->setFirstPassBvaluesOnly(false);
   pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
   pdc->UseSignedVz(false);
+    // Automatically configure single-photon vs MinBias:
+    //  - runNo is resolved above from $PDC_RUNNUMBER or by filename sniffing
+    //  - default = true (single-photon), MinBias (runNo==21) => false
+    const bool pdc_isMinBias = (runNo == 21);
+    pdc->setIsSinglePhoton(!pdc_isMinBias);
   /*------------------------------------------------------------
       2)  π0-mass-window support
     ------------------------------------------------------------*/
@@ -273,13 +308,42 @@ void Fun4All_PDC(int nevents = 0,
   // Set *true* for the second (pass-2) job that *consumes* the table and
   // applies the slice-dependent mass cut.
   pdc->setMassFitsDone(false);
+    
+
+    /*------------------------------------------------------------
+        3)  Anchor/partner quality gates (configurable)
+        ------------------------------------------------------------
+        AnchorQualityMode controls anchor-cluster screening in finalClusterLoop():
+          - kNone : no anchor quality gate (accept all anchors).
+          - kChi2 : require clusChi2 <= m_anchorChi2Cut (χ² gate).
+          - kProb : require clusProb >= m_anchorProbMin  (probability gate).
+          - kBoth : require BOTH χ² and probability gates to pass.
+
+        Partner (second-cluster) probability gate in processClusterPairs():
+          - enableSecondClusterProbCut(false)  → no partner probability cut (default)
+          - enableSecondClusterProbCut(true)   → require c2Prob >= m_pairProbMin.
+    ------------------------------------------------------------*/
+//    // Default job settings (safe & explicit):
+    pdc->setAnchorQualityMode(PositionDependentCorrection::AnchorQualityMode::kChi2);
+    pdc->setAnchorChi2Cut(4.0f);
+    pdc->enableSecondClusterProbCut(false);
+    
+    // Partner (cluster‑2) χ² gate – enable and set threshold
+    pdc->enableSecondClusterChi2Cut(true);
+    pdc->setSecondClusterChi2Max(4.0f);
+
+//    // To switch to probability gates at 0.50, uncomment:
+//     pdc->setAnchorQualityMode(PositionDependentCorrection::AnchorQualityMode::kProb);
+//     pdc->setAnchorProbMin(0.50f);
+//     pdc->enableSecondClusterProbCut(true);
+//     pdc->setSecondClusterProbMin(0.50f);
+    
   /*------------------------------------------------------------
       4)  Energy-binning mode
   ------------------------------------------------------------*/
   pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
 
-  pdc->Verbosity(10);                 // 0 = silent → raise for debugging
-  pdc->setFirstPassBvaluesOnly(false);
+  pdc->Verbosity(2);                 // 0 = silent → raise for debugging
 
   // Finally register the module with Fun4All
   se->registerSubsystem(pdc);

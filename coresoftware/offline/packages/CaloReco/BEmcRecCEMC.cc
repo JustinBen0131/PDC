@@ -244,15 +244,15 @@ void BEmcRecCEMC::SetPhiTiltVariant(ETiltVariant v)
   // (a,b) in radians for φ(E) = a − b·lnE.  If you later calibrate EA flavours,
   // update the four CLUS_CP_EA_* entries below.
   static const std::unordered_map<ETiltVariant,std::pair<double,double>> lut = {
-      {ETiltVariant::CLUS_RAW, { -2.634138e-03, 8.197368e-04 }},  // no corr, cluster
-      {ETiltVariant::CLUS_CP, { -1.943936e-03, 7.964160e-04 }},  // CorrectPosition, cluster
-      {ETiltVariant::CLUS_CP_EA_GEOM, { -1.818732e-03, 7.311745e-04 }},  // CorrectPosition(EA geom), cluster
-      {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { -2.111571e-03, 8.283177e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
-      {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { -2.110115e-03, 8.289973e-04 }},  // CorrectPosition(EA E-only), cluster
-      {ETiltVariant::CLUS_CP_EA_MIX, { -2.110349e-03, 8.290781e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
-      {ETiltVariant::CLUS_BCORR, { -2.147950e-03, 8.244132e-04 }},  // b(E) corr, cluster
-      {ETiltVariant::PDC_RAW, { -2.728010e-03, 8.246884e-04 }},  // no corr, scratch
-      {ETiltVariant::PDC_CORR, { -2.268813e-03, 8.313010e-04 }},  // b(E) corr, scratch
+      {ETiltVariant::CLUS_RAW, { 2.634138e-03, 8.197368e-04 }},  // no corr, cluster
+      {ETiltVariant::CLUS_CP, { 1.943936e-03, 7.964160e-04 }},  // CorrectPosition, cluster
+      {ETiltVariant::CLUS_CP_EA_GEOM, { 1.818732e-03, 7.311745e-04 }},  // CorrectPosition(EA geom), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.111407e-03, 8.281758e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.110158e-03, 8.290417e-04 }},  // CorrectPosition(EA E-only), cluster
+      {ETiltVariant::CLUS_CP_EA_MIX, { 2.110239e-03, 8.290575e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
+      {ETiltVariant::CLUS_BCORR, { 2.147911e-03, 8.244258e-04 }},  // b(E) corr, cluster
+      {ETiltVariant::PDC_RAW, { 2.728010e-03, 8.246884e-04 }},  // no corr, scratch
+      {ETiltVariant::PDC_CORR, { 2.268857e-03, 8.313311e-04 }},  // b(E) corr, scratch
       
       {ETiltVariant::DEFAULT,               { 8.654924e-04, 8.490399e-04}}   // legacy numbers
   };
@@ -908,16 +908,23 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
     else                      iEtaBin = 2; // up to ~1.10
   }
 
-  // ---- per-bin log-fit coefficients from your MC study (E0=3 GeV) ----
-  constexpr float E0 = 3.0f;
+    // ---- per-bin log-fit coefficients from MC (E0 = 3 GeV) ----
+    constexpr float E0 = 3.0f;
 
-  // φ: bφ(E,|η|) = b0φ + mφ * ln(E/E0)
-  static constexpr float B0_PHI[4] = { 0.187805f, 0.184350f, 0.182152f, 0.183339f };
-  static constexpr float M_PHI [4] = {-0.007606f,-0.008060f,-0.008994f,-0.007931f };
+    // Indexing convention:
+    //   [0] |η| ≤ 0.20
+    //   [1] 0.20 < |η| ≤ 0.70
+    //   [2] 0.70 < |η| ≤ 1.10
+    //   [3] fallback (no-η-dep)
+    //
+    // φ: bφ(E,|η|) = b0φ + mφ * ln(E/E0)
+    static constexpr float B0_PHI[4] = { 0.187685f, 0.184475f, 0.182260f, 0.183330f };
+    static constexpr float M_PHI [4] = {-0.007453f,-0.008141f,-0.009008f,-0.007932f };
 
-  // η: bη(E,|η|) = b0η + mη * ln(E/E0)
-  static constexpr float B0_ETA[4] = { 0.178535f, 0.196368f, 0.200538f, 0.191296f };
-  static constexpr float M_ETA [4] = {-0.007176f,-0.006067f,-0.001264f,-0.004557f };
+    // η: bη(E,|η|) = b0η + mη * ln(E/E0)
+    static constexpr float B0_ETA[4] = { 0.178946f, 0.196326f, 0.200883f, 0.191289f };
+    static constexpr float M_ETA [4] = {-0.007106f,-0.006145f,-0.001358f,-0.004542f };
+
 
   auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
   const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
@@ -979,13 +986,13 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x,
   if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
   { xc = x; yc = y; return; }
 
-  // ---- energy-only (no |η| dependence) log-fit laws (MC) -------------
-  // b(E) = b0 + m * ln(E/E0)  with  E0 = 3 GeV
-  constexpr float E0     = 3.0f;
-  constexpr float B0_PHI = 0.183339f;
-  constexpr float M_PHI  = -0.007931f;
-  constexpr float B0_ETA = 0.191296f;
-  constexpr float M_ETA  = -0.004557f;
+    // ---- energy-only (no |η| dependence) log-fit laws (MC) -------------
+    // b(E) = b0 + m * ln(E/E0)  with  E0 = 3 GeV
+    constexpr float E0     = 3.0f;
+    constexpr float B0_PHI = 0.183330f;   // no-η-dep
+    constexpr float M_PHI  = -0.007932f;  // no-η-dep
+    constexpr float B0_ETA = 0.191289f;   // no-η-dep
+    constexpr float M_ETA  = -0.004542f;  // no-η-dep
 
   const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
 
@@ -1082,13 +1089,14 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float E
   // ---- log-fit coefficients from MC (E0 = 3 GeV) -------------------------
   constexpr float E0 = 3.0f;
 
-  // φ uses the **no-|η|-dep** category ONLY
-  constexpr float B0_PHI_NOETA = 0.183339f;
-  constexpr float M_PHI_NOETA  = -0.007931f;
+    // φ uses the **no-|η|-dep** category ONLY
+    constexpr float B0_PHI_NOETA = 0.183330f;
+    constexpr float M_PHI_NOETA  = -0.007932f;
 
-  // η uses the **|η|-dependent** categories (0,1,2), 3=fallback(no-η-dep)
-  static constexpr float B0_ETA[4] = { 0.178535f, 0.196368f, 0.200538f, 0.191296f };
-  static constexpr float M_ETA [4] = {-0.007176f,-0.006067f,-0.001264f,-0.004557f };
+    // η uses the **|η|-dependent** categories (0,1,2), 3=fallback(no-η-dep)
+    static constexpr float B0_ETA[4] = { 0.178946f, 0.196326f, 0.200883f, 0.191289f };
+    static constexpr float M_ETA [4] = {-0.007106f,-0.006145f,-0.001358f,-0.004542f };
+
 
   const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
   auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };

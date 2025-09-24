@@ -7,11 +7,11 @@ series,variant,residual,E,mu,dmu,sigma,dsigma
 0,Constant-b (Production) Uncorr,phi,13.5,-0.000466681,1.44855e-05,0.00442485,1.02428e-05
 0,Constant-b (Production) Uncorr,phi,17.5,-0.000189797,1.11928e-05,0.00440708,7.91448e-06
 0,Constant-b (Production) Uncorr,phi,25,-3.12351e-05,7.29636e-06,0.0040814,5.1593e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,3,-0.00125019,1.60692e-05,0.00373339,1.13627e-05
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,5,-0.000746547,1.41035e-05,0.0033367,9.97269e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,7,-0.000503886,1.28857e-05,0.00316199,9.11156e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,9,-0.000320945,1.30244e-05,0.00325378,9.20965e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,11,-0.000138834,1.36719e-05,0.00342237,9.66749e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,13.5,8.72682e-05,1.17525e-05,0.00359,8.31028e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,17.5,0.000333669,8.9009e-06,0.00350467,6.29389e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,25,0.00053473,5.37853e-06,0.00300862,3.80319e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,3,-0.0012501,1.60691e-05,0.00373335,1.13625e-05
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,5,-0.000746369,1.41036e-05,0.00333672,9.97276e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,7,-0.000503886,1.28858e-05,0.00316201,9.11162e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,9,-0.000320881,1.30244e-05,0.00325378,9.20963e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,11,-0.000138818,1.3672e-05,0.0034224,9.66757e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,13.5,8.73218e-05,1.17525e-05,0.00359001,8.31029e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,17.5,0.000333695,8.90092e-06,0.00350468,6.2939e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),phi,25,0.000534787,5.37848e-06,0.00300859,3.80316e-06

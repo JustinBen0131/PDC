@@ -1,0 +1,9 @@
+E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
+2.000,4.000,"CP(EA |#eta|+E), cluster",0.003263,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.003268,0.000006,"CP(EA E-only), cluster",0.009809,"b(E) corr, cluster",0.009811,0.000001
+4.000,6.000,"b(E) corr, cluster",0.002562,"CP(EA E-only), cluster",0.002644,0.000082,"b(E) corr, cluster",0.009977,"no corr, scratch",0.010059,0.000082
+6.000,8.000,"b(E) corr, cluster",0.001829,"CP(EA |#eta|+E), cluster",0.001906,0.000076,"CP(EA |#eta|+E), cluster",0.003681,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.003681,0.000000
+8.000,10.000,"b(E) corr, scratch",0.000000,"no corr, scratch",0.000500,0.000500,"no corr, scratch",0.004500,"no corr, cluster",0.004500,0.000000
+10.000,12.000,"CP(EA |#eta|+E), cluster",0.000000,"CP(EA E-only), cluster",0.000000,0.000000,"no corr, scratch",0.000000,"",nan,nan
+12.000,15.000,"",nan,"",nan,nan,"",nan,"",nan,nan
+15.000,20.000,"",nan,"",nan,nan,"",nan,"",nan,nan
+20.000,30.000,"",nan,"",nan,nan,"",nan,"",nan,nan

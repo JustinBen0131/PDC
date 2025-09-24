@@ -1,0 +1,11 @@
+series,variant,residual,E,mu,dmu,sigma,dsigma
+0,Constant-b (Production) Uncorr,phi,3,-0.000665483,4.73976e-05,0.00385556,3.35152e-05
+0,Constant-b (Production) Uncorr,phi,5,-0.00071393,0.000252695,0.00358257,0.000178683
+0,Constant-b (Production) Uncorr,phi,7,-0.000214286,0.00102448,0.00271052,0.000724418
+0,Constant-b (Production) Uncorr,phi,9,-0.0005,0.00212132,0.003,0.0015
+0,Constant-b (Production) Uncorr,phi,11,-0.0065,0,0,0
+1,(Production) CP(EA geom),phi,3,-0.0005872,4.22971e-05,0.00344065,2.99086e-05
+1,(Production) CP(EA geom),phi,5,-0.000654229,0.000191669,0.00271738,0.000135531
+1,(Production) CP(EA geom),phi,7,-0.00164286,0.000740341,0.00195876,0.0005235
+1,(Production) CP(EA geom),phi,9,0.002,0.00106066,0.0015,0.00075
+1,(Production) CP(EA geom),phi,11,-0.0025,0,0,0

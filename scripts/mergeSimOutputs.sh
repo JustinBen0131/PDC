@@ -409,15 +409,21 @@ if [[ "$DO_FILE_CHECK" == true ]]; then
 fi
 
   # -------------------------------------------------------------------------
-  # PLAN: For plain 'condor' with no sub-mode, use 300 files per job (~40 partials for 12k files)
+  # PLAN: default grouping per job; MINBIAS uses smaller (100), default uses 300,
+  #       unless an explicit sub-mode changed FILES_PER_GROUP already.
   # -------------------------------------------------------------------------
   if ! $testMode && ! $firstHalf && ! $asMany; then
-    FILES_PER_GROUP=300
-    echo "[PLAN] No sub-mode supplied → forcing FILES_PER_GROUP=${FILES_PER_GROUP} (target ~40 partials for 12k files)"
+    if $MINBIAS; then
+      FILES_PER_GROUP=100
+      echo "[PLAN][MINBIAS] No sub-mode supplied → FILES_PER_GROUP=${FILES_PER_GROUP} (smaller groups for MB I/O)"
+    else
+      FILES_PER_GROUP=300
+      echo "[PLAN] No sub-mode supplied → FILES_PER_GROUP=${FILES_PER_GROUP} (target ~40 partials for ~12k files)"
+    fi
     echo "       With ${totalToMerge:-0} outputs, expected sublists ≈ $(( (totalToMerge + FILES_PER_GROUP - 1) / FILES_PER_GROUP ))"
   else
     # keep whatever FILES_PER_GROUP is (default 100 or 1000 for asManyAsCan)
-    echo "[PLAN] Sub-mode='$SUBMODE' → FILES_PER_GROUP=${FILES_PER_GROUP}"
+    echo "[PLAN] Sub-mode='${SUBMODE:-<none>}' → FILES_PER_GROUP=${FILES_PER_GROUP}"
   fi
 
 

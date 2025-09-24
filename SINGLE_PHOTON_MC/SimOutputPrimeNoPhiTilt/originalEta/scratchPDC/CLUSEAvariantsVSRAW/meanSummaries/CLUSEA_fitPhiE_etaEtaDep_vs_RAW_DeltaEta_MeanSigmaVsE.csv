@@ -7,11 +7,11 @@ series,variant,residual,E,mu,dmu,sigma,dsigma
 0,Constant-b (Production) Uncorr,eta,13.5,3.26867e-06,1.29906e-05,0.0039682,9.18575e-06
 0,Constant-b (Production) Uncorr,eta,17.5,-9.20443e-06,9.9729e-06,0.00392676,7.0519e-06
 0,Constant-b (Production) Uncorr,eta,25,-2.49616e-05,6.77927e-06,0.00379216,4.79367e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,3,-1.85261e-06,1.72727e-05,0.004013,1.22137e-05
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,5,4.5647e-06,1.52859e-05,0.00361644,1.08088e-05
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,7,-1.95715e-05,1.3954e-05,0.00342414,9.86699e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,9,-3.23741e-05,1.34272e-05,0.00335441,9.49446e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,11,-2.43293e-05,1.30814e-05,0.00327457,9.24998e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,13.5,-1.02776e-05,1.05922e-05,0.00323558,7.48985e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,17.5,-1.02687e-05,8.05678e-06,0.00317231,5.697e-06
-1,Constant-b (Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,25,-2.44726e-05,5.33844e-06,0.00298619,3.77485e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,3,-1.7044e-06,1.72705e-05,0.00401248,1.22121e-05
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,5,4.42177e-06,1.5283e-05,0.00361575,1.08067e-05
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,7,-1.92892e-05,1.39546e-05,0.00342429,9.86741e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,9,-3.26785e-05,1.34299e-05,0.00335508,9.49636e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,11,-2.43293e-05,1.3077e-05,0.00327346,9.24685e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,13.5,-1.06205e-05,1.05929e-05,0.00323579,7.49034e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,17.5,-1.01204e-05,8.0569e-06,0.00317235,5.69709e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,25,-2.45301e-05,5.33848e-06,0.00298621,3.77487e-06

@@ -1,0 +1,9 @@
+E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
+2.000,4.000,"CP(EA |#eta|+E), cluster",0.003731,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.003733,0.000002,"b(E) corr, scratch",0.003955,"b(E) corr, cluster",0.003987,0.000032
+4.000,6.000,"b(E) corr, scratch",0.003320,"CP(EA |#eta|+E), cluster",0.003335,0.000014,"b(E) corr, scratch",0.003565,"b(E) corr, cluster",0.003594,0.000029
+6.000,8.000,"b(E) corr, scratch",0.003151,"CP(EA |#eta|+E), cluster",0.003160,0.000009,"b(E) corr, scratch",0.003366,"b(E) corr, cluster",0.003401,0.000035
+8.000,10.000,"CP(EA |#eta|+E), cluster",0.003252,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.003254,0.000001,"b(E) corr, scratch",0.003275,"b(E) corr, cluster",0.003333,0.000058
+10.000,12.000,"CP(EA |#eta|+E), cluster",0.003420,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.003422,0.000002,"b(E) corr, scratch",0.003187,"b(E) corr, cluster",0.003253,0.000066
+12.000,15.000,"b(E) corr, scratch",0.003569,"CP(EA |#eta|+E), cluster",0.003589,0.000021,"b(E) corr, scratch",0.003145,"b(E) corr, cluster",0.003213,0.000068
+15.000,20.000,"b(E) corr, scratch",0.003474,"CP(EA |#eta|+E), cluster",0.003502,0.000028,"b(E) corr, scratch",0.003076,"b(E) corr, cluster",0.003152,0.000076
+20.000,30.000,"b(E) corr, scratch",0.002983,"CP(EA |#eta|+E), cluster",0.003005,0.000022,"b(E) corr, scratch",0.002892,"b(E) corr, cluster",0.002966,0.000074

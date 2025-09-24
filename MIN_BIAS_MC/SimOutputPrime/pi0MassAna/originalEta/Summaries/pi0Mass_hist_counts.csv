@@ -1,0 +1,321 @@
+view,variant,Elo,Ehi,entries
+originalEta,No Correction,2,4,27175
+originalEta,No Correction,4,6,250
+originalEta,No Correction,6,8,2
+originalEta,No Correction,8,10,2
+originalEta,No Correction,10,12,0
+originalEta,No Correction,12,15,0
+originalEta,No Correction,15,20,0
+originalEta,No Correction,20,30,0
+originalEta,Legacy Constant b-corr,2,4,27175
+originalEta,Legacy Constant b-corr,4,6,250
+originalEta,Legacy Constant b-corr,6,8,2
+originalEta,Legacy Constant b-corr,8,10,2
+originalEta,Legacy Constant b-corr,10,12,0
+originalEta,Legacy Constant b-corr,12,15,0
+originalEta,Legacy Constant b-corr,15,20,0
+originalEta,Legacy Constant b-corr,20,30,0
+originalEta,CLUS-CP(EA),2,4,27175
+originalEta,CLUS-CP(EA),4,6,250
+originalEta,CLUS-CP(EA),6,8,2
+originalEta,CLUS-CP(EA),8,10,2
+originalEta,CLUS-CP(EA),10,12,0
+originalEta,CLUS-CP(EA),12,15,0
+originalEta,CLUS-CP(EA),15,20,0
+originalEta,CLUS-CP(EA),20,30,0
+originalEta,Energy/|#eta|-Dep b-correction,2,4,27175
+originalEta,Energy/|#eta|-Dep b-correction,4,6,250
+originalEta,Energy/|#eta|-Dep b-correction,6,8,2
+originalEta,Energy/|#eta|-Dep b-correction,8,10,2
+originalEta,Energy/|#eta|-Dep b-correction,10,12,0
+originalEta,Energy/|#eta|-Dep b-correction,12,15,0
+originalEta,Energy/|#eta|-Dep b-correction,15,20,0
+originalEta,Energy/|#eta|-Dep b-correction,20,30,0
+originalEta,Energy-Dep b-correction,2,4,27175
+originalEta,Energy-Dep b-correction,4,6,250
+originalEta,Energy-Dep b-correction,6,8,2
+originalEta,Energy-Dep b-correction,8,10,2
+originalEta,Energy-Dep b-correction,10,12,0
+originalEta,Energy-Dep b-correction,12,15,0
+originalEta,Energy-Dep b-correction,15,20,0
+originalEta,Energy-Dep b-correction,20,30,0
+originalEta,EA-mix,2,4,27175
+originalEta,EA-mix,4,6,250
+originalEta,EA-mix,6,8,2
+originalEta,EA-mix,8,10,2
+originalEta,EA-mix,10,12,0
+originalEta,EA-mix,12,15,0
+originalEta,EA-mix,15,20,0
+originalEta,EA-mix,20,30,0
+originalEta,PDC-raw,2,4,27175
+originalEta,PDC-raw,4,6,250
+originalEta,PDC-raw,6,8,2
+originalEta,PDC-raw,8,10,2
+originalEta,PDC-raw,10,12,0
+originalEta,PDC-raw,12,15,0
+originalEta,PDC-raw,15,20,0
+originalEta,PDC-raw,20,30,0
+originalEta,PDC-corr,2,4,27175
+originalEta,PDC-corr,4,6,250
+originalEta,PDC-corr,6,8,2
+originalEta,PDC-corr,8,10,2
+originalEta,PDC-corr,10,12,0
+originalEta,PDC-corr,12,15,0
+originalEta,PDC-corr,15,20,0
+originalEta,PDC-corr,20,30,0
+fullEta,No Correction,2,4,25281
+fullEta,No Correction,4,6,212
+fullEta,No Correction,6,8,2
+fullEta,No Correction,8,10,2
+fullEta,No Correction,10,12,0
+fullEta,No Correction,12,15,0
+fullEta,No Correction,15,20,0
+fullEta,No Correction,20,30,0
+fullEta,Legacy Constant b-corr,2,4,25281
+fullEta,Legacy Constant b-corr,4,6,212
+fullEta,Legacy Constant b-corr,6,8,2
+fullEta,Legacy Constant b-corr,8,10,2
+fullEta,Legacy Constant b-corr,10,12,0
+fullEta,Legacy Constant b-corr,12,15,0
+fullEta,Legacy Constant b-corr,15,20,0
+fullEta,Legacy Constant b-corr,20,30,0
+fullEta,CLUS-CP(EA),2,4,25281
+fullEta,CLUS-CP(EA),4,6,212
+fullEta,CLUS-CP(EA),6,8,2
+fullEta,CLUS-CP(EA),8,10,2
+fullEta,CLUS-CP(EA),10,12,0
+fullEta,CLUS-CP(EA),12,15,0
+fullEta,CLUS-CP(EA),15,20,0
+fullEta,CLUS-CP(EA),20,30,0
+fullEta,Energy/|#eta|-Dep b-correction,2,4,25281
+fullEta,Energy/|#eta|-Dep b-correction,4,6,212
+fullEta,Energy/|#eta|-Dep b-correction,6,8,2
+fullEta,Energy/|#eta|-Dep b-correction,8,10,2
+fullEta,Energy/|#eta|-Dep b-correction,10,12,0
+fullEta,Energy/|#eta|-Dep b-correction,12,15,0
+fullEta,Energy/|#eta|-Dep b-correction,15,20,0
+fullEta,Energy/|#eta|-Dep b-correction,20,30,0
+fullEta,Energy-Dep b-correction,2,4,25281
+fullEta,Energy-Dep b-correction,4,6,212
+fullEta,Energy-Dep b-correction,6,8,2
+fullEta,Energy-Dep b-correction,8,10,2
+fullEta,Energy-Dep b-correction,10,12,0
+fullEta,Energy-Dep b-correction,12,15,0
+fullEta,Energy-Dep b-correction,15,20,0
+fullEta,Energy-Dep b-correction,20,30,0
+fullEta,EA-mix,2,4,25281
+fullEta,EA-mix,4,6,212
+fullEta,EA-mix,6,8,2
+fullEta,EA-mix,8,10,2
+fullEta,EA-mix,10,12,0
+fullEta,EA-mix,12,15,0
+fullEta,EA-mix,15,20,0
+fullEta,EA-mix,20,30,0
+fullEta,PDC-raw,2,4,25281
+fullEta,PDC-raw,4,6,212
+fullEta,PDC-raw,6,8,2
+fullEta,PDC-raw,8,10,2
+fullEta,PDC-raw,10,12,0
+fullEta,PDC-raw,12,15,0
+fullEta,PDC-raw,15,20,0
+fullEta,PDC-raw,20,30,0
+fullEta,PDC-corr,2,4,25281
+fullEta,PDC-corr,4,6,212
+fullEta,PDC-corr,6,8,2
+fullEta,PDC-corr,8,10,2
+fullEta,PDC-corr,10,12,0
+fullEta,PDC-corr,12,15,0
+fullEta,PDC-corr,15,20,0
+fullEta,PDC-corr,20,30,0
+etaCore,No Correction,2,4,2977
+etaCore,No Correction,4,6,16
+etaCore,No Correction,6,8,0
+etaCore,No Correction,8,10,0
+etaCore,No Correction,10,12,0
+etaCore,No Correction,12,15,0
+etaCore,No Correction,15,20,0
+etaCore,No Correction,20,30,0
+etaCore,Legacy Constant b-corr,2,4,2977
+etaCore,Legacy Constant b-corr,4,6,16
+etaCore,Legacy Constant b-corr,6,8,0
+etaCore,Legacy Constant b-corr,8,10,0
+etaCore,Legacy Constant b-corr,10,12,0
+etaCore,Legacy Constant b-corr,12,15,0
+etaCore,Legacy Constant b-corr,15,20,0
+etaCore,Legacy Constant b-corr,20,30,0
+etaCore,CLUS-CP(EA),2,4,2977
+etaCore,CLUS-CP(EA),4,6,16
+etaCore,CLUS-CP(EA),6,8,0
+etaCore,CLUS-CP(EA),8,10,0
+etaCore,CLUS-CP(EA),10,12,0
+etaCore,CLUS-CP(EA),12,15,0
+etaCore,CLUS-CP(EA),15,20,0
+etaCore,CLUS-CP(EA),20,30,0
+etaCore,Energy/|#eta|-Dep b-correction,2,4,2977
+etaCore,Energy/|#eta|-Dep b-correction,4,6,16
+etaCore,Energy/|#eta|-Dep b-correction,6,8,0
+etaCore,Energy/|#eta|-Dep b-correction,8,10,0
+etaCore,Energy/|#eta|-Dep b-correction,10,12,0
+etaCore,Energy/|#eta|-Dep b-correction,12,15,0
+etaCore,Energy/|#eta|-Dep b-correction,15,20,0
+etaCore,Energy/|#eta|-Dep b-correction,20,30,0
+etaCore,Energy-Dep b-correction,2,4,2977
+etaCore,Energy-Dep b-correction,4,6,16
+etaCore,Energy-Dep b-correction,6,8,0
+etaCore,Energy-Dep b-correction,8,10,0
+etaCore,Energy-Dep b-correction,10,12,0
+etaCore,Energy-Dep b-correction,12,15,0
+etaCore,Energy-Dep b-correction,15,20,0
+etaCore,Energy-Dep b-correction,20,30,0
+etaCore,EA-mix,2,4,2977
+etaCore,EA-mix,4,6,16
+etaCore,EA-mix,6,8,0
+etaCore,EA-mix,8,10,0
+etaCore,EA-mix,10,12,0
+etaCore,EA-mix,12,15,0
+etaCore,EA-mix,15,20,0
+etaCore,EA-mix,20,30,0
+etaCore,PDC-raw,2,4,2977
+etaCore,PDC-raw,4,6,16
+etaCore,PDC-raw,6,8,0
+etaCore,PDC-raw,8,10,0
+etaCore,PDC-raw,10,12,0
+etaCore,PDC-raw,12,15,0
+etaCore,PDC-raw,15,20,0
+etaCore,PDC-raw,20,30,0
+etaCore,PDC-corr,2,4,2977
+etaCore,PDC-corr,4,6,16
+etaCore,PDC-corr,6,8,0
+etaCore,PDC-corr,8,10,0
+etaCore,PDC-corr,10,12,0
+etaCore,PDC-corr,12,15,0
+etaCore,PDC-corr,15,20,0
+etaCore,PDC-corr,20,30,0
+etaMid,No Correction,2,4,9291
+etaMid,No Correction,4,6,52
+etaMid,No Correction,6,8,0
+etaMid,No Correction,8,10,1
+etaMid,No Correction,10,12,0
+etaMid,No Correction,12,15,0
+etaMid,No Correction,15,20,0
+etaMid,No Correction,20,30,0
+etaMid,Legacy Constant b-corr,2,4,9291
+etaMid,Legacy Constant b-corr,4,6,52
+etaMid,Legacy Constant b-corr,6,8,0
+etaMid,Legacy Constant b-corr,8,10,1
+etaMid,Legacy Constant b-corr,10,12,0
+etaMid,Legacy Constant b-corr,12,15,0
+etaMid,Legacy Constant b-corr,15,20,0
+etaMid,Legacy Constant b-corr,20,30,0
+etaMid,CLUS-CP(EA),2,4,9291
+etaMid,CLUS-CP(EA),4,6,52
+etaMid,CLUS-CP(EA),6,8,0
+etaMid,CLUS-CP(EA),8,10,1
+etaMid,CLUS-CP(EA),10,12,0
+etaMid,CLUS-CP(EA),12,15,0
+etaMid,CLUS-CP(EA),15,20,0
+etaMid,CLUS-CP(EA),20,30,0
+etaMid,Energy/|#eta|-Dep b-correction,2,4,9291
+etaMid,Energy/|#eta|-Dep b-correction,4,6,52
+etaMid,Energy/|#eta|-Dep b-correction,6,8,0
+etaMid,Energy/|#eta|-Dep b-correction,8,10,1
+etaMid,Energy/|#eta|-Dep b-correction,10,12,0
+etaMid,Energy/|#eta|-Dep b-correction,12,15,0
+etaMid,Energy/|#eta|-Dep b-correction,15,20,0
+etaMid,Energy/|#eta|-Dep b-correction,20,30,0
+etaMid,Energy-Dep b-correction,2,4,9291
+etaMid,Energy-Dep b-correction,4,6,52
+etaMid,Energy-Dep b-correction,6,8,0
+etaMid,Energy-Dep b-correction,8,10,1
+etaMid,Energy-Dep b-correction,10,12,0
+etaMid,Energy-Dep b-correction,12,15,0
+etaMid,Energy-Dep b-correction,15,20,0
+etaMid,Energy-Dep b-correction,20,30,0
+etaMid,EA-mix,2,4,9291
+etaMid,EA-mix,4,6,52
+etaMid,EA-mix,6,8,0
+etaMid,EA-mix,8,10,1
+etaMid,EA-mix,10,12,0
+etaMid,EA-mix,12,15,0
+etaMid,EA-mix,15,20,0
+etaMid,EA-mix,20,30,0
+etaMid,PDC-raw,2,4,9291
+etaMid,PDC-raw,4,6,52
+etaMid,PDC-raw,6,8,0
+etaMid,PDC-raw,8,10,1
+etaMid,PDC-raw,10,12,0
+etaMid,PDC-raw,12,15,0
+etaMid,PDC-raw,15,20,0
+etaMid,PDC-raw,20,30,0
+etaMid,PDC-corr,2,4,9291
+etaMid,PDC-corr,4,6,52
+etaMid,PDC-corr,6,8,0
+etaMid,PDC-corr,8,10,1
+etaMid,PDC-corr,10,12,0
+etaMid,PDC-corr,12,15,0
+etaMid,PDC-corr,15,20,0
+etaMid,PDC-corr,20,30,0
+etaEdge,No Correction,2,4,13013
+etaEdge,No Correction,4,6,144
+etaEdge,No Correction,6,8,2
+etaEdge,No Correction,8,10,1
+etaEdge,No Correction,10,12,0
+etaEdge,No Correction,12,15,0
+etaEdge,No Correction,15,20,0
+etaEdge,No Correction,20,30,0
+etaEdge,Legacy Constant b-corr,2,4,13013
+etaEdge,Legacy Constant b-corr,4,6,144
+etaEdge,Legacy Constant b-corr,6,8,2
+etaEdge,Legacy Constant b-corr,8,10,1
+etaEdge,Legacy Constant b-corr,10,12,0
+etaEdge,Legacy Constant b-corr,12,15,0
+etaEdge,Legacy Constant b-corr,15,20,0
+etaEdge,Legacy Constant b-corr,20,30,0
+etaEdge,CLUS-CP(EA),2,4,13013
+etaEdge,CLUS-CP(EA),4,6,144
+etaEdge,CLUS-CP(EA),6,8,2
+etaEdge,CLUS-CP(EA),8,10,1
+etaEdge,CLUS-CP(EA),10,12,0
+etaEdge,CLUS-CP(EA),12,15,0
+etaEdge,CLUS-CP(EA),15,20,0
+etaEdge,CLUS-CP(EA),20,30,0
+etaEdge,Energy/|#eta|-Dep b-correction,2,4,13013
+etaEdge,Energy/|#eta|-Dep b-correction,4,6,144
+etaEdge,Energy/|#eta|-Dep b-correction,6,8,2
+etaEdge,Energy/|#eta|-Dep b-correction,8,10,1
+etaEdge,Energy/|#eta|-Dep b-correction,10,12,0
+etaEdge,Energy/|#eta|-Dep b-correction,12,15,0
+etaEdge,Energy/|#eta|-Dep b-correction,15,20,0
+etaEdge,Energy/|#eta|-Dep b-correction,20,30,0
+etaEdge,Energy-Dep b-correction,2,4,13013
+etaEdge,Energy-Dep b-correction,4,6,144
+etaEdge,Energy-Dep b-correction,6,8,2
+etaEdge,Energy-Dep b-correction,8,10,1
+etaEdge,Energy-Dep b-correction,10,12,0
+etaEdge,Energy-Dep b-correction,12,15,0
+etaEdge,Energy-Dep b-correction,15,20,0
+etaEdge,Energy-Dep b-correction,20,30,0
+etaEdge,EA-mix,2,4,13013
+etaEdge,EA-mix,4,6,144
+etaEdge,EA-mix,6,8,2
+etaEdge,EA-mix,8,10,1
+etaEdge,EA-mix,10,12,0
+etaEdge,EA-mix,12,15,0
+etaEdge,EA-mix,15,20,0
+etaEdge,EA-mix,20,30,0
+etaEdge,PDC-raw,2,4,13013
+etaEdge,PDC-raw,4,6,144
+etaEdge,PDC-raw,6,8,2
+etaEdge,PDC-raw,8,10,1
+etaEdge,PDC-raw,10,12,0
+etaEdge,PDC-raw,12,15,0
+etaEdge,PDC-raw,15,20,0
+etaEdge,PDC-raw,20,30,0
+etaEdge,PDC-corr,2,4,13013
+etaEdge,PDC-corr,4,6,144
+etaEdge,PDC-corr,6,8,2
+etaEdge,PDC-corr,8,10,1
+etaEdge,PDC-corr,10,12,0
+etaEdge,PDC-corr,12,15,0
+etaEdge,PDC-corr,15,20,0
+etaEdge,PDC-corr,20,30,0

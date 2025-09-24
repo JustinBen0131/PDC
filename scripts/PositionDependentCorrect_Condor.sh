@@ -44,6 +44,17 @@ echo "[INFO] chunkIndex  = $chunkIndex"
 echo "[INFO] chunkFile2  = $chunkFile2"
 echo "---------------------------------------------------------------------"
 
+# Export a simple mode flag for the macro to read
+export PDC_MODE="${dataOrSim^^}"   # DATA or SIM (uppercase)
+
+# Normalize optional second list for DATA:
+# (the submit file now passes NONE instead of "" to avoid Condor quoting issues)
+if [[ "$dataOrSim" == "data" && ( -z "$chunkFile2" || "$chunkFile2" == "NONE" ) ]]; then
+  chunkFile2=""
+fi
+
+
+
 #############################
 # 3) Check that macros/Fun4All_PDC.C exists
 #############################
@@ -57,15 +68,17 @@ fi
 #############################
 # Priority:
 #   (1) caller supplied destBase → use it
-#   (2) built‑in defaults      → OUTDIR_DATA / OUTDIR_SIM
+#   (2) environment OUTDIR_SIM / OUTDIR_DATA (if set)
+#   (3) built-in defaults
 if [[ -n "$destBase" ]]; then
   outDir="${destBase}/${runNumber}"
 else
   if [[ "$dataOrSim" == "sim" ]]; then
-    outDir="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut/${runNumber}"
+    base="${OUTDIR_SIM:-/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut}"
   else
-    outDir="/sphenix/tg/tg01/bulk/jbennett/PDC/output/${runNumber}"
+    base="${OUTDIR_DATA:-/sphenix/tg/tg01/bulk/jbennett/PDC/output}"
   fi
+  outDir="${base}/${runNumber}"
 fi
 mkdir -p "$outDir"
 echo "[INFO] Output directory = $outDir"
@@ -87,10 +100,23 @@ echo "[INFO] Final output file: $outFile"
 #############################
 # 6) Run the macro directly
 #############################
-echo "[INFO] Invoking ROOT macro with command:"
-echo "root -b -l -q \"macros/Fun4All_PDC.C(${nEvents}, \\\"${chunkFile1}\\\", \\\"${chunkFile2}\\\", \\\"${outFile}\\\")\""
+# Decide RUNNUMBER for macro (21 for MinBias, else 24) and export for the macro
+if [[ -z "${PDC_RUNNUMBER:-}" ]]; then
+  PDC_RUNNUMBER=24
+  if [[ "$dataOrSim" == "sim" ]]; then
+    if [[ "$chunkFile1" == *MinBias* || "$chunkFile1" == *Herwig_MB* || \
+          "$chunkFile2" == *MinBias* || "$chunkFile2" == *Herwig_MB* ]]; then
+      PDC_RUNNUMBER=21
+    fi
+  fi
+fi
+export PDC_RUNNUMBER
+echo "[INFO] Using PDC_RUNNUMBER=${PDC_RUNNUMBER}"
 
-root -b -l -q "macros/Fun4All_PDC.C(${nEvents}, \"${chunkFile1}\", \"${chunkFile2}\", \"${outFile}\")"
+echo "[INFO] Invoking ROOT macro with command:"
+echo "PDC_RUNNUMBER=${PDC_RUNNUMBER} root -b -l -q \"macros/Fun4All_PDC.C(${nEvents}, \\\"${chunkFile1}\\\", \\\"${chunkFile2}\\\", \\\"${outFile}\\\")\""
+
+PDC_RUNNUMBER=${PDC_RUNNUMBER} root -b -l -q "macros/Fun4All_PDC.C(${nEvents}, \"${chunkFile1}\", \"${chunkFile2}\", \"${outFile}\")"
 rc=$?
 
 echo "---------------------------------------------------------------------"

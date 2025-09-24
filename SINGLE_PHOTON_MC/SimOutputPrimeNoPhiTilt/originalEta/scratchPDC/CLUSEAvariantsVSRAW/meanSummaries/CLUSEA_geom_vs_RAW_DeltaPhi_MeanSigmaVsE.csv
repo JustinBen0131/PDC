@@ -7,11 +7,11 @@ series,variant,residual,E,mu,dmu,sigma,dsigma
 0,Constant-b (Production) Uncorr,phi,13.5,-0.000466681,1.44855e-05,0.00442485,1.02428e-05
 0,Constant-b (Production) Uncorr,phi,17.5,-0.000189797,1.11928e-05,0.00440708,7.91448e-06
 0,Constant-b (Production) Uncorr,phi,25,-3.12351e-05,7.29636e-06,0.0040814,5.1593e-06
-1,Constant-b (Production) CP(EA geom),phi,3,-0.00111983,1.66815e-05,0.00387563,1.17956e-05
-1,Constant-b (Production) CP(EA geom),phi,5,-0.000639139,1.44916e-05,0.00342851,1.02471e-05
-1,Constant-b (Production) CP(EA geom),phi,7,-0.000397982,1.31684e-05,0.00323136,9.31145e-06
-1,Constant-b (Production) CP(EA geom),phi,9,-0.000222533,1.32456e-05,0.00330905,9.36607e-06
-1,Constant-b (Production) CP(EA geom),phi,11,-4.82836e-05,1.38399e-05,0.00346444,9.78631e-06
-1,Constant-b (Production) CP(EA geom),phi,13.5,0.000162587,1.18345e-05,0.00361505,8.36826e-06
-1,Constant-b (Production) CP(EA geom),phi,17.5,0.000371435,8.97831e-06,0.00353515,6.34863e-06
-1,Constant-b (Production) CP(EA geom),phi,25,0.000488245,5.71855e-06,0.00319882,4.04363e-06
+1,(Production) CP(EA geom),phi,3,-0.00111983,1.66815e-05,0.00387563,1.17956e-05
+1,(Production) CP(EA geom),phi,5,-0.000639139,1.44916e-05,0.00342851,1.02471e-05
+1,(Production) CP(EA geom),phi,7,-0.000397982,1.31684e-05,0.00323136,9.31145e-06
+1,(Production) CP(EA geom),phi,9,-0.000222533,1.32456e-05,0.00330905,9.36607e-06
+1,(Production) CP(EA geom),phi,11,-4.82836e-05,1.38399e-05,0.00346444,9.78631e-06
+1,(Production) CP(EA geom),phi,13.5,0.000162587,1.18345e-05,0.00361505,8.36826e-06
+1,(Production) CP(EA geom),phi,17.5,0.000371435,8.97831e-06,0.00353515,6.34863e-06
+1,(Production) CP(EA geom),phi,25,0.000488245,5.71855e-06,0.00319882,4.04363e-06
