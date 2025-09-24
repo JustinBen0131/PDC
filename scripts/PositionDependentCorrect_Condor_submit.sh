@@ -317,7 +317,7 @@ split_golden_run_list()(
 ##############################################################################
 
 # ---------- user‑tunable constants ----------
-CHUNK_SIZE_DATA=10          # N  – files per Condor job
+CHUNK_SIZE_DATA=5          # N  – files per Condor job
 MAX_JOBS_DATA=10000         # Q  – global cap for “condor firstTen”
 # ---------------------------------------------------------------------------
 
@@ -337,7 +337,7 @@ submit_data_condor() {
 
     # ---- helpers -----------------------------------------------------------
     vecho() { (( VERBOSE )) && echo -e "$@"; }
-    die()   { echo -e "[ERROR] $*"; return 1; }
+    die() { echo -e "[ERROR] $*" >&2; echo 1; }
     check_dir_writable() {
       local d="$1"
       [[ -d "$d" ]] || die "Missing directory: $d"
@@ -376,11 +376,14 @@ submit_data_condor() {
       [[ -f "$runListFile" ]] || return $(die "Run-list file not found → $runListFile")
       vecho "[VERBOSE] Using external run-list file → $(basename "$runListFile")"
       while IFS= read -r rn; do
-        [[ -z "$rn" || "$rn" =~ ^# ]] && continue
-        rn=$(printf "%08d" "$rn")
-        local lf="${DST_LIST_DIR}/dst_calo_run2pp-${rn}.list"
-        if [[ -f "$lf" ]]; then listFiles+=( "$lf" )
-        else echo "[WARN] Missing DST list for run ${rn} (skipped)"; fi
+            [[ -z "$rn" || "$rn" =~ ^# ]] && continue
+            rn=$(printf "%08d" "$((10#$rn))")   # force base-10; keep 8-digit zero-pad
+            lf="${DST_LIST_DIR}/dst_calo_run2pp-${rn}.list"
+            if [[ -f "$lf" ]]; then
+                listFiles+=( "$lf" )
+            else
+                echo "[WARN] Missing DST list for run ${rn} (skipped)"
+            fi
       done < "$runListFile"
     else
       mapfile -t listFiles < <(ls -1 "${DST_LIST_DIR}"/dst_calo_run2pp-*.list 2>/dev/null)

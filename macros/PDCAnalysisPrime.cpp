@@ -1182,7 +1182,7 @@ static void OverlayUncorrPhiEta(TH3F*  hUnc3D,
       const double ymax = std::max(hPhi->GetMaximum(), hEta->GetMaximum());
       hEta->GetYaxis()->SetRangeUser(0.0, 1.30 * std::max(1.0, ymax));
 
-      TString sliceTitle = Form("Uncorrected: %.1f < E < %.1f  GeV   (#scale[0.8]{%s})",
+      TString sliceTitle = Form("%.1f < E < %.1f  GeV   (#scale[0.8]{%s})",
                                 eLo, eHi, etaPretty);
       hEta->SetTitle(sliceTitle);
       hEta->GetXaxis()->SetTitle("#phi_{CG}/#eta_{CG}");
@@ -1627,160 +1627,301 @@ static void SaveOverlayAcrossVariants(
             << std::setw(10) << "χ²/ndf"
             << "\n"
             << "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n";
+    // ----------------------------- per-variant loop (ordered) -----------------
+    // Desired η-order: Core, Mid, Edge, Full, then "no η-dep" if present.
+    auto containsKey = [](const std::vector<std::string>& v, const std::string& s)->bool {
+      for (const auto& x : v) if (x == s) return true;
+      return false;
+    };
 
-  // ----------------------------- per-variant loop ---------------------------
-  int idx = 0;
-  for (const auto& kv : byVar)
-  {
-    const std::string& key   = kv.first;
-    const auto&        vals  = kv.second;
-    if (vals.size() != ecenters.size()) continue;
+    std::vector<std::string> desired = {"etaCore","etaMid","etaEdge","fullEta","originalEta"};
+    std::vector<std::string> keysOrdered;
+    // add known keys in desired order if present
+    for (const auto& k : desired) if (byVar.find(k) != byVar.end()) keysOrdered.push_back(k);
+    // append any remaining (unexpected) keys to preserve them
+    for (const auto& kv : byVar) if (!containsKey(keysOrdered, kv.first)) keysOrdered.push_back(kv.first);
 
-    // errors (if any)
-    auto itErr = byVarErr.find(key);
-    std::vector<double> errs = (itErr != byVarErr.end()) ? itErr->second
-                                                         : std::vector<double>(vals.size(), 0.0);
-    if (errs.size() != vals.size()) errs.assign(vals.size(), 0.0);
-
-    // points
-    std::unique_ptr<TGraphErrors> g(new TGraphErrors(static_cast<int>(vals.size())));
-    double Emin = +1e9, Emax = -1e9;
-    for (size_t i = 0; i < vals.size(); ++i)
+    // First overlay: include everything in the ordered sequence
+    int idx = 0;
+    for (const auto& key : keysOrdered)
     {
-      const double Ei = ecenters[i];
-      const double yi = vals[i];
-      const double si = (std::isfinite(errs[i]) ? errs[i] : 0.0);
-      if (!std::isfinite(Ei) || !std::isfinite(yi)) continue;
+      const auto& vals = byVar.at(key);
+      if (vals.size() != ecenters.size()) { ++idx; continue; }
 
-      g->SetPoint(static_cast<int>(i), Ei, yi);
-      g->SetPointError(static_cast<int>(i), 0.0, si);
-      Emin = std::min(Emin, Ei);
-      Emax = std::max(Emax, Ei);
+      // errors (if any)
+      auto itErr = byVarErr.find(key);
+      std::vector<double> errs = (itErr != byVarErr.end()) ? itErr->second
+                                                           : std::vector<double>(vals.size(), 0.0);
+      if (errs.size() != vals.size()) errs.assign(vals.size(), 0.0);
+
+      // points
+      std::unique_ptr<TGraphErrors> g(new TGraphErrors(static_cast<int>(vals.size())));
+      double Emin = +1e9, Emax = -1e9;
+      for (size_t i = 0; i < vals.size(); ++i)
+      {
+        const double Ei = ecenters[i];
+        const double yi = vals[i];
+        const double si = (std::isfinite(errs[i]) ? errs[i] : 0.0);
+        if (!std::isfinite(Ei) || !std::isfinite(yi)) continue;
+
+        g->SetPoint(static_cast<int>(i), Ei, yi);
+        g->SetPointError(static_cast<int>(i), 0.0, si);
+        Emin = std::min(Emin, Ei);
+        Emax = std::max(Emax, Ei);
+      }
+      const int col = colors[idx % 8];
+      g->SetMarkerStyle(kMarkerStyle);
+      g->SetMarkerSize(kMarkerSize);
+      g->SetMarkerColor(col);
+      g->SetLineColor(col);
+      g->Draw("P SAME");
+      leg.AddEntry(g.get(), prettyName(key), "p");
+      keepPoints.emplace_back(std::move(g));
+
+      // --------------------- closed-form weighted least squares ----------------
+      double S=0, Sx=0, Sy=0, Sxx=0, Sxy=0;
+      int     Nuse = 0;
+      bool    haveYerrs = false;
+
+      std::vector<double> xi; xi.reserve(vals.size());
+      std::vector<double> yi; yi.reserve(vals.size());
+      std::vector<double> wi; wi.reserve(vals.size());
+
+      for (size_t i = 0; i < vals.size(); ++i)
+      {
+        const double E  = ecenters[i];
+        const double y  = vals[i];
+        const double sy = errs[i];
+
+        if (!(std::isfinite(E) && E > 0.0 && std::isfinite(y))) continue;
+
+        const double x = std::log(E / E0);
+        const double w = (std::isfinite(sy) && sy > 0.0) ? (haveYerrs = true, 1.0/(sy*sy)) : 1.0;
+
+        S   += w;
+        Sx  += w * x;
+        Sy  += w * y;
+        Sxx += w * x * x;
+        Sxy += w * x * y;
+
+        xi.push_back(x);
+        yi.push_back(y);
+        wi.push_back(w);
+        ++Nuse;
+      }
+
+      const double Delta = S*Sxx - Sx*Sx;
+      if (Nuse >= 2 && (Delta > 0.0)) {
+        const double m  = (S * Sxy - Sx * Sy) / Delta;
+        const double b0 = (Sxx * Sy - Sx * Sxy) / Delta;
+
+        // residual sums
+        double chi2 = 0.0, TSS_w = 0.0, Wsum = 0.0;
+        const double ybar_w = Sy / S;
+        for (int i = 0; i < Nuse; ++i) {
+          const double yhat = b0 + m * xi[i];
+          const double r    = yi[i] - yhat;
+          chi2  += wi[i] * r * r;
+          TSS_w += wi[i] * (yi[i] - ybar_w) * (yi[i] - ybar_w);
+          Wsum  += wi[i];
+        }
+        const int    ndf     = std::max(0, Nuse - 2);
+        const double redChi2 = (ndf > 0) ? (chi2 / ndf) : 0.0;
+        const double R2_w    = (TSS_w > 0) ? (1.0 - chi2 / TSS_w) : 0.0;
+        const double RMSE_w  = (Wsum  > 0) ? std::sqrt(chi2 / Wsum) : 0.0;
+
+        const double invFac  = 1.0 / Delta;
+        const double baseVar = haveYerrs ? 1.0 : redChi2;
+        const double var_b0  = baseVar * (Sxx * invFac);
+        const double var_m   = baseVar * (S   * invFac);
+        const double sb0     = (var_b0 > 0.0) ? std::sqrt(var_b0) : 0.0;
+        const double sm      = (var_m  > 0.0) ? std::sqrt(var_m ) : 0.0;
+
+        const double m_per_dec = m * std::log(10.0);
+        const double db_fit    = (b0 + m * std::log(Emax / E0))
+                               - (b0 + m * std::log(Emin / E0));
+        double db_data = 0.0;
+        if (!vals.empty()) {
+          const double y1 = vals.front();
+          const double y2 = vals.back();
+          if (std::isfinite(y1) && std::isfinite(y2)) db_data = y2 - y1;
+        }
+
+        // draw fitted curve
+        const double fitLo = std::max(xLo, 0.95 * Emin);
+        const double fitHi = std::min(xHi, 1.05 * Emax);
+        std::unique_ptr<TF1> f(new TF1(Form("f_%s_%d", key.c_str(), idx),
+                                       "[0] + [1]*log(x/[2])", fitLo, fitHi));
+        f->SetParameters(b0, m, E0);
+        f->FixParameter(2, E0);
+        f->SetLineColor(colors[idx % 8]);
+        f->SetLineWidth(2);
+        f->Draw("SAME");
+        keepFits.emplace_back(std::move(f));
+
+        lt.SetTextColor(colors[idx % 8]);
+        lt.DrawLatex(xTxt, yTop - idx*yStep,
+                     Form("%s: b_{0}=%.4f,  m=%.4f,  #chi^{2}/ndf=%.2f",
+                          prettyName(key), b0, m, redChi2));
+
+        // terminal row
+        std::cout << std::left  << std::setw(18) << prettyName(key)
+                  << std::right << std::setw(4)  << Nuse
+                  << std::setw(12) << std::fixed << std::setprecision(3) << Emin
+                  << std::setw(12) << std::fixed << std::setprecision(3) << Emax
+                  << std::setw(12) << std::fixed << std::setprecision(6) << b0
+                  << std::setw(10) << std::fixed << std::setprecision(6) << sb0
+                  << std::setw(12) << std::fixed << std::setprecision(6) << m
+                  << std::setw(10) << std::fixed << std::setprecision(6) << sm
+                  << std::setw(8)  << std::fixed << std::setprecision(2) << (sm>0?m/sm:0.0)
+                  << std::setw(12) << std::fixed << std::setprecision(6) << m_per_dec
+                  << std::setw(14) << std::fixed << std::setprecision(6) << db_fit
+                  << std::setw(14) << std::fixed << std::setprecision(6) << db_data
+                  << std::setw(8)  << std::fixed << std::setprecision(3) << R2_w
+                  << std::setw(12) << std::fixed << std::setprecision(6) << RMSE_w
+                  << std::setw(10) << std::fixed << std::setprecision(3) << redChi2
+                  << "\n";
+      }
+
+      ++idx;
     }
-    const int col = colors[idx % 8];
-    g->SetMarkerStyle(kMarkerStyle);
-    g->SetMarkerSize(kMarkerSize);
-    g->SetMarkerColor(col);
-    g->SetLineColor(col);
-    g->Draw("P SAME");
-    leg.AddEntry(g.get(), prettyName(key), "p");
-    keepPoints.emplace_back(std::move(g));
 
-    // --------------------- closed-form weighted least squares ----------------
-    // model: y = b0 + m * x, where x = ln(E/E0)
-    // weights: w = 1/sigma^2 when available, else w = 1
-    double S=0, Sx=0, Sy=0, Sxx=0, Sxy=0;
-    int     Nuse = 0;
-    bool    haveYerrs = false;
-
-    std::vector<double> xi; xi.reserve(vals.size());
-    std::vector<double> yi; yi.reserve(vals.size());
-    std::vector<double> wi; wi.reserve(vals.size());
-
-    for (size_t i = 0; i < vals.size(); ++i)
+    // ----------------------------- second PNG: η-dependent only ---------------
     {
-      const double E  = ecenters[i];
-      const double y  = vals[i];
-      const double sy = errs[i];
+      // Filter out the "no η-dep" key if present.
+      std::vector<std::string> keysEtaOnly;
+      for (const auto& k : keysOrdered) if (k != "originalEta") keysEtaOnly.push_back(k);
 
-      if (!(std::isfinite(E) && E > 0.0 && std::isfinite(y))) continue;
+        TCanvas c2("cbOverlay_etaOnly",
+                   isPhi ? "b_{#varphi}(E) overlay" : "b_{#eta}(E) overlay",
+                   900, 700);
+        
+        // compute y-range from eta-only series (include ±errors)
+        double ymin2 = +1e9, ymax2 = -1e9;
+        for (const auto& key : keysEtaOnly) {
+          const auto& vals = byVar.at(key);
+          auto itErr = byVarErr.find(key);
+          const std::vector<double>* errs = (itErr == byVarErr.end()) ? nullptr : &itErr->second;
+          for (size_t i = 0; i < vals.size(); ++i) {
+            if (!std::isfinite(vals[i])) continue;
+            const double e = (errs && i < errs->size() && std::isfinite((*errs)[i])) ? (*errs)[i] : 0.0;
+            ymin2 = std::min(ymin2, vals[i] - e);
+            ymax2 = std::max(ymax2, vals[i] + e);
+          }
+        }
+        if (!std::isfinite(ymin2) || !std::isfinite(ymax2)) { ymin2 = 0.0; ymax2 = 1.0; }
+        double span2 = ymax2 - ymin2;
+        if (span2 <= 0) { span2 = 1.0; }
+        const double yLo2 = ymin2 - 0.10 * std::fabs(ymin2);
+        const double yHi2 = ymax2 + 0.15 * std::fabs(ymax2);
 
-      const double x = std::log(E / E0);
-      const double w = (std::isfinite(sy) && sy > 0.0) ? (haveYerrs = true, 1.0/(sy*sy)) : 1.0;
+        TH2F frame2("frame2", "", 100, xLo, xHi, 100, yLo2, yHi2);
+        frame2.SetTitle(isPhi ? "best-fit  b_{#varphi}  vs  E;E  [GeV];b_{#varphi}"
+                              : "best-fit  b_{#eta}     vs  E;E  [GeV];b_{#eta}");
+        frame2.SetStats(0);
+        frame2.Draw();
 
-      S   += w;
-      Sx  += w * x;
-      Sy  += w * y;
-      Sxx += w * x * x;
-      Sxy += w * x * y;
 
-      xi.push_back(x);
-      yi.push_back(y);
-      wi.push_back(w);
-      ++Nuse;
+      TLegend leg2(0.16, 0.65, 0.42, 0.89);
+      leg2.SetBorderSize(0);
+      leg2.SetFillStyle(0);
+      leg2.SetTextSize(0.040);
+
+      std::vector<std::unique_ptr<TGraphErrors>> keepPoints2;
+      std::vector<std::unique_ptr<TF1>>          keepFits2;
+
+      int idx2 = 0;
+      for (const auto& key : keysEtaOnly)
+      {
+        const auto& vals = byVar.at(key);
+        if (vals.size() != ecenters.size()) { ++idx2; continue; }
+
+        auto itErr = byVarErr.find(key);
+        std::vector<double> errs = (itErr != byVarErr.end()) ? itErr->second
+                                                             : std::vector<double>(vals.size(), 0.0);
+        if (errs.size() != vals.size()) errs.assign(vals.size(), 0.0);
+
+        std::unique_ptr<TGraphErrors> g2(new TGraphErrors(static_cast<int>(vals.size())));
+        double Emin = +1e9, Emax = -1e9;
+        for (size_t i = 0; i < vals.size(); ++i)
+        {
+          const double Ei = ecenters[i];
+          const double yi = vals[i];
+          const double si = (std::isfinite(errs[i]) ? errs[i] : 0.0);
+          if (!std::isfinite(Ei) || !std::isfinite(yi)) continue;
+
+          g2->SetPoint(static_cast<int>(i), Ei, yi);
+          g2->SetPointError(static_cast<int>(i), 0.0, si);
+          Emin = std::min(Emin, Ei);
+          Emax = std::max(Emax, Ei);
+        }
+        const int col = colors[idx2 % 8];
+        g2->SetMarkerStyle(kMarkerStyle);
+        g2->SetMarkerSize(kMarkerSize);
+        g2->SetMarkerColor(col);
+        g2->SetLineColor(col);
+        g2->Draw("P SAME");
+        leg2.AddEntry(g2.get(), prettyName(key), "p");
+        keepPoints2.emplace_back(std::move(g2));
+
+        // Fit & draw (same closed-form fit as above)
+        // (Recompute quickly for this view)
+        double S=0, Sx=0, Sy=0, Sxx=0, Sxy=0;
+        int     Nuse = 0;
+        bool    haveYerrs = false;
+
+        std::vector<double> xi; xi.reserve(vals.size());
+        std::vector<double> yi; yi.reserve(vals.size());
+        std::vector<double> wi; wi.reserve(vals.size());
+
+        for (size_t i = 0; i < vals.size(); ++i)
+        {
+          const double E  = ecenters[i];
+          const double y  = vals[i];
+          const double sy = errs[i];
+          if (!(std::isfinite(E) && E > 0.0 && std::isfinite(y))) continue;
+
+          const double x = std::log(E / E0);
+          const double w = (std::isfinite(sy) && sy > 0.0) ? (haveYerrs = true, 1.0/(sy*sy)) : 1.0;
+
+          S   += w;
+          Sx  += w * x;
+          Sy  += w * y;
+          Sxx += w * x * x;
+          Sxy += w * x * y;
+
+          xi.push_back(x);
+          yi.push_back(y);
+          wi.push_back(w);
+          ++Nuse;
+        }
+
+        const double Delta = S*Sxx - Sx*Sx;
+        if (Nuse >= 2 && (Delta > 0.0)) {
+          const double m  = (S * Sxy - Sx * Sy) / Delta;
+          const double b0 = (Sxx * Sy - Sx * Sxy) / Delta;
+
+          const double fitLo = std::max(xLo, 0.95 * Emin);
+          const double fitHi = std::min(xHi, 1.05 * Emax);
+          std::unique_ptr<TF1> f2(new TF1(Form("f2_%s_%d", key.c_str(), idx2),
+                                          "[0] + [1]*log(x/[2])", fitLo, fitHi));
+          f2->SetParameters(b0, m, E0);
+          f2->FixParameter(2, E0);
+          f2->SetLineColor(colors[idx2 % 8]);
+          f2->SetLineWidth(2);
+          f2->Draw("SAME");
+          keepFits2.emplace_back(std::move(f2));
+        }
+
+        ++idx2;
+      }
+
+      leg2.Draw();
+      TString out2 = Form("%s/%s", outBaseDir.c_str(),
+                          isPhi ? "bValuesPhiOverlay_etaOnly.png" : "bValuesEtaOverlay_etaOnly.png");
+      c2.SaveAs(out2);
     }
 
-    const double Delta = S*Sxx - Sx*Sx;
-    if (Nuse < 2 || !(Delta > 0.0)) { ++idx; continue; }
-
-    const double m  = (S * Sxy - Sx * Sy) / Delta;
-    const double b0 = (Sxx * Sy - Sx * Sxy) / Delta;
-
-    // residual sums
-    double chi2 = 0.0, TSS_w = 0.0, Wsum = 0.0;
-    const double ybar_w = Sy / S;
-    for (int i = 0; i < Nuse; ++i)
-    {
-      const double yhat = b0 + m * xi[i];
-      const double r    = yi[i] - yhat;
-      chi2  += wi[i] * r * r;             // weighted SSE (χ²)
-      TSS_w += wi[i] * (yi[i] - ybar_w) * (yi[i] - ybar_w);
-      Wsum  += wi[i];
-    }
-    const int    ndf     = std::max(0, Nuse - 2);
-    const double redChi2 = (ndf > 0) ? (chi2 / ndf) : 0.0;
-    const double R2_w    = (TSS_w > 0) ? (1.0 - chi2 / TSS_w) : 0.0;
-    const double RMSE_w  = (Wsum  > 0) ? std::sqrt(chi2 / Wsum) : 0.0;
-
-    // covariance: (X^T W X)^{-1}; scale by redChi2 only if unit weights were used
-    const double invFac  = 1.0 / Delta;
-    const double baseVar = haveYerrs ? 1.0 : redChi2;    // key fix vs earlier version
-    const double var_b0  = baseVar * (Sxx * invFac);
-    const double var_m   = baseVar * (S   * invFac);
-    const double sb0     = (var_b0 > 0.0) ? std::sqrt(var_b0) : 0.0;
-    const double sm      = (var_m  > 0.0) ? std::sqrt(var_m ) : 0.0;
-    const double z_m     = (sm > 0.0) ? (m / sm) : 0.0;
-
-    // slopes per decade and Δb across observed span
-    const double m_per_dec = m * std::log(10.0);
-    const double db_fit    = (b0 + m * std::log(Emax / E0))
-                           - (b0 + m * std::log(Emin / E0));
-    // empirical Δb from first/last points in this vector (no model)
-    double db_data = 0.0;
-    if (!vals.empty()) {
-      const double y1 = vals.front();
-      const double y2 = vals.back();
-      if (std::isfinite(y1) && std::isfinite(y2)) db_data = y2 - y1;
-    }
-
-    // draw fitted curve
-    const double fitLo = std::max(xLo, 0.95 * Emin);
-    const double fitHi = std::min(xHi, 1.05 * Emax);
-    std::unique_ptr<TF1> f(new TF1(Form("f_%s_%d", key.c_str(), idx),
-                                   "[0] + [1]*log(x/[2])", fitLo, fitHi));
-    f->SetParameters(b0, m, E0);
-    f->FixParameter(2, E0);
-    f->SetLineColor(col);
-    f->SetLineWidth(2);
-    f->Draw("SAME");
-    keepFits.emplace_back(std::move(f));
-
-      lt.SetTextColor(col);
-      lt.DrawLatex(xTxt, yTop - idx*yStep,
-                   Form("%s: b_{0}=%.4f,  m=%.4f,  #chi^{2}/ndf=%.2f",
-                        prettyName(key), b0, m, redChi2));
-
-
-    // terminal row
-    std::cout << std::left  << std::setw(18) << prettyName(key)
-              << std::right << std::setw(4)  << Nuse
-              << std::setw(12) << std::fixed << std::setprecision(3) << Emin
-              << std::setw(12) << std::fixed << std::setprecision(3) << Emax
-              << std::setw(12) << std::fixed << std::setprecision(6) << b0
-              << std::setw(10) << std::fixed << std::setprecision(6) << sb0
-              << std::setw(12) << std::fixed << std::setprecision(6) << m
-              << std::setw(10) << std::fixed << std::setprecision(6) << sm
-              << std::setw(8)  << std::fixed << std::setprecision(2) << z_m
-              << std::setw(12) << std::fixed << std::setprecision(6) << m_per_dec
-              << std::setw(14) << std::fixed << std::setprecision(6) << db_fit
-              << std::setw(14) << std::fixed << std::setprecision(6) << db_data
-              << std::setw(8)  << std::fixed << std::setprecision(3) << R2_w
-              << std::setw(12) << std::fixed << std::setprecision(6) << RMSE_w
-              << std::setw(10) << std::fixed << std::setprecision(3) << redChi2
-              << "\n";
-
-    ++idx;
-  }
 
   std::cout << "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n"
             << "(E0 fixed at " << E0 << " GeV; m/decade = m * ln 10. "
@@ -2925,7 +3066,7 @@ static void MakeFourWaySummaries(
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/MIN_BIAS_MC/PositionDep_sim_ALL.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/chunkMerge_run_00047289.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -8246,16 +8387,14 @@ static void runAshLogRMSOnly(const char* inFilePath, const char* outBaseDir)
 
 // ================================ MAIN ======================================
 
-
-
 void PDCAnalysisPrime()
 {
   gROOT->SetBatch(kTRUE);
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/MIN_BIAS_MC/PositionDep_sim_ALL.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/MIN_BIAS_MC/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/chunkMerge_run_00047289.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/SimOutputPrime";
 
   EnsureDir(outBaseDir);
 

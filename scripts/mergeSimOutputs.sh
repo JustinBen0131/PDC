@@ -84,7 +84,9 @@
 # 0) Configuration
 ###############################################################################
 SIM_CHUNK_DIR="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut/9999"
+DATA_RUN_BASE="/sphenix/tg/tg01/bulk/jbennett/PDC/output"   # per-run subdirs: /.../output/<run>/
 OUTPUT_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/output/simOutput"
+OUTPUT_DIR_DATA="/sphenix/u/patsfan753/scratch/PDCrun24pp/output/dataOutput"
 MERGED_FILE="PositionDep_sim_ALL.root"
 LISTFILE="sim_chunks_fulllist.txt"
 PARTIAL_PREFIX="chunkMerge"
@@ -127,26 +129,28 @@ usage() {
   exit 1
 }
 
-# Allow up to 4 tokens so we can add an independent 'minbias' flag
+# Allow up to 4 tokens so we can add independent flags like 'minbias' or 'data'
 [[ $# -lt 1 || $# -gt 4 ]] && usage
 MODE="$1"
 SUB1="${2:-}"
 SUB2="${3:-}"
 SUB3="${4:-}"
 
-# Detect 'minbias' anywhere (case-insensitive), but DO NOT include it in SUBMODE
+# Detect flags anywhere (case-insensitive), but DO NOT include them in SUBMODE
 MINBIAS=false
+DATA_MODE=false
 for tok in "$SUB1" "$SUB2" "$SUB3"; do
   case "$tok" in
     MINBIAS|minbias|MinBias) MINBIAS=true ;;
+    DATA|data|Data)          DATA_MODE=true ;;
   esac
 done
 
-# Build SUBMODE from remaining tokens (exclude MINBIAS tokens)
+# Build SUBMODE from remaining tokens (exclude MINBIAS/DATA tokens)
 SUBMODE=""
 for tok in "$SUB1" "$SUB2" "$SUB3"; do
   case "$tok" in
-    ""|MINBIAS|minbias|MinBias) continue ;;
+    ""|MINBIAS|minbias|MinBias|DATA|data|Data) continue ;;
     *) SUBMODE="${SUBMODE:+$SUBMODE }$tok" ;;
   esac
 done
@@ -175,6 +179,13 @@ if $MINBIAS; then
 
   # Avoid cross-run clobbering of the master list file
   LISTFILE="${OUTPUT_DIR%/}/sim_chunks_fulllist_minbias.txt"
+fi
+
+# Apply 'data' overrides: per-run inputs under $DATA_RUN_BASE, write per-run partials under $OUTPUT_DIR_DATA
+if $DATA_MODE; then
+  OUTPUT_DIR="$OUTPUT_DIR_DATA"
+  MERGED_FILE="PositionDep_data_ALL.root"
+  PARTIAL_PREFIX="chunkMerge_run"
 fi
 
 echo "============================================================================"
@@ -267,9 +278,14 @@ fi
 # 1b) LOCAL (sequential) or CONDOR  ------------------------------------------
 ###############################################################################
 if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
+  echo "-----------------------------------------------------------------------"
+  echo "[MODE] Entering ${MODE^^} path  |  SUBMODE='${SUBMODE:-<none>}'  |  DATA_MODE=$DATA_MODE  |  DO_FILE_CHECK=$DO_FILE_CHECK"
+  echo "-----------------------------------------------------------------------"
 
+  ###########################################################################
+  # LOCAL: do first-stage merges sequentially on this node
+  ###########################################################################
   if [[ "$MODE" == "local" ]]; then
-    # -------- LOCAL: do first-stage merges sequentially on this node --------
     FILES_PER_GROUP=1000
     echo "======================================================================="
     echo "[LOCAL] First-stage merging (sequential) with FILES_PER_GROUP=$FILES_PER_GROUP"
@@ -293,14 +309,12 @@ if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
       echo "  Found output files   : $presentOutputs"
     fi
 
-    # CLEAN old outputs (partials, superchunks, final)
     echo "[LOCAL][CLEAN] Removing old ${PARTIAL_PREFIX}_*.root, ${SUPER_PREFIX}_*.root, and $MERGED_FILE from $OUTPUT_DIR"
     find "$OUTPUT_DIR" -maxdepth 1 -type f \( -name "${PARTIAL_PREFIX}_*.root" -o -name "${SUPER_PREFIX}_*.root" -o -name "$MERGED_FILE" \) -delete
     rm -rf "$TMP_SUBDIR" "$TMP_SUPERDIR"
 
-    # Build master list of chunk files
-    find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" \
-      | sort -V > "$LISTFILE"
+    echo "[LOCAL] Scanning chunk directory: $SIM_CHUNK_DIR"
+    find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" | sort -V > "$LISTFILE"
     [[ ! -s "$LISTFILE" ]] && { echo "[ERROR][LOCAL] No chunk files found"; exit 1; }
 
     totalToMerge=$(wc -l < "$LISTFILE")
@@ -324,94 +338,87 @@ if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
     echo "[LOCAL] Completed $i partial merges in $OUTPUT_DIR"
     echo "======================================================================="
     exit 0
-  fi
+  fi  # end LOCAL block
 
-  # ----------------------------- CONDOR path (unchanged) ---------------------
+  ###########################################################################
+  # CONDOR: first-stage parallel merges
+  ###########################################################################
+  echo "======================================================================="
+  echo "[CONDOR] First-stage parallel merge planning"
+  echo "======================================================================="
+
   testMode=false; firstHalf=false; asMany=false
   case "$SUBMODE" in
     test)          testMode=true  ;;
     firstHalf)     firstHalf=true ;;
     asManyAsCan)   asMany=true    ;;
     "")            ;;
-    *) usage ;;
+    *)             usage ;;
   esac
 
-# -------------------------------------------------------------------------
-# PRE-FLIGHT: optionally run the 'checkFileOutput' logic
-# -------------------------------------------------------------------------
-if [[ "$DO_FILE_CHECK" == true ]]; then
-  echo "======================================================================="
-  echo "[PRECHECK] Verifying produced sim outputs correspond 1:1 with expected inputs"
-  echo "           (equivalent to: ./mergeSimOutputs.sh checkFileOutput)"
-  echo "-----------------------------------------------------------------------"
-  [[ -d "$SIM_CHUNK_DIR" ]] || { echo "[ERROR] SIM_CHUNK_DIR not found: $SIM_CHUNK_DIR"; exit 1; }
-  [[ -f "$SIM_DST_LIST"  ]] || { echo "[ERROR] SIM_DST_LIST not found:  $SIM_DST_LIST";  exit 1; }
-  [[ -f "$SIM_HITS_LIST" ]] || { echo "[ERROR] SIM_HITS_LIST not found: $SIM_HITS_LIST"; exit 1; }
+  # PRE-FLIGHT: optionally run the 'checkFileOutput' logic
+  if [[ "$DO_FILE_CHECK" == true ]]; then
+    echo "======================================================================="
+    echo "[PRECHECK] Verifying produced sim outputs correspond 1:1 with expected inputs"
+    echo "           (equivalent to: ./mergeSimOutputs.sh checkFileOutput)"
+    echo "-----------------------------------------------------------------------"
+    [[ -d "$SIM_CHUNK_DIR" ]] || { echo "[ERROR] SIM_CHUNK_DIR not found: $SIM_CHUNK_DIR"; exit 1; }
+    [[ -f "$SIM_DST_LIST"  ]] || { echo "[ERROR] SIM_DST_LIST not found:  $SIM_DST_LIST";  exit 1; }
+    [[ -f "$SIM_HITS_LIST" ]] || { echo "[ERROR] SIM_HITS_LIST not found: $SIM_HITS_LIST"; exit 1; }
 
-  mapfile -t pairs < <(paste -d' ' "$SIM_DST_LIST" "$SIM_HITS_LIST" | sort -k1,1V)
-  totalExpected=${#pairs[@]}
-  presentOutputs=$(find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name 'PositionDep_sim_*.root' | wc -l)
+    mapfile -t pairs < <(paste -d' ' "$SIM_DST_LIST" "$SIM_HITS_LIST" | sort -k1,1V)
+    totalExpected=${#pairs[@]}
+    presentOutputs=$(find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name 'PositionDep_sim_*.root' | wc -l)
 
-  echo "  SIM_CHUNK_DIR : $SIM_CHUNK_DIR"
-  echo "  SIM_DST_LIST  : $SIM_DST_LIST"
-  echo "  SIM_HITS_LIST : $SIM_HITS_LIST"
-  echo "-----------------------------------------------------------------------"
-  echo "  Expected input pairs : $totalExpected"
-  echo "  Found output files   : $presentOutputs  (pattern: PositionDep_sim_*.root)"
-  echo "-----------------------------------------------------------------------"
+    echo "  SIM_CHUNK_DIR : $SIM_CHUNK_DIR"
+    echo "  SIM_DST_LIST  : $SIM_DST_LIST"
+    echo "  SIM_HITS_LIST : $SIM_HITS_LIST"
+    echo "-----------------------------------------------------------------------"
+    echo "  Expected input pairs : $totalExpected"
+    echo "  Found output files   : $presentOutputs  (pattern: PositionDep_sim_*.root)"
+    echo "-----------------------------------------------------------------------"
 
-  # Deep check: verify each expected index can be matched to an output file
-  missing=0
-  for idx in "${!pairs[@]}"; do
-    read -r dstPath hitsPath <<< "${pairs[$idx]}"
-
-    candidates=(
-      "$SIM_CHUNK_DIR/PositionDep_sim_${idx}.root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_$(printf "%06d" "$idx").root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_pair${idx}.root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_pair$(printf "%06d" "$idx").root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_chunk${idx}.root"
-    )
-
-    found=false
-    for c in "${candidates[@]}"; do
-      if [[ -f "$c" ]]; then found=true; break; fi
+    missing=0
+    for idx in "${!pairs[@]}"; do
+      read -r dstPath hitsPath <<< "${pairs[$idx]}"
+      candidates=(
+        "$SIM_CHUNK_DIR/PositionDep_sim_${idx}.root"
+        "$SIM_CHUNK_DIR/PositionDep_sim_$(printf "%06d" "$idx").root"
+        "$SIM_CHUNK_DIR/PositionDep_sim_pair${idx}.root"
+        "$SIM_CHUNK_DIR/PositionDep_sim_pair$(printf "%06d" "$idx").root"
+        "$SIM_CHUNK_DIR/PositionDep_sim_chunk${idx}.root"
+      )
+      found=false
+      for c in "${candidates[@]}"; do
+        [[ -f "$c" ]] && { found=true; break; }
+      done
+      if ! $found; then
+        ((missing++))
+        echo "[MISSING] index=$idx"
+        echo "          DST : $(basename "$dstPath")"
+        echo "          HITS: $(basename "$hitsPath")"
+      fi
     done
 
-    if ! $found; then
-      ((missing++))
-      echo "[MISSING] index=$idx"
-      echo "          DST : $(basename "$dstPath")"
-      echo "          HITS: $(basename "$hitsPath")"
-      echo "          looked for any of:"
-      for c in "${candidates[@]}"; do
-        echo "             $(basename "$c")"
-      done
+    if (( missing > 0 )); then
+      echo "-----------------------------------------------------------------------"
+      echo "[PRECHECK][WARN] Missing=$missing / expected=$totalExpected"
+      echo "[PRECHECK] Proceeding with Condor submissions (will merge what exists)."
+      echo "-----------------------------------------------------------------------"
     fi
-  done
 
-  if (( missing > 0 )); then
-    echo "-----------------------------------------------------------------------"
-    echo "[PRECHECK][WARN] Missing=$missing / expected=$totalExpected"
-    echo "[PRECHECK] Proceeding with Condor submissions (will merge what exists)."
-    echo "-----------------------------------------------------------------------"
-  fi
+    if (( presentOutputs != totalExpected )); then
+      echo "-----------------------------------------------------------------------"
+      echo "[PRECHECK][WARN] Count mismatch (present=$presentOutputs, expected=$totalExpected)"
+      echo "[PRECHECK] However, per-index existence check passed; continuing anyway."
+      echo "-----------------------------------------------------------------------"
+    else
+      echo "[PRECHECK][PASS] All $totalExpected expected inputs have matching output files."
+    fi
+    echo "======================================================================="
+  fi  # end PRE-FLIGHT
 
-  if (( presentOutputs != totalExpected )); then
-    echo "-----------------------------------------------------------------------"
-    echo "[PRECHECK][WARN] Count mismatch (present=$presentOutputs, expected=$totalExpected)"
-    echo "[PRECHECK] However, per-index existence check passed; continuing anyway."
-    echo "-----------------------------------------------------------------------"
-  else
-    echo "[PRECHECK][PASS] All $totalExpected expected inputs have matching output files."
-  fi
-  echo "======================================================================="
-fi
-
-  # -------------------------------------------------------------------------
-  # PLAN: default grouping per job; MINBIAS uses smaller (100), default uses 300,
-  #       unless an explicit sub-mode changed FILES_PER_GROUP already.
-  # -------------------------------------------------------------------------
+  # PLAN: default grouping per job; MINBIAS uses smaller (100), default uses 300
   if ! $testMode && ! $firstHalf && ! $asMany; then
     if $MINBIAS; then
       FILES_PER_GROUP=100
@@ -422,26 +429,96 @@ fi
     fi
     echo "       With ${totalToMerge:-0} outputs, expected sublists ≈ $(( (totalToMerge + FILES_PER_GROUP - 1) / FILES_PER_GROUP ))"
   else
-    # keep whatever FILES_PER_GROUP is (default 100 or 1000 for asManyAsCan)
     echo "[PLAN] Sub-mode='${SUBMODE:-<none>}' → FILES_PER_GROUP=${FILES_PER_GROUP}"
   fi
 
-
-  # -------------------------------------------------------------------------
-  # CLEAN old outputs (partials, superchunks, final) only after successful precheck
-  # -------------------------------------------------------------------------
+  # CLEAN after precheck
   echo "[CLEAN] Removing old ${PARTIAL_PREFIX}_*.root, ${SUPER_PREFIX}_*.root, and $MERGED_FILE from $OUTPUT_DIR"
   find "$OUTPUT_DIR" -maxdepth 1 -type f \( -name "${PARTIAL_PREFIX}_*.root" -o -name "${SUPER_PREFIX}_*.root" -o -name "$MERGED_FILE" \) -delete
   rm -rf "$TMP_SUBDIR" "$TMP_SUPERDIR"
 
-find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" \
-       | sort -V > "$LISTFILE"
+  # Build helper once
+  cat > "$CONDOR_EXEC" <<'EOS'
+#!/usr/bin/env bash
+set -eo pipefail
+set +u
+export USER="$(id -un)"
+export LOGNAME="$USER"
+export HOME="/sphenix/u/$USER"
+MYINSTALL="/sphenix/user/$USER/install"
+source /opt/sphenix/core/bin/sphenix_setup.sh -n
+source /opt/sphenix/core/bin/setup_local.sh "$MYINSTALL"
+set -u
+[[ $# -eq 2 ]] || { echo "[ERROR] Usage: $0 <list> <out>"; exit 1; }
+LIST="$1"; OUT="$2"
+echo "[hadd_condor] merging $(wc -l < "$LIST") files -> $OUT"
+hadd -v 3 -f "$OUT" @"$LIST"
+EOS
+  chmod +x "$CONDOR_EXEC"
+
+  mkdir -p "$TMP_SUBDIR" "$TMP_SUPERDIR"
+
+  ###########################################################################
+  # DATA MODE on CONDOR: one job per run directory
+  ###########################################################################
+  if $DATA_MODE; then
+    echo "[CONDOR][DATA] Building one merge job per run under $DATA_RUN_BASE"
+    mapfile -t runlist < <(find "$DATA_RUN_BASE" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V)
+    [[ ${#runlist[@]} -gt 0 ]] || { echo "[ERROR] No run directories under $DATA_RUN_BASE"; exit 1; }
+
+    queueN=${#runlist[@]}
+    $testMode  && queueN=1
+    $firstHalf && queueN=$(( queueN / 2 ))
+    echo "[CONDOR][DATA] Planned runs: ${#runlist[@]}  |  queueN=$queueN"
+
+    SUB="partial_merge.sub"; rm -f "$SUB"
+    cat > "$SUB" <<EOT
+universe   = vanilla
+executable = $CONDOR_EXEC
+output     = $CONDOR_OUTDIR/merge.\$(Cluster).\$(Process).out
+error      = $CONDOR_ERRDIR/merge.\$(Cluster).\$(Process).err
+log        = $CONDOR_LOGDIR/merge.\$(Cluster).\$(Process).log
+request_memory = 1.5GB
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+stream_output = True
+stream_error  = True
+EOT
+
+    i=0
+    for run in "${runlist[@]}"; do
+      ((i++))
+      [[ $i -gt $queueN ]] && break
+      list="$TMP_SUBDIR/run_${run}.txt"
+      find "$DATA_RUN_BASE/$run" -maxdepth 1 -type f -name "PositionDep_data_*.root" | sort -V > "$list"
+      if [[ ! -s "$list" ]]; then
+        echo "[WARN] No PositionDep_data_*.root files for run $run – skipping"
+        ((i--))
+        continue
+      fi
+      echo "arguments = $list $OUTPUT_DIR/${PARTIAL_PREFIX}_${run}.root" >> "$SUB"
+      echo "queue" >> "$SUB"
+    done
+
+    echo "======================================================================="
+    echo "[SUBMIT] condor_submit $SUB"
+    echo "         (one partial per run → ${OUTPUT_DIR}/${PARTIAL_PREFIX}_<run>.root)"
+    echo "======================================================================="
+    condor_submit "$SUB" || { echo "[ERROR] condor_submit failed"; exit 1; }
+    echo "[INFO] Submitted $i Condor jobs (data per-run)."
+    exit 0
+  fi  # end DATA_MODE on CONDOR
+
+  ###########################################################################
+  # SIM MODE on CONDOR: group by FILES_PER_GROUP (original behavior)
+  ###########################################################################
+  echo "[CONDOR][SIM] Grouping by FILES_PER_GROUP=$FILES_PER_GROUP from $SIM_CHUNK_DIR"
+  find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" | sort -V > "$LISTFILE"
   [[ ! -s "$LISTFILE" ]] && { echo "[ERROR] No chunk files found after precheck"; exit 1; }
 
   totalToMerge=$(wc -l < "$LISTFILE")
-  echo "[INFO] Files to merge listed in $LISTFILE  (count=$totalToMerge)"
+  echo "[CONDOR][SIM] Files to merge listed in $LISTFILE  (count=$totalToMerge)"
 
-  mkdir -p "$TMP_SUBDIR" "$TMP_SUPERDIR"
   if $testMode; then
     head -n "$FILES_PER_GROUP" "$LISTFILE" > "$TMP_SUBDIR/sublist_00"
     totalSublists=1
@@ -454,7 +531,7 @@ find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" \
   $firstHalf && queueN=$(( totalSublists / 2 ))
 
   echo "-----------------------------------------------------------------------"
-  echo "[INFO] Grouping plan"
+  echo "[CONDOR][SIM] Grouping plan"
   echo "  • FILES_PER_GROUP   : $FILES_PER_GROUP"
   echo "  • Total sublists    : $totalSublists"
   $firstHalf && echo "  • firstHalf active   → queueN=$queueN"
@@ -462,28 +539,6 @@ find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" \
   echo "  • Jobs to submit    : $queueN"
   echo "-----------------------------------------------------------------------"
 
-  # ---------------------------------------------------------------------------
-  # helper script **with nounset off while sourcing env**
-  # ---------------------------------------------------------------------------
-  cat > "$CONDOR_EXEC" <<'EOS'
-#!/usr/bin/env bash
-set -eo pipefail
-set +u                      # ------------ disable nounset ------------
-export USER="$(id -un)"
-export LOGNAME="$USER"
-export HOME="/sphenix/u/$USER"
-MYINSTALL="/sphenix/user/$USER/install"
-source /opt/sphenix/core/bin/sphenix_setup.sh -n
-source /opt/sphenix/core/bin/setup_local.sh "$MYINSTALL"
-set -u                      # ------------ re-enable nounset -----------
-[[ $# -eq 2 ]] || { echo "[ERROR] Usage: $0 <list> <out>"; exit 1; }
-LIST="$1"; OUT="$2"
-echo "[hadd_condor] merging $(wc -l < "$LIST") files -> $OUT"
-hadd -v 3 -f "$OUT" @"$LIST"
-EOS
-  chmod +x "$CONDOR_EXEC"
-
-  # submission file
   SUB="partial_merge.sub"; rm -f "$SUB"
   cat > "$SUB" <<EOT
 universe   = vanilla
@@ -511,9 +566,11 @@ EOT
   echo "         (will create ${queueN} partial outputs named ${PARTIAL_PREFIX}_<N>.root)"
   echo "======================================================================="
   condor_submit "$SUB" || { echo "[ERROR] condor_submit failed"; exit 1; }
-  echo "[INFO] Submitted $queueN Condor jobs."
+  echo "[INFO] Submitted $i Condor jobs."
   exit 0
-fi
+
+fi  # end LOCAL/CONDOR selector
+
 
 
 
@@ -521,14 +578,64 @@ fi
 # 2) ADDCHUNKS  ---------------------------------------------------------------
 ###############################################################################
 # New sub-modes:
-#   addChunks part1          -> build superchunks from partials locally
-#   addChunks part1 condor   -> build superchunks via Condor
-# Plain:
-#   addChunks [condor]       -> final merge; prefers superchunks if present,
-#                               otherwise falls back to partials.
+#   addChunks part1                -> build superchunks from partials locally
+#   addChunks part1 condor         -> build superchunks via Condor
+#   addChunks [condor]             -> final merge; prefers superchunks if present,
+#                                     otherwise falls back to partials.
+#   addChunks <8-digit-run-number> -> LOCAL one-run merge of all PositionDep_data_*.root
+#                                     found under $DATA_RUN_BASE/<run> into:
+#                                     $OUTPUT_DIR_DATA/chunkMerge_run_<run>.root
 ###############################################################################
+
+# Special case: addChunks <RUN> → local per-run data merge
+if [[ "$MODE" == "addChunks" && "$SUBMODE" =~ ^[0-9]{8}$ ]]; then
+  RUN="$SUBMODE"
+  RUN_DIR="${DATA_RUN_BASE%/}/$RUN"
+  [[ -d "$RUN_DIR" ]] || { echo "[ERROR] Run directory not found: $RUN_DIR"; exit 1; }
+
+  mkdir -p "$OUTPUT_DIR_DATA" "$TMP_SUBDIR"
+
+  LIST="$TMP_SUBDIR/run_${RUN}_data_files.txt"
+  find "$RUN_DIR" -maxdepth 1 -type f -name "PositionDep_data_*.root" | sort -V > "$LIST"
+
+  [[ -s "$LIST" ]] || { echo "[ERROR] No PositionDep_data_*.root files found for run $RUN under $RUN_DIR"; exit 1; }
+
+  OUT="$OUTPUT_DIR_DATA/chunkMerge_run_${RUN}.root"
+  echo "======================================================================="
+  echo "[addChunks][DATA][LOCAL] Merging run ${RUN}"
+  echo "  Input list : $LIST  ($(wc -l < "$LIST") files)"
+  echo "  Output     : $OUT"
+  echo "======================================================================="
+
+  rm -f "$OUT" 2>/dev/null || true
+  hadd -v 3 -f "$OUT" @"$LIST" || { echo "[ERROR] hadd failed for run $RUN"; exit 1; }
+
+  echo "[INFO] Created $(ls -lh "$OUT")"
+  exit 0
+fi
+
+# Auto-detect dataset type for final merge:
+#  - If run-level partials (chunkMerge_run_*.root) exist, this is DATA.
+#  - Otherwise, assume SIM partials (chunkMerge_*.root).
+DATA_MODE_ADD=false
+if compgen -G "$OUTPUT_DIR/chunkMerge_run_*.root" > /dev/null; then
+  DATA_MODE_ADD=true
+fi
+# If not found in current OUTPUT_DIR, check the canonical data OUTPUT_DIR
+if ! $DATA_MODE_ADD; then
+  if [[ -n "${OUTPUT_DIR_DATA:-}" ]] && compgen -G "$OUTPUT_DIR_DATA/chunkMerge_run_*.root" > /dev/null; then
+    DATA_MODE_ADD=true
+    OUTPUT_DIR="$OUTPUT_DIR_DATA"
+  fi
+fi
+if $DATA_MODE_ADD; then
+  PARTIAL_PREFIX="chunkMerge_run"
+  MERGED_FILE="PositionDep_data_ALL.root"
+fi
+
 FINAL="$OUTPUT_DIR/$MERGED_FILE"
 GROUP_OF=10                        # merge 10 partials -> 1 superchunk
+
 
 # Helper to emit a simple wrapper that runs hadd on a @listfile
 emit_hadd_wrapper() {
@@ -552,6 +659,7 @@ hadd -v 3 -f "$OUT" @"$LIST"
 EOS
   chmod +x "$exe"
 }
+
 
 # Build arrays of existing files
 mapfile -t partials < <(ls -1 "$OUTPUT_DIR"/${PARTIAL_PREFIX}_*.root 2>/dev/null || true)

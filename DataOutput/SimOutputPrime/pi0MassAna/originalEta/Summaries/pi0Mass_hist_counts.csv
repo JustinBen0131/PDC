@@ -1,0 +1,321 @@
+view,variant,Elo,Ehi,entries
+originalEta,No Correction,2,4,1581392
+originalEta,No Correction,4,6,119472
+originalEta,No Correction,6,8,7350
+originalEta,No Correction,8,10,934
+originalEta,No Correction,10,12,150
+originalEta,No Correction,12,15,42
+originalEta,No Correction,15,20,4
+originalEta,No Correction,20,30,2
+originalEta,Legacy Constant b-corr,2,4,1581392
+originalEta,Legacy Constant b-corr,4,6,119472
+originalEta,Legacy Constant b-corr,6,8,7350
+originalEta,Legacy Constant b-corr,8,10,934
+originalEta,Legacy Constant b-corr,10,12,150
+originalEta,Legacy Constant b-corr,12,15,42
+originalEta,Legacy Constant b-corr,15,20,4
+originalEta,Legacy Constant b-corr,20,30,2
+originalEta,CLUS-CP(EA),2,4,1581392
+originalEta,CLUS-CP(EA),4,6,119472
+originalEta,CLUS-CP(EA),6,8,7350
+originalEta,CLUS-CP(EA),8,10,934
+originalEta,CLUS-CP(EA),10,12,150
+originalEta,CLUS-CP(EA),12,15,42
+originalEta,CLUS-CP(EA),15,20,4
+originalEta,CLUS-CP(EA),20,30,2
+originalEta,Energy/|#eta|-Dep b-correction,2,4,1581392
+originalEta,Energy/|#eta|-Dep b-correction,4,6,119472
+originalEta,Energy/|#eta|-Dep b-correction,6,8,7350
+originalEta,Energy/|#eta|-Dep b-correction,8,10,934
+originalEta,Energy/|#eta|-Dep b-correction,10,12,150
+originalEta,Energy/|#eta|-Dep b-correction,12,15,42
+originalEta,Energy/|#eta|-Dep b-correction,15,20,4
+originalEta,Energy/|#eta|-Dep b-correction,20,30,2
+originalEta,Energy-Dep b-correction,2,4,1581392
+originalEta,Energy-Dep b-correction,4,6,119472
+originalEta,Energy-Dep b-correction,6,8,7350
+originalEta,Energy-Dep b-correction,8,10,934
+originalEta,Energy-Dep b-correction,10,12,150
+originalEta,Energy-Dep b-correction,12,15,42
+originalEta,Energy-Dep b-correction,15,20,4
+originalEta,Energy-Dep b-correction,20,30,2
+originalEta,EA-mix,2,4,1581392
+originalEta,EA-mix,4,6,119472
+originalEta,EA-mix,6,8,7350
+originalEta,EA-mix,8,10,934
+originalEta,EA-mix,10,12,150
+originalEta,EA-mix,12,15,42
+originalEta,EA-mix,15,20,4
+originalEta,EA-mix,20,30,2
+originalEta,PDC-raw,2,4,1581392
+originalEta,PDC-raw,4,6,119472
+originalEta,PDC-raw,6,8,7350
+originalEta,PDC-raw,8,10,934
+originalEta,PDC-raw,10,12,150
+originalEta,PDC-raw,12,15,42
+originalEta,PDC-raw,15,20,4
+originalEta,PDC-raw,20,30,2
+originalEta,PDC-corr,2,4,1581392
+originalEta,PDC-corr,4,6,119472
+originalEta,PDC-corr,6,8,7350
+originalEta,PDC-corr,8,10,934
+originalEta,PDC-corr,10,12,150
+originalEta,PDC-corr,12,15,42
+originalEta,PDC-corr,15,20,4
+originalEta,PDC-corr,20,30,2
+fullEta,No Correction,2,4,1467958
+fullEta,No Correction,4,6,109202
+fullEta,No Correction,6,8,6644
+fullEta,No Correction,8,10,819
+fullEta,No Correction,10,12,140
+fullEta,No Correction,12,15,38
+fullEta,No Correction,15,20,3
+fullEta,No Correction,20,30,2
+fullEta,Legacy Constant b-corr,2,4,1467958
+fullEta,Legacy Constant b-corr,4,6,109202
+fullEta,Legacy Constant b-corr,6,8,6644
+fullEta,Legacy Constant b-corr,8,10,819
+fullEta,Legacy Constant b-corr,10,12,140
+fullEta,Legacy Constant b-corr,12,15,38
+fullEta,Legacy Constant b-corr,15,20,3
+fullEta,Legacy Constant b-corr,20,30,2
+fullEta,CLUS-CP(EA),2,4,1467958
+fullEta,CLUS-CP(EA),4,6,109202
+fullEta,CLUS-CP(EA),6,8,6644
+fullEta,CLUS-CP(EA),8,10,819
+fullEta,CLUS-CP(EA),10,12,140
+fullEta,CLUS-CP(EA),12,15,38
+fullEta,CLUS-CP(EA),15,20,3
+fullEta,CLUS-CP(EA),20,30,2
+fullEta,Energy/|#eta|-Dep b-correction,2,4,1467958
+fullEta,Energy/|#eta|-Dep b-correction,4,6,109202
+fullEta,Energy/|#eta|-Dep b-correction,6,8,6644
+fullEta,Energy/|#eta|-Dep b-correction,8,10,819
+fullEta,Energy/|#eta|-Dep b-correction,10,12,140
+fullEta,Energy/|#eta|-Dep b-correction,12,15,38
+fullEta,Energy/|#eta|-Dep b-correction,15,20,3
+fullEta,Energy/|#eta|-Dep b-correction,20,30,2
+fullEta,Energy-Dep b-correction,2,4,1467958
+fullEta,Energy-Dep b-correction,4,6,109202
+fullEta,Energy-Dep b-correction,6,8,6644
+fullEta,Energy-Dep b-correction,8,10,819
+fullEta,Energy-Dep b-correction,10,12,140
+fullEta,Energy-Dep b-correction,12,15,38
+fullEta,Energy-Dep b-correction,15,20,3
+fullEta,Energy-Dep b-correction,20,30,2
+fullEta,EA-mix,2,4,1467958
+fullEta,EA-mix,4,6,109202
+fullEta,EA-mix,6,8,6644
+fullEta,EA-mix,8,10,819
+fullEta,EA-mix,10,12,140
+fullEta,EA-mix,12,15,38
+fullEta,EA-mix,15,20,3
+fullEta,EA-mix,20,30,2
+fullEta,PDC-raw,2,4,1467958
+fullEta,PDC-raw,4,6,109202
+fullEta,PDC-raw,6,8,6644
+fullEta,PDC-raw,8,10,819
+fullEta,PDC-raw,10,12,140
+fullEta,PDC-raw,12,15,38
+fullEta,PDC-raw,15,20,3
+fullEta,PDC-raw,20,30,2
+fullEta,PDC-corr,2,4,1467958
+fullEta,PDC-corr,4,6,109202
+fullEta,PDC-corr,6,8,6644
+fullEta,PDC-corr,8,10,819
+fullEta,PDC-corr,10,12,140
+fullEta,PDC-corr,12,15,38
+fullEta,PDC-corr,15,20,3
+fullEta,PDC-corr,20,30,2
+etaCore,No Correction,2,4,80841
+etaCore,No Correction,4,6,3784
+etaCore,No Correction,6,8,170
+etaCore,No Correction,8,10,19
+etaCore,No Correction,10,12,3
+etaCore,No Correction,12,15,0
+etaCore,No Correction,15,20,0
+etaCore,No Correction,20,30,0
+etaCore,Legacy Constant b-corr,2,4,80841
+etaCore,Legacy Constant b-corr,4,6,3784
+etaCore,Legacy Constant b-corr,6,8,170
+etaCore,Legacy Constant b-corr,8,10,19
+etaCore,Legacy Constant b-corr,10,12,3
+etaCore,Legacy Constant b-corr,12,15,0
+etaCore,Legacy Constant b-corr,15,20,0
+etaCore,Legacy Constant b-corr,20,30,0
+etaCore,CLUS-CP(EA),2,4,80841
+etaCore,CLUS-CP(EA),4,6,3784
+etaCore,CLUS-CP(EA),6,8,170
+etaCore,CLUS-CP(EA),8,10,19
+etaCore,CLUS-CP(EA),10,12,3
+etaCore,CLUS-CP(EA),12,15,0
+etaCore,CLUS-CP(EA),15,20,0
+etaCore,CLUS-CP(EA),20,30,0
+etaCore,Energy/|#eta|-Dep b-correction,2,4,80841
+etaCore,Energy/|#eta|-Dep b-correction,4,6,3784
+etaCore,Energy/|#eta|-Dep b-correction,6,8,170
+etaCore,Energy/|#eta|-Dep b-correction,8,10,19
+etaCore,Energy/|#eta|-Dep b-correction,10,12,3
+etaCore,Energy/|#eta|-Dep b-correction,12,15,0
+etaCore,Energy/|#eta|-Dep b-correction,15,20,0
+etaCore,Energy/|#eta|-Dep b-correction,20,30,0
+etaCore,Energy-Dep b-correction,2,4,80841
+etaCore,Energy-Dep b-correction,4,6,3784
+etaCore,Energy-Dep b-correction,6,8,170
+etaCore,Energy-Dep b-correction,8,10,19
+etaCore,Energy-Dep b-correction,10,12,3
+etaCore,Energy-Dep b-correction,12,15,0
+etaCore,Energy-Dep b-correction,15,20,0
+etaCore,Energy-Dep b-correction,20,30,0
+etaCore,EA-mix,2,4,80841
+etaCore,EA-mix,4,6,3784
+etaCore,EA-mix,6,8,170
+etaCore,EA-mix,8,10,19
+etaCore,EA-mix,10,12,3
+etaCore,EA-mix,12,15,0
+etaCore,EA-mix,15,20,0
+etaCore,EA-mix,20,30,0
+etaCore,PDC-raw,2,4,80841
+etaCore,PDC-raw,4,6,3784
+etaCore,PDC-raw,6,8,170
+etaCore,PDC-raw,8,10,19
+etaCore,PDC-raw,10,12,3
+etaCore,PDC-raw,12,15,0
+etaCore,PDC-raw,15,20,0
+etaCore,PDC-raw,20,30,0
+etaCore,PDC-corr,2,4,80841
+etaCore,PDC-corr,4,6,3784
+etaCore,PDC-corr,6,8,170
+etaCore,PDC-corr,8,10,19
+etaCore,PDC-corr,10,12,3
+etaCore,PDC-corr,12,15,0
+etaCore,PDC-corr,15,20,0
+etaCore,PDC-corr,20,30,0
+etaMid,No Correction,2,4,447581
+etaMid,No Correction,4,6,25740
+etaMid,No Correction,6,8,1283
+etaMid,No Correction,8,10,148
+etaMid,No Correction,10,12,17
+etaMid,No Correction,12,15,8
+etaMid,No Correction,15,20,0
+etaMid,No Correction,20,30,0
+etaMid,Legacy Constant b-corr,2,4,447581
+etaMid,Legacy Constant b-corr,4,6,25740
+etaMid,Legacy Constant b-corr,6,8,1283
+etaMid,Legacy Constant b-corr,8,10,148
+etaMid,Legacy Constant b-corr,10,12,17
+etaMid,Legacy Constant b-corr,12,15,8
+etaMid,Legacy Constant b-corr,15,20,0
+etaMid,Legacy Constant b-corr,20,30,0
+etaMid,CLUS-CP(EA),2,4,447581
+etaMid,CLUS-CP(EA),4,6,25740
+etaMid,CLUS-CP(EA),6,8,1283
+etaMid,CLUS-CP(EA),8,10,148
+etaMid,CLUS-CP(EA),10,12,17
+etaMid,CLUS-CP(EA),12,15,8
+etaMid,CLUS-CP(EA),15,20,0
+etaMid,CLUS-CP(EA),20,30,0
+etaMid,Energy/|#eta|-Dep b-correction,2,4,447581
+etaMid,Energy/|#eta|-Dep b-correction,4,6,25740
+etaMid,Energy/|#eta|-Dep b-correction,6,8,1283
+etaMid,Energy/|#eta|-Dep b-correction,8,10,148
+etaMid,Energy/|#eta|-Dep b-correction,10,12,17
+etaMid,Energy/|#eta|-Dep b-correction,12,15,8
+etaMid,Energy/|#eta|-Dep b-correction,15,20,0
+etaMid,Energy/|#eta|-Dep b-correction,20,30,0
+etaMid,Energy-Dep b-correction,2,4,447581
+etaMid,Energy-Dep b-correction,4,6,25740
+etaMid,Energy-Dep b-correction,6,8,1283
+etaMid,Energy-Dep b-correction,8,10,148
+etaMid,Energy-Dep b-correction,10,12,17
+etaMid,Energy-Dep b-correction,12,15,8
+etaMid,Energy-Dep b-correction,15,20,0
+etaMid,Energy-Dep b-correction,20,30,0
+etaMid,EA-mix,2,4,447581
+etaMid,EA-mix,4,6,25740
+etaMid,EA-mix,6,8,1283
+etaMid,EA-mix,8,10,148
+etaMid,EA-mix,10,12,17
+etaMid,EA-mix,12,15,8
+etaMid,EA-mix,15,20,0
+etaMid,EA-mix,20,30,0
+etaMid,PDC-raw,2,4,447581
+etaMid,PDC-raw,4,6,25740
+etaMid,PDC-raw,6,8,1283
+etaMid,PDC-raw,8,10,148
+etaMid,PDC-raw,10,12,17
+etaMid,PDC-raw,12,15,8
+etaMid,PDC-raw,15,20,0
+etaMid,PDC-raw,20,30,0
+etaMid,PDC-corr,2,4,447581
+etaMid,PDC-corr,4,6,25740
+etaMid,PDC-corr,6,8,1283
+etaMid,PDC-corr,8,10,148
+etaMid,PDC-corr,10,12,17
+etaMid,PDC-corr,12,15,8
+etaMid,PDC-corr,15,20,0
+etaMid,PDC-corr,20,30,0
+etaEdge,No Correction,2,4,939536
+etaEdge,No Correction,4,6,79678
+etaEdge,No Correction,6,8,5191
+etaEdge,No Correction,8,10,652
+etaEdge,No Correction,10,12,120
+etaEdge,No Correction,12,15,30
+etaEdge,No Correction,15,20,3
+etaEdge,No Correction,20,30,2
+etaEdge,Legacy Constant b-corr,2,4,939536
+etaEdge,Legacy Constant b-corr,4,6,79678
+etaEdge,Legacy Constant b-corr,6,8,5191
+etaEdge,Legacy Constant b-corr,8,10,652
+etaEdge,Legacy Constant b-corr,10,12,120
+etaEdge,Legacy Constant b-corr,12,15,30
+etaEdge,Legacy Constant b-corr,15,20,3
+etaEdge,Legacy Constant b-corr,20,30,2
+etaEdge,CLUS-CP(EA),2,4,939536
+etaEdge,CLUS-CP(EA),4,6,79678
+etaEdge,CLUS-CP(EA),6,8,5191
+etaEdge,CLUS-CP(EA),8,10,652
+etaEdge,CLUS-CP(EA),10,12,120
+etaEdge,CLUS-CP(EA),12,15,30
+etaEdge,CLUS-CP(EA),15,20,3
+etaEdge,CLUS-CP(EA),20,30,2
+etaEdge,Energy/|#eta|-Dep b-correction,2,4,939536
+etaEdge,Energy/|#eta|-Dep b-correction,4,6,79678
+etaEdge,Energy/|#eta|-Dep b-correction,6,8,5191
+etaEdge,Energy/|#eta|-Dep b-correction,8,10,652
+etaEdge,Energy/|#eta|-Dep b-correction,10,12,120
+etaEdge,Energy/|#eta|-Dep b-correction,12,15,30
+etaEdge,Energy/|#eta|-Dep b-correction,15,20,3
+etaEdge,Energy/|#eta|-Dep b-correction,20,30,2
+etaEdge,Energy-Dep b-correction,2,4,939536
+etaEdge,Energy-Dep b-correction,4,6,79678
+etaEdge,Energy-Dep b-correction,6,8,5191
+etaEdge,Energy-Dep b-correction,8,10,652
+etaEdge,Energy-Dep b-correction,10,12,120
+etaEdge,Energy-Dep b-correction,12,15,30
+etaEdge,Energy-Dep b-correction,15,20,3
+etaEdge,Energy-Dep b-correction,20,30,2
+etaEdge,EA-mix,2,4,939536
+etaEdge,EA-mix,4,6,79678
+etaEdge,EA-mix,6,8,5191
+etaEdge,EA-mix,8,10,652
+etaEdge,EA-mix,10,12,120
+etaEdge,EA-mix,12,15,30
+etaEdge,EA-mix,15,20,3
+etaEdge,EA-mix,20,30,2
+etaEdge,PDC-raw,2,4,939536
+etaEdge,PDC-raw,4,6,79678
+etaEdge,PDC-raw,6,8,5191
+etaEdge,PDC-raw,8,10,652
+etaEdge,PDC-raw,10,12,120
+etaEdge,PDC-raw,12,15,30
+etaEdge,PDC-raw,15,20,3
+etaEdge,PDC-raw,20,30,2
+etaEdge,PDC-corr,2,4,939536
+etaEdge,PDC-corr,4,6,79678
+etaEdge,PDC-corr,6,8,5191
+etaEdge,PDC-corr,8,10,652
+etaEdge,PDC-corr,10,12,120
+etaEdge,PDC-corr,12,15,30
+etaEdge,PDC-corr,15,20,3
+etaEdge,PDC-corr,20,30,2
