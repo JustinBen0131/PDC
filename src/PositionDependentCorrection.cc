@@ -4435,6 +4435,70 @@ int PositionDependentCorrection::process_towers(PHCompositeNode* topNode)
 {
     // Job‑wide accounting
     s_cuts.ev_total++;
+    
+    // 1) Decode triggers
+    if (trigAna)
+    {
+        if (Verbosity() > 0)
+        {
+            std::cout << "[DEBUG] About to call trigAna->decodeTriggers()"
+                      << " on topNode=" << topNode << std::endl;
+        }
+        trigAna->decodeTriggers(topNode);
+    }
+    else
+    {
+        std::cerr << "[ERROR] No TriggerAnalyzer pointer!\n";
+        return Fun4AllReturnCodes::ABORTEVENT;
+    }
+
+    // 2) Build a vector of fired trigger *short* names using the DB-names in triggerNameMap.
+    std::vector<std::string> activeTriggerNames;
+    activeTriggerNames.reserve(triggerNameMap.size());
+
+    for (const auto &kv : triggerNameMap)
+    {
+        const std::string &dbTriggerName   = kv.first;   // how it's known in the DB
+        const std::string &histFriendlyStr = kv.second;  // short name for histograms
+
+        // 3) Check if this DB trigger fired
+        if (trigAna->didTriggerFire(dbTriggerName))
+        {
+            // 4) Save the *short* name for future reference
+            activeTriggerNames.push_back(histFriendlyStr);
+            if (Verbosity() > 0)
+            {
+                std::cout << "Trigger fired: \"" << dbTriggerName
+                          << "\" => short name \"" << histFriendlyStr << "\"" << std::endl;
+            }
+        }
+    }
+
+    // 2a) DATA-ONLY gate: require the single trigger "MBD N&S >= 1".
+    //     (Short name from your map is "MBD_NandS_geq_1".)
+    if (!m_isSimulation)
+    {
+        const char* requiredShort = "MBD_NandS_geq_1";
+        bool haveRequired = false;
+        for (const auto& s : activeTriggerNames)
+        {
+            if (s == requiredShort) { haveRequired = true; break; }
+        }
+
+        if (!haveRequired)
+        {
+            if (Verbosity() > 0)
+            {
+                std::cout << "[trigger-gate] DATA event skipped: required trigger "
+                             "\"MBD N&S >= 1\" (short=\"" << requiredShort
+                          << "\") not active this event.\n";
+            }
+            s_cuts.ev_trig_skipped++;                 // <-- track trigger-based skips
+            return Fun4AllReturnCodes::EVENT_OK;      // skip cleanly (no fills)
+        }
+    }
+
+
 
     if (Verbosity() > 0)
     {
@@ -4789,11 +4853,14 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 
       // Events
       std::cout << ANSI_BOLD << "Events" << ANSI_RESET << '\n';
-    std::cout << "  total          : " << s_cuts.ev_total
-              << "   processed     : " << s_cuts.ev_processed
-              << "   |vz| skipped  : " << s_cuts.ev_vz_skipped
-              << "   nClus>cap skip: " << s_cuts.ev_nClusTooLarge
-              << '\n';
+      std::cout << "  total           : " << s_cuts.ev_total << '\n'
+                << "   processed      : " << s_cuts.ev_processed << '\n'
+                << "   trig skipped   : " << s_cuts.ev_trig_skipped
+                << "  (" << pct(s_cuts.ev_trig_skipped, s_cuts.ev_total) << ")\n"
+                << "   |vz| skipped   : " << s_cuts.ev_vz_skipped
+                << "  (" << pct(s_cuts.ev_vz_skipped, s_cuts.ev_total) << ")\n"
+                << "   nClus>cap skip : " << s_cuts.ev_nClusTooLarge
+                << "  (" << pct(s_cuts.ev_nClusTooLarge, s_cuts.ev_total) << ")\n";
 
     // Cluster‑1 screening
       // Cluster‑1 screening

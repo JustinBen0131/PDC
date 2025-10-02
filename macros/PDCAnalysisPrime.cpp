@@ -338,9 +338,20 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
       TH1 *hR=hKeepV[iv][vR][i].get(), *hA=hKeepV[iv][vA][i].get();
       hR->SetTitle(Form("%s vs %s   (%s)   [%s]",
                         kVarPretty[vA], kVarPretty[vR], ePretty(i).Data(), kViews[iv].pretty));
-      const double yMax = std::max(hR->GetMaximum(), hA->GetMaximum());
-      hR->SetMinimum(0.0); hR->SetMaximum(yMax*1.3);
-      hR->Draw("E1"); hA->Draw("E1 SAME");
+        auto maxWithErr = [](TH1* h)->double {
+          if (!h) return 0.0;
+          double m = 0.0;
+          for (int b = 1; b <= h->GetNbinsX(); ++b) {
+            const double y = h->GetBinContent(b) + h->GetBinError(b);
+            if (y > m) m = y;
+          }
+          return m;
+        };
+        const double yMax = std::max(maxWithErr(hR), maxWithErr(hA));
+        hR->SetMinimum(0.0);
+        hR->SetMaximum(yMax * 1.08);   // ~8% headroom above the tallest bin (+err)
+        hR->Draw("E1"); hA->Draw("E1 SAME");
+
 
       drawTotalModel(iv,vR,i);
       drawTotalModel(iv,vA,i);
@@ -378,9 +389,19 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
       TH1* hR=hKeepV[iv][vR][i].get(); TH1* hB=hKeepV[iv][vB][i].get(); TH1* hC=hKeepV[iv][vC][i].get();
       hR->SetTitle(Form("%s vs %s vs %s   (%s)   [%s]",
                         kVarPretty[vR], kVarPretty[vB], kVarPretty[vC], ePretty(i).Data(), kViews[iv].pretty));
-      const double yMax = std::max(hR->GetMaximum(), std::max(hB->GetMaximum(), hC->GetMaximum()));
-      hR->SetMinimum(0.0); hR->SetMaximum(yMax*1.08);
-      hR->Draw("E1"); hB->Draw("E1 SAME"); hC->Draw("E1 SAME");
+        auto maxWithErr = [](TH1* h)->double {
+          if (!h) return 0.0;
+          double m = 0.0;
+          for (int b = 1; b <= h->GetNbinsX(); ++b) {
+            const double y = h->GetBinContent(b) + h->GetBinError(b);
+            if (y > m) m = y;
+          }
+          return m;
+        };
+        const double yMax = std::max(maxWithErr(hR), std::max(maxWithErr(hB), maxWithErr(hC)));
+        hR->SetMinimum(0.0);
+        hR->SetMaximum(yMax * 1.06);   // slightly tighter (~6%) for 3-overlay
+        hR->Draw("E1"); hB->Draw("E1 SAME"); hC->Draw("E1 SAME");
 
       drawTotalModel(iv,vR,i);
       drawTotalModel(iv,vB,i);
@@ -723,7 +744,6 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
       }
     }
   } // end per-view loop
-
     // -------------------------- NEW: sigma overlay across variants • first E bin --------------------------
     {
       // Required variant indices (tags from kVarTags)
@@ -744,11 +764,12 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
       } else if (N_E <= 0) {
         std::cerr << "[SigmaOverlay] No energy bins available — skipping overlay.\n";
       } else {
-        const int iE = 0; // first energy bin only
-
-        // X positions for the four categories and their display labels
-        std::vector<double> x = {1.0, 2.0, 3.0, 4.0};
-        const char* xlabels[4] = { kVarPretty[vRAW], kVarPretty[vCP], kVarPretty[vEAone], kVarPretty[vEAeta] };
+        // Loop over ALL energy bins
+        for (int iE = 0; iE < N_E; ++iE)
+        {
+          // X positions for the four categories and their display labels
+          std::vector<double> x = {1.0, 2.0, 3.0, 4.0};
+          const char* xlabels[4] = { kVarPretty[vRAW], kVarPretty[vCP], kVarPretty[vEAone], kVarPretty[vEAeta] };
 
           // Helper to build a TGraphErrors for a given view index, with an x-offset to separate series within each category
           auto makeViewGraph = [&](int iview, double xoff, Style_t mstyle, Color_t col)->std::unique_ptr<TGraphErrors>
@@ -798,41 +819,47 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
           auto g_edge = makeViewGraph(4,  0.06, 22, kMagenta+1);
           auto g_full = makeViewGraph(1,  0.18, 24, kRed+1);
 
-          // Determine dynamic y-range from the available points, including error bars
-          double ymin = +1e30, ymax = -1e30, X, Y;
-          auto upd = [&](TGraphErrors* g) {
-            if (!g) return;
-            for (int k = 0; k < g->GetN(); ++k) {
-              g->GetPoint(k, X, Y);
-              const double eY = g->GetErrorY(k);
-              ymin = std::min(ymin, Y - eY);
-              ymax = std::max(ymax, Y + eY);
-            }
-          };
-          upd(g_edge.get()); upd(g_mid.get()); upd(g_core.get()); upd(g_full.get());
-          if (!(std::isfinite(ymin) && std::isfinite(ymax))) { ymin = 0.010; ymax = 0.040; }
-          double span = ymax - ymin;
-          if (span <= 0) { span = 0.001; ymin -= 0.5*span; ymax += 0.5*span; }
-          const double pad = std::max(0.15 * span, 0.001);
-          ymin = std::max(0.0, ymin - pad);
-          ymax = ymax + pad;
+            // Determine dynamic y-range from the available points, including error bars
+            double ymin = +1e30, ymax = -1e30, X, Y;
+            auto upd = [&](TGraphErrors* g) {
+              if (!g) return;
+              for (int k = 0; k < g->GetN(); ++k) {
+                g->GetPoint(k, X, Y);
+                const double eY = g->GetErrorY(k);
+                ymin = std::min(ymin, Y - eY);
+                ymax = std::max(ymax, Y + eY);
+              }
+            };
+            upd(g_edge.get()); upd(g_mid.get()); upd(g_core.get()); upd(g_full.get());
+            if (!(std::isfinite(ymin) && std::isfinite(ymax))) { ymin = 0.010; ymax = 0.040; }
+            double span = ymax - ymin;
+            if (span <= 0) { span = 1e-4; }
+            // Tighter asymmetric padding: minimal empty space but keep headroom for legend
+            const double padBottom = std::max(0.06 * span, 5e-4);
+            const double padTop    = std::max(0.10 * span, 8e-4);
+            ymin = std::max(0.0, ymin - padBottom);
+            ymax = ymax + padTop;
 
-        // Frame with categorical x-axis (bin labels centered under markers)
-        TCanvas cS("cSigmaOverlay", "Gaussian sigma (first E bin)", 1000, 700);
-        cS.SetLeftMargin(0.12);
-        cS.SetBottomMargin(0.18);
 
-        TH1F fr("fr_sigma", "", 4, 0.5, 4.5);
-        fr.SetStats(0);
-        fr.GetYaxis()->SetTitle("Gaussian #sigma  [GeV]");
-        fr.GetYaxis()->SetRangeUser(ymin, ymax);
-        fr.GetXaxis()->SetTitle("Variant");
-        fr.GetXaxis()->SetLabelSize(0.045);
-        fr.GetXaxis()->SetTitleOffset(1.2);
-        fr.GetYaxis()->SetTitleOffset(1.1);
-        for (int ib = 1; ib <= 4; ++ib) fr.GetXaxis()->SetBinLabel(ib, xlabels[ib-1]);
-        fr.GetXaxis()->CenterLabels(true);
-        fr.Draw();
+            // Frame with categorical x-axis (bin labels centered under markers)
+            TCanvas cS(Form("cSigmaOverlay_%02d", iE), "Gaussian sigma (E bin)", 1000, 700);
+            
+            
+          cS.SetLeftMargin(0.18);
+          cS.SetBottomMargin(0.18);
+
+          TH1F fr("fr_sigma", "", 4, 0.5, 4.5);
+          fr.SetStats(0);
+          fr.GetYaxis()->SetTitle("Gaussian #sigma  [GeV]");
+          fr.GetYaxis()->SetLabelSize(0.025);
+          fr.GetYaxis()->SetRangeUser(ymin, ymax);
+          fr.GetXaxis()->SetTitle("");
+          fr.GetXaxis()->SetTitleSize(0.0);   // hide x-axis title
+          fr.GetXaxis()->SetLabelSize(0.032); // smaller category labels
+          fr.GetYaxis()->SetTitleOffset(1.55);
+          for (int ib = 1; ib <= 4; ++ib) fr.GetXaxis()->SetBinLabel(ib, xlabels[ib-1]);
+          fr.GetXaxis()->CenterLabels(true);
+          fr.Draw();
 
           // Draw graphs (left→right): Core, Mid, Edge, Full
           if (g_core && g_core->GetN() > 0) g_core->Draw("P SAME");
@@ -841,20 +868,19 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
           if (g_full && g_full->GetN() > 0) g_full->Draw("P SAME");
 
           // Legend in numerical order (Core, Mid, Edge, Full)
-          // kViews: 2:etaCore, 3:etaMid, 4:etaEdge, 1:fullEta
           TLegend L(0.62, 0.70, 0.88, 0.88); L.SetBorderSize(0); L.SetFillStyle(0);
-          L.AddEntry(g_core.get(), kViews[2].pretty, "p"); // "|#eta| #leq 0.20"
-          L.AddEntry(g_mid.get(),  kViews[3].pretty, "p"); // "0.20 < |#eta| #leq 0.70"
-          L.AddEntry(g_edge.get(), kViews[4].pretty, "p"); // "0.70 < |#eta| #leq 1.10"
-          L.AddEntry(g_full.get(), kViews[1].pretty, "p"); // "|#eta| #leq 1.10"
+          L.AddEntry(g_core.get(), kViews[2].pretty, "p");
+          L.AddEntry(g_mid.get(),  kViews[3].pretty, "p");
+          L.AddEntry(g_edge.get(), kViews[4].pretty, "p");
+          L.AddEntry(g_full.get(), kViews[1].pretty, "p");
           L.Draw();
 
           TLatex tx; tx.SetNDC(); tx.SetTextSize(0.035);
-          tx.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} (%s) across variants", ePretty(0).Data()));
+          tx.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} (%s) across variants", ePretty(iE).Data()));
 
-          // Save the full (all-η) version
+          // Save the full (all-η) version for this energy bin
           {
-            const TString outP = baseOut + "/pi0Sigma_firstEbin.png";
+            const TString outP = Form("%s/pi0Sigma_Ebin_%02d.png", baseOut.Data(), iE);
             cS.Modified(); cS.Update(); cS.SaveAs(outP);
             std::cout << "[SigmaOverlay] Wrote: " << outP << "\n";
           }
@@ -873,14 +899,15 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
               }
             };
             upd2(g_edge.get()); upd2(g_mid.get()); upd2(g_full.get());
-            if (!(std::isfinite(ymin2) && std::isfinite(ymax2))) { ymin2 = 0.010; ymax2 = 0.040; }
-            double span2 = ymax2 - ymin2;
-            if (span2 <= 0) { span2 = 0.001; ymin2 -= 0.5*span2; ymax2 += 0.5*span2; }
-            const double pad2 = std::max(0.15 * span2, 0.001);
-            ymin2 = std::max(0.0, ymin2 - pad2);
-            ymax2 = ymax2 + pad2;
+              if (!(std::isfinite(ymin2) && std::isfinite(ymax2))) { ymin2 = 0.010; ymax2 = 0.040; }
+              double span2 = ymax2 - ymin2;
+              if (span2 <= 0) { span2 = 1e-4; }
+              const double pad2b = std::max(0.06 * span2, 5e-4);
+              const double pad2t = std::max(0.10 * span2, 8e-4);
+              ymin2 = std::max(0.0, ymin2 - pad2b);
+              ymax2 = ymax2 + pad2t;
 
-            TCanvas cS2("cSigmaOverlay_noCore", "Gaussian sigma (first E bin) — no etaCore", 1000, 700);
+            TCanvas cS2(Form("cSigmaOverlay_noCore_%02d", iE), "Gaussian sigma (no etaCore)", 1000, 700);
             cS2.SetLeftMargin(0.12);
             cS2.SetBottomMargin(0.18);
 
@@ -888,9 +915,9 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
             fr2.SetStats(0);
             fr2.GetYaxis()->SetTitle("Gaussian #sigma  [GeV]");
             fr2.GetYaxis()->SetRangeUser(ymin2, ymax2);
-            fr2.GetXaxis()->SetTitle("Variant");
-            fr2.GetXaxis()->SetLabelSize(0.045);
-            fr2.GetXaxis()->SetTitleOffset(1.2);
+            fr2.GetXaxis()->SetTitle("");
+            fr2.GetXaxis()->SetTitleSize(0.0);
+            fr2.GetXaxis()->SetLabelSize(0.032);
             fr2.GetYaxis()->SetTitleOffset(1.1);
             for (int ib = 1; ib <= 4; ++ib) fr2.GetXaxis()->SetBinLabel(ib, xlabels[ib-1]);
             fr2.GetXaxis()->CenterLabels(true);
@@ -902,24 +929,405 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
             if (g_full && g_full->GetN() > 0) g_full->Draw("P SAME");
 
             TLegend L2(0.62, 0.70, 0.88, 0.88); L2.SetBorderSize(0); L2.SetFillStyle(0);
-            L2.AddEntry(g_mid.get(),  kViews[3].pretty, "p"); // Mid
-            L2.AddEntry(g_edge.get(), kViews[4].pretty, "p"); // Edge
-            L2.AddEntry(g_full.get(), kViews[1].pretty, "p"); // Full
+            L2.AddEntry(g_mid.get(),  kViews[3].pretty, "p");
+            L2.AddEntry(g_edge.get(), kViews[4].pretty, "p");
+            L2.AddEntry(g_full.get(), kViews[1].pretty, "p");
             L2.Draw();
-              
-            TLatex tx2; tx2.SetNDC(); tx2.SetTextSize(0.035);
-            tx2.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} (%s) across variants  —  no |#eta| #leq 0.20", ePretty(0).Data()));
 
-            const TString outP2 = baseOut + "/pi0Sigma_firstEbin_noCore.png";
+            TLatex tx2; tx2.SetNDC(); tx2.SetTextSize(0.035);
+            tx2.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} (%s) across variants  —  no |#eta| #leq 0.20", ePretty(iE).Data()));
+
+            const TString outP2 = Form("%s/pi0Sigma_Ebin_%02d_noCore.png", baseOut.Data(), iE);
             cS2.Modified(); cS2.Update(); cS2.SaveAs(outP2);
             std::cout << "[SigmaOverlay] Wrote: " << outP2 << "\n";
           }
+
+          // ========================== NEW: Resolution overlay (σ/μ) across variants for this E bin ==========================
+          // Build a resolution graph builder per η view with proper (uncorrelated) error propagation.
+          auto makeViewGraphRes = [&](int iview, double xoff, Style_t mstyle, Color_t col)->std::unique_ptr<TGraphErrors>
+          {
+            std::vector<double> y, ey;
+            auto push = [&](const FitRes& R) {
+              if (R.ok && std::isfinite(R.sig) && std::isfinite(R.mean) && R.sig>0.0 && R.mean>0.0) {
+                const double res = R.sig / R.mean;
+                const double err = res * std::sqrt( std::pow(R.sigErr / R.sig,  2.0) +
+                                                    std::pow(R.meanErr / R.mean, 2.0) );
+                y.push_back(res); ey.push_back(err);
+              } else {
+                y.push_back(std::numeric_limits<double>::quiet_NaN()); ey.push_back(0.0);
+              }
+            };
+
+            // Order matches x: CLUSRAW, CLUSCP, EAEonly, EAetaE
+            push(summaryV[iview][vRAW][iE]);
+            push(summaryV[iview][vCP][iE]);
+            push(summaryV[iview][vEAone][iE]);
+            push(summaryV[iview][vEAeta][iE]);
+
+            // Filter NaNs while preserving x order; apply per-series x offset
+            std::vector<double> xf, yf, exf, eyf;
+            for (size_t k = 0; k < y.size(); ++k) {
+              if (!std::isfinite(y[k])) continue;
+              xf.push_back(x[k] + xoff);
+              yf.push_back(y[k]);
+              exf.push_back(0.0);
+              eyf.push_back(ey[k]);
+            }
+
+            auto g = std::make_unique<TGraphErrors>(
+              (int)xf.size(),
+              xf.empty()?nullptr:&xf[0],
+              yf.empty()?nullptr:&yf[0],
+              exf.empty()?nullptr:&exf[0],
+              eyf.empty()?nullptr:&eyf[0]
+            );
+            g->SetMarkerStyle(mstyle);
+            g->SetMarkerSize(1.5);
+            g->SetMarkerColor(col);
+            g->SetLineColor(col);
+            g->SetLineWidth(2);
+            return g;
+          };
+
+          auto r_core = makeViewGraphRes(2, -0.18, 20, kBlue+1);
+          auto r_mid  = makeViewGraphRes(3, -0.06, 21, kGreen+2);
+          auto r_edge = makeViewGraphRes(4,  0.06, 22, kMagenta+1);
+          auto r_full = makeViewGraphRes(1,  0.18, 24, kRed+1);
+
+          // Dynamic y-range for resolution
+          double rymin = +1e30, rymax = -1e30, RX, RY;
+          auto rupd = [&](TGraphErrors* g) {
+            if (!g) return;
+            for (int k = 0; k < g->GetN(); ++k) {
+              g->GetPoint(k, RX, RY);
+              const double eY = g->GetErrorY(k);
+              rymin = std::min(rymin, RY - eY);
+              rymax = std::max(rymax, RY + eY);
+            }
+          };
+          rupd(r_core.get()); rupd(r_mid.get()); rupd(r_edge.get()); rupd(r_full.get());
+          if (!(std::isfinite(rymin) && std::isfinite(rymax))) { rymin = 0.10; rymax = 0.20; }
+          double rspan = rymax - rymin; if (rspan <= 0) rspan = 1e-3;
+          const double rpadB = 0.18 * rspan;
+          const double rpadT = 0.3 * rspan;
+          rymin = std::max(0.0, rymin - rpadB);
+          rymax = rymax + rpadT;
+
+          // Frame and draw resolution overlay
+          TCanvas cR(Form("cResolutionOverlay_%02d", iE), "Gaussian resolution (E bin)", 1000, 700);
+          cR.SetLeftMargin(0.18);
+          cR.SetBottomMargin(0.18);
+
+          TH1F frr("fr_resolution", "", 4, 0.5, 4.5);
+          frr.SetStats(0);
+          frr.GetYaxis()->SetTitle("Gaussian resolution  #sigma / #mu");
+          frr.GetYaxis()->SetLabelSize(0.025);
+          frr.GetYaxis()->SetRangeUser(rymin, rymax);
+          frr.GetXaxis()->SetTitle("");
+          frr.GetXaxis()->SetTitleSize(0.0);
+          frr.GetXaxis()->SetLabelSize(0.032);
+          frr.GetYaxis()->SetTitleOffset(1.55);
+          for (int ib = 1; ib <= 4; ++ib) frr.GetXaxis()->SetBinLabel(ib, xlabels[ib-1]);
+          frr.GetXaxis()->CenterLabels(true);
+          frr.Draw();
+
+          if (r_core && r_core->GetN() > 0) r_core->Draw("P SAME");
+          if (r_mid  && r_mid->GetN()  > 0) r_mid->Draw("P SAME");
+          if (r_edge && r_edge->GetN() > 0) r_edge->Draw("P SAME");
+          if (r_full && r_full->GetN() > 0) r_full->Draw("P SAME");
+
+          TLegend LR(0.62, 0.70, 0.88, 0.88); LR.SetBorderSize(0); LR.SetFillStyle(0);
+          LR.AddEntry(r_core.get(), kViews[2].pretty, "p");
+          LR.AddEntry(r_mid.get(),  kViews[3].pretty, "p");
+          LR.AddEntry(r_edge.get(), kViews[4].pretty, "p");
+          LR.AddEntry(r_full.get(), kViews[1].pretty, "p");
+          LR.Draw();
+
+          TLatex txR; txR.SetNDC(); txR.SetTextSize(0.035);
+          txR.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} / #mu_{#pi^{0}} (%s) across variants", ePretty(iE).Data()));
+
+          const TString outR = Form("%s/pi0Resolution_Ebin_%02d.png", baseOut.Data(), iE);
+          cR.Modified(); cR.Update(); cR.SaveAs(outR);
+          std::cout << "[ResolutionOverlay] Wrote: " << outR << "\n";
+
+          // No-Core version (exclude etaCore)
+          {
+            double r2min = +1e30, r2max = -1e30, XX, YY;
+            auto rupd2 = [&](TGraphErrors* g) {
+              if (!g) return;
+              for (int k = 0; k < g->GetN(); ++k) {
+                g->GetPoint(k, XX, YY);
+                const double eY = g->GetErrorY(k);
+                r2min = std::min(r2min, YY - eY);
+                r2max = std::max(r2max, YY + eY);
+              }
+            };
+            rupd2(r_mid.get()); rupd2(r_edge.get()); rupd2(r_full.get());
+            if (!(std::isfinite(r2min) && std::isfinite(r2max))) { r2min = 0.10; r2max = 0.20; }
+            double rsp2 = r2max - r2min; if (rsp2 <= 0) rsp2 = 1e-3;
+            const double r2padB = 0.06 * rsp2;
+            const double r2padT = 0.10 * rsp2;
+            r2min = std::max(0.0, r2min - r2padB);
+            r2max = r2max + r2padT;
+
+            TCanvas cR2(Form("cResolutionOverlay_noCore_%02d", iE), "Gaussian resolution (no etaCore)", 1000, 700);
+            cR2.SetLeftMargin(0.18);
+            cR2.SetBottomMargin(0.18);
+
+            TH1F frr2("fr_resolution_noCore", "", 4, 0.5, 4.5);
+            frr2.SetStats(0);
+            frr2.GetYaxis()->SetTitle("Gaussian resolution  #sigma / #mu");
+            frr2.GetYaxis()->SetRangeUser(r2min, r2max);
+            frr2.GetXaxis()->SetTitle("");
+            frr2.GetXaxis()->SetTitleSize(0.0);
+            frr2.GetXaxis()->SetLabelSize(0.032);
+            frr2.GetYaxis()->SetTitleOffset(1.55);
+            for (int ib = 1; ib <= 4; ++ib) frr2.GetXaxis()->SetBinLabel(ib, xlabels[ib-1]);
+            frr2.GetXaxis()->CenterLabels(true);
+            frr2.Draw();
+
+            if (r_mid  && r_mid->GetN()  > 0) r_mid->Draw("P SAME");
+            if (r_edge && r_edge->GetN() > 0) r_edge->Draw("P SAME");
+            if (r_full && r_full->GetN() > 0) r_full->Draw("P SAME");
+
+            TLegend LR2(0.62, 0.70, 0.88, 0.88); LR2.SetBorderSize(0); LR2.SetFillStyle(0);
+            LR2.AddEntry(r_mid.get(),  kViews[3].pretty, "p");
+            LR2.AddEntry(r_edge.get(), kViews[4].pretty, "p");
+            LR2.AddEntry(r_full.get(), kViews[1].pretty, "p");
+            LR2.Draw();
+
+            TLatex txR2; txR2.SetNDC(); txR2.SetTextSize(0.035);
+            txR2.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} / #mu_{#pi^{0}} (%s) across variants  —  no |#eta| #leq 0.20", ePretty(iE).Data()));
+
+            const TString outR2 = Form("%s/pi0Resolution_Ebin_%02d_noCore.png", baseOut.Data(), iE);
+            cR2.Modified(); cR2.Update(); cR2.SaveAs(outR2);
+            std::cout << "[ResolutionOverlay] Wrote: " << outR2 << "\n";
+          }
+          // ========================== END Resolution overlay ==========================
+        } // end for iE
+      }
+    }
+
+
+    // -------------------------- NEW: sigma RATIO vs E across η-views (money plots) --------------------------
+    {
+      // Find indices for RAW baseline and requested variants
+      int vRAW = -1, vCP = -1, vEAone = -1, vEAeta = -1;
+      for (int v = 0; v < NVAR; ++v) {
+        const std::string tag = kVarTags[v];
+        if      (tag == "CLUSRAW") vRAW   = v;
+        else if (tag == "CLUSCP")  vCP    = v;
+        else if (tag == "EAEonly") vEAone = v;
+        else if (tag == "EAetaE")  vEAeta = v;
+      }
+
+      if (vRAW < 0) {
+        std::cerr << "[SigmaRatio] CLUSRAW index not found — skipping ratio plots.\n";
+      } else {
+        gSystem->mkdir(baseOut + "/SigmaRatios", true);
+
+        // Build sigma(variant)/sigma(RAW) vs E with proper uncertainty propagation
+        auto makeRatioGraph = [&](int iview, int vVar, Color_t col, Style_t mstyle)->std::unique_ptr<TGraphErrors>
+        {
+          std::vector<double> x, y, ex, ey;
+          x.reserve(N_E); y.reserve(N_E); ex.assign(N_E, 0.0); ey.reserve(N_E);
+
+          for (int i = 0; i < N_E; ++i) {
+            const FitRes& Rs = summaryV[iview][vVar][i]; // variant
+            const FitRes& Rr = summaryV[iview][vRAW][i]; // RAW baseline
+            if (!Rs.ok || !Rr.ok) continue;
+            if (!(std::isfinite(Rs.sig) && std::isfinite(Rr.sig))) continue;
+            if (Rs.sig <= 0.0 || Rr.sig <= 0.0) continue;
+
+            const double ratio = Rs.sig / Rr.sig;
+            const double err   = ratio * std::sqrt( std::pow(Rs.sigErr / Rs.sig, 2.0) +
+                                                    std::pow(Rr.sigErr / Rr.sig, 2.0) );
+            x.push_back( eCtrOf(i) );
+            y.push_back( ratio );
+            ey.push_back( err );
+          }
+
+          auto g = std::make_unique<TGraphErrors>(
+            (int)x.size(),
+            x.empty()?nullptr:&x[0],
+            y.empty()?nullptr:&y[0],
+            ex.empty()?nullptr:&ex[0],
+            ey.empty()?nullptr:&ey[0]
+          );
+          g->SetMarkerStyle(mstyle);
+          g->SetMarkerSize(1.2);
+          g->SetMarkerColor(col);
+          g->SetLineColor(col);
+          g->SetLineWidth(2);
+          return g;
+        };
+
+        struct ViewStyle { int iv; Color_t col; Style_t ms; };
+        // Order: Core, Mid, Edge, Full (η-dependent views only)
+        std::vector<ViewStyle> views = {
+          {2, kBlue+1,   20},  // etaCore
+          {3, kGreen+2,  21},  // etaMid
+          {4, kMagenta+1,22},  // etaEdge
+          {1, kRed+1,    24}   // fullEta
+        };
+
+        auto moneyPlot = [&](int vVar, const char* varPretty, const char* varTag)
+        {
+          std::vector<std::unique_ptr<TGraphErrors>> gs;
+          double ymin = +1e30, ymax = -1e30, X, Y;
+          int Ntot = 0;
+
+          for (const auto& vw : views) {
+            auto g = makeRatioGraph(vw.iv, vVar, vw.col, vw.ms);
+            Ntot += g->GetN();
+            if (g->GetN() > 0) {
+              for (int k = 0; k < g->GetN(); ++k) {
+                g->GetPoint(k, X, Y);
+                const double eY = g->GetErrorY(k);
+                ymin = std::min(ymin, Y - eY);
+                ymax = std::max(ymax, Y + eY);
+              }
+            }
+            gs.emplace_back(std::move(g));
+          }
+
+          if (Ntot == 0) {
+            std::cerr << "[SigmaRatio] No valid points for variant " << varTag << " — skipping.\n";
+            return;
+          }
+
+          if (!(std::isfinite(ymin) && std::isfinite(ymax))) { ymin = 0.8; ymax = 1.2; }
+          double span = ymax - ymin; if (span <= 0) span = 0.1;
+          const double pad = 0.15 * span;
+          ymin = std::max(0.0, ymin - pad);
+          ymax = ymax + pad;
+
+          TCanvas c("cRatio", "sigma ratio vs E", 950, 700);
+          c.SetLeftMargin(0.14);
+          c.SetBottomMargin(0.14);
+
+          TH2F fr("fr_ratio", "", 100, E_edges[0]-0.5, E_edges[N_E]-0.5, 100, ymin, ymax);
+          fr.SetTitle(Form("#sigma_{#pi^{0}} ratio: %s / No Correction;E [GeV];#sigma_{%s}/#sigma_{RAW}", varPretty, "#pi^{0}"));
+          fr.SetStats(0);
+          fr.Draw();
+
+          // Reference line at ratio = 1
+          TLine Lref(E_edges[0]-0.5, 1.0, E_edges[N_E]-0.5, 1.0);
+          Lref.SetLineColor(kGray+2);
+          Lref.SetLineStyle(2);
+          Lref.Draw("SAME");
+
+          for (const auto& g : gs) { if (g && g->GetN() > 0) g->Draw("P SAME"); }
+
+          TLegend LR(0.62, 0.70, 0.88, 0.88); LR.SetBorderSize(0); LR.SetFillStyle(0);
+          LR.AddEntry(gs[0].get(), kViews[2].pretty, "p"); // etaCore
+          LR.AddEntry(gs[1].get(), kViews[3].pretty, "p"); // etaMid
+          LR.AddEntry(gs[2].get(), kViews[4].pretty, "p"); // etaEdge
+          LR.AddEntry(gs[3].get(), kViews[1].pretty, "p"); // fullEta
+          LR.Draw();
+
+          const TString outP = baseOut + "/SigmaRatios/sigmaRatio_" + TString(varTag) + "_over_CLUSRAW_vsE.png";
+          c.Modified(); c.Update(); c.SaveAs(outP);
+          std::cout << "[SigmaRatio] Wrote: " << outP << "\n";
+        };
+
+          // Produce the requested money plots:
+          if (vCP    >= 0) moneyPlot(vCP,    "Legacy Constant b-corr",         "CLUSCP");
+          if (vEAone >= 0) moneyPlot(vEAone, "Energy-Dep b-correction",         "EAEonly");
+          if (vEAeta >= 0) moneyPlot(vEAeta, "Energy/|#eta|-Dep b-correction",  "EAetaE");
+
+          // -------------------------- TERMINAL SUMMARY TABLE --------------------------
+          // Print per-η-view tables of RMS percent differences vs CLUSRAW
+          // Δ% = 100 * (σ_variant - σ_RAW) / σ_RAW   (one row per energy bin)
+          auto pctStr = [](double num)->std::string {
+            if (!std::isfinite(num)) return std::string("   n/a ");
+            std::ostringstream os; os.setf(std::ios::fixed); os<<std::setprecision(2)<<std::setw(7)<<num;
+            return os.str();
+          };
+
+          struct VarDef { int idx; const char* tag; };
+          std::vector<VarDef> vars;
+          if (vCP    >= 0) vars.push_back({vCP,    "CLUSCP "});
+          if (vEAone >= 0) vars.push_back({vEAone, "EAEonly"});
+          if (vEAeta >= 0) vars.push_back({vEAeta, "EAetaE "});
+
+          // Views in numerical order: Core, Mid, Edge, Full
+          std::vector<int> viewOrder = {2, 3, 4, 1};
+
+          std::cout << "\n";
+          std::cout << "╔═════════════════════════════════════════════════════════════════════════════════════╗\n";
+          std::cout << "║   RMS percent differences vs CLUSRAW  (per η view, per E-bin)                      ║\n";
+          std::cout << "║   Δ% = 100 × (σ_variant − σ_RAW) / σ_RAW                                           ║\n";
+          std::cout << "╚═════════════════════════════════════════════════════════════════════════════════════╝\n";
+
+          for (int iv : viewOrder)
+          {
+            // Skip if nothing to compare
+            if (vRAW < 0 || vars.empty()) continue;
+
+            std::cout << "\n";
+            std::cout << "View: " << kViews[iv].pretty << "   (key=" << kViews[iv].key << ")\n";
+            std::cout << "─────────────────────────────────────────────────────────────────────────────────────\n";
+            // Header
+            std::cout << std::left << std::setw(16) << "E-bin"
+                      << std::right;
+            for (const auto& vd : vars) {
+              std::cout << " | " << std::setw(12) << vd.tag;
+            }
+            std::cout << "\n";
+
+            std::cout << std::string(16 + (int)vars.size() * (3 + 12), '-') << "\n";
+
+            // Row per energy bin
+            for (int i = 0; i < N_E; ++i)
+            {
+              const FitRes& Rr = summaryV[iv][vRAW][i];
+              std::cout << std::left << std::setw(16)
+                        << Form("[%.0f,%.0f) GeV", E_edges[i], E_edges[i+1])
+                        << std::right;
+
+              for (const auto& vd : vars)
+              {
+                const FitRes& Rs = summaryV[iv][vd.idx][i];
+                double pct = std::numeric_limits<double>::quiet_NaN();
+                if (Rr.ok && Rs.ok && std::isfinite(Rr.sig) && std::isfinite(Rs.sig) && Rr.sig > 0.0)
+                  pct = 100.0 * (Rs.sig - Rr.sig) / Rr.sig;
+
+                std::cout << " | " << std::setw(12) << pctStr(pct);
+              }
+              std::cout << "\n";
+            }
+
+            // Per-view averages (unweighted over bins with valid entries)
+            std::cout << std::string(16 + (int)vars.size() * (3 + 12), '-') << "\n";
+            std::cout << std::left << std::setw(16) << "Avg Δ% (bins)"
+                      << std::right;
+            for (const auto& vd : vars)
+            {
+              double sum = 0.0; int n=0;
+              for (int i = 0; i < N_E; ++i) {
+                const FitRes& Rr = summaryV[iv][vRAW][i];
+                const FitRes& Rs = summaryV[iv][vd.idx][i];
+                if (Rr.ok && Rs.ok && std::isfinite(Rr.sig) && std::isfinite(Rs.sig) && Rr.sig > 0.0) {
+                  sum += 100.0 * (Rs.sig - Rr.sig) / Rr.sig;
+                  ++n;
+                }
+              }
+              const double avg = (n>0) ? (sum / n) : std::numeric_limits<double>::quiet_NaN();
+              std::cout << " | " << std::setw(12) << pctStr(avg);
+            }
+            std::cout << "\n";
+          }
+          std::cout << std::endl;
+          // --------------------------------------------------------------------
+
       }
     }
 
     std::cout << "[Pi0MassAna] DONE. Outputs → " << baseOut << "\n";
 
 }
+
 
 
 
@@ -3066,7 +3474,7 @@ static void MakeFourWaySummaries(
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/chunkMerge_run_00047289.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -8393,7 +8801,7 @@ void PDCAnalysisPrime()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/chunkMerge_run_00047289.root";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root";
   const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/SimOutputPrime";
 
   EnsureDir(outBaseDir);

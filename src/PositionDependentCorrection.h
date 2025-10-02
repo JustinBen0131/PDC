@@ -322,13 +322,15 @@ class PositionDependentCorrection : public SubsysReco
     bool              m_vtxCut{true};
     bool              alreadyDeclaredHistograms{false};
     bool              m_firstPassBvaluesOnly{false};   ///< fast path: only book/fill uncorrected TH3s
-
+    
     struct Pi0CutCounters {
-      // Event accounting
-      std::uint64_t ev_total        = 0;   // all events entering process_towers
-      std::uint64_t ev_processed    = 0;   // events that pass |vz| acceptance
-      std::uint64_t ev_vz_skipped   = 0;   // events rejected by |vz| > m_vzSliceMax
-      std::uint64_t ev_nClusTooLarge= 0;   // events rejected by nClusCount > max_nClusCount
+        // Event accounting
+        std::uint64_t ev_total         = 0;  // all events entering process_towers
+        std::uint64_t ev_processed     = 0;  // events that pass |vz| acceptance
+        std::uint64_t ev_vz_skipped    = 0;  // events rejected by |vz| > m_vzSliceMax
+        std::uint64_t ev_trig_skipped  = 0;  // events skipped because required data trigger not fired
+        std::uint64_t ev_nClusTooLarge = 0;  // events rejected by nClusCount > max_nClusCount
+
         
         // NEW: explicit, separate counters
         std::uint64_t c1_prob         = 0; // anchor rejected by probability
@@ -400,44 +402,44 @@ class PositionDependentCorrection : public SubsysReco
   /* random */
   TRandom3* rnd{nullptr};
     
-    /* global counters (unchanged + ties added) */
-    std::atomic<std::uint64_t> m_nWinRAW{0},   m_nWinCP{0},   m_nWinBCorr{0};
-    std::atomic<std::uint64_t> m_nWinRAW_Eta{0},m_nWinCP_Eta{0},m_nWinBCorr_Eta{0};
-      std::atomic<std::uint64_t> m_phiWinCLUSraw{0}, m_phiWinCLUScp{0},
+  /* global counters (unchanged + ties added) */
+  std::atomic<std::uint64_t> m_nWinRAW{0},   m_nWinCP{0},   m_nWinBCorr{0};
+  std::atomic<std::uint64_t> m_nWinRAW_Eta{0},m_nWinCP_Eta{0},m_nWinBCorr_Eta{0};
+  std::atomic<std::uint64_t> m_phiWinCLUSraw{0}, m_phiWinCLUScp{0},
                                  m_phiWinCLUSbcorr{0}, m_phiWinPDCraw{0},
                                  m_phiWinPDCcorr{0},  m_phiWinCLUScpEA{0};
-      std::atomic<std::uint64_t> m_etaWinCLUSraw{0}, m_etaWinCLUScp{0},
+  std::atomic<std::uint64_t> m_etaWinCLUSraw{0}, m_etaWinCLUScp{0},
                                  m_etaWinCLUSbcorr{0}, m_etaWinPDCraw{0},
                                  m_etaWinPDCcorr{0},  m_etaWinCLUScpEA{0};
 
 
-    std::atomic<std::uint64_t> m_phiTieCLUScpEA{0};
-    std::atomic<std::uint64_t> m_etaTieCLUScpEA{0};
+  std::atomic<std::uint64_t> m_phiTieCLUScpEA{0};
+  std::atomic<std::uint64_t> m_etaTieCLUScpEA{0};
 
 
-    std::atomic<std::uint64_t> m_phiNoChange_CP_vs_RAW{0};
-    std::atomic<std::uint64_t> m_phiNoChange_EA_vs_RAW{0};
-    std::atomic<std::uint64_t> m_etaNoChange_CP_vs_RAW{0};
-    std::atomic<std::uint64_t> m_etaNoChange_EA_vs_RAW{0};
+  std::atomic<std::uint64_t> m_phiNoChange_CP_vs_RAW{0};
+  std::atomic<std::uint64_t> m_phiNoChange_EA_vs_RAW{0};
+  std::atomic<std::uint64_t> m_etaNoChange_CP_vs_RAW{0};
+  std::atomic<std::uint64_t> m_etaNoChange_EA_vs_RAW{0};
 
-      // PDC side-peak tallies (± one-tower width)
-      std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
-      std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
+  // PDC side-peak tallies (± one-tower width)
+  std::atomic<std::uint64_t> m_pdcRawPos1Tw{0},  m_pdcRawNeg1Tw{0};
+  std::atomic<std::uint64_t> m_pdcCorrPos1Tw{0}, m_pdcCorrNeg1Tw{0};
 
-      std::vector<float> m_pdcRawPos1Tw_dphi,  m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E;
-      std::vector<float> m_pdcRawNeg1Tw_dphi,  m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E;
-      std::vector<float> m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E;
-      std::vector<float> m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E;
+  std::vector<float> m_pdcRawPos1Tw_dphi,  m_pdcRawPos1Tw_eta,   m_pdcRawPos1Tw_vz,   m_pdcRawPos1Tw_E;
+  std::vector<float> m_pdcRawNeg1Tw_dphi,  m_pdcRawNeg1Tw_eta,   m_pdcRawNeg1Tw_vz,   m_pdcRawNeg1Tw_E;
+  std::vector<float> m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta,  m_pdcCorrPos1Tw_vz,  m_pdcCorrPos1Tw_E;
+  std::vector<float> m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta,  m_pdcCorrNeg1Tw_vz,  m_pdcCorrNeg1Tw_E;
 
 
-      // CLUS (clusterizer) side-peak tallies (± one-tower width) for RAW and CP
-      std::atomic<std::uint64_t> m_clusRawPos1Tw{0},  m_clusRawNeg1Tw{0};
-      std::atomic<std::uint64_t> m_clusCPPos1Tw{0},   m_clusCPNeg1Tw{0};
+  // CLUS (clusterizer) side-peak tallies (± one-tower width) for RAW and CP
+  std::atomic<std::uint64_t> m_clusRawPos1Tw{0},  m_clusRawNeg1Tw{0};
+  std::atomic<std::uint64_t> m_clusCPPos1Tw{0},   m_clusCPNeg1Tw{0};
 
-      std::vector<float> m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E;
-      std::vector<float> m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E;
-      std::vector<float> m_clusCPPos1Tw_dphi,  m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E;
-      std::vector<float> m_clusCPNeg1Tw_dphi,  m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E;
+  std::vector<float> m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta,  m_clusRawPos1Tw_vz,  m_clusRawPos1Tw_E;
+  std::vector<float> m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta,  m_clusRawNeg1Tw_vz,  m_clusRawNeg1Tw_E;
+  std::vector<float> m_clusCPPos1Tw_dphi,  m_clusCPPos1Tw_eta,   m_clusCPPos1Tw_vz,   m_clusCPPos1Tw_E;
+  std::vector<float> m_clusCPNeg1Tw_dphi,  m_clusCPNeg1Tw_eta,   m_clusCPNeg1Tw_vz,   m_clusCPNeg1Tw_E;
 
 
     
@@ -484,10 +486,10 @@ class PositionDependentCorrection : public SubsysReco
     // Per-variant, per-slice π0 mass histograms (8 variants × N_Ebins)
     TH1F* h_m_pi0_var[static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
 
-    // NEW: Per-η-view, per-variant, per-slice π0 mass histograms
-    // view index: 0=fullEta (|η|≤1.10), 1=etaCore (|η|≤0.20),
-    //             2=etaMid (0.20<|η|≤0.70), 3=etaEdge (0.70<|η|≤1.10)
-    TH1F* h_m_pi0_var_eta[kNEtaViews][static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
+  // NEW: Per-η-view, per-variant, per-slice π0 mass histograms
+  // view index: 0=fullEta (|η|≤1.10), 1=etaCore (|η|≤0.20),
+  //             2=etaMid (0.20<|η|≤0.70), 3=etaEdge (0.70<|η|≤1.10)
+  TH1F* h_m_pi0_var_eta[kNEtaViews][static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
 
   TH1F* h_phi_diff_raw_E        [N_Ebins]{};
   TH1F* h_phi_diff_cpRaw_E      [N_Ebins]{};
@@ -496,49 +498,49 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
     
-    // --- NEW: per-slice (E) 2D maps for CP(EA) ---
-    // x = b_phi  , y = Δφ(folded); one per energy bin
-    TH2F* h2_phi_diffEA_vs_bphi_E [N_Ebins]{};
-    // x = b_eta  , y = Δη        ; one per energy bin
-    TH2F* h2_eta_diffEA_vs_beta_E [N_Ebins]{};
+  // --- NEW: per-slice (E) 2D maps for CP(EA) ---
+  // x = b_phi  , y = Δφ(folded); one per energy bin
+  TH2F* h2_phi_diffEA_vs_bphi_E [N_Ebins]{};
+  // x = b_eta  , y = Δη        ; one per energy bin
+  TH2F* h2_eta_diffEA_vs_beta_E [N_Ebins]{};
 
-    // --- EA residuals (φ) – four uniquely-named variants
-    TH1F* h_phi_diff_cpCorrEA_geom_E                          [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
+  // --- EA residuals (φ) – four uniquely-named variants
+  TH1F* h_phi_diff_cpCorrEA_geom_E                          [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
 
-    // --- EA residuals (η) – four uniquely-named variants
-    TH1F* h_eta_diff_cpCorrEA_geom_E                          [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
+  // --- EA residuals (η) – four uniquely-named variants
+  TH1F* h_eta_diff_cpCorrEA_geom_E                          [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
 
-    // --- Ash scan profiles: <(Δφ)^2> / <(Δη)^2> vs b (tower-space driven)
-    TProfile* p_phi_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δφ)^2>
-    TProfile* p_eta_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δη)^2>
+  // --- Ash scan profiles: <(Δφ)^2> / <(Δη)^2> vs b (tower-space driven)
+  TProfile* p_phi_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δφ)^2>
+  TProfile* p_eta_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δη)^2>
 
-    // --- Log scan profiles: <(Δφ)^2> / <(Δη)^2> vs w0 (tower-space driven)
-    TProfile* p_phi_rms2_vs_w0_E[N_Ebins]{};
-    TProfile* p_eta_rms2_vs_w0_E[N_Ebins]{};
+  // --- Log scan profiles: <(Δφ)^2> / <(Δη)^2> vs w0 (tower-space driven)
+  TProfile* p_phi_rms2_vs_w0_E[N_Ebins]{};
+  TProfile* p_eta_rms2_vs_w0_E[N_Ebins]{};
 
-    // --- Agreement diagnostic in tower units: |CP(b) - CP(EA)|
-    TProfile* p_abs_dloc_phi_CPea_vs_b_E [N_Ebins]{};
-    TProfile* p_abs_dloc_eta_CPea_vs_b_E [N_Ebins]{};
+  // --- Agreement diagnostic in tower units: |CP(b) - CP(EA)|
+  TProfile* p_abs_dloc_phi_CPea_vs_b_E [N_Ebins]{};
+  TProfile* p_abs_dloc_eta_CPea_vs_b_E [N_Ebins]{};
     
-    // ----- 6-way corrected winners (Δφ): RAW, CP, EA_geom, EA_fitEta, EA_fitE, EA_mix
-    std::uint64_t m_phi6WayWin_RAW{0}, m_phi6WayWin_CP{0},
+  // ----- 6-way corrected winners (Δφ): RAW, CP, EA_geom, EA_fitEta, EA_fitE, EA_mix
+  std::uint64_t m_phi6WayWin_RAW{0}, m_phi6WayWin_CP{0},
                   m_phi6WayWin_EA_geom{0}, m_phi6WayWin_EA_fitEta{0},
                   m_phi6WayWin_EA_fitE{0},  m_phi6WayWin_EA_mix{0};
-    std::uint64_t m_phi6WayWinByE_RAW[N_Ebins]{}, m_phi6WayWinByE_CP[N_Ebins]{},
+  std::uint64_t m_phi6WayWinByE_RAW[N_Ebins]{}, m_phi6WayWinByE_CP[N_Ebins]{},
                   m_phi6WayWinByE_EA_geom[N_Ebins]{}, m_phi6WayWinByE_EA_fitEta[N_Ebins]{},
                   m_phi6WayWinByE_EA_fitE[N_Ebins]{},  m_phi6WayWinByE_EA_mix[N_Ebins]{};
 
-    // ----- 6-way corrected winners (Δη): RAW, CP, EA_geom, EA_fitEta, EA_fitE, EA_mix
-    std::uint64_t m_eta6WayWin_RAW{0}, m_eta6WayWin_CP{0},
+  // ----- 6-way corrected winners (Δη): RAW, CP, EA_geom, EA_fitEta, EA_fitE, EA_mix
+  std::uint64_t m_eta6WayWin_RAW{0}, m_eta6WayWin_CP{0},
                   m_eta6WayWin_EA_geom{0}, m_eta6WayWin_EA_fitEta{0},
                   m_eta6WayWin_EA_fitE{0},  m_eta6WayWin_EA_mix{0};
-    std::uint64_t m_eta6WayWinByE_RAW[N_Ebins]{}, m_eta6WayWinByE_CP[N_Ebins]{},
+  std::uint64_t m_eta6WayWinByE_RAW[N_Ebins]{}, m_eta6WayWinByE_CP[N_Ebins]{},
                   m_eta6WayWinByE_EA_geom[N_Ebins]{}, m_eta6WayWinByE_EA_fitEta[N_Ebins]{},
                   m_eta6WayWinByE_EA_fitE[N_Ebins]{},  m_eta6WayWinByE_EA_mix[N_Ebins]{};
 

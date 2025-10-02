@@ -317,7 +317,7 @@ split_golden_run_list()(
 ##############################################################################
 
 # ---------- user‑tunable constants ----------
-CHUNK_SIZE_DATA=5          # N  – files per Condor job
+CHUNK_SIZE_DATA=2          # N  – files per Condor job
 MAX_JOBS_DATA=10000         # Q  – global cap for “condor firstTen”
 # ---------------------------------------------------------------------------
 
@@ -1473,17 +1473,102 @@ case "$MODE" in
             condorFirstTen)
                 submit_data_condor "condor" "firstTen" ;;
 
-            condor)
-                # -----------------------------------------------
-                #   • dataOnly condor           → full scan (old)
-                #   • dataOnly condor round N   → submit segment N
-                # -----------------------------------------------
-                if [[ "$3" == "round" && "$4" =~ ^[0-9]+$ ]]; then
+             condor)
+                # -----------------------------------------------------------------
+                #   • dataOnly condor                 → full scan (legacy)
+                #   • dataOnly condor round N         → submit entire segment N
+                #   • dataOnly condor startFrom RUN   → submit from RUN → end of its segment
+                #     (NEVER falls back to full scan; errors out if not found)
+                # -----------------------------------------------------------------
+
+                if [[ "$3" == "startFrom" && "$4" =~ ^[0-9]+$ ]]; then
+                    # Normalize to 8 digits to match goldenRuns_segment*.txt format
+                    startRun=$(printf "%08d" "$((10#$4))")
+                    mkdir -p "$CONDOR_LISTFILES_DIR"
+
+                    # Collect segment files
+                    shopt -s nullglob
+                    segs=( "${GOLDEN_SEGMENT_PREFIX}"*.txt )
+                    shopt -u nullglob
+                    if (( ${#segs[@]} == 0 )); then
+                        echo "[ERROR] startFrom: no segment files found at ${GOLDEN_SEGMENT_PREFIX}*.txt"
+                        exit 1
+                    fi
+
+                    # Locate the segment containing startRun (exact line match)
+                    segMatch=""
+                    for s in "${segs[@]}"; do
+                        if grep -qx "$startRun" "$s"; then
+                            segMatch="$s"
+                            break
+                        fi
+                    done
+
+                    if [[ -z "$segMatch" ]]; then
+                        echo "[ERROR] startFrom: run ${startRun} not found in any segment file."
+                        echo "[HINT] Your segments are:"
+                        for s in "${segs[@]}"; do
+                            echo "  - $(basename "$s"): first/last 5 lines →"
+                            awk 'NR<=5{print "    ",$0} END{print "    ..."; for(i=NR-4;i<=NR;i++) if(i>5&&i>0) print "    ",$i}' "$s"
+                        done
+                        exit 1
+                    fi
+
+                    # Build tail list from startRun → EOF of the matched segment (strip comments/blanks)
+                    tmpRunList="${CONDOR_LISTFILES_DIR}/startFrom_${startRun}_$(date +%s).txt"
+                    awk -v s="$startRun" '
+                        BEGIN { emit=0 }
+                        /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+                        $0==s { emit=1 }
+                        emit { print $0 }
+                    ' "$segMatch" > "$tmpRunList"
+
+                    lines=$(wc -l < "$tmpRunList" 2>/dev/null || echo 0)
+                    if (( lines == 0 )); then
+                        echo "[ERROR] startFrom: built list is empty; segment=$(basename "$segMatch"), start=${startRun}"
+                        exit 1
+                    fi
+
+                    echo "[INFO] startFrom: segment=$(basename "$segMatch"), first=${startRun}, lines=${lines}"
+                    submit_data_condor "condor" "" "$tmpRunList"
+                    exit 0
+
+                elif [[ "$3" == "round" && "$4" =~ ^[0-9]+$ ]]; then
                     segFile="${GOLDEN_SEGMENT_PREFIX}${4}.txt"
+                    echo "[INFO] round: submitting entire segment file $(basename "$segFile")"
+
+                    # One-time cleanup ONLY for round 1 (data output + condor log paths)
+                    if [[ "$4" -eq 1 ]]; then
+                      echo "[CLEAN] Round 1 detected → clearing previous DATA outputs and Condor logs"
+                      # DATA output path: remove everything inside (keep the top directory)
+                      if [[ -d "$OUTDIR_DATA" ]]; then
+                        echo "        OUTDIR_DATA → $OUTDIR_DATA"
+                        find "$OUTDIR_DATA" -mindepth 1 -print -delete 2>/dev/null || true
+                      else
+                        echo "        [WARN] OUTDIR_DATA does not exist: $OUTDIR_DATA"
+                      fi
+                      # Condor paths: remove files only (keep directories)
+                      for d in "$LOG_DIR/stdout" "$LOG_DIR/log" "$LOG_DIR/error"; do
+                        if [[ -d "$d" ]]; then
+                          echo "        CONDOR DIR  → $d"
+                          find "$d" -type f -print -delete 2>/dev/null || true
+                        else
+                          echo "        [WARN] Condor dir not found: $d"
+                        fi
+                      done
+                    fi
+
                     submit_data_condor "condor" "" "$segFile"
+                    exit 0
+
                 else
-                    submit_data_condor "condor" ""          # legacy path
-                fi ;;
+                    echo "[INFO] legacy: submitting full scan (no round/startFrom provided)"
+                    submit_data_condor "condor" ""
+                    exit 0
+                fi
+                ;;
+
+
 
             splitGoldenRunList)
                 split_golden_run_list ;;
