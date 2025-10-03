@@ -614,20 +614,24 @@ if [[ "$MODE" == "addChunks" && "$SUBMODE" =~ ^[0-9]{8}$ ]]; then
   exit 0
 fi
 
-# Auto-detect dataset type for final merge:
-#  - If run-level partials (chunkMerge_run_*.root) exist, this is DATA.
-#  - Otherwise, assume SIM partials (chunkMerge_*.root).
+# Auto-detect dataset type for final merge — PREFER SIM artifacts under $OUTPUT_DIR.
+# Only if no SIM superchunks/partials are present, fall back to DATA partials.
 DATA_MODE_ADD=false
-if compgen -G "$OUTPUT_DIR/chunkMerge_run_*.root" > /dev/null; then
-  DATA_MODE_ADD=true
-fi
-# If not found in current OUTPUT_DIR, check the canonical data OUTPUT_DIR
-if ! $DATA_MODE_ADD; then
+
+# If SIM superchunks or SIM partials exist in $OUTPUT_DIR, stay in SIM mode.
+if compgen -G "$OUTPUT_DIR/${SUPER_PREFIX}_*.root" > /dev/null || \
+   compgen -G "$OUTPUT_DIR/${PARTIAL_PREFIX}_*.root" > /dev/null; then
+  DATA_MODE_ADD=false
+else
+  # Otherwise, check for DATA partials first in the canonical DATA dir, then in $OUTPUT_DIR
   if [[ -n "${OUTPUT_DIR_DATA:-}" ]] && compgen -G "$OUTPUT_DIR_DATA/chunkMerge_run_*.root" > /dev/null; then
     DATA_MODE_ADD=true
     OUTPUT_DIR="$OUTPUT_DIR_DATA"
+  elif compgen -G "$OUTPUT_DIR/chunkMerge_run_*.root" > /dev/null; then
+    DATA_MODE_ADD=true
   fi
 fi
+
 if $DATA_MODE_ADD; then
   PARTIAL_PREFIX="chunkMerge_run"
   MERGED_FILE="PositionDep_data_ALL.root"

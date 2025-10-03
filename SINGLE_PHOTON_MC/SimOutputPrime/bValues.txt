@@ -1,81 +1,241 @@
-# E range   best-b   (PHI or ETA)   etaVariant
-PHI [2.0,4.0)  0.188033  originalEta
-ETA [2.0,4.0)  0.194218  originalEta
-PHI [4.0,6.0)  0.176562  originalEta
-ETA [4.0,6.0)  0.186917  originalEta
-PHI [6.0,8.0)  0.173292  originalEta
-ETA [6.0,8.0)  0.186127  originalEta
-PHI [8.0,10.0)  0.173561  originalEta
-ETA [8.0,10.0)  0.184815  originalEta
-PHI [10.0,12.0)  0.173548  originalEta
-ETA [10.0,12.0)  0.185665  originalEta
-PHI [12.0,15.0)  0.172339  originalEta
-ETA [12.0,15.0)  0.184592  originalEta
-PHI [15.0,20.0)  0.169458  originalEta
-ETA [15.0,20.0)  0.183523  originalEta
-PHI [20.0,30.0)  0.166703  originalEta
-ETA [20.0,30.0)  0.181867  originalEta
-PHI [2.0,4.0)  0.189321  fullEta
-ETA [2.0,4.0)  0.196377  fullEta
-PHI [4.0,6.0)  0.177485  fullEta
-ETA [4.0,6.0)  0.188928  fullEta
-PHI [6.0,8.0)  0.173773  fullEta
-ETA [6.0,8.0)  0.188101  fullEta
-PHI [8.0,10.0)  0.174412  fullEta
-ETA [8.0,10.0)  0.186634  fullEta
-PHI [10.0,12.0)  0.173968  fullEta
-ETA [10.0,12.0)  0.186984  fullEta
-PHI [12.0,15.0)  0.172809  fullEta
-ETA [12.0,15.0)  0.185776  fullEta
-PHI [15.0,20.0)  0.169896  fullEta
-ETA [15.0,20.0)  0.184817  fullEta
-PHI [20.0,30.0)  0.167059  fullEta
-ETA [20.0,30.0)  0.182494  fullEta
-PHI [2.0,4.0)  0.190636  etaCore
-ETA [2.0,4.0)  0.180649  etaCore
-PHI [4.0,6.0)  0.182121  etaCore
-ETA [4.0,6.0)  0.174767  etaCore
-PHI [6.0,8.0)  0.179771  etaCore
-ETA [6.0,8.0)  0.170082  etaCore
-PHI [8.0,10.0)  0.177136  etaCore
-ETA [8.0,10.0)  0.171197  etaCore
-PHI [10.0,12.0)  0.179497  etaCore
-ETA [10.0,12.0)  0.168987  etaCore
-PHI [12.0,15.0)  0.175853  etaCore
-ETA [12.0,15.0)  0.169269  etaCore
-PHI [15.0,20.0)  0.175844  etaCore
-ETA [15.0,20.0)  0.167198  etaCore
-PHI [20.0,30.0)  0.171837  etaCore
-ETA [20.0,30.0)  0.163690  etaCore
-PHI [2.0,4.0)  0.189866  etaMid
-ETA [2.0,4.0)  0.199934  etaMid
-PHI [4.0,6.0)  0.177455  etaMid
-ETA [4.0,6.0)  0.190464  etaMid
-PHI [6.0,8.0)  0.174224  etaMid
-ETA [6.0,8.0)  0.191202  etaMid
-PHI [8.0,10.0)  0.175596  etaMid
-ETA [8.0,10.0)  0.187537  etaMid
-PHI [10.0,12.0)  0.173567  etaMid
-ETA [10.0,12.0)  0.187825  etaMid
-PHI [12.0,15.0)  0.172846  etaMid
-ETA [12.0,15.0)  0.186343  etaMid
-PHI [15.0,20.0)  0.169502  etaMid
-ETA [15.0,20.0)  0.186780  etaMid
-PHI [20.0,30.0)  0.167752  etaMid
-ETA [20.0,30.0)  0.183366  etaMid
-PHI [2.0,4.0)  0.187857  etaEdge
-ETA [2.0,4.0)  0.203300  etaEdge
-PHI [4.0,6.0)  0.174967  etaEdge
-ETA [4.0,6.0)  0.197377  etaEdge
-PHI [6.0,8.0)  0.169650  etaEdge
-ETA [6.0,8.0)  0.198412  etaEdge
-PHI [8.0,10.0)  0.171106  etaEdge
-ETA [8.0,10.0)  0.198111  etaEdge
-PHI [10.0,12.0)  0.171162  etaEdge
-ETA [10.0,12.0)  0.201876  etaEdge
-PHI [12.0,15.0)  0.170801  etaEdge
-ETA [12.0,15.0)  0.200053  etaEdge
-PHI [15.0,20.0)  0.166780  etaEdge
-ETA [15.0,20.0)  0.197865  etaEdge
-PHI [20.0,30.0)  0.163149  etaEdge
-ETA [20.0,30.0)  0.198148  etaEdge
+# E range   best-b   (PHI or ETA)   etaVariant   zVariant
+PHI [2.0,4.0)  0.184236  originalEta  originalZRange
+ETA [2.0,4.0)  0.189756  originalEta  originalZRange
+PHI [4.0,6.0)  0.174607  originalEta  originalZRange
+ETA [4.0,6.0)  0.185435  originalEta  originalZRange
+PHI [6.0,8.0)  0.172625  originalEta  originalZRange
+ETA [6.0,8.0)  0.185280  originalEta  originalZRange
+PHI [8.0,10.0)  0.173374  originalEta  originalZRange
+ETA [8.0,10.0)  0.184680  originalEta  originalZRange
+PHI [10.0,12.0)  0.173389  originalEta  originalZRange
+ETA [10.0,12.0)  0.185872  originalEta  originalZRange
+PHI [12.0,15.0)  0.172433  originalEta  originalZRange
+ETA [12.0,15.0)  0.184847  originalEta  originalZRange
+PHI [15.0,20.0)  0.169739  originalEta  originalZRange
+ETA [15.0,20.0)  0.183486  originalEta  originalZRange
+PHI [20.0,30.0)  0.167136  originalEta  originalZRange
+ETA [20.0,30.0)  0.183011  originalEta  originalZRange
+PHI [2.0,4.0)  0.185467  fullEta  originalZRange
+ETA [2.0,4.0)  0.192351  fullEta  originalZRange
+PHI [4.0,6.0)  0.175544  fullEta  originalZRange
+ETA [4.0,6.0)  0.187590  fullEta  originalZRange
+PHI [6.0,8.0)  0.173196  fullEta  originalZRange
+ETA [6.0,8.0)  0.187437  fullEta  originalZRange
+PHI [8.0,10.0)  0.174303  fullEta  originalZRange
+ETA [8.0,10.0)  0.186736  fullEta  originalZRange
+PHI [10.0,12.0)  0.173924  fullEta  originalZRange
+ETA [10.0,12.0)  0.187172  fullEta  originalZRange
+PHI [12.0,15.0)  0.172933  fullEta  originalZRange
+ETA [12.0,15.0)  0.186018  fullEta  originalZRange
+PHI [15.0,20.0)  0.170170  fullEta  originalZRange
+ETA [15.0,20.0)  0.184700  fullEta  originalZRange
+PHI [20.0,30.0)  0.167417  fullEta  originalZRange
+ETA [20.0,30.0)  0.183450  fullEta  originalZRange
+PHI [2.0,4.0)  0.187715  etaCore  originalZRange
+ETA [2.0,4.0)  0.177667  etaCore  originalZRange
+PHI [4.0,6.0)  0.179734  etaCore  originalZRange
+ETA [4.0,6.0)  0.173795  etaCore  originalZRange
+PHI [6.0,8.0)  0.180144  etaCore  originalZRange
+ETA [6.0,8.0)  0.170222  etaCore  originalZRange
+PHI [8.0,10.0)  0.177106  etaCore  originalZRange
+ETA [8.0,10.0)  0.170862  etaCore  originalZRange
+PHI [10.0,12.0)  0.179487  etaCore  originalZRange
+ETA [10.0,12.0)  0.169670  etaCore  originalZRange
+PHI [12.0,15.0)  0.176303  etaCore  originalZRange
+ETA [12.0,15.0)  0.169788  etaCore  originalZRange
+PHI [15.0,20.0)  0.175774  etaCore  originalZRange
+ETA [15.0,20.0)  0.167070  etaCore  originalZRange
+PHI [20.0,30.0)  0.171829  etaCore  originalZRange
+ETA [20.0,30.0)  0.164042  etaCore  originalZRange
+PHI [2.0,4.0)  0.185498  etaMid  originalZRange
+ETA [2.0,4.0)  0.196126  etaMid  originalZRange
+PHI [4.0,6.0)  0.175865  etaMid  originalZRange
+ETA [4.0,6.0)  0.189813  etaMid  originalZRange
+PHI [6.0,8.0)  0.173794  etaMid  originalZRange
+ETA [6.0,8.0)  0.190664  etaMid  originalZRange
+PHI [8.0,10.0)  0.174729  etaMid  originalZRange
+ETA [8.0,10.0)  0.187904  etaMid  originalZRange
+PHI [10.0,12.0)  0.173630  etaMid  originalZRange
+ETA [10.0,12.0)  0.188203  etaMid  originalZRange
+PHI [12.0,15.0)  0.172589  etaMid  originalZRange
+ETA [12.0,15.0)  0.186527  etaMid  originalZRange
+PHI [15.0,20.0)  0.169609  etaMid  originalZRange
+ETA [15.0,20.0)  0.186695  etaMid  originalZRange
+PHI [20.0,30.0)  0.167534  etaMid  originalZRange
+ETA [20.0,30.0)  0.183712  etaMid  originalZRange
+PHI [2.0,4.0)  0.184120  etaEdge  originalZRange
+ETA [2.0,4.0)  0.198281  etaEdge  originalZRange
+PHI [4.0,6.0)  0.172676  etaEdge  originalZRange
+ETA [4.0,6.0)  0.194999  etaEdge  originalZRange
+PHI [6.0,8.0)  0.168127  etaEdge  originalZRange
+ETA [6.0,8.0)  0.197374  etaEdge  originalZRange
+PHI [8.0,10.0)  0.171881  etaEdge  originalZRange
+ETA [8.0,10.0)  0.198880  etaEdge  originalZRange
+PHI [10.0,12.0)  0.170796  etaEdge  originalZRange
+ETA [10.0,12.0)  0.201771  etaEdge  originalZRange
+PHI [12.0,15.0)  0.171204  etaEdge  originalZRange
+ETA [12.0,15.0)  0.200870  etaEdge  originalZRange
+PHI [15.0,20.0)  0.167354  etaEdge  originalZRange
+ETA [15.0,20.0)  0.198398  etaEdge  originalZRange
+PHI [20.0,30.0)  0.164348  etaEdge  originalZRange
+ETA [20.0,30.0)  0.202078  etaEdge  originalZRange
+PHI [2.0,4.0)  0.184236  originalEta  z00to10
+ETA [2.0,4.0)  0.189756  originalEta  z00to10
+PHI [4.0,6.0)  0.174607  originalEta  z00to10
+ETA [4.0,6.0)  0.185435  originalEta  z00to10
+PHI [6.0,8.0)  0.172625  originalEta  z00to10
+ETA [6.0,8.0)  0.185280  originalEta  z00to10
+PHI [8.0,10.0)  0.173374  originalEta  z00to10
+ETA [8.0,10.0)  0.184680  originalEta  z00to10
+PHI [10.0,12.0)  0.173389  originalEta  z00to10
+ETA [10.0,12.0)  0.185872  originalEta  z00to10
+PHI [12.0,15.0)  0.172433  originalEta  z00to10
+ETA [12.0,15.0)  0.184847  originalEta  z00to10
+PHI [15.0,20.0)  0.169739  originalEta  z00to10
+ETA [15.0,20.0)  0.183486  originalEta  z00to10
+PHI [20.0,30.0)  0.167136  originalEta  z00to10
+ETA [20.0,30.0)  0.183011  originalEta  z00to10
+PHI [2.0,4.0)  0.185066  originalEta  z10to20
+ETA [2.0,4.0)  0.193076  originalEta  z10to20
+PHI [4.0,6.0)  0.174061  originalEta  z10to20
+ETA [4.0,6.0)  0.191298  originalEta  z10to20
+PHI [6.0,8.0)  0.173678  originalEta  z10to20
+ETA [6.0,8.0)  0.188440  originalEta  z10to20
+PHI [8.0,10.0)  0.173066  originalEta  z10to20
+ETA [8.0,10.0)  0.189272  originalEta  z10to20
+PHI [10.0,12.0)  0.175282  originalEta  z10to20
+ETA [10.0,12.0)  0.188858  originalEta  z10to20
+PHI [12.0,15.0)  0.172289  originalEta  z10to20
+ETA [12.0,15.0)  0.188116  originalEta  z10to20
+PHI [15.0,20.0)  0.170312  originalEta  z10to20
+ETA [15.0,20.0)  0.189662  originalEta  z10to20
+PHI [20.0,30.0)  0.167368  originalEta  z10to20
+ETA [20.0,30.0)  0.187097  originalEta  z10to20
+PHI [2.0,4.0)  0.183490  originalEta  z20to30
+ETA [2.0,4.0)  0.207679  originalEta  z20to30
+PHI [4.0,6.0)  0.173951  originalEta  z20to30
+ETA [4.0,6.0)  0.205875  originalEta  z20to30
+PHI [6.0,8.0)  0.172299  originalEta  z20to30
+ETA [6.0,8.0)  0.201995  originalEta  z20to30
+PHI [8.0,10.0)  0.171227  originalEta  z20to30
+ETA [8.0,10.0)  0.200350  originalEta  z20to30
+PHI [10.0,12.0)  0.171569  originalEta  z20to30
+ETA [10.0,12.0)  0.201024  originalEta  z20to30
+PHI [12.0,15.0)  0.171041  originalEta  z20to30
+ETA [12.0,15.0)  0.197804  originalEta  z20to30
+PHI [15.0,20.0)  0.169270  originalEta  z20to30
+ETA [15.0,20.0)  0.198563  originalEta  z20to30
+PHI [20.0,30.0)  0.166570  originalEta  z20to30
+ETA [20.0,30.0)  0.194681  originalEta  z20to30
+PHI [2.0,4.0)  0.181285  originalEta  z30to45
+ETA [2.0,4.0)  0.232760  originalEta  z30to45
+PHI [4.0,6.0)  0.173492  originalEta  z30to45
+ETA [4.0,6.0)  0.230923  originalEta  z30to45
+PHI [6.0,8.0)  0.172678  originalEta  z30to45
+ETA [6.0,8.0)  0.226927  originalEta  z30to45
+PHI [8.0,10.0)  0.170649  originalEta  z30to45
+ETA [8.0,10.0)  0.224907  originalEta  z30to45
+PHI [10.0,12.0)  0.169385  originalEta  z30to45
+ETA [10.0,12.0)  0.223691  originalEta  z30to45
+PHI [12.0,15.0)  0.170105  originalEta  z30to45
+ETA [12.0,15.0)  0.221612  originalEta  z30to45
+PHI [15.0,20.0)  0.166588  originalEta  z30to45
+ETA [15.0,20.0)  0.218938  originalEta  z30to45
+PHI [20.0,30.0)  0.165775  originalEta  z30to45
+ETA [20.0,30.0)  0.212455  originalEta  z30to45
+PHI [2.0,4.0)  0.178828  originalEta  z45to60
+ETA [2.0,4.0)  0.311539  originalEta  z45to60
+PHI [4.0,6.0)  0.171502  originalEta  z45to60
+ETA [4.0,6.0)  0.320262  originalEta  z45to60
+PHI [6.0,8.0)  0.169764  originalEta  z45to60
+ETA [6.0,8.0)  0.323292  originalEta  z45to60
+PHI [8.0,10.0)  0.169406  originalEta  z45to60
+ETA [8.0,10.0)  0.333898  originalEta  z45to60
+PHI [10.0,12.0)  0.168002  originalEta  z45to60
+ETA [10.0,12.0)  0.331820  originalEta  z45to60
+PHI [12.0,15.0)  0.166252  originalEta  z45to60
+ETA [12.0,15.0)  0.327411  originalEta  z45to60
+PHI [15.0,20.0)  0.164624  originalEta  z45to60
+ETA [15.0,20.0)  0.333140  originalEta  z45to60
+PHI [20.0,30.0)  0.163573  originalEta  z45to60
+ETA [20.0,30.0)  0.308228  originalEta  z45to60
+PHI [2.0,4.0)  0.183852  originalEta  z00to02
+ETA [2.0,4.0)  0.189959  originalEta  z00to02
+PHI [4.0,6.0)  0.173961  originalEta  z00to02
+ETA [4.0,6.0)  0.186550  originalEta  z00to02
+PHI [6.0,8.0)  0.174735  originalEta  z00to02
+ETA [6.0,8.0)  0.183358  originalEta  z00to02
+PHI [8.0,10.0)  0.176641  originalEta  z00to02
+ETA [8.0,10.0)  0.184590  originalEta  z00to02
+PHI [10.0,12.0)  0.174507  originalEta  z00to02
+ETA [10.0,12.0)  0.184876  originalEta  z00to02
+PHI [12.0,15.0)  0.173578  originalEta  z00to02
+ETA [12.0,15.0)  0.184259  originalEta  z00to02
+PHI [15.0,20.0)  0.168815  originalEta  z00to02
+ETA [15.0,20.0)  0.184188  originalEta  z00to02
+PHI [20.0,30.0)  0.167291  originalEta  z00to02
+ETA [20.0,30.0)  0.183508  originalEta  z00to02
+PHI [2.0,4.0)  0.184795  originalEta  z02to04
+ETA [2.0,4.0)  0.189545  originalEta  z02to04
+PHI [4.0,6.0)  0.176615  originalEta  z02to04
+ETA [4.0,6.0)  0.184628  originalEta  z02to04
+PHI [6.0,8.0)  0.173904  originalEta  z02to04
+ETA [6.0,8.0)  0.183342  originalEta  z02to04
+PHI [8.0,10.0)  0.172404  originalEta  z02to04
+ETA [8.0,10.0)  0.182583  originalEta  z02to04
+PHI [10.0,12.0)  0.171500  originalEta  z02to04
+ETA [10.0,12.0)  0.185204  originalEta  z02to04
+PHI [12.0,15.0)  0.171802  originalEta  z02to04
+ETA [12.0,15.0)  0.184390  originalEta  z02to04
+PHI [15.0,20.0)  0.170178  originalEta  z02to04
+ETA [15.0,20.0)  0.182290  originalEta  z02to04
+PHI [20.0,30.0)  0.166616  originalEta  z02to04
+ETA [20.0,30.0)  0.182164  originalEta  z02to04
+PHI [2.0,4.0)  0.190546  originalEta  z04to06
+ETA [2.0,4.0)  0.189028  originalEta  z04to06
+PHI [4.0,6.0)  0.176129  originalEta  z04to06
+ETA [4.0,6.0)  0.182140  originalEta  z04to06
+PHI [6.0,8.0)  0.172510  originalEta  z04to06
+ETA [6.0,8.0)  0.185680  originalEta  z04to06
+PHI [8.0,10.0)  0.173800  originalEta  z04to06
+ETA [8.0,10.0)  0.183408  originalEta  z04to06
+PHI [10.0,12.0)  0.174574  originalEta  z04to06
+ETA [10.0,12.0)  0.186718  originalEta  z04to06
+PHI [12.0,15.0)  0.173047  originalEta  z04to06
+ETA [12.0,15.0)  0.184481  originalEta  z04to06
+PHI [15.0,20.0)  0.170177  originalEta  z04to06
+ETA [15.0,20.0)  0.185389  originalEta  z04to06
+PHI [20.0,30.0)  0.167690  originalEta  z04to06
+ETA [20.0,30.0)  0.183996  originalEta  z04to06
+PHI [2.0,4.0)  0.179025  originalEta  z06to08
+ETA [2.0,4.0)  0.190202  originalEta  z06to08
+PHI [4.0,6.0)  0.172871  originalEta  z06to08
+ETA [4.0,6.0)  0.186415  originalEta  z06to08
+PHI [6.0,8.0)  0.171700  originalEta  z06to08
+ETA [6.0,8.0)  0.185786  originalEta  z06to08
+PHI [8.0,10.0)  0.173126  originalEta  z06to08
+ETA [8.0,10.0)  0.185307  originalEta  z06to08
+PHI [10.0,12.0)  0.175027  originalEta  z06to08
+ETA [10.0,12.0)  0.188032  originalEta  z06to08
+PHI [12.0,15.0)  0.170418  originalEta  z06to08
+ETA [12.0,15.0)  0.185281  originalEta  z06to08
+PHI [15.0,20.0)  0.169746  originalEta  z06to08
+ETA [15.0,20.0)  0.184444  originalEta  z06to08
+PHI [20.0,30.0)  0.167128  originalEta  z06to08
+ETA [20.0,30.0)  0.183583  originalEta  z06to08
+PHI [2.0,4.0)  0.183475  originalEta  z08to10
+ETA [2.0,4.0)  0.190050  originalEta  z08to10
+PHI [4.0,6.0)  0.173596  originalEta  z08to10
+ETA [4.0,6.0)  0.187564  originalEta  z08to10
+PHI [6.0,8.0)  0.170384  originalEta  z08to10
+ETA [6.0,8.0)  0.188327  originalEta  z08to10
+PHI [8.0,10.0)  0.171069  originalEta  z08to10
+ETA [8.0,10.0)  0.187638  originalEta  z08to10
+PHI [10.0,12.0)  0.171360  originalEta  z08to10
+ETA [10.0,12.0)  0.184580  originalEta  z08to10
+PHI [12.0,15.0)  0.173397  originalEta  z08to10
+ETA [12.0,15.0)  0.185832  originalEta  z08to10
+PHI [15.0,20.0)  0.169775  originalEta  z08to10
+ETA [15.0,20.0)  0.181174  originalEta  z08to10
+PHI [20.0,30.0)  0.166948  originalEta  z08to10
+ETA [20.0,30.0)  0.181811  originalEta  z08to10

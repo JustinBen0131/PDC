@@ -12,6 +12,7 @@
 #include <TH2.h>
 #include <TH3.h>
 #include <TH2F.h>
+#include <regex>
 #include <TH3F.h>
 #include <TString.h>
 #include <TVector2.h>
@@ -38,7 +39,7 @@
 
 // ========================= Global switches & energy bins ====================
 
-static bool isFirstPass = false;  // <-- set by the user request
+static bool isFirstPass = true;  // <-- set by the user request
 
 // Binning-mode enum used by the playground helpers
 enum class EBinningMode { kRange, kDiscrete };
@@ -76,6 +77,30 @@ static const std::map<std::string, std::string> kEtaPretty = {
   {"etaCore",     "|#eta| #leq 0.20"},
   {"etaMid",      "0.20 < |#eta| #leq 0.70"},
   {"etaEdge",     "0.70 < |#eta| #leq 1.10"}
+};
+
+// Pretty labels for |z_vtx| slices (COARSE) and fixed draw order
+static const std::map<std::string, std::string> kZPretty = {
+  {"z00to10", "|z_{vtx}| 0-10 cm"},
+  {"z10to20", "|z_{vtx}| 10-20 cm"},
+  {"z20to30", "|z_{vtx}| 20-30 cm"},
+  {"z30to45", "|z_{vtx}| 30-45 cm"},
+  {"z45to60", "|z_{vtx}| 45-60 cm"}
+};
+static const std::vector<std::string> kZOrder = {
+  "z00to10","z10to20","z20to30","z30to45","z45to60"
+};
+
+// Pretty labels for |z_vtx| slices (FINE 0-10 cm: 0-2,2-4,4-6,6-8,8-10) and fixed draw order
+static const std::map<std::string, std::string> kZFinePretty = {
+  {"z00to02", "|z_{vtx}| 0-2 cm"},
+  {"z02to04", "|z_{vtx}| 2-4 cm"},
+  {"z04to06", "|z_{vtx}| 4-6 cm"},
+  {"z06to08", "|z_{vtx}| 6-8 cm"},
+  {"z08to10", "|z_{vtx}| 8-10 cm"}
+};
+static const std::vector<std::string> kZFineOrder = {
+  "z00to02","z02to04","z04to06","z06to08","z08to10"
 };
 
 static inline std::vector<std::pair<double,double>> MakeEnergySlices()
@@ -1009,7 +1034,7 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
           if (!(std::isfinite(rymin) && std::isfinite(rymax))) { rymin = 0.10; rymax = 0.20; }
           double rspan = rymax - rymin; if (rspan <= 0) rspan = 1e-3;
           const double rpadB = 0.18 * rspan;
-          const double rpadT = 0.3 * rspan;
+          const double rpadT = 0.5 * rspan;
           rymin = std::max(0.0, rymin - rpadB);
           rymax = rymax + rpadT;
 
@@ -1049,7 +1074,7 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
           const TString outR = Form("%s/pi0Resolution_Ebin_%02d.png", baseOut.Data(), iE);
           cR.Modified(); cR.Update(); cR.SaveAs(outR);
           std::cout << "[ResolutionOverlay] Wrote: " << outR << "\n";
-
+            
           // No-Core version (exclude etaCore)
           {
             double r2min = +1e30, r2max = -1e30, XX, YY;
@@ -1906,7 +1931,8 @@ static void FitLocalPhiEta(TH3F*  hUnc3D,
 static void WriteBValuesTxt(TH3F* hUnc3D,
                             const std::vector<std::pair<double,double>>& eEdges,
                             std::ofstream& bOut,
-                            const char* variantKey)
+                            const char* etaVariantKey,
+                            const char* zVariantKey)
 {
   if (!hUnc3D) return;
   if (!bOut.is_open()) return;
@@ -1927,7 +1953,7 @@ static void WriteBValuesTxt(TH3F* hUnc3D,
     if (hPhi) {
       BRes bPhi = FitAsinh1D(hPhi.get());
       if (std::isfinite(bPhi.val))
-        bOut << Form("PHI [%.1f,%.1f)  %.6f  %s\n", eLo, eHi, bPhi.val, variantKey);
+        bOut << Form("PHI [%.1f,%.1f)  %.6f  %s  %s\n", eLo, eHi, bPhi.val, etaVariantKey, zVariantKey);
     }
 
     // η
@@ -1936,7 +1962,7 @@ static void WriteBValuesTxt(TH3F* hUnc3D,
     if (hEta) {
       BRes bEta = FitAsinh1D(hEta.get());
       if (std::isfinite(bEta.val))
-        bOut << Form("ETA [%.1f,%.1f)  %.6f  %s\n", eLo, eHi, bEta.val, variantKey);
+        bOut << Form("ETA [%.1f,%.1f)  %.6f  %s  %s\n", eLo, eHi, bEta.val, etaVariantKey, zVariantKey);
     }
   }
 }
@@ -1947,7 +1973,8 @@ static void SaveOverlayAcrossVariants(
     const std::vector<double>& ecenters,
     const std::map<std::string, std::vector<double>>& byVar,
     const std::map<std::string, std::vector<double>>& byVarErr,
-    bool isPhi)
+    bool isPhi,
+    const char* outSuffix)
 {
   if (byVar.empty()) return;
 
@@ -1956,38 +1983,52 @@ static void SaveOverlayAcrossVariants(
   const double xLo  = E_edges[0] - 0.5;          // assume these globals exist
   const double xHi  = E_edges[N_E] - 0.5;
 
+  // pretty label: try η keys, then fine-z, then coarse-z; else echo key
   auto prettyName = [&](const std::string& key)->const char*
   {
-    auto it = kEtaPretty.find(key);
-    return (it == kEtaPretty.end()) ? key.c_str() : it->second.c_str();
+    auto itEta = kEtaPretty.find(key);
+    if (itEta != kEtaPretty.end()) return itEta->second.c_str();
+    auto itZf  = kZFinePretty.find(key);
+    if (itZf  != kZFinePretty.end()) return itZf->second.c_str();
+    auto itZc  = kZPretty.find(key);
+    return (itZc == kZPretty.end()) ? key.c_str() : itZc->second.c_str();
   };
 
-  // ----------------------------- y-range (±σ if available) ------------------
-  double ymin = +1e9, ymax = -1e9;
-  for (const auto& kv : byVar)
-  {
-    const auto& key  = kv.first;
-    const auto& vals = kv.second;
-    const auto itErr = byVarErr.find(key);
-    const std::vector<double>* errs = (itErr == byVarErr.end()) ? nullptr : &itErr->second;
-
-    for (size_t i = 0; i < vals.size(); ++i)
+    // ----------------------------- y-range (±σ if available) ------------------
+    double ymin = +1e9, ymax = -1e9;
+    for (const auto& kv : byVar)
     {
-      if (!std::isfinite(vals[i])) continue;
-      const double e = (errs && i < errs->size() && std::isfinite((*errs)[i])) ? (*errs)[i] : 0.0;
-      ymin = std::min(ymin, vals[i] - e);
-      ymax = std::max(ymax, vals[i] + e);
-    }
-  }
-  if (!std::isfinite(ymin) || !std::isfinite(ymax)) { ymin = 0.0; ymax = 1.0; }
-  const double yLo = ymin - 0.05 * std::fabs(ymin);
-  const double yHi = ymax + 0.10 * std::fabs(ymax);
+      const auto& key  = kv.first;
+      const auto& vals = kv.second;
+      const auto itErr = byVarErr.find(key);
+      const std::vector<double>* errs = (itErr == byVarErr.end()) ? nullptr : &itErr->second;
 
-  // ----------------------------- canvas & frame -----------------------------
-  TCanvas c("cbOverlay",
-            isPhi ? "b_{#varphi}(E) overlay" : "b_{#eta}(E) overlay",
-            900, 700);
-  TH2F frame("frame", "", 100, xLo, xHi, 100, yLo, yHi);
+      for (size_t i = 0; i < vals.size(); ++i)
+      {
+        if (!std::isfinite(vals[i])) continue;
+        const double e = (errs && i < errs->size() && std::isfinite((*errs)[i])) ? (*errs)[i] : 0.0;
+        ymin = std::min(ymin, vals[i] - e);
+        ymax = std::max(ymax, vals[i] + e);
+      }
+    }
+    if (!std::isfinite(ymin) || !std::isfinite(ymax)) { ymin = 0.0; ymax = 1.0; }
+    double yLo = ymin - 0.05 * std::fabs(ymin);
+    double yHi = ymax + 0.10 * std::fabs(ymax);
+
+    // Force axis range for η overlays with "_zOnly" suffix
+    // Top fixed at 0.42; add extra bottom buffer down to 0.14
+    if (!isPhi && outSuffix && std::string(outSuffix).find("_zOnly") != std::string::npos) {
+      yHi = 0.42;
+      yLo = 0.14;
+      // safety: if yLo accidentally crosses yHi, keep at least a small span
+      if (yLo >= yHi - 1e-6) yLo = std::max(0.0, yHi - 0.10);
+    }
+
+    // ----------------------------- canvas & frame -----------------------------
+    TCanvas c("cbOverlay",
+              isPhi ? "b_{#varphi}(E) overlay" : "b_{#eta}(E) overlay",
+              900, 700);
+    TH2F frame("frame", "", 100, xLo, xHi, 100, yLo, yHi);
   frame.SetTitle(isPhi ? "best-fit  b_{#varphi}  vs  E;E  [GeV];b_{#varphi}"
                        : "best-fit  b_{#eta}     vs  E;E  [GeV];b_{#eta}");
   frame.SetStats(0);
@@ -2003,68 +2044,118 @@ static void SaveOverlayAcrossVariants(
   leg.SetFillStyle(0);
   leg.SetTextSize(0.040);
 
-  TLatex lt; lt.SetNDC(true); lt.SetTextSize(0.024);
-  const double xTxt = 0.45, yTop = 0.87, yStep = 0.050;
-
+  // TLatex overlay disabled: no on-canvas fit text
   std::vector<std::unique_ptr<TGraphErrors>> keepPoints;
   std::vector<std::unique_ptr<TF1>>          keepFits;
 
-  // ----------------------------- terminal banner ----------------------------
-  std::cout << "\n"
-            << (isPhi ? "[PHI] " : "[ETA] ")
-            << "Log-fit model:  b(E) = b0 + m * ln(E/E0),   E0 = " << E0 << " GeV\n"
-            << "Weighted least squares per variant: w_i = 1/sigma_i^2 (if sigma provided) or 1 otherwise.\n"
-            << "Parameter errors: unscaled if errors provided; scaled by χ²/ndf when unit weights are used.\n\n";
+    // ----------------------------- terminal banner ----------------------------
+    {
+      const char* B = "\033[1m";   // ANSI bold
+      const char* R = "\033[0m";   // ANSI reset
 
-  std::cout << std::left
-            << std::setw(18) << "variant"
-            << std::right
-            << std::setw(4)  << "N"
-            << std::setw(12) << "E[min]"
-            << std::setw(12) << "E[max]"
-            << std::setw(12) << "b0@E0"
-            << std::setw(10) << "±b0"
-            << std::setw(12) << "m (ln E)"
-            << std::setw(10) << "±m"
-            << std::setw(8)  << "z(m)"
-            << std::setw(12) << "m/decade"
-            << std::setw(14) << "Δb_fit"
-            << std::setw(14) << "Δb_data"
-            << std::setw(8)  << "R^2"
-            << std::setw(12) << "RMSE_w"
-            << std::setw(10) << "χ²/ndf"
-            << "\n"
-            << "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n";
-    // ----------------------------- per-variant loop (ordered) -----------------
-    // Desired η-order: Core, Mid, Edge, Full, then "no η-dep" if present.
-    auto containsKey = [](const std::vector<std::string>& v, const std::string& s)->bool {
-      for (const auto& x : v) if (x == s) return true;
-      return false;
-    };
+      std::ostringstream t;
+      t << (isPhi ? "[PHI] " : "[ETA] ")
+        << "b(E) = b0 + m * ln(E/E0),  E0 = " << E0 << " GeV";
+      std::cout << "\n" << B << t.str() << R << "\n";
+      std::cout << "Weighted least squares per variant: w_i = 1/sigma_i^2 (if provided) or 1 otherwise.\n"
+                << "Parameter errors: unscaled if errors provided; scaled by sqrt(χ²/ndf) when unit weights are used.\n\n";
 
-    std::vector<std::string> desired = {"etaCore","etaMid","etaEdge","fullEta","originalEta"};
-    std::vector<std::string> keysOrdered;
-    // add known keys in desired order if present
-    for (const auto& k : desired) if (byVar.find(k) != byVar.end()) keysOrdered.push_back(k);
-    // append any remaining (unexpected) keys to preserve them
-    for (const auto& kv : byVar) if (!containsKey(keysOrdered, kv.first)) keysOrdered.push_back(kv.first);
+      // Bold, clearly separated header
+      std::cout << B
+                << std::left  << std::setw(18) << "variant" << R
+                << " | " << std::right << std::setw(6)  << "N"
+                << " | " << std::setw(9)  << "E[min]"
+                << " | " << std::setw(9)  << "E[max]"
+                << " | " << std::setw(12) << "b0@E0"
+                << " | " << std::setw(10) << "±b0"
+                << " | " << std::setw(12) << "m (ln E)"
+                << " | " << std::setw(10) << "±m"
+                << " | " << std::setw(9)  << "z(m)"
+                << " | " << std::setw(12) << "m/decade"
+                << " | " << std::setw(12) << "Δb_fit"
+                << " | " << std::setw(12) << "Δb_data"
+                << " | " << std::setw(8)  << "R^2"
+                << " | " << std::setw(10) << "RMSE_w"
+                << " | " << std::setw(10) << "χ²/ndf"
+                << "\n";
 
-    // First overlay: include everything in the ordered sequence
+      // Horizontal rule
+      std::cout << std::string(
+                     18+2 + 6+3 + 9+3 + 9+3 + 12+3 + 10+3 + 12+3 + 10+3 +
+                     9+3 + 12+3 + 12+3 + 8+3 + 10+3 + 10, '-') << "\n";
+
+      // Numeric formatting for table rows
+      std::cout.setf(std::ios::fixed);
+      std::cout << std::setprecision(6);
+    }
+  // Desired η-order for legends (if η-keys are used)
+  auto containsKey = [](const std::vector<std::string>& v, const std::string& s)->bool {
+    for (const auto& x : v) if (x == s) return true; return false;
+  };
+  std::vector<std::string> desiredEta = {"etaCore","etaMid","etaEdge","fullEta","originalEta"};
+
+    // Build ordered key list for PLOTTING, then extend a second list for TABULATION.
+    //  - If all fine-z tags → use kZFineOrder
+    //  - else if all coarse-z tags → use kZOrder
+    //  - else (η overlays) → EXCLUDE "originalEta" from plotting order,
+    //                        but APPEND it to the table order.
+    std::vector<std::string> keysOrdered;     // for plotting
+    std::vector<std::string> keysForTable;    // for printing/CSV (may include originalEta)
+    bool allCoarseZ = true, allFineZ = true;
+    for (const auto& kv : byVar) {
+      if (kZPretty.find(kv.first)     == kZPretty.end())     allCoarseZ = false;
+      if (kZFinePretty.find(kv.first) == kZFinePretty.end()) allFineZ   = false;
+    }
+
+    if (allFineZ) {
+      for (const auto& z : kZFineOrder)
+        if (byVar.find(z) != byVar.end()) keysOrdered.push_back(z);
+      keysForTable = keysOrdered;  // z-only: table == plot
+    } else if (allCoarseZ) {
+      for (const auto& z : kZOrder)
+        if (byVar.find(z) != byVar.end()) keysOrdered.push_back(z);
+      keysForTable = keysOrdered;  // z-only: table == plot
+    } else {
+      // η overlays: plot excludes "originalEta"
+      for (const auto& k : desiredEta)
+        if (k != "originalEta" && byVar.find(k) != byVar.end())
+          keysOrdered.push_back(k);
+      for (const auto& kv : byVar)
+        if (kv.first != "originalEta" && !containsKey(keysOrdered, kv.first))
+          keysOrdered.push_back(kv.first);
+
+      // Table should ALSO include "originalEta" if present
+      keysForTable = keysOrdered;
+      if (byVar.find("originalEta") != byVar.end() &&
+          !containsKey(keysForTable, "originalEta")) {
+        keysForTable.push_back("originalEta");
+      }
+    }
+
+    // Collect CSV rows (one line per variant)
+    std::vector<std::string> csvRows;
+    {
+      std::ostringstream hdr;
+      hdr << "variant,N,E_min,E_max,b0@E0,db0,m_lnE,dm_lnE,z_m,m_per_decade,Delta_b_fit,Delta_b_data,R2w,RMSEw,chi2_ndf";
+      csvRows.push_back(hdr.str());
+    }
+
     int idx = 0;
-    for (const auto& key : keysOrdered)
+    for (const auto& key : keysForTable)
     {
       const auto& vals = byVar.at(key);
       if (vals.size() != ecenters.size()) { ++idx; continue; }
 
-      // errors (if any)
       auto itErr = byVarErr.find(key);
       std::vector<double> errs = (itErr != byVarErr.end()) ? itErr->second
                                                            : std::vector<double>(vals.size(), 0.0);
       if (errs.size() != vals.size()) errs.assign(vals.size(), 0.0);
 
-      // points
       std::unique_ptr<TGraphErrors> g(new TGraphErrors(static_cast<int>(vals.size())));
       double Emin = +1e9, Emax = -1e9;
+      double yMin = +1e9, yMax = -1e9;
+
+      // Load points to graph and track data range
       for (size_t i = 0; i < vals.size(); ++i)
       {
         const double Ei = ecenters[i];
@@ -2076,25 +2167,35 @@ static void SaveOverlayAcrossVariants(
         g->SetPointError(static_cast<int>(i), 0.0, si);
         Emin = std::min(Emin, Ei);
         Emax = std::max(Emax, Ei);
+        yMin = std::min(yMin, yi);
+        yMax = std::max(yMax, yi);
       }
-      const int col = colors[idx % 8];
-      g->SetMarkerStyle(kMarkerStyle);
-      g->SetMarkerSize(kMarkerSize);
-      g->SetMarkerColor(col);
-      g->SetLineColor(col);
-      g->Draw("P SAME");
-      leg.AddEntry(g.get(), prettyName(key), "p");
-      keepPoints.emplace_back(std::move(g));
 
-      // --------------------- closed-form weighted least squares ----------------
+        const int col = colors[idx % 8];
+        bool drawThis = (allCoarseZ || allFineZ) || (key != "originalEta"); // do not draw originalEta on η overlays
+
+        if (drawThis) {
+          g->SetMarkerStyle(kMarkerStyle);
+          g->SetMarkerSize(kMarkerSize);
+          g->SetMarkerColor(col);
+          g->SetLineColor(col);
+          g->Draw("P SAME");
+          leg.AddEntry(g.get(), prettyName(key), "p");
+          keepPoints.emplace_back(std::move(g));
+        } else {
+          // keep the object alive for lifetime safety even if not drawn
+          keepPoints.emplace_back(std::move(g));
+        }
+
+      // closed-form weighted least squares for line in log(E/E0)
       double S=0, Sx=0, Sy=0, Sxx=0, Sxy=0;
       int     Nuse = 0;
-      bool    haveYerrs = false;
 
       std::vector<double> xi; xi.reserve(vals.size());
       std::vector<double> yi; yi.reserve(vals.size());
       std::vector<double> wi; wi.reserve(vals.size());
 
+      bool haveYerrsAll = true; // if any sigma == 0, we'll scale errors by chi2/ndf
       for (size_t i = 0; i < vals.size(); ++i)
       {
         const double E  = ecenters[i];
@@ -2104,7 +2205,8 @@ static void SaveOverlayAcrossVariants(
         if (!(std::isfinite(E) && E > 0.0 && std::isfinite(y))) continue;
 
         const double x = std::log(E / E0);
-        const double w = (std::isfinite(sy) && sy > 0.0) ? (haveYerrs = true, 1.0/(sy*sy)) : 1.0;
+        double w = 1.0;
+        if (std::isfinite(sy) && sy > 0.0) w = 1.0/(sy*sy); else haveYerrsAll = false;
 
         S   += w;
         Sx  += w * x;
@@ -2118,231 +2220,150 @@ static void SaveOverlayAcrossVariants(
         ++Nuse;
       }
 
-      const double Delta = S*Sxx - Sx*Sx;
-      if (Nuse >= 2 && (Delta > 0.0)) {
-        const double m  = (S * Sxy - Sx * Sy) / Delta;
-        const double b0 = (Sxx * Sy - Sx * Sxy) / Delta;
+      double b0 = std::numeric_limits<double>::quiet_NaN();
+      double m  = std::numeric_limits<double>::quiet_NaN();
+      double db0= std::numeric_limits<double>::quiet_NaN();
+      double dm = std::numeric_limits<double>::quiet_NaN();
+      double chi2=0.0, R2w=0.0, RMSEw=0.0, redChi2=0.0;
+      double dBfit=0.0, dBdata=0.0, z_m=0.0, m_per_dec=0.0;
 
-        // residual sums
-        double chi2 = 0.0, TSS_w = 0.0, Wsum = 0.0;
-        const double ybar_w = Sy / S;
-        for (int i = 0; i < Nuse; ++i) {
+      const double Delta = S*Sxx - Sx*Sx;
+      if (Nuse >= 2 && (Delta > 0.0))
+      {
+        // Fit parameters
+        m  = (S * Sxy - Sx * Sy) / Delta;
+        b0 = (Sxx * Sy - Sx * Sxy) / Delta;
+
+        // Parameter uncertainties from WLS normal equations
+        const double var_m  =  S / Delta;
+        const double var_b0 = Sxx / Delta;
+
+        // Goodness metrics
+        double ybar_w = Sy / S;
+        double TSSw = 0.0; // weighted total sum of squares
+        for (int i = 0; i < Nuse; ++i)
+        {
           const double yhat = b0 + m * xi[i];
           const double r    = yi[i] - yhat;
           chi2  += wi[i] * r * r;
-          TSS_w += wi[i] * (yi[i] - ybar_w) * (yi[i] - ybar_w);
-          Wsum  += wi[i];
+          TSSw  += wi[i] * (yi[i] - ybar_w) * (yi[i] - ybar_w);
+          if (i == 0) { dBfit = yhat; dBdata = yi[i]; }
+          else {
+            dBfit = std::max(dBfit, yhat);
+          }
         }
-        const int    ndf     = std::max(0, Nuse - 2);
-        const double redChi2 = (ndf > 0) ? (chi2 / ndf) : 0.0;
-        const double R2_w    = (TSS_w > 0) ? (1.0 - chi2 / TSS_w) : 0.0;
-        const double RMSE_w  = (Wsum  > 0) ? std::sqrt(chi2 / Wsum) : 0.0;
+        // Δb_data from raw values
+        dBdata = yMax - yMin;
 
-        const double invFac  = 1.0 / Delta;
-        const double baseVar = haveYerrs ? 1.0 : redChi2;
-        const double var_b0  = baseVar * (Sxx * invFac);
-        const double var_m   = baseVar * (S   * invFac);
-        const double sb0     = (var_b0 > 0.0) ? std::sqrt(var_b0) : 0.0;
-        const double sm      = (var_m  > 0.0) ? std::sqrt(var_m ) : 0.0;
+        const int ndf = std::max(0, Nuse - 2);
+        redChi2 = (ndf > 0) ? (chi2 / ndf) : 0.0;
+        R2w     = (TSSw > 0) ? (1.0 - chi2 / TSSw) : 0.0;
+        RMSEw   = (S > 0.0) ? std::sqrt(chi2 / S) : 0.0;
 
-        const double m_per_dec = m * std::log(10.0);
-        const double db_fit    = (b0 + m * std::log(Emax / E0))
-                               - (b0 + m * std::log(Emin / E0));
-        double db_data = 0.0;
-        if (!vals.empty()) {
-          const double y1 = vals.front();
-          const double y2 = vals.back();
-          if (std::isfinite(y1) && std::isfinite(y2)) db_data = y2 - y1;
+        // If we did not have per-point uncertainties, scale parameter errors by sqrt(chi2/ndf)
+        const double scale = (!haveYerrsAll && ndf > 0) ? std::sqrt(redChi2) : 1.0;
+        dm  = std::sqrt(std::max(0.0, var_m )) * scale;
+        db0 = std::sqrt(std::max(0.0, var_b0)) * scale;
+
+        // Report extras
+        z_m        = (dm > 0.0 ? m / dm : 0.0);
+        m_per_dec  = m * std::log(10.0);
+
+        // Recompute Δb_fit using predicted range over actually used energy range (min/max xi)
+        if (!xi.empty())
+        {
+          const double x_min = *std::min_element(xi.begin(), xi.end());
+          const double x_max = *std::max_element(xi.begin(), xi.end());
+          const double yhat_min = b0 + m * x_min;
+          const double yhat_max = b0 + m * x_max;
+          dBfit = yhat_max - yhat_min;
         }
 
-        // draw fitted curve
-        const double fitLo = std::max(xLo, 0.95 * Emin);
-        const double fitHi = std::min(xHi, 1.05 * Emax);
+        // Draw the fitted line
         std::unique_ptr<TF1> f(new TF1(Form("f_%s_%d", key.c_str(), idx),
-                                       "[0] + [1]*log(x/[2])", fitLo, fitHi));
+                                       "[0] + [1]*log(x/[2])", xLo, xHi));
         f->SetParameters(b0, m, E0);
         f->FixParameter(2, E0);
-        f->SetLineColor(colors[idx % 8]);
-        f->SetLineWidth(2);
-        f->Draw("SAME");
-        keepFits.emplace_back(std::move(f));
+          f->SetLineColor(colors[idx % 8]);
+          f->SetLineWidth(2);
+          if (drawThis) f->Draw("SAME");
+          keepFits.emplace_back(std::move(f));
+      }
 
-        lt.SetTextColor(colors[idx % 8]);
-        lt.DrawLatex(xTxt, yTop - idx*yStep,
-                     Form("%s: b_{0}=%.4f,  m=%.4f,  #chi^{2}/ndf=%.2f",
-                          prettyName(key), b0, m, redChi2));
+        // Print one clean, aligned row per variant
+        {
+          std::ostringstream ln;
+          ln.setf(std::ios::fixed);
+          ln << std::setprecision(6);
 
-        // terminal row
-        std::cout << std::left  << std::setw(18) << prettyName(key)
-                  << std::right << std::setw(4)  << Nuse
-                  << std::setw(12) << std::fixed << std::setprecision(3) << Emin
-                  << std::setw(12) << std::fixed << std::setprecision(3) << Emax
-                  << std::setw(12) << std::fixed << std::setprecision(6) << b0
-                  << std::setw(10) << std::fixed << std::setprecision(6) << sb0
-                  << std::setw(12) << std::fixed << std::setprecision(6) << m
-                  << std::setw(10) << std::fixed << std::setprecision(6) << sm
-                  << std::setw(8)  << std::fixed << std::setprecision(2) << (sm>0?m/sm:0.0)
-                  << std::setw(12) << std::fixed << std::setprecision(6) << m_per_dec
-                  << std::setw(14) << std::fixed << std::setprecision(6) << db_fit
-                  << std::setw(14) << std::fixed << std::setprecision(6) << db_data
-                  << std::setw(8)  << std::fixed << std::setprecision(3) << R2_w
-                  << std::setw(12) << std::fixed << std::setprecision(6) << RMSE_w
-                  << std::setw(10) << std::fixed << std::setprecision(3) << redChi2
-                  << "\n";
+          ln << std::left << std::setw(18) << key
+             << " | " << std::right << std::setw(6)  << Nuse
+             << " | " << std::setw(9)  << (std::isfinite(Emin)?Emin:0.0)
+             << " | " << std::setw(9)  << (std::isfinite(Emax)?Emax:0.0)
+             << " | " << std::setw(12) << (std::isfinite(b0)?b0:0.0)
+             << " | " << std::setw(10) << (std::isfinite(db0)?db0:0.0)
+             << " | " << std::setw(12) << (std::isfinite(m)?m:0.0)
+             << " | " << std::setw(10) << (std::isfinite(dm)?dm:0.0)
+             << " | " << std::setw(9)  << (std::isfinite(z_m)?z_m:0.0)
+             << " | " << std::setw(12) << (std::isfinite(m_per_dec)?m_per_dec:0.0)
+             << " | " << std::setw(12) << (std::isfinite(dBfit)?dBfit:0.0)
+             << " | " << std::setw(12) << (std::isfinite(dBdata)?dBdata:0.0)
+             << " | " << std::setw(8)  << (std::isfinite(R2w)?R2w:0.0)
+             << " | " << std::setw(10) << (std::isfinite(RMSEw)?RMSEw:0.0)
+             << " | " << std::setw(10) << (std::isfinite(redChi2)?redChi2:0.0);
+
+          std::cout << ln.str() << "\n";
+        }
+      // CSV line (same fields)
+      {
+        std::ostringstream ln;
+        ln << key << ","
+           << Nuse << ","
+           << (std::isfinite(Emin)?Emin:0.0) << ","
+           << (std::isfinite(Emax)?Emax:0.0) << ","
+           << (std::isfinite(b0)?b0:0.0) << ","
+           << (std::isfinite(db0)?db0:0.0) << ","
+           << (std::isfinite(m)?m:0.0) << ","
+           << (std::isfinite(dm)?dm:0.0) << ","
+           << (std::isfinite(z_m)?z_m:0.0) << ","
+           << (std::isfinite(m_per_dec)?m_per_dec:0.0) << ","
+           << (std::isfinite(dBfit)?dBfit:0.0) << ","
+           << (std::isfinite(dBdata)?dBdata:0.0) << ","
+           << (std::isfinite(R2w)?R2w:0.0) << ","
+           << (std::isfinite(RMSEw)?RMSEw:0.0) << ","
+           << (std::isfinite(redChi2)?redChi2:0.0);
+        csvRows.push_back(ln.str());
       }
 
       ++idx;
     }
 
-    // ----------------------------- second PNG: η-dependent only ---------------
+    // Write CSV once per overlay call
     {
-      // Filter out the "no η-dep" key if present.
-      std::vector<std::string> keysEtaOnly;
-      for (const auto& k : keysOrdered) if (k != "originalEta") keysEtaOnly.push_back(k);
-
-        TCanvas c2("cbOverlay_etaOnly",
-                   isPhi ? "b_{#varphi}(E) overlay" : "b_{#eta}(E) overlay",
-                   900, 700);
-        
-        // compute y-range from eta-only series (include ±errors)
-        double ymin2 = +1e9, ymax2 = -1e9;
-        for (const auto& key : keysEtaOnly) {
-          const auto& vals = byVar.at(key);
-          auto itErr = byVarErr.find(key);
-          const std::vector<double>* errs = (itErr == byVarErr.end()) ? nullptr : &itErr->second;
-          for (size_t i = 0; i < vals.size(); ++i) {
-            if (!std::isfinite(vals[i])) continue;
-            const double e = (errs && i < errs->size() && std::isfinite((*errs)[i])) ? (*errs)[i] : 0.0;
-            ymin2 = std::min(ymin2, vals[i] - e);
-            ymax2 = std::max(ymax2, vals[i] + e);
-          }
-        }
-        if (!std::isfinite(ymin2) || !std::isfinite(ymax2)) { ymin2 = 0.0; ymax2 = 1.0; }
-        double span2 = ymax2 - ymin2;
-        if (span2 <= 0) { span2 = 1.0; }
-        const double yLo2 = ymin2 - 0.10 * std::fabs(ymin2);
-        const double yHi2 = ymax2 + 0.15 * std::fabs(ymax2);
-
-        TH2F frame2("frame2", "", 100, xLo, xHi, 100, yLo2, yHi2);
-        frame2.SetTitle(isPhi ? "best-fit  b_{#varphi}  vs  E;E  [GeV];b_{#varphi}"
-                              : "best-fit  b_{#eta}     vs  E;E  [GeV];b_{#eta}");
-        frame2.SetStats(0);
-        frame2.Draw();
-
-
-      TLegend leg2(0.16, 0.65, 0.42, 0.89);
-      leg2.SetBorderSize(0);
-      leg2.SetFillStyle(0);
-      leg2.SetTextSize(0.040);
-
-      std::vector<std::unique_ptr<TGraphErrors>> keepPoints2;
-      std::vector<std::unique_ptr<TF1>>          keepFits2;
-
-      int idx2 = 0;
-      for (const auto& key : keysEtaOnly)
+      const char* which = isPhi ? "phi" : "eta";
+      std::string suff  = (outSuffix ? std::string(outSuffix) : std::string());
+      std::string csvPath = outBaseDir + "/bFitParams_" + which + (suff.empty()? "" : suff) + ".csv";
+      std::ofstream fout(csvPath);
+      if (fout)
       {
-        const auto& vals = byVar.at(key);
-        if (vals.size() != ecenters.size()) { ++idx2; continue; }
-
-        auto itErr = byVarErr.find(key);
-        std::vector<double> errs = (itErr != byVarErr.end()) ? itErr->second
-                                                             : std::vector<double>(vals.size(), 0.0);
-        if (errs.size() != vals.size()) errs.assign(vals.size(), 0.0);
-
-        std::unique_ptr<TGraphErrors> g2(new TGraphErrors(static_cast<int>(vals.size())));
-        double Emin = +1e9, Emax = -1e9;
-        for (size_t i = 0; i < vals.size(); ++i)
-        {
-          const double Ei = ecenters[i];
-          const double yi = vals[i];
-          const double si = (std::isfinite(errs[i]) ? errs[i] : 0.0);
-          if (!std::isfinite(Ei) || !std::isfinite(yi)) continue;
-
-          g2->SetPoint(static_cast<int>(i), Ei, yi);
-          g2->SetPointError(static_cast<int>(i), 0.0, si);
-          Emin = std::min(Emin, Ei);
-          Emax = std::max(Emax, Ei);
-        }
-        const int col = colors[idx2 % 8];
-        g2->SetMarkerStyle(kMarkerStyle);
-        g2->SetMarkerSize(kMarkerSize);
-        g2->SetMarkerColor(col);
-        g2->SetLineColor(col);
-        g2->Draw("P SAME");
-        leg2.AddEntry(g2.get(), prettyName(key), "p");
-        keepPoints2.emplace_back(std::move(g2));
-
-        // Fit & draw (same closed-form fit as above)
-        // (Recompute quickly for this view)
-        double S=0, Sx=0, Sy=0, Sxx=0, Sxy=0;
-        int     Nuse = 0;
-        bool    haveYerrs = false;
-
-        std::vector<double> xi; xi.reserve(vals.size());
-        std::vector<double> yi; yi.reserve(vals.size());
-        std::vector<double> wi; wi.reserve(vals.size());
-
-        for (size_t i = 0; i < vals.size(); ++i)
-        {
-          const double E  = ecenters[i];
-          const double y  = vals[i];
-          const double sy = errs[i];
-          if (!(std::isfinite(E) && E > 0.0 && std::isfinite(y))) continue;
-
-          const double x = std::log(E / E0);
-          const double w = (std::isfinite(sy) && sy > 0.0) ? (haveYerrs = true, 1.0/(sy*sy)) : 1.0;
-
-          S   += w;
-          Sx  += w * x;
-          Sy  += w * y;
-          Sxx += w * x * x;
-          Sxy += w * x * y;
-
-          xi.push_back(x);
-          yi.push_back(y);
-          wi.push_back(w);
-          ++Nuse;
-        }
-
-        const double Delta = S*Sxx - Sx*Sx;
-        if (Nuse >= 2 && (Delta > 0.0)) {
-          const double m  = (S * Sxy - Sx * Sy) / Delta;
-          const double b0 = (Sxx * Sy - Sx * Sxy) / Delta;
-
-          const double fitLo = std::max(xLo, 0.95 * Emin);
-          const double fitHi = std::min(xHi, 1.05 * Emax);
-          std::unique_ptr<TF1> f2(new TF1(Form("f2_%s_%d", key.c_str(), idx2),
-                                          "[0] + [1]*log(x/[2])", fitLo, fitHi));
-          f2->SetParameters(b0, m, E0);
-          f2->FixParameter(2, E0);
-          f2->SetLineColor(colors[idx2 % 8]);
-          f2->SetLineWidth(2);
-          f2->Draw("SAME");
-          keepFits2.emplace_back(std::move(f2));
-        }
-
-        ++idx2;
+        for (const auto& s : csvRows) fout << s << "\n";
+        fout.close();
+        std::cout << "[b-fit] Wrote CSV: " << csvPath << "\n";
       }
-
-      leg2.Draw();
-      TString out2 = Form("%s/%s", outBaseDir.c_str(),
-                          isPhi ? "bValuesPhiOverlay_etaOnly.png" : "bValuesEtaOverlay_etaOnly.png");
-      c2.SaveAs(out2);
+      else
+      {
+        std::cerr << "[b-fit] WARNING: Could not write CSV to " << csvPath << "\n";
+      }
     }
 
+    leg.Draw();
 
-  std::cout << "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n"
-            << "(E0 fixed at " << E0 << " GeV; m/decade = m * ln 10. "
-            << "Errors unscaled when σ_y provided; otherwise scaled by χ²/ndf.)\n\n";
-
-  leg.Draw();
-
-  TString out = Form("%s/%s", outBaseDir.c_str(),
-                     isPhi ? "bValuesPhiOverlay.png" : "bValuesEtaOverlay.png");
-  c.SaveAs(out);
+  // Single overlay image (NO redundant second save)
+  TString outMain = Form("%s/%s%s.png", outBaseDir.c_str(),
+                         isPhi ? "bValuesPhiOverlay" : "bValuesEtaOverlay",
+                         outSuffix ? outSuffix : "");
+  c.SaveAs(outMain);
 }
-
-
 
 
 /*
@@ -3474,7 +3495,7 @@ static void MakeFourWaySummaries(
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -5415,7 +5436,7 @@ void MakeDeltaPhiEtaPlayground(
             "ETiltVariant::CLUS_RAW",                // 2
             "ETiltVariant::CLUS_CP",                 // 3
             "ETiltVariant::CLUS_BCORR",              // 4
-            "ETiltVariant::CLUS_CP_EA_GEOM",         // 5
+            "ETiltVariant::CLUS_CP_EA_FIT_ZDEP",     // 5
             "ETiltVariant::CLUS_CP_EA_FIT_ETADEP",   // 6
             "ETiltVariant::CLUS_CP_EA_FIT_EONLY",    // 7
             "ETiltVariant::CLUS_CP_EA_MIX"           // 8
@@ -8801,8 +8822,8 @@ void PDCAnalysisPrime()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/SimOutputPrime";
 
   EnsureDir(outBaseDir);
 
@@ -8818,19 +8839,19 @@ void PDCAnalysisPrime()
   const auto eEdges = MakeEnergySlices();
   const auto eCent  = MakeEnergyCenters();
 
-    RunPi0MassAnalysis(inFilePath.c_str(), outBaseDir.c_str());
+//    RunPi0MassAnalysis(inFilePath.c_str(), outBaseDir.c_str());
     
-  // Prepare global b-values text file
-  const std::string bValFile = outBaseDir + "/bValues.txt";
-  std::ofstream bOut(bValFile);
-  if (!bOut.is_open())
-  {
-    std::cerr << "[WARN] Cannot open " << bValFile << " => won't save b-values.\n";
-  }
-  else
-  {
-    bOut << "# E range   best-b   (PHI or ETA)   etaVariant\n";
-  }
+    // Prepare global b-values text file
+    const std::string bValFile = outBaseDir + "/bValues.txt";
+    std::ofstream bOut(bValFile);
+    if (!bOut.is_open())
+    {
+      std::cerr << "[WARN] Cannot open " << bValFile << " => won't save b-values.\n";
+    }
+    else
+    {
+      bOut << "# E range   best-b   (PHI or ETA)   etaVariant   zVariant\n";
+    }
 
   // Variant definitions: list of possible names (range / disc) for each histogram
   struct VSpec {
@@ -8862,52 +8883,368 @@ void PDCAnalysisPrime()
     }
   };
 
-  // To build the global overlays across variants:
-  std::map<std::string, std::vector<double>> phiByVariant;     // key -> bφ(E)
-  std::map<std::string, std::vector<double>> etaByVariant;     // key -> bη(E)
-  std::map<std::string, std::vector<double>> phiErrByVariant;  // key -> σ_bφ(E)
-  std::map<std::string, std::vector<double>> etaErrByVariant;  // key -> σ_bη(E)
+    // To build the global overlays across variants:
+    std::map<std::string, std::vector<double>> phiByVariant;     // key -> bφ(E)
+    std::map<std::string, std::vector<double>> etaByVariant;     // key -> bη(E)
+    std::map<std::string, std::vector<double>> phiErrByVariant;  // key -> σ_bφ(E)
+    std::map<std::string, std::vector<double>> etaErrByVariant;  // key -> σ_bη(E)
 
-  for (const auto& v : variants)
-    {
-      const std::string outDir = outBaseDir + "/" + v.key;
-      EnsureDir(outDir);
+    // NEW: store per-variant counts of clusters per energy bin (UNCORRECTED)
+    std::map<std::string, std::vector<long long>> entriesByVariant;
 
-      // --- run your normal per-variant products (lego, 2D, overlays, b vs E) ---
-      TH3F* hUnc = GetTH3FByNames(fin.get(), v.uncNames);
-      TH3F* hCor = nullptr;
-      if (!isFirstPass) hCor = GetTH3FByNames(fin.get(), v.corNames);
-      if (!hUnc) { std::cerr << "[WARN] missing " << v.key << " - skipped\n"; continue; }
-      hUnc->SetDirectory(nullptr); if (hCor) hCor->SetDirectory(nullptr);
-
-      SaveTH3Lego(hUnc, (outDir + "/lego_unc.png").c_str(), kEtaPretty.at(v.key).c_str());
-      Plot2DBlockEtaPhi(hUnc, hCor, isFirstPass, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
-      OverlayUncorrPhiEta (hUnc, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
-      BVecs bv = MakeBvaluesVsEnergyPlot(hUnc, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
-      phiByVariant[v.key]    = bv.bphi;  phiErrByVariant[v.key] = bv.bphiErr;
-      etaByVariant[v.key]    = bv.beta;  etaErrByVariant[v.key] = bv.betaErr;
-      if (bOut.is_open()) WriteBValuesTxt(hUnc, eEdges, bOut, v.key.c_str());
-      if (!isFirstPass && hCor) { SaveTH3Lego(hCor, (outDir + "/lego_cor.png").c_str(), kEtaPretty.at(v.key).c_str());
-                                  FitLocalPhiEta(hUnc, hCor, false, eEdges, outDir.c_str()); }
-
-      // --- NEW: run the Playground only for originalEta into .../originalEta/scratchPDC ---
-      if (v.key == "originalEta")
+    for (const auto& v : variants)
       {
-        const std::string scratch = outDir + "/scratchPDC";
-        EnsureDir(scratch);
-        MakeDeltaPhiEtaPlayground(inFilePath.c_str(), scratch.c_str(),
-                                  /*xMin*/ -0.035, /*xMax*/ 0.035);
+        const std::string outDir = outBaseDir + "/" + v.key;
+        EnsureDir(outDir);
+
+        // --- run your normal per-variant products (lego, 2D, overlays, b vs E) ---
+        TH3F* hUnc = GetTH3FByNames(fin.get(), v.uncNames);
+        TH3F* hCor = nullptr;
+        if (!isFirstPass) hCor = GetTH3FByNames(fin.get(), v.corNames);
+        if (!hUnc) { std::cerr << "[WARN] missing " << v.key << " - skipped\n"; continue; }
+        hUnc->SetDirectory(nullptr); if (hCor) hCor->SetDirectory(nullptr);
+
+        SaveTH3Lego(hUnc, (outDir + "/lego_unc.png").c_str(), kEtaPretty.at(v.key).c_str());
+        Plot2DBlockEtaPhi(hUnc, hCor, isFirstPass, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
+        OverlayUncorrPhiEta (hUnc, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
+        BVecs bv = MakeBvaluesVsEnergyPlot(hUnc, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
+        phiByVariant[v.key]    = bv.bphi;  phiErrByVariant[v.key] = bv.bphiErr;
+        etaByVariant[v.key]    = bv.beta;  etaErrByVariant[v.key] = bv.betaErr;
+        if (bOut.is_open()) WriteBValuesTxt(hUnc, eEdges, bOut, v.key.c_str(), "originalZRange");
+
+        if (!isFirstPass && hCor) { SaveTH3Lego(hCor, (outDir + "/lego_cor.png").c_str(), kEtaPretty.at(v.key).c_str());
+                                    FitLocalPhiEta(hUnc, hCor, false, eEdges, outDir.c_str()); }
+
+        // --- NEW: run the Playground only for originalEta into .../originalEta/scratchPDC ---
+        if (v.key == "originalEta")
+        {
+          const std::string scratch = outDir + "/scratchPDC";
+          EnsureDir(scratch);
+          MakeDeltaPhiEtaPlayground(inFilePath.c_str(), scratch.c_str(),
+                                    /*xMin*/ -0.035, /*xMax*/ 0.035);
+        }
+
+        // --- NEW: compute entries per energy bin (UNCORRECTED 3D → sum over X,Y in that Z slice) ---
+        {
+          const int nx = hUnc->GetNbinsX();
+          const int ny = hUnc->GetNbinsY();
+          std::vector<long long> cntVec;
+          cntVec.reserve(eEdges.size());
+          for (size_t i = 0; i < eEdges.size(); ++i) {
+            const double eLo = eEdges[i].first;
+            const double eHi = eEdges[i].second;
+            const int zLo = std::max(1, hUnc->GetZaxis()->FindBin(eLo + 1e-9));
+            const int zHi = std::min(hUnc->GetNbinsZ(), hUnc->GetZaxis()->FindBin(eHi - 1e-9));
+            // Include full XY range, and only the Z slice corresponding to the energy bin:
+            const double sum = hUnc->Integral(1, nx, 1, ny, zLo, zHi);
+            const long long cnt = static_cast<long long>(std::llround(sum));
+            cntVec.push_back(cnt);
+          }
+          entriesByVariant[v.key] = std::move(cntVec);
+        }
+
+        delete hUnc; if (hCor) delete hCor;
+    }
+
+    // NEW: Print entries summary tables (UNCORRECTED)
+    //   1) Across η-views (you already computed entriesByVariant above)
+    //   2) Across |z_vtx| slices by reading the h3_blockCoord_E_zXXtoYY_* histos from file
+    {
+      // ------------------ 1) η-views table ------------------
+      {
+        // Preferred column order; print only those we actually filled:
+        std::vector<std::string> colOrder = {"etaCore","etaMid","etaEdge","fullEta","originalEta"};
+        std::vector<std::string> cols; cols.reserve(colOrder.size());
+        for (const auto& k : colOrder) {
+          if (entriesByVariant.count(k)) cols.push_back(k);
+        }
+
+        if (!cols.empty()) {
+          std::cout << "\n";
+          std::cout << "╔═════════════════════════════════════════════════════════════════════════════════════╗\n";
+          std::cout << "║  Entries summary: number of clusters per E-bin and |η| bin (uncorrected Z-slices)  ║\n";
+          std::cout << "╚═════════════════════════════════════════════════════════════════════════════════════╝\n";
+          // Header
+          std::cout << std::left << std::setw(20) << "E-bin";
+          for (const auto& key : cols) {
+            std::cout << " | " << std::setw(14) << kEtaPretty.at(key);
+          }
+          std::cout << "\n";
+          std::cout << std::string(20 + (int)cols.size() * (3 + 14), '-') << "\n";
+
+          // Rows
+          for (size_t i = 0; i < eEdges.size(); ++i) {
+            std::cout << std::left << std::setw(20)
+                      << Form("[%.1f,%.1f) GeV", eEdges[i].first, eEdges[i].second)
+                      << std::right;
+            for (const auto& key : cols) {
+              const auto& vec = entriesByVariant.at(key);
+              const long long val = (i < vec.size()) ? vec[i] : 0LL;
+              std::cout << " | " << std::setw(14) << val;
+            }
+            std::cout << "\n";
+          }
+
+          // Totals row
+          std::cout << std::string(20 + (int)cols.size() * (3 + 14), '-') << "\n";
+          std::cout << std::left << std::setw(20) << "Total" << std::right;
+          for (const auto& key : cols) {
+            long long tot = 0;
+            for (const auto& v : entriesByVariant.at(key)) tot += v;
+            std::cout << " | " << std::setw(14) << tot;
+          }
+          std::cout << "\n\n";
+        }
       }
 
-      delete hUnc; if (hCor) delete hCor;
-  }
+        // ------------------ 2) |z_vtx|-slice table (COARSE) ------------------
+        {
+          // Try to read each z-slice TH3 (either *_range or *_disc) and compute per-E-bin counts
+          // The order/labels come from your kZOrder / kZPretty.
+          std::map<std::string, std::vector<long long>> zEntries;   // zTag -> counts per E-bin
+          std::vector<std::string> zCols; zCols.reserve(kZOrder.size());
 
-  if (bOut.is_open()) bOut.close();
+          for (const auto& ztag : kZOrder)
+          {
+            std::vector<TString> zNames = {
+              Form("h3_blockCoord_E_%s_range", ztag.c_str()),
+              Form("h3_blockCoord_E_%s_disc" , ztag.c_str())
+            };
+            TH3F* hZ = GetTH3FByNames(fin.get(), zNames);
+            if (!hZ) continue;
 
-  // Global overlays across variants (in base path)
-  SaveOverlayAcrossVariants(outBaseDir, eCent, phiByVariant, phiErrByVariant, /*isPhi*/true);
-  SaveOverlayAcrossVariants(outBaseDir, eCent, etaByVariant, etaErrByVariant, /*isPhi*/false);
-  AnalyzeBvsResCLUSCPEA(inFilePath.c_str(), outBaseDir.c_str());
+            hZ->SetDirectory(nullptr);
+            const int nx = hZ->GetNbinsX();
+            const int ny = hZ->GetNbinsY();
+
+            std::vector<long long> cntVec; cntVec.reserve(eEdges.size());
+            for (size_t i = 0; i < eEdges.size(); ++i) {
+              const double eLo = eEdges[i].first;
+              const double eHi = eEdges[i].second;
+              const int zLo = std::max(1, hZ->GetZaxis()->FindBin(eLo + 1e-9));
+              const int zHi = std::min(hZ->GetNbinsZ(), hZ->GetZaxis()->FindBin(eHi - 1e-9));
+              const double sum = hZ->Integral(1, nx, 1, ny, zLo, zHi);
+              const long long cnt = static_cast<long long>(std::llround(sum));
+              cntVec.push_back(cnt);
+            }
+
+            zEntries[ztag] = std::move(cntVec);
+            zCols.push_back(ztag);
+            delete hZ;
+          }
+
+          if (!zCols.empty()) {
+            std::cout << "\n";
+            std::cout << "╔══════════════════════════════════════════════════════════════════════════════════════╗\n";
+            std::cout << "║  Entries summary: number of clusters per E-bin and |z_vtx| bin (uncorrected z-slices)║\n";
+            std::cout << "╚══════════════════════════════════════════════════════════════════════════════════════╝\n";
+            // Header
+            std::cout << std::left << std::setw(20) << "E-bin";
+            for (const auto& ztag : zCols) {
+              std::cout << " | " << std::setw(14) << kZPretty.at(ztag);
+            }
+            std::cout << "\n";
+            std::cout << std::string(20 + (int)zCols.size() * (3 + 14), '-') << "\n";
+
+            // Rows
+            for (size_t i = 0; i < eEdges.size(); ++i) {
+              std::cout << std::left << std::setw(20)
+                        << Form("[%.1f,%.1f) GeV", eEdges[i].first, eEdges[i].second)
+                        << std::right;
+              for (const auto& ztag : zCols) {
+                const auto& vec = zEntries.at(ztag);
+                const long long val = (i < vec.size()) ? vec[i] : 0LL;
+                std::cout << " | " << std::setw(14) << val;
+              }
+              std::cout << "\n";
+            }
+
+            // Totals row
+            std::cout << std::string(20 + (int)zCols.size() * (3 + 14), '-') << "\n";
+            std::cout << std::left << std::setw(20) << "Total" << std::right;
+            for (const auto& ztag : zCols) {
+              long long tot = 0;
+              for (const auto& v : zEntries.at(ztag)) tot += v;
+              std::cout << " | " << std::setw(14) << tot;
+            }
+            std::cout << "\n\n";
+          }
+        }
+
+        // ------------------ 2b) |z_vtx|-slice table (FINE 0–10 cm) ------------------
+        {
+          // Read each fine z-slice TH3 (z00to02 ... z08to10) and compute per-E-bin counts
+          // The order/labels come from kZFineOrder / kZFinePretty.
+          std::map<std::string, std::vector<long long>> zEntriesFine;   // fine zTag -> counts
+          std::vector<std::string> zColsFine; zColsFine.reserve(kZFineOrder.size());
+
+          for (const auto& ztag : kZFineOrder)
+          {
+            std::vector<TString> zNamesFine = {
+              Form("h3_blockCoord_E_%s_range", ztag.c_str()),
+              Form("h3_blockCoord_E_%s_disc" , ztag.c_str())
+            };
+            TH3F* hZf = GetTH3FByNames(fin.get(), zNamesFine);
+            if (!hZf) continue;
+
+            hZf->SetDirectory(nullptr);
+            const int nx = hZf->GetNbinsX();
+            const int ny = hZf->GetNbinsY();
+
+            std::vector<long long> cntVec; cntVec.reserve(eEdges.size());
+            for (size_t i = 0; i < eEdges.size(); ++i) {
+              const double eLo = eEdges[i].first;
+              const double eHi = eEdges[i].second;
+              const int zLo = std::max(1, hZf->GetZaxis()->FindBin(eLo + 1e-9));
+              const int zHi = std::min(hZf->GetNbinsZ(), hZf->GetZaxis()->FindBin(eHi - 1e-9));
+              const double sum = hZf->Integral(1, nx, 1, ny, zLo, zHi);
+              const long long cnt = static_cast<long long>(std::llround(sum));
+              cntVec.push_back(cnt);
+            }
+
+            zEntriesFine[ztag] = std::move(cntVec);
+            zColsFine.push_back(ztag);
+            delete hZf;
+          }
+
+          if (!zColsFine.empty()) {
+            std::cout << "\n";
+            std::cout << "╔════════════════════════════════════════════════════════════════════════════════════════════╗\n";
+            std::cout << "║  Entries summary: number of clusters per E-bin and |z_vtx| bin (uncorrected fine z-slices 0–10 cm) ║\n";
+            std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════╝\n";
+            // Header
+            std::cout << std::left << std::setw(20) << "E-bin";
+            for (const auto& ztag : zColsFine) {
+              std::cout << " | " << std::setw(14) << kZFinePretty.at(ztag);
+            }
+            std::cout << "\n";
+            std::cout << std::string(20 + (int)zColsFine.size() * (3 + 14), '-') << "\n";
+
+            // Rows
+            for (size_t i = 0; i < eEdges.size(); ++i) {
+              std::cout << std::left << std::setw(20)
+                        << Form("[%.1f,%.1f) GeV", eEdges[i].first, eEdges[i].second)
+                        << std::right;
+              for (const auto& ztag : zColsFine) {
+                const auto& vec = zEntriesFine.at(ztag);
+                const long long val = (i < vec.size()) ? vec[i] : 0LL;
+                std::cout << " | " << std::setw(14) << val;
+              }
+              std::cout << "\n";
+            }
+
+            // Totals row
+            std::cout << std::string(20 + (int)zColsFine.size() * (3 + 14), '-') << "\n";
+            std::cout << std::left << std::setw(20) << "Total" << std::right;
+            for (const auto& ztag : zColsFine) {
+              long long tot = 0;
+              for (const auto& v : zEntriesFine.at(ztag)) tot += v;
+              std::cout << " | " << std::setw(14) << tot;
+            }
+            std::cout << "\n\n";
+          }
+        }
+      }
+    // ----------------------- Per-|z_vtx| (uncorrected) first-pass add-ons -----------------------
+    if (isFirstPass)
+    {
+      // ===================== COARSE z (existing behavior, unchanged) =====================
+      std::map<std::string, std::vector<double>> zPhiByVar, zEtaByVar;
+      std::map<std::string, std::vector<double>> zPhiErrByVar, zEtaErrByVar;
+
+      for (const auto& ztag : kZOrder)
+      {
+        // Try both range/disc names, e.g. h3_blockCoord_E_z00to10_range or ..._disc
+        std::vector<TString> zNames = {
+          Form("h3_blockCoord_E_%s_range", ztag.c_str()),
+          Form("h3_blockCoord_E_%s_disc" , ztag.c_str())
+        };
+        TH3F* hZ = GetTH3FByNames(fin.get(), zNames);
+        if (!hZ) {
+          std::cerr << "[WARN] missing z-slice TH3F: " << ztag << " - skipped\n";
+          continue;
+        }
+        hZ->SetDirectory(nullptr);
+
+        const std::string outDirZ = outBaseDir + "/" + ztag;
+        EnsureDir(outDirZ);
+
+        // Produce the same first-pass products
+        SaveTH3Lego(hZ, (outDirZ + "/lego_unc.png").c_str(), kZPretty.at(ztag).c_str());
+        Plot2DBlockEtaPhi(hZ, /*hCor3D*/nullptr, /*firstPass*/true, eEdges, outDirZ.c_str(), kZPretty.at(ztag).c_str());
+        OverlayUncorrPhiEta(hZ, eEdges, outDirZ.c_str(), kZPretty.at(ztag).c_str());
+        BVecs zbv = MakeBvaluesVsEnergyPlot(hZ, eEdges, outDirZ.c_str(), kZPretty.at(ztag).c_str());
+
+        // Persist per-z b(E) for overlays
+        zPhiByVar[ztag]     = zbv.bphi;  zPhiErrByVar[ztag] = zbv.bphiErr;
+        zEtaByVar[ztag]     = zbv.beta;  zEtaErrByVar[ztag] = zbv.betaErr;
+
+        // Write b-values with zVariant tag; etaVariant is "originalEta" for these z-slices
+        if (bOut.is_open()) WriteBValuesTxt(hZ, eEdges, bOut, "originalEta", ztag.c_str());
+
+        delete hZ;
+      }
+
+      if (!zPhiByVar.empty())
+      {
+        // Coarse z-only overlays
+        SaveOverlayAcrossVariants(outBaseDir, eCent, zPhiByVar, zPhiErrByVar, /*isPhi*/true , "_zOnly");
+        SaveOverlayAcrossVariants(outBaseDir, eCent, zEtaByVar, zEtaErrByVar, /*isPhi*/false, "_zOnly");
+      }
+
+      // ===================== FINE z (new: 0-2,2-4,4-6,6-8,8-10 cm) =====================
+      std::map<std::string, std::vector<double>> zPhiFineByVar, zEtaFineByVar;
+      std::map<std::string, std::vector<double>> zPhiFineErrByVar, zEtaFineErrByVar;
+
+      for (const auto& ztag : kZFineOrder)
+      {
+        // Try both range/disc names, e.g. h3_blockCoord_E_z00to02_range or ..._disc
+        std::vector<TString> zNamesFine = {
+          Form("h3_blockCoord_E_%s_range", ztag.c_str()),
+          Form("h3_blockCoord_E_%s_disc" , ztag.c_str())
+        };
+        TH3F* hZf = GetTH3FByNames(fin.get(), zNamesFine);
+        if (!hZf) {
+          // Silently skip if not present in this file — analysis remains robust.
+          continue;
+        }
+        hZf->SetDirectory(nullptr);
+
+        const std::string outDirZf = outBaseDir + "/" + ztag; // per-fine-slice folder
+        EnsureDir(outDirZf);
+
+        // Produce the same first-pass products for fine z-bins
+        SaveTH3Lego(hZf, (outDirZf + "/lego_unc.png").c_str(), kZFinePretty.at(ztag).c_str());
+        Plot2DBlockEtaPhi(hZf, /*hCor3D*/nullptr, /*firstPass*/true, eEdges, outDirZf.c_str(), kZFinePretty.at(ztag).c_str());
+        OverlayUncorrPhiEta(hZf, eEdges, outDirZf.c_str(), kZFinePretty.at(ztag).c_str());
+        BVecs zbvFine = MakeBvaluesVsEnergyPlot(hZf, eEdges, outDirZf.c_str(), kZFinePretty.at(ztag).c_str());
+
+        // Persist per-fine-z b(E) for overlays
+        zPhiFineByVar[ztag]     = zbvFine.bphi;  zPhiFineErrByVar[ztag] = zbvFine.bphiErr;
+        zEtaFineByVar[ztag]     = zbvFine.beta;  zEtaFineErrByVar[ztag] = zbvFine.betaErr;
+
+        // Also log fine-z b-values; etaVariant stays "originalEta"
+        if (bOut.is_open()) WriteBValuesTxt(hZf, eEdges, bOut, "originalEta", ztag.c_str());
+
+        delete hZf;
+      }
+
+      if (!zPhiFineByVar.empty())
+      {
+        // Request: two separate comparison plots ONLY for the fine bins
+        SaveOverlayAcrossVariants(outBaseDir, eCent, zPhiFineByVar, zPhiFineErrByVar, /*isPhi*/true ,  "_zFine");
+        SaveOverlayAcrossVariants(outBaseDir, eCent, zEtaFineByVar, zEtaFineErrByVar, /*isPhi*/false, "_zFine");
+      }
+    }
+    if (bOut.is_open()) bOut.close();
+
+    // ----------------------- Global overlays across η-variants (base path) -----------------------
+    SaveOverlayAcrossVariants(outBaseDir, eCent, phiByVariant, phiErrByVariant, /*isPhi*/true , ""  );
+    SaveOverlayAcrossVariants(outBaseDir, eCent, etaByVariant, etaErrByVariant, /*isPhi*/false, ""  );
+
+    AnalyzeBvsResCLUSCPEA(inFilePath.c_str(), outBaseDir.c_str());
+
+
     
   std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
 }

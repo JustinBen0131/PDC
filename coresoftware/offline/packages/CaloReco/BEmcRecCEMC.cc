@@ -246,7 +246,7 @@ void BEmcRecCEMC::SetPhiTiltVariant(ETiltVariant v)
   static const std::unordered_map<ETiltVariant,std::pair<double,double>> lut = {
       {ETiltVariant::CLUS_RAW, { 2.634138e-03, 8.197368e-04 }},  // no corr, cluster
       {ETiltVariant::CLUS_CP, { 1.943936e-03, 7.964160e-04 }},  // CorrectPosition, cluster
-      {ETiltVariant::CLUS_CP_EA_GEOM, { 1.818732e-03, 7.311745e-04 }},  // CorrectPosition(EA geom), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 1.818732e-03, 7.311745e-04 }},  // CorrectPosition(EA geom), cluster
       {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.111407e-03, 8.281758e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
       {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.110158e-03, 8.290417e-04 }},  // CorrectPosition(EA E-only), cluster
       {ETiltVariant::CLUS_CP_EA_MIX, { 2.110239e-03, 8.290575e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
@@ -285,7 +285,7 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
        *        φ(E) =  a  –  b · ln E      with  E in GeV
        *
     * -------------------------------------------------------------- */
-    bool doPhiTilt = true; // <<< set to false internally to disable
+    bool doPhiTilt = false; // <<< set to false internally to disable
     if (doPhiTilt)
     {
         /* variant–dependent tilt constants (set via SetPhiTiltVariant) */
@@ -501,374 +501,129 @@ void BEmcRecCEMC::CorrectPosition(float Energy, float x, float y,
 
 
 
-/*
- GEOMETRY ONLY
- */
-void BEmcRecCEMC::CorrectPositionEnergyAwareFromGeometry(float Energy, float x, float y,
-                                             float& xc, float& yc,
-                                             float* out_bphi, float* out_beta)
+void BEmcRecCEMC::CorrectPositionEnergyAwareZVTXAndEnergyDep(float Energy, float vtxZ_cm,
+                                                             float x, float y,
+                                                             float& xc, float& yc)
+
 {
-  // initialize optional outputs (so caller never sees stale data)
-  if (out_bphi) *out_bphi = std::numeric_limits<float>::quiet_NaN();
-  if (out_beta) *out_beta = std::numeric_limits<float>::quiet_NaN();
+  // Legacy gating (match your other correctors)
+  if (!m_UseCorrectPosition) { xc = x; yc = y; return; }
+  if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
+  { xc = x; yc = y; return; }
 
-  // -------- pass-through guards
-  xc = x; yc = y;
-  if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y)) return;
-  if (Energy < 0.01f) return;
+  // Map |z_vtx| to a z-slice index
+  const float absZ = std::fabs(vtxZ_cm);
 
-  // -------- small helpers
-  auto clampf = [](float v, float lo, float hi){ return (v < lo) ? lo : (v > hi) ? hi : v; };
-  auto norm3  = [&](float v[3]) { float n = std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); if (n<1e-12f) n=1e-12f; v[0]/=n; v[1]/=n; v[2]/=n; };
-  auto proj_perp_len = [&](const float aHat[3], float vx, float vy, float vz)->float {
-    const float k = vx*aHat[0] + vy*aHat[1] + vz*aHat[2];
-    const float px = vx - k*aHat[0];
-    const float py = vy - k*aHat[1];
-    const float pz = vz - k*aHat[2];
-    return std::sqrt(px*px + py*py + pz*pz);
+    // Bin order (9 bins total):
+    //   0:[0,2)  1:[2,4)  2:[4,6)  3:[6,8)  4:[8,10)  5:[10,20)  6:[20,30)  7:[30,45)  8:[45,60] and above
+    auto zIndex = [](float z_cm)->int {
+      // |z| is non-negative; return a valid bin for all inputs (≥60 → last bin)
+      if (z_cm <  2.f)  return 0;
+      if (z_cm <  4.f)  return 1;
+      if (z_cm <  6.f)  return 2;
+      if (z_cm <  8.f)  return 3;
+      if (z_cm < 10.f)  return 4;
+      if (z_cm < 20.f)  return 5;
+      if (z_cm < 30.f)  return 6;
+      if (z_cm < 45.f)  return 7;
+      // [45,60) → 8, and anything ≥60 cm also → 8 (clamp high)
+      return 8;
+    };
+
+    int iz = zIndex(absZ);
+
+  // ---- per-|z| bin log-fit coefficients from your PDC-RAW tables (E0 = 3 GeV) ----
+  // φ: bφ(E,|z|) = b0φ + mφ * ln(E/E0)
+  // η: bη(E,|z|) = b0η + mη * ln(E/E0)
+  //
+  // Fine 0–10 cm (2-cm slices) from bValuesPhiOverlay_zFine / bValuesEtaOverlay_zFine:
+  //   z00to02:  b0φ=0.181614, mφ=-0.006720   |  b0η=0.187871, mη=-0.002202
+  //   z02to04:  b0φ=0.181808, mφ=-0.007140   |  b0η=0.187243, mη=-0.002529
+  //   z04to06:  b0φ=0.183499, mφ=-0.007598   |  b0η=0.186277, mη=-0.001018
+  //   z06to08:  b0φ=0.177695, mφ=-0.004814   |  b0η=0.189039, mη=-0.002569
+  //   z08to10:  b0φ=0.179001, mφ=-0.005619   |  b0η=0.190574, mη=-0.004268
+  //
+  // Coarse 10–60 cm from bValuesPhiOverlay_zOnly / bValuesEtaOverlay_zOnly:
+  //   z10to20:  b0φ=0.181252, mφ=-0.006485   |  b0η=0.192266, mη=-0.002334
+  //   z20to30:  b0φ=0.179671, mφ=-0.006219   |  b0η=0.207996, mη=-0.006129
+  //   z30to45:  b0φ=0.178555, mφ=-0.006275   |  b0η=0.235485, mη=-0.010342
+  //   z45to60:  b0φ=0.176307, mφ=-0.006279   |  b0η=0.322516, mη=-0.002704
+  //
+  // For 0–10 coarse in that table, you are already using the fine bins above.
+
+  static constexpr float E0 = 3.0f;
+
+  // 9-bin arrays in the order listed above
+  static constexpr float B0_PHI_Z[9] = {
+    0.181614f, 0.181808f, 0.183499f, 0.177695f, 0.179001f,  // 0..4 : 0–10 cm fine
+    0.181252f, 0.179671f, 0.178555f, 0.176307f               // 5..8 : 10–60 cm coarse
   };
-  auto wrap_phi = [&](float v)->float {
-    if (!(fNx > 0) || !std::isfinite(v)) return v;
-    const float lo = -0.5f, hi = float(fNx) - 0.5f, span = float(fNx);
-    float t = std::fmod(v - lo, span); if (t < 0.f) t += span;
-    float r = lo + t;
-    // open-right guard: map exact top back to lo
-    if (std::fabs(r - hi) < 1e-7f) r = lo;
-    return r;
+  static constexpr float M_PHI_Z[9] = {
+   -0.006720f,-0.007140f,-0.007598f,-0.004814f,-0.005619f,  // 0..4
+   -0.006485f,-0.006219f,-0.006275f,-0.006279f               // 5..8
   };
-  auto dot3 = [&](const float a[3], const float b[3]){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; };
 
-  // -------- indices & geometry
-  const int ixHome = EmcCluster::lowint(x + 0.5f);
-  const int iyHome = EmcCluster::lowint(y + 0.5f);
+  static constexpr float B0_ETA_Z[9] = {
+    0.187871f, 0.187243f, 0.186277f, 0.189039f, 0.190574f,  // 0..4
+    0.192266f, 0.207996f, 0.235485f, 0.322516f               // 5..8
+  };
+  static constexpr float M_ETA_Z[9] = {
+   -0.002202f,-0.002529f,-0.001018f,-0.002569f,-0.004268f,  // 0..4
+   -0.002334f,-0.006129f,-0.010342f,-0.002704f               // 5..8
+  };
 
-  TowerGeom g{};
-  if (!GetTowerGeometry(ixHome, iyHome, g)) {
-    // conservative fallback: legacy constant b
-    const float b = 0.15f;
+  // Safety: clamp iz in [0..8]
+  if (iz < 0) iz = 0;
+  if (iz > 8) iz = 8;
 
-    // report b-values in fallback
-    if (out_bphi) *out_bphi = b;
-    if (out_beta) *out_beta = b;
+  // Build b(E) for φ/η at this z-slice
+  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
+  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
 
-    // φ inverse-asinh (no zero-shift)
-    float x0 = x; const int ix0 = EmcCluster::lowint(x0 + 0.5f);
-    if (std::fabs(x0 - ix0) <= 0.5f) {
-      const float Sx = std::sinh(0.5f / b);
-      x0 = ix0 + b * std::asinh( 2.f * (x0 - ix0) * Sx );
-    }
+  const float bx = clamp_b(B0_PHI_Z[iz] + M_PHI_Z[iz] * lnE); // φ-direction b(E; z)
+  const float by = clamp_b(B0_ETA_Z[iz] + M_ETA_Z[iz] * lnE); // η-direction b(E; z)
 
-    // ripple
-    int   ix8 = int(x + 0.5f) / 8;
-    float x8  = x + 0.5f - (ix8 * 8) - 4.f;
-    float dx  = m_UseDetailedGeometry
-              ? static_cast<float>(factor_[int(x+0.5f)-ix8*8]) * (x8/4.f)
-              : (std::fabs(x8) > 3.3f ? 0.f : 0.10f * (x8/4.f));
-    xc = wrap_phi(x0 - dx);
+  // ----- identical inverse-asinh + ripple/wrap as your other correctors -----
+  const int ix0 = EmcCluster::lowint(x + 0.5f);
+  const int iy0 = EmcCluster::lowint(y + 0.5f);
 
-    // η inverse-asinh (no zero-shift)
-    float y0 = y; const int iy0 = EmcCluster::lowint(y0 + 0.5f);
-    if (std::fabs(y0 - iy0) <= 0.5f) {
-      const float Sy = std::sinh(0.5f / b);
-      y0 = iy0 + b * std::asinh( 2.f * (y0 - iy0) * Sy );
-    }
-    yc = y0;
-    return;
-  }
-
-  // ============================================================
-  // Local basis & shower axis at depth
-  // ============================================================
-  float ephi[3] = { g.dX[0], g.dY[0], g.dZ[0] };
-  float eeta[3] = { g.dX[1], g.dY[1], g.dZ[1] };
-  norm3(ephi); norm3(eeta);
-  float erad[3] = { ephi[1]*eeta[2] - ephi[2]*eeta[1],
-                    ephi[2]*eeta[0] - ephi[0]*eeta[2],
-                    ephi[0]*eeta[1] - ephi[1]*eeta[0] };
-  norm3(erad);
-
-  float r0E[3];
-  CorrectShowerDepth(ixHome, iyHome, Energy, g.Xcenter, g.Ycenter, g.Zcenter,
-                     r0E[0], r0E[1], r0E[2]);
-
-  float aTmp[3] = { r0E[0], r0E[1], r0E[2] - fVz };
-  norm3(aTmp);
-  const float aHat[3] = { aTmp[0], aTmp[1], aTmp[2] };
-
-  // ---- small high-E depth reference (shared by φ & η tempering)
-  constexpr float E0_HE_REF = 10.0f;
-  float r0E_ref[3];
-  CorrectShowerDepth(ixHome, iyHome, E0_HE_REF, g.Xcenter, g.Ycenter, g.Zcenter,
-                     r0E_ref[0], r0E_ref[1], r0E_ref[2]);
-  float aTmpRef[3] = { r0E_ref[0], r0E_ref[1], r0E_ref[2] - fVz };
-  norm3(aTmpRef);
-  const float aHatRef[3] = { aTmpRef[0], aTmpRef[1], aTmpRef[2] };
-
-  const float rF[3]  = { g.Xcenter, g.Ycenter, g.Zcenter };
-  const float drE[3]   = { r0E[0]-rF[0],    r0E[1]-rF[1],    r0E[2]-rF[2] };
-  const float drRef[3] = { r0E_ref[0]-rF[0], r0E_ref[1]-rF[1], r0E_ref[2]-rF[2] };
-  const float depthE   = std::fabs(dot3(drE,   aHat));
-  const float depthRef = std::fabs(dot3(drRef, aHatRef));
-
-  // Neighbor indices
-  const int ixP   = (fNx > 0) ? ((ixHome + 1 + fNx) % fNx) : ixHome; // +φ
-  const int ixM   = (fNx > 0) ? ((ixHome - 1 + fNx) % fNx) : ixHome; // −φ  (PATCH)
-  const int iyP   = (iyHome + 1 < fNy) ? (iyHome + 1) : iyHome;       // +η
-  const int iyDn  = (iyHome > 0) ? (iyHome - 1) : iyHome;             // −η
-
-  // ============================================================
-  // φ side — high‑E refinement (kept) + PATCH: ±φ symmetry at high E
-  // ============================================================
-  constexpr float b0 = 0.15f;
-
-  const float dPhF[3] = { g.dX[0], g.dY[0], g.dZ[0] }; // φ step on the face
-
-  // transport a *face-advanced* point (home + dPhF) to depth at +φ index
-  const float cPhP[3] = { g.Xcenter + dPhF[0], g.Ycenter + dPhF[1], g.Zcenter + dPhF[2] };
-  float rPhE_p[3];
-  CorrectShowerDepth(ixP, iyHome, Energy, cPhP[0], cPhP[1], cPhP[2],
-                     rPhE_p[0], rPhE_p[1], rPhE_p[2]);
-
-  // PATCH: mirror to −φ using a face-retreated point (home − dPhF)
-  const float cPhM[3] = { g.Xcenter - dPhF[0], g.Ycenter - dPhF[1], g.Zcenter - dPhF[2] };
-  float rPhE_m[3];
-  CorrectShowerDepth(ixM, iyHome, Energy, cPhM[0], cPhM[1], cPhM[2],
-                     rPhE_m[0], rPhE_m[1], rPhE_m[2]);
-
-  // widths: ⟂ aHat (baseline)
-  const float wPh_front_perp = proj_perp_len(aHat, dPhF[0], dPhF[1], dPhF[2]);
-  const float dPhE_p[3]      = { rPhE_p[0]-r0E[0], rPhE_p[1]-r0E[1], rPhE_p[2]-r0E[2] };
-  const float dPhE_m[3]      = { rPhE_m[0]-r0E[0], rPhE_m[1]-r0E[1], rPhE_m[2]-r0E[2] };
-
-  const float wPh_depth_perp_p = proj_perp_len(aHat, dPhE_p[0], dPhE_p[1], dPhE_p[2]);
-  const float wPh_depth_perp_m = proj_perp_len(aHat, dPhE_m[0], dPhE_m[1], dPhE_m[2]);
-
-  // along-eφ widths
-  const float wPh_front_along = std::fabs(dot3(dPhF, ephi));
-  const float wPh_depth_along_p = std::fabs(dot3(dPhE_p, ephi));
-  const float wPh_depth_along_m = std::fabs(dot3(dPhE_m, ephi));
-
-  // single-sided sPhi (current baseline)
-  const float sPhi_perp_single  = (wPh_depth_perp_p  > 1e-6f) ? (wPh_front_perp  / wPh_depth_perp_p ) : 1.0f;
-  const float sPhi_along_single = (wPh_depth_along_p > 1e-6f) ? (wPh_front_along / wPh_depth_along_p) : 1.0f;
-
-  // PATCH: symmetric ±φ widths (arithmetic mean), gated to high E
-  float wPh_depth_perp_sym  = 0.f, wPh_depth_along_sym = 0.f;
-  if (wPh_depth_perp_p > 0.f && wPh_depth_perp_m > 0.f)
-    wPh_depth_perp_sym = 0.5f * (wPh_depth_perp_p + wPh_depth_perp_m);
-  else
-    wPh_depth_perp_sym = (wPh_depth_perp_p > 0.f ? wPh_depth_perp_p :
-                          (wPh_depth_perp_m > 0.f ? wPh_depth_perp_m : 0.f));
-
-  if (wPh_depth_along_p > 0.f && wPh_depth_along_m > 0.f)
-    wPh_depth_along_sym = 0.5f * (wPh_depth_along_p + wPh_depth_along_m);
-  else
-    wPh_depth_along_sym = (wPh_depth_along_p > 0.f ? wPh_depth_along_p :
-                           (wPh_depth_along_m > 0.f ? wPh_depth_along_m : 0.f));
-
-  const float sPhi_perp_sym  = (wPh_depth_perp_sym  > 1e-6f) ? (wPh_front_perp  / wPh_depth_perp_sym ) : 1.0f;
-  const float sPhi_along_sym = (wPh_depth_along_sym > 1e-6f) ? (wPh_front_along / wPh_depth_along_sym) : 1.0f;
-
-  // high‑E weight for φ blending / zero-shift / temper
-  constexpr float E_PHI_HE_LO = 12.0f;
-  constexpr float E_PHI_HE_HI = 25.0f;
-  float wHE_phi = 0.0f;
-  if (Energy > E_PHI_HE_LO) {
-    const float t = (Energy - E_PHI_HE_LO) / (E_PHI_HE_HI - E_PHI_HE_LO);
-    wHE_phi = (t < 0.f) ? 0.f : (t > 1.f) ? 1.f : t;
-  }
-
-  // PATCH: gently fade from single-sided → symmetric with high‑E
-  const float wSYM_phi = 0.60f * wHE_phi; // modest weight
-  const float sPhi_perp_eff  = (1.0f - wSYM_phi) * sPhi_perp_single  + wSYM_phi * sPhi_perp_sym;
-  const float sPhi_along_eff = (1.0f - wSYM_phi) * sPhi_along_single + wSYM_phi * sPhi_along_sym;
-
-  // your existing ⟂ vs along φ blend (kept)
-  const float sPhi_blend = (1.0f - wHE_phi) * sPhi_perp_eff + wHE_phi * sPhi_along_eff;
-  float bx = b0 * sPhi_blend;
-
-  // --- tiny high‑E depth tempering (kept)
-  constexpr float E_TEMPER_LO = 18.0f;
-  constexpr float E_TEMPER_HI = 30.0f;
-  float wHE_temper = 0.0f;
-  if (Energy > E_TEMPER_LO) {
-    const float t = (Energy - E_TEMPER_LO) / (E_TEMPER_HI - E_TEMPER_LO);
-    wHE_temper = (t < 0.f) ? 0.f : (t > 1.f) ? 1.f : t;
-  }
-  if (depthE > 1e-3f && depthRef > 1e-3f) {
-    const float ratio = clampf(depthRef / depthE, 0.85f, 1.15f);
-    const float LAMBDA_HE = 0.12f; // very gentle
-    const float boost = std::pow(ratio, LAMBDA_HE * wHE_temper);
-    bx *= boost;
-  }
-
-  // clamp: baseline [0.14,0.20], tightened a hair at very high E
-  const float bx_lo = (1.0f - wHE_phi)*0.14f + wHE_phi*0.135f; // → 0.135 at top
-  const float bx_hi = (1.0f - wHE_phi)*0.20f + wHE_phi*0.190f; // → 0.190 at top
-  bx = clampf(bx, bx_lo, bx_hi);
-
-  // report bφ now (final)
-  if (out_bphi) *out_bphi = bx;
-
-  // tiny tilt-based zero-shift enabled only at high E (kept)
-  float xZero = 0.f;
-  if (wHE_phi > 0.f) {
-    const float a_phi = dot3(aHat, ephi);
-    const float a_rad = dot3(aHat, erad);
-    const float den   = std::sqrt(a_phi*a_phi + a_rad*a_rad);
-    const float sinTx = (den > 1e-9f) ? (a_phi / den) : 0.f;
-    const float sin2  = sinTx * sinTx;
-    const float amp   = clampf(0.9f * (wPh_front_along / (wPh_depth_along_p + 1e-6f)), 0.75f, 1.25f);
-    float xZero_raw   = amp * ( (sinTx > 0.f) ? (-0.20f * sinTx - 0.60f * sin2)
-                                              : (-0.20f * sinTx + 0.60f * sin2) );
-    xZero_raw = clampf(xZero_raw, -0.30f, 0.30f);
-    const int ix0 = EmcCluster::lowint(x + 0.5f);
-    const float xShifted = x + xZero_raw;
-    const float over = std::fabs(xShifted - ix0) - 0.499f;
-    if (over > 0.f) xZero_raw -= std::copysign(over, xZero_raw);
-    xZero = wHE_phi * xZero_raw;
-  }
-
-  // φ inverse-asinh about (x + xZero)
-  float x_corr = x + xZero;
+  // φ
+  float x_corr = x;
+  if (std::fabs(x - ix0) <= 0.5f)
   {
-    const int ix0 = EmcCluster::lowint(x_corr + 0.5f);
-    if (std::fabs(x_corr - ix0) <= 0.5f) {
-      const float Sx = std::sinh(0.5f / bx);
-      x_corr = (ix0 - xZero) + bx * std::asinh( 2.f * (x_corr - ix0) * Sx );
-    }
+    const float Sx = std::sinh(0.5f / bx);
+    x_corr = ix0 + bx * std::asinh(2.f * (x - ix0) * Sx);
   }
 
-  // φ ripple (module-of-8) + wrap (kept, with high‑E de‑emphasis)
-  float dx = 0.f;
+  // module-of-8 ripple (same as legacy CorrectPosition)
+  int   ix8 = int(x + 0.5f) / 8;                       // NOLINT(bugprone-incorrect-roundings)
+  float x8  = x + 0.5f - (ix8 * 8) - 4.f;               // −4 … +4
+  float dx  = 0.f;
+  if (m_UseDetailedGeometry)
   {
-    const int   ix8 = int(x + 0.5f) / 8;
-    const float x8  = x + 0.5f - (ix8 * 8) - 4.f;
-    if (m_UseDetailedGeometry) {
-      const int local_ix8 = int(x + 0.5f) - ix8 * 8; // nominally 0..7
-      const int FACTOR_LEN = int(sizeof(factor_) / sizeof(factor_[0]));
-      if (local_ix8 >= 0 && local_ix8 < FACTOR_LEN)
-        dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
-      else
-        dx = 0.f;
-    } else {
-      dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
-    }
-    dx *= (1.0f - 0.20f * wHE_phi); // de‑emphasize ripple at high E
-    xc = wrap_phi(x_corr - dx);
+    int local_ix8 = int(x + 0.5f) - ix8 * 8;            // 0..7   // NOLINT(bugprone-incorrect-roundings)
+    dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
   }
-
-  // ============================================================
-  // η side — kept + PATCH: power‑mean for ±η at high E
-  // ============================================================
-    const float dEtF[3] = { g.dX[1], g.dY[1], g.dZ[1] };
-
-
-  const float wEt_front_perp = proj_perp_len(aHat, dEtF[0], dEtF[1], dEtF[2]);
-
-  // +η and −η face points
-  const float cEtP[3] = { g.Xcenter + dEtF[0], g.Ycenter + dEtF[1], g.Zcenter + dEtF[2] };
-  const float cEtM[3] = { g.Xcenter - dEtF[0], g.Ycenter - dEtF[1], g.Zcenter - dEtF[2] };
-
-  float rEtUp[3], rEtDn[3];
-  CorrectShowerDepth(ixHome, iyP,  Energy, cEtP[0], cEtP[1], cEtP[2], rEtUp[0], rEtUp[1], rEtUp[2]);
-  CorrectShowerDepth(ixHome, iyDn, Energy, cEtM[0], cEtM[1], cEtM[2], rEtDn[0], rEtDn[1], rEtDn[2]);
-
-  const float dEtUpVec[3] = { rEtUp[0]-r0E[0], rEtUp[1]-r0E[1], rEtUp[2]-r0E[2] };
-  const float dEtDnVec[3] = { rEtDn[0]-r0E[0], rEtDn[1]-r0E[1], rEtDn[2]-r0E[2] };
-
-  const float wEt_depth_perpU = proj_perp_len(aHat, dEtUpVec[0], dEtUpVec[1], dEtUpVec[2]);
-  const float wEt_depth_perpD = proj_perp_len(aHat, dEtDnVec[0], dEtDnVec[1], dEtDnVec[2]);
-
-  // arithmetic mean (baseline)
-  float wEt_depth_perp_sym = 0.f;
-  if (wEt_depth_perpU > 0.f && wEt_depth_perpD > 0.f)
-    wEt_depth_perp_sym = 0.5f * (wEt_depth_perpU + wEt_depth_perpD);
   else
-    wEt_depth_perp_sym = (wEt_depth_perpU > 0.f ? wEt_depth_perpU :
-                          (wEt_depth_perpD > 0.f ? wEt_depth_perpD : 0.f));
-
-  // PATCH: power‑mean (p=0.5) to de‑emphasize outliers at high E
-  float wHE_eta = 0.0f;
-  constexpr float E_ETA_AVG_LO = 12.0f;
-  constexpr float E_ETA_AVG_HI = 25.0f;
-  if (Energy > E_ETA_AVG_LO) {
-    const float t = (Energy - E_ETA_AVG_LO) / (E_ETA_AVG_HI - E_ETA_AVG_LO);
-    wHE_eta = (t < 0.f) ? 0.f : (t > 1.f) ? 1.f : t;
+  {
+    dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
   }
-  if (wEt_depth_perpU > 0.f && wEt_depth_perpD > 0.f) {
-    const float p = 0.5f;
-    const float pm = 0.5f * (std::pow(wEt_depth_perpU, p) + std::pow(wEt_depth_perpD, p));
-    const float w_pm = std::pow(pm, 1.0f/p);
-    const float beta_pm = 0.35f * wHE_eta;  // modest influence
-    wEt_depth_perp_sym = (1.0f - beta_pm) * wEt_depth_perp_sym + beta_pm * w_pm;
-  }
+  x_corr -= dx;
 
-  const float sEta_plus  = (wEt_depth_perpU   > 1e-6f) ? (wEt_front_perp / wEt_depth_perpU)   : 1.0f;
-  const float sEta_sym   = (wEt_depth_perp_sym > 1e-6f) ? (wEt_front_perp / wEt_depth_perp_sym) : 1.0f;
+  // Wrap φ tower coordinate to [−0.5, Nx−0.5)
+  while (x_corr < -0.5f)              x_corr += float(fNx);
+  while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
 
-  // main η scale: lowE→ +η only, highE→ symmetric ±η (kept)
-  const float sEta_blend = (1.0f - wHE_eta) * sEta_plus + wHE_eta * sEta_sym;
-
-  // tiny along‑eη component at high E (kept)
-  const float wEt_front_along = std::fabs(dot3(dEtF, eeta));
-  float wEt_depth_alongU = std::fabs(dot3(dEtUpVec, eeta));
-  float wEt_depth_alongD = std::fabs(dot3(dEtDnVec, eeta));
-
-  float wEt_depth_along_sym = 0.f;
-  if (wEt_depth_alongU > 0.f && wEt_depth_alongD > 0.f) {
-    // PATCH: power‑mean for along as well (same p), small weight
-    float w_al_sym = 0.5f * (wEt_depth_alongU + wEt_depth_alongD);
-    const float p = 0.5f;
-    const float pm = 0.5f * (std::pow(wEt_depth_alongU, p) + std::pow(wEt_depth_alongD, p));
-    const float w_pm = std::pow(pm, 1.0f/p);
-    const float beta_pm_al = 0.25f * wHE_eta; // slightly smaller than ⟂ case
-    wEt_depth_along_sym = (1.0f - beta_pm_al) * w_al_sym + beta_pm_al * w_pm;
-  } else {
-    wEt_depth_along_sym = (wEt_depth_alongU > 0.f ? wEt_depth_alongU :
-                           (wEt_depth_alongD > 0.f ? wEt_depth_alongD : 0.f));
-  }
-
-  const float sEta_along = (wEt_depth_along_sym > 1e-6f) ? (wEt_front_along / wEt_depth_along_sym) : 1.0f;
-
-  // tiny push toward along‑eη at high E (kept)
-  const float alpha_eta_along = 0.15f * wHE_eta;
-  const float sEta_final = (1.0f - alpha_eta_along) * sEta_blend + alpha_eta_along * sEta_along;
-
-  float by = b0 * sEta_final;
-
-  // tiny high‑E depth tempering for η (kept)
-  if (depthE > 1e-3f && depthRef > 1e-3f) {
-    const float ratio = clampf(depthRef / depthE, 0.85f, 1.15f);
-    const float LAMBDA_HE = 0.10f;
-    const float boost = std::pow(ratio, LAMBDA_HE * wHE_temper);
-    by *= boost;
-  }
-
-  // Existing high‑E clamp tightening (kept)
-  constexpr float E_ETA_TIGHT_LO = 10.0f;
-  constexpr float E_ETA_TIGHT_HI = 25.0f;
-  float wHigh = 0.0f;
-  if (Energy <= E_ETA_TIGHT_LO)      wHigh = 0.0f;
-  else if (Energy >= E_ETA_TIGHT_HI) wHigh = 1.0f;
-  else                                wHigh = (Energy - E_ETA_TIGHT_LO) / (E_ETA_TIGHT_HI - E_ETA_TIGHT_LO);
-
-  const float by_lo = (1.0f - wHigh)*0.11f + wHigh*0.12f;
-  const float by_hi = (1.0f - wHigh)*0.30f + wHigh*0.25f;
-  by = clampf(by, by_lo, by_hi);
-
-  // report bη now (final)
-  if (out_beta) *out_beta = by;
-
-  // η inverse-asinh (NO η zero-shift; center at home index)
+  // η
   float y_corr = y;
+  if (std::fabs(y - iy0) <= 0.5f)
   {
-    const int iy0 = EmcCluster::lowint(y_corr + 0.5f);
-    if (std::fabs(y_corr - iy0) <= 0.5f) {
-      const float Sy = std::sinh(0.5f / by);
-      y_corr = iy0 + by * std::asinh( 2.f * (y_corr - iy0) * Sy );
-    }
+    const float Sy = std::sinh(0.5f / by);
+    y_corr = iy0 + by * std::asinh(2.f * (y - iy0) * Sy);
   }
+
+  // Output
+  xc = x_corr;
   yc = y_corr;
 }
 
@@ -908,22 +663,41 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
     else                      iEtaBin = 2; // up to ~1.10
   }
 
-    // ---- per-bin log-fit coefficients from MC (E0 = 3 GeV) ----
+    // ---- per-bin log-fit coefficients from PDC-RAW (E0 = 3 GeV) ----
+    // Indexing convention:
+    //   [0] |η| ≤ 0.20        (etaCore)
+    //   [1] 0.20 < |η| ≤ 0.70 (etaMid)
+    //   [2] 0.70 < |η| ≤ 1.10 (etaEdge)
+    //   [3] fallback (originalEta; no-η-dep)
     constexpr float E0 = 3.0f;
 
-    // Indexing convention:
-    //   [0] |η| ≤ 0.20
-    //   [1] 0.20 < |η| ≤ 0.70
-    //   [2] 0.70 < |η| ≤ 1.10
-    //   [3] fallback (no-η-dep)
-    //
-    // φ: bφ(E,|η|) = b0φ + mφ * ln(E/E0)
-    static constexpr float B0_PHI[4] = { 0.187685f, 0.184475f, 0.182260f, 0.183330f };
-    static constexpr float M_PHI [4] = {-0.007453f,-0.008141f,-0.009008f,-0.007932f };
+    // φ: bφ(E,|η|) = b0φ + mφ * ln(E/E0)  (from bValuesPhiOverlay)
+    static constexpr float B0_PHI[4] = {
+      0.185809f,  // etaCore
+      0.182105f,  // etaMid
+      0.179244f,  // etaEdge
+      0.180775f   // originalEta (fallback)
+    };
+    static constexpr float M_PHI[4] = {
+     -0.006405f, // etaCore
+     -0.006936f, // etaMid
+     -0.006973f, // etaEdge
+     -0.006402f  // originalEta (fallback)
+    };
 
-    // η: bη(E,|η|) = b0η + mη * ln(E/E0)
-    static constexpr float B0_ETA[4] = { 0.178946f, 0.196326f, 0.200883f, 0.191289f };
-    static constexpr float M_ETA [4] = {-0.007106f,-0.006145f,-0.001358f,-0.004542f };
+    // η: bη(E,|η|) = b0η + mη * ln(E/E0)  (from bValuesEtaOverlay)
+    static constexpr float B0_ETA[4] = {
+      0.177320f,  // etaCore
+      0.194483f,  // etaMid
+      0.196258f,  // etaEdge
+      0.188228f   // originalEta (fallback)
+    };
+    static constexpr float M_ETA[4] = {
+     -0.006088f, // etaCore
+     -0.005003f, // etaMid
+      0.002431f, // etaEdge (NOTE: positive slope)
+     -0.002528f  // originalEta (fallback)
+    };
 
 
   auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
@@ -986,20 +760,23 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x,
   if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
   { xc = x; yc = y; return; }
 
-    // ---- energy-only (no |η| dependence) log-fit laws (MC) -------------
+    // ---- energy-only (no |η| dependence) log-fit laws (from PDC-RAW ‘originalEta’) ----
     // b(E) = b0 + m * ln(E/E0)  with  E0 = 3 GeV
+    //  - PHI  (originalEta): b0 = 0.180775 , m = -0.006402
+    //  - ETA  (originalEta): b0 = 0.188228 , m = -0.002528
     constexpr float E0     = 3.0f;
-    constexpr float B0_PHI = 0.183330f;   // no-η-dep
-    constexpr float M_PHI  = -0.007932f;  // no-η-dep
-    constexpr float B0_ETA = 0.191289f;   // no-η-dep
-    constexpr float M_ETA  = -0.004542f;  // no-η-dep
+    constexpr float B0_PHI = 0.180775f;   // originalEta (PHI)
+    constexpr float M_PHI  = -0.006402f;  // originalEta (PHI)
+    constexpr float B0_ETA = 0.188228f;   // originalEta (ETA)
+    constexpr float M_ETA  = -0.002528f;  // originalEta (ETA)
 
-  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
+    const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
 
-  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
+    auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
 
-  const float bx = clamp_b(B0_PHI + M_PHI * lnE);  // φ-direction b(E)
-  const float by = clamp_b(B0_ETA + M_ETA * lnE);  // η-direction b(E)
+    const float bx = clamp_b(B0_PHI + M_PHI * lnE);  // φ-direction b(E)
+    const float by = clamp_b(B0_ETA + M_ETA * lnE);  // η-direction b(E)
+    
 
   // ============================== φ ===================================
   float x_corr = x;

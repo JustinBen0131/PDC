@@ -454,14 +454,14 @@ class PositionDependentCorrection : public SubsysReco
   std::array<std::array<std::uint64_t, N_Ebins>, 6> m_etaWinByE{{}};
 
 
-    std::array<std::uint64_t, N_Ebins> m_phiTieByE_CP_EA{};
-    std::array<std::uint64_t, N_Ebins> m_etaTieByE_CP_EA{};
+  std::array<std::uint64_t, N_Ebins> m_phiTieByE_CP_EA{};
+  std::array<std::uint64_t, N_Ebins> m_etaTieByE_CP_EA{};
 
 
-    std::array<std::uint64_t, N_Ebins> m_phiNoChangeByE_CP_vs_RAW{};
-    std::array<std::uint64_t, N_Ebins> m_phiNoChangeByE_EA_vs_RAW{};
-    std::array<std::uint64_t, N_Ebins> m_etaNoChangeByE_CP_vs_RAW{};
-    std::array<std::uint64_t, N_Ebins> m_etaNoChangeByE_EA_vs_RAW{};
+  std::array<std::uint64_t, N_Ebins> m_phiNoChangeByE_CP_vs_RAW{};
+  std::array<std::uint64_t, N_Ebins> m_phiNoChangeByE_EA_vs_RAW{};
+  std::array<std::uint64_t, N_Ebins> m_etaNoChangeByE_CP_vs_RAW{};
+  std::array<std::uint64_t, N_Ebins> m_etaNoChangeByE_EA_vs_RAW{};
 
   std::atomic<std::uint64_t> g_nanPhi{0}, g_nanEta{0}, g_nCorrPhiRight{0};
 
@@ -474,7 +474,7 @@ class PositionDependentCorrection : public SubsysReco
     // Eight reconstruction variants for π0 studies
     enum class VarPi0 {
       CLUS_RAW=0, CLUS_CP=1,
-      EA_GEOM=2, EA_FIT_ETADEP=3, EA_FIT_EONLY=4, EA_MIX=5,
+      EA_FIT_zDEP=2, EA_FIT_ETADEP=3, EA_FIT_EONLY=4, EA_MIX=5,
       PDC_RAW=6, PDC_CORR=7,
       NVAR=8
     };
@@ -505,16 +505,40 @@ class PositionDependentCorrection : public SubsysReco
   TH2F* h2_eta_diffEA_vs_beta_E [N_Ebins]{};
 
   // --- EA residuals (φ) – four uniquely-named variants
-  TH1F* h_phi_diff_cpCorrEA_geom_E                          [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitZVTXDep_E                          [N_Ebins]{};
   TH1F* h_phi_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
   TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
   TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
 
-  // --- EA residuals (η) – four uniquely-named variants
-  TH1F* h_eta_diff_cpCorrEA_geom_E                          [N_Ebins]{};
-  TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
-  TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
-  TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
+    // --- EA residuals (η) – four uniquely-named variants
+    TH1F* h_eta_diff_cpCorrEA_fitZVTXDep_E                          [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
+
+    // ---------- NEW: |z| ≤ 60 cm gated duplicates (suffix: _0_60vz) ----------
+    // Δφ (cluster family + scratch)
+    TH1F* h_phi_diff_cpRaw_E_0_60vz                           [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorr_E_0_60vz                          [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorrEA_fitEtaDep_E_0_60vz              [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [N_Ebins]{};
+    TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [N_Ebins]{};
+    TH1F* h_phi_diff_cpBcorr_E_0_60vz                         [N_Ebins]{};
+    TH1F* h_phi_diff_raw_E_0_60vz                             [N_Ebins]{};
+    TH1F* h_phi_diff_corrected_E_0_60vz                       [N_Ebins]{};
+
+    // Δη (cluster family + scratch)
+    TH1F* h_eta_diff_cpRaw_E_0_60vz                           [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorr_E_0_60vz                          [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E_0_60vz              [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [N_Ebins]{};
+    TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [N_Ebins]{};
+    TH1F* h_eta_diff_cpBcorr_E_0_60vz                         [N_Ebins]{};
+    TH1F* h_eta_diff_raw_E_0_60vz                             [N_Ebins]{};
+    TH1F* h_eta_diff_corrected_E_0_60vz                       [N_Ebins]{};
+    
 
   // --- Ash scan profiles: <(Δφ)^2> / <(Δη)^2> vs b (tower-space driven)
   TProfile* p_phi_rms2_vs_b_E [N_Ebins]{};  // x: b, y: <(Δφ)^2>
@@ -543,6 +567,62 @@ class PositionDependentCorrection : public SubsysReco
   std::uint64_t m_eta6WayWinByE_RAW[N_Ebins]{}, m_eta6WayWinByE_CP[N_Ebins]{},
                   m_eta6WayWinByE_EA_geom[N_Ebins]{}, m_eta6WayWinByE_EA_fitEta[N_Ebins]{},
                   m_eta6WayWinByE_EA_fitE[N_Ebins]{},  m_eta6WayWinByE_EA_mix[N_Ebins]{};
+
+    
+    /* --------------------  NEW: |z_vtx| slice TH3s (uncorrected)  -------------------- */
+    /* COARSE bins for 0–60 cm: 0–10, 10–20, 20–30, 30–45, 45–60 cm */
+    static constexpr int   N_VzH3Bins = 5;
+    static constexpr float vzH3Edges[N_VzH3Bins + 1] = { 0.f, 10.f, 20.f, 30.f, 45.f, 60.f };
+
+    /* FINE bins for 0–10 cm: 0–2, 2–4, 4–6, 6–8, 8–10 cm */
+    static constexpr int   N_VzH3FineBins = 5;
+    static constexpr float vzH3FineEdges[N_VzH3FineBins + 1] = { 0.f, 2.f, 4.f, 6.f, 8.f, 10.f };
+
+    /* Helper: map |z| to 0..N_VzH3Bins-1 (returns -1 if outside 0–60) */
+    inline int getVzH3Slice(float absVz) const
+    {
+      for (int i = 0; i < N_VzH3Bins; ++i)
+        if (absVz >= vzH3Edges[i] && absVz < vzH3Edges[i + 1]) return i;
+      return -1;
+    }
+
+    /* Helper (fine): map |z| to 0..N_VzH3FineBins-1 (returns -1 if outside 0–10) */
+    inline int getVzH3FineSlice(float absVz) const
+    {
+      for (int i = 0; i < N_VzH3FineBins; ++i)
+        if (absVz >= vzH3FineEdges[i] && absVz < vzH3FineEdges[i + 1]) return i;
+      return -1;
+    }
+
+    /* Tags like "z00to10" or "z00to02" */
+    inline std::string vzH3RangeTag(int i) const
+    {
+      return Form("z%02dto%02d", (int)std::lround(vzH3Edges[i]),
+                                  (int)std::lround(vzH3Edges[i+1]));
+    }
+    inline std::string vzH3FineRangeTag(int i) const
+    {
+      return Form("z%02dto%02d", (int)std::lround(vzH3FineEdges[i]),
+                                  (int)std::lround(vzH3FineEdges[i+1]));
+    }
+
+    /* Hist arrays: one uncorrected TH3 per |z| bin (coarse and fine) */
+    TH3F* h3_blockCoord_E_vz      [N_VzH3Bins]     {};
+    TH3F* h3_blockCoord_E_vz_fine [N_VzH3FineBins]{};
+
+    /* NEW: per-|z_vtx| b-tables and readiness flags (coarse and fine) */
+    std::array<std::array<float, N_Ebins>, N_VzH3Bins>       m_bValsPhi_vz{};
+    std::array<std::array<float, N_Ebins>, N_VzH3Bins>       m_bValsEta_vz{};
+    std::array<std::array<float, N_Ebins>, N_VzH3FineBins>   m_bValsPhi_vz_fine{};
+    std::array<std::array<float, N_Ebins>, N_VzH3FineBins>   m_bValsEta_vz_fine{};
+    std::array<bool, N_VzH3Bins>       m_bPhiReady_vz{{}};
+    std::array<bool, N_VzH3Bins>       m_bEtaReady_vz{{}};
+    std::array<bool, N_VzH3FineBins>   m_bPhiReady_vz_fine{{}};
+    std::array<bool, N_VzH3FineBins>   m_bEtaReady_vz_fine{{}};
+
+    /* NEW: corrected counterparts per |z| slice */
+    TH3F* h3_blockCoord_E_vz_corr      [N_VzH3Bins]     {};
+    TH3F* h3_blockCoord_E_vz_fine_corr [N_VzH3FineBins]{};
 
     
     

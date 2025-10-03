@@ -317,8 +317,8 @@ split_golden_run_list()(
 ##############################################################################
 
 # ---------- user‑tunable constants ----------
-CHUNK_SIZE_DATA=2          # N  – files per Condor job
-MAX_JOBS_DATA=10000         # Q  – global cap for “condor firstTen”
+CHUNK_SIZE_DATA=18          # N  – files per Condor job
+MAX_JOBS_DATA=15000         # Q  – global cap for “condor firstTen”
 # ---------------------------------------------------------------------------
 
 
@@ -352,9 +352,11 @@ submit_data_condor() {
     command -v split         >/dev/null 2>&1 || return $(die "split not in PATH")
 
     # ---- global cap logic (unchanged semantics) ---------------------------
+    local firstChunkOnly=0
     if [[ "$runMode" == "condor" ]]; then
-      if   [[ "$limitSwitch" == "firstTen"  ]]; then jobLimit=$MAX_JOBS_DATA
-      elif [[ "$limitSwitch" =~ ^[0-9]+$   ]]; then jobLimit=$limitSwitch
+      if   [[ "$limitSwitch" == "firstTen"   ]]; then jobLimit=$MAX_JOBS_DATA
+      elif [[ "$limitSwitch" == "firstChunk" ]]; then jobLimit=1; firstChunkOnly=1
+      elif [[ "$limitSwitch" =~ ^[0-9]+$     ]]; then jobLimit=$limitSwitch
       fi
     fi
 
@@ -427,11 +429,16 @@ submit_data_condor() {
       local nChunks=${#chunks[@]}
       (( nChunks )) || return $(die "split produced zero chunks for run $runNum")
 
+      # If testing with only the first chunk, collapse to the first element
+      if (( firstChunkOnly )); then
+         chunks=( "${chunks[0]}" )
+         nChunks=1
+      fi
 
-      # preview first two chunks (lines)
+      # preview first two (or just the one) chunk(s)
       for p in "${chunks[@]:0:2}"; do
-        local lc; lc=$(wc -l < "$p" 2>/dev/null || echo 0)
-        vecho "[VERBOSE]   chunk $(basename "$p") : ${lc} line(s)"
+         local lc; lc=$(wc -l < "$p" 2>/dev/null || echo 0)
+         vecho "[VERBOSE]   chunk $(basename "$p") : ${lc} line(s)"
       done
 
       # cap guard
@@ -1413,13 +1420,129 @@ EOL
 }
 
 
+# --------------------------- DATA RESUBMISSION (single-job per ID) ---------------------------
+resubmit_data_jobs() {
+  # Usage:
+  #   resubmitDataJobs         -> harvest IDs, remove each job and resubmit the exact list
+  #   resubmitDataJobs TEST    -> harvest IDs and print file; NO removal/resubmit
+  local testMode=false
+  [[ "${1:-}" =~ ^[Tt][Ee][Ss][Tt]$ ]] && testMode=true
+
+  local owner="${USER:-patsfan753}"
+
+  command -v condor_q  >/dev/null 2>&1 || { echo "[ERROR] condor_q not in PATH"; return 1; }
+  if ! $testMode; then
+    command -v condor_rm >/dev/null 2>&1 || { echo "[ERROR] condor_rm not in PATH"; return 1; }
+    command -v condor_submit >/dev/null 2>&1 || { echo "[ERROR] condor_submit not in PATH"; return 1; }
+  fi
+
+  # Temp file of ClusterId.ProcId
+  mkdir -p "$LOG_DIR" "$LOG_DIR/log" "$LOG_DIR/stdout" "$LOG_DIR/error" || true
+  local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
+  local idsFile="${LOG_DIR}/data_resubmit_ids_${stamp}.txt"
+
+  # Harvest IDs as ClusterId.ProcId, unique
+  condor_q "$owner" -nobatch -af:tq ClusterId ProcId 2>/dev/null \
+    | awk 'NF==2{print $1 "." $2}' \
+    | sort -u > "$idsFile"
+
+  echo "[DATA-RESUBMIT] Wrote $(wc -l < "$idsFile") id(s) → $idsFile"
+  echo "[DATA-RESUBMIT] IDs:"
+  cat "$idsFile" || true
+
+  if $testMode; then
+    echo "[DATA-RESUBMIT] TEST mode: no removal/resubmission performed."
+    return 0
+  fi
+
+  # For each ID: get its Arguments, extract <runNum> and <listFile>, remove job, and resubmit a single job
+  while IFS= read -r jid; do
+    [[ -z "$jid" ]] && continue
+    echo "------------------------------------------------------------------"
+    echo "[DATA-RESUBMIT] Processing $jid"
+
+    # Pull Arguments (fall back to Args if empty)
+    local args
+    args=$(condor_q -nobatch "$jid" -af:tq Arguments 2>/dev/null | head -n1)
+    if [[ -z "$args" || "$args" == "(null)" || "$args" == "undefined" ]]; then
+      args=$(condor_q -nobatch "$jid" -af:tq Args 2>/dev/null | head -n1)
+    fi
+    # Strip surrounding quotes if present
+    args="${args%\"}"; args="${args#\"}"
+
+    if [[ -z "$args" || "$args" == "(null)" || "$args" == "undefined" ]]; then
+      echo "[WARN] Cannot read Arguments for $jid — skipping."
+      continue
+    fi
+
+    # Your data job arguments are:
+    #   <runNum> <listFile> data <Cluster> 0 <chunkIdx> NONE <OUTDIR_DATA>
+    local runNum listFile
+    runNum=$(echo "$args" | awk '{print $1}')
+    listFile=$(echo "$args" | awk '{print $2}')
+
+    if [[ -z "$runNum" || -z "$listFile" ]]; then
+      echo "[WARN] Could not parse runNum/listFile from Arguments for $jid — skipping."
+      continue
+    fi
+    if [[ ! -f "$listFile" ]]; then
+      echo "[WARN] List file missing on disk: $listFile — skipping."
+      continue
+    fi
+
+    echo "[DATA-RESUBMIT] run=${runNum}  list=$(basename "$listFile")"
+
+    # Remove the existing job (best-effort)
+    if ! condor_rm "$jid"; then
+      echo "[WARN] condor_rm failed for $jid, attempting to continue."
+    fi
+
+    # Build a single-job submit file mirroring your data path
+    local subFile="PositionDependentCorrect_data_resubmit_${runNum}_$(basename "$listFile" .list).sub"
+    cat > "$subFile" <<EOS
+universe      = vanilla
+executable    = /sphenix/u/patsfan753/scratch/PDCrun24pp/PositionDependentCorrect_Condor.sh
+initialdir    = /sphenix/u/patsfan753/scratch/PDCrun24pp
+getenv        = True
+log           = ${LOG_DIR}/log/job.\$(Cluster).\$(Process).log
+output        = ${LOG_DIR}/stdout/job.\$(Cluster).\$(Process).out
+error         = ${LOG_DIR}/error/job.\$(Cluster).\$(Process).err
+request_memory= 1000MB
+should_transfer_files   = NO
+stream_output           = True
+stream_error            = True
+environment   = PDC_MODE=DATA;PDC_RUNNUMBER=24
+# Args: <runNum> <listFile> <data|sim> <clusterID> <nEvents> <chunkIdx> <hitsList> <destBase>
+arguments     = ${runNum} ${listFile} data \$(Cluster) 0 0 NONE ${OUTDIR_DATA}
+queue
+EOS
+
+    echo "[DATA-RESUBMIT] condor_submit → $subFile"
+    condor_submit "$subFile" || echo "[ERROR] condor_submit failed for $subFile"
+
+  done < "$idsFile"
+
+  echo "[DATA-RESUBMIT] Completed."
+}
+
 #############################
 # 4) MAIN LOGIC
 #############################
 case "$MODE" in
 
   # -----------------------------------------------------------------------
-  #  LEGACY SHORT‑CUTS  (kept for backward‑compatibility)
+  #  DATA RESUBMIT (single-job per ID harvested from condor_q)
+  # -----------------------------------------------------------------------
+  resubmitDataJobs)
+    # Syntax:
+    #   resubmitDataJobs        → harvest IDs, remove jobs, resubmit single-job for each list
+    #   resubmitDataJobs TEST   → harvest IDs and print; no removal/resubmission
+    resubmit_data_jobs "$WHAT"
+    exit 0
+    ;;
+
+  # -----------------------------------------------------------------------
+  #  LEGACY SHORT-CUTS  (kept for backward-compatibility)
   # -----------------------------------------------------------------------
   noSim)         # data only, unlimited jobs
     echo "===================================================================="
@@ -1532,7 +1655,7 @@ case "$MODE" in
                     echo "[INFO] startFrom: segment=$(basename "$segMatch"), first=${startRun}, lines=${lines}"
                     submit_data_condor "condor" "" "$tmpRunList"
                     exit 0
-
+                
                 elif [[ "$3" == "round" && "$4" =~ ^[0-9]+$ ]]; then
                     segFile="${GOLDEN_SEGMENT_PREFIX}${4}.txt"
                     echo "[INFO] round: submitting entire segment file $(basename "$segFile")"
@@ -1558,9 +1681,14 @@ case "$MODE" in
                       done
                     fi
 
-                    submit_data_condor "condor" "" "$segFile"
-                    exit 0
+                    # Optional 5th arg: "firstChunk" to submit only the first chunk as a test
+                    limitSwitchArg=""
+                    if [[ "$5" == "firstChunk" ]]; then
+                      limitSwitchArg="firstChunk"
+                    fi
 
+                    submit_data_condor "condor" "$limitSwitchArg" "$segFile"
+                    exit 0
                 else
                     echo "[INFO] legacy: submitting full scan (no round/startFrom provided)"
                     submit_data_condor "condor" ""
