@@ -294,14 +294,28 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
   pdc->setIsSimulation(isSimulation);
-  pdc->setFirstPassBvaluesOnly(true);
-  pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
-  pdc->UseSignedVz(false);
-    // Automatically configure single-photon vs MinBias:
-    //  - runNo is resolved above from $PDC_RUNNUMBER or by filename sniffing
-    //  - default = true (single-photon), MinBias (runNo==21) => false
-    const bool pdc_isMinBias = (runNo == 21);
-    pdc->setIsSinglePhoton(!pdc_isMinBias);
+  pdc->setFirstPassBvaluesOnly(false);
+    
+    pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
+    pdc->UseSignedVz(false);
+      // Automatically configure single-photon vs MinBias, with manual override via $PDC_DATASET:
+      //  - default = (runNo != 21)  → single-photon
+      //  - $PDC_DATASET=singlePi0   → force π0-mode (enable pair loop)
+      //  - $PDC_DATASET=singleGamma → force single-γ mode
+      const bool pdc_isMinBias = (runNo == 21);
+      bool singlePhotonMode = !pdc_isMinBias;
+
+      if (const char* dsEnv = gSystem->Getenv("PDC_DATASET"))
+      {
+        std::string ds = dsEnv;
+        for (auto& c : ds) c = std::tolower(c);
+        if (ds == "singlepi0" || ds == "pi0" || ds == "single_pi0")
+          singlePhotonMode = false;
+        else if (ds == "singlegamma" || ds == "gamma" || ds == "single_gamma")
+          singlePhotonMode = true;
+      }
+      pdc->setIsSinglePhoton(singlePhotonMode);
+
   /*------------------------------------------------------------
       2)  π0-mass-window support
     ------------------------------------------------------------*/
@@ -344,7 +358,7 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
 
-  pdc->Verbosity(2);                 // 0 = silent → raise for debugging
+  pdc->Verbosity(10);                 // 0 = silent → raise for debugging
 
   // Finally register the module with Fun4All
   se->registerSubsystem(pdc);

@@ -1,0 +1,321 @@
+view,variant,Elo,Ehi,entries
+originalEta,No Correction,2,4,449187
+originalEta,No Correction,4,6,234611
+originalEta,No Correction,6,8,100104
+originalEta,No Correction,8,10,49110
+originalEta,No Correction,10,12,28544
+originalEta,No Correction,12,15,26592
+originalEta,No Correction,15,20,23220
+originalEta,No Correction,20,30,15098
+originalEta,Legacy Constant b-corr,2,4,449187
+originalEta,Legacy Constant b-corr,4,6,234611
+originalEta,Legacy Constant b-corr,6,8,100104
+originalEta,Legacy Constant b-corr,8,10,49110
+originalEta,Legacy Constant b-corr,10,12,28544
+originalEta,Legacy Constant b-corr,12,15,26592
+originalEta,Legacy Constant b-corr,15,20,23220
+originalEta,Legacy Constant b-corr,20,30,15098
+originalEta,Energy/|z_{vtx}|-Dep b-correction,2,4,449187
+originalEta,Energy/|z_{vtx}|-Dep b-correction,4,6,234611
+originalEta,Energy/|z_{vtx}|-Dep b-correction,6,8,100104
+originalEta,Energy/|z_{vtx}|-Dep b-correction,8,10,49110
+originalEta,Energy/|z_{vtx}|-Dep b-correction,10,12,28544
+originalEta,Energy/|z_{vtx}|-Dep b-correction,12,15,26592
+originalEta,Energy/|z_{vtx}|-Dep b-correction,15,20,23220
+originalEta,Energy/|z_{vtx}|-Dep b-correction,20,30,15098
+originalEta,Energy/|#eta|-Dep b-correction,2,4,449187
+originalEta,Energy/|#eta|-Dep b-correction,4,6,234611
+originalEta,Energy/|#eta|-Dep b-correction,6,8,100104
+originalEta,Energy/|#eta|-Dep b-correction,8,10,49110
+originalEta,Energy/|#eta|-Dep b-correction,10,12,28544
+originalEta,Energy/|#eta|-Dep b-correction,12,15,26592
+originalEta,Energy/|#eta|-Dep b-correction,15,20,23220
+originalEta,Energy/|#eta|-Dep b-correction,20,30,15098
+originalEta,Energy-Dep b-correction,2,4,449187
+originalEta,Energy-Dep b-correction,4,6,234611
+originalEta,Energy-Dep b-correction,6,8,100104
+originalEta,Energy-Dep b-correction,8,10,49110
+originalEta,Energy-Dep b-correction,10,12,28544
+originalEta,Energy-Dep b-correction,12,15,26592
+originalEta,Energy-Dep b-correction,15,20,23220
+originalEta,Energy-Dep b-correction,20,30,15098
+originalEta,EA-mix,2,4,449187
+originalEta,EA-mix,4,6,234611
+originalEta,EA-mix,6,8,100104
+originalEta,EA-mix,8,10,49110
+originalEta,EA-mix,10,12,28544
+originalEta,EA-mix,12,15,26592
+originalEta,EA-mix,15,20,23220
+originalEta,EA-mix,20,30,15098
+originalEta,PDC-raw,2,4,449187
+originalEta,PDC-raw,4,6,234611
+originalEta,PDC-raw,6,8,100104
+originalEta,PDC-raw,8,10,49110
+originalEta,PDC-raw,10,12,28544
+originalEta,PDC-raw,12,15,26592
+originalEta,PDC-raw,15,20,23220
+originalEta,PDC-raw,20,30,15098
+originalEta,PDC-corr,2,4,449187
+originalEta,PDC-corr,4,6,234611
+originalEta,PDC-corr,6,8,100104
+originalEta,PDC-corr,8,10,49110
+originalEta,PDC-corr,10,12,28544
+originalEta,PDC-corr,12,15,26592
+originalEta,PDC-corr,15,20,23220
+originalEta,PDC-corr,20,30,15098
+fullEta,No Correction,2,4,419693
+fullEta,No Correction,4,6,213283
+fullEta,No Correction,6,8,85262
+fullEta,No Correction,8,10,39688
+fullEta,No Correction,10,12,23061
+fullEta,No Correction,12,15,22027
+fullEta,No Correction,15,20,19641
+fullEta,No Correction,20,30,12429
+fullEta,Legacy Constant b-corr,2,4,419693
+fullEta,Legacy Constant b-corr,4,6,213283
+fullEta,Legacy Constant b-corr,6,8,85262
+fullEta,Legacy Constant b-corr,8,10,39688
+fullEta,Legacy Constant b-corr,10,12,23061
+fullEta,Legacy Constant b-corr,12,15,22027
+fullEta,Legacy Constant b-corr,15,20,19641
+fullEta,Legacy Constant b-corr,20,30,12429
+fullEta,Energy/|z_{vtx}|-Dep b-correction,2,4,419693
+fullEta,Energy/|z_{vtx}|-Dep b-correction,4,6,213283
+fullEta,Energy/|z_{vtx}|-Dep b-correction,6,8,85262
+fullEta,Energy/|z_{vtx}|-Dep b-correction,8,10,39688
+fullEta,Energy/|z_{vtx}|-Dep b-correction,10,12,23061
+fullEta,Energy/|z_{vtx}|-Dep b-correction,12,15,22027
+fullEta,Energy/|z_{vtx}|-Dep b-correction,15,20,19641
+fullEta,Energy/|z_{vtx}|-Dep b-correction,20,30,12429
+fullEta,Energy/|#eta|-Dep b-correction,2,4,419693
+fullEta,Energy/|#eta|-Dep b-correction,4,6,213283
+fullEta,Energy/|#eta|-Dep b-correction,6,8,85262
+fullEta,Energy/|#eta|-Dep b-correction,8,10,39688
+fullEta,Energy/|#eta|-Dep b-correction,10,12,23061
+fullEta,Energy/|#eta|-Dep b-correction,12,15,22027
+fullEta,Energy/|#eta|-Dep b-correction,15,20,19641
+fullEta,Energy/|#eta|-Dep b-correction,20,30,12429
+fullEta,Energy-Dep b-correction,2,4,419693
+fullEta,Energy-Dep b-correction,4,6,213283
+fullEta,Energy-Dep b-correction,6,8,85262
+fullEta,Energy-Dep b-correction,8,10,39688
+fullEta,Energy-Dep b-correction,10,12,23061
+fullEta,Energy-Dep b-correction,12,15,22027
+fullEta,Energy-Dep b-correction,15,20,19641
+fullEta,Energy-Dep b-correction,20,30,12429
+fullEta,EA-mix,2,4,419693
+fullEta,EA-mix,4,6,213283
+fullEta,EA-mix,6,8,85262
+fullEta,EA-mix,8,10,39688
+fullEta,EA-mix,10,12,23061
+fullEta,EA-mix,12,15,22027
+fullEta,EA-mix,15,20,19641
+fullEta,EA-mix,20,30,12429
+fullEta,PDC-raw,2,4,419693
+fullEta,PDC-raw,4,6,213283
+fullEta,PDC-raw,6,8,85262
+fullEta,PDC-raw,8,10,39688
+fullEta,PDC-raw,10,12,23061
+fullEta,PDC-raw,12,15,22027
+fullEta,PDC-raw,15,20,19641
+fullEta,PDC-raw,20,30,12429
+fullEta,PDC-corr,2,4,419693
+fullEta,PDC-corr,4,6,213283
+fullEta,PDC-corr,6,8,85262
+fullEta,PDC-corr,8,10,39688
+fullEta,PDC-corr,10,12,23061
+fullEta,PDC-corr,12,15,22027
+fullEta,PDC-corr,15,20,19641
+fullEta,PDC-corr,20,30,12429
+etaCore,No Correction,2,4,93135
+etaCore,No Correction,4,6,37199
+etaCore,No Correction,6,8,11278
+etaCore,No Correction,8,10,5688
+etaCore,No Correction,10,12,3831
+etaCore,No Correction,12,15,3865
+etaCore,No Correction,15,20,3116
+etaCore,No Correction,20,30,1469
+etaCore,Legacy Constant b-corr,2,4,93135
+etaCore,Legacy Constant b-corr,4,6,37199
+etaCore,Legacy Constant b-corr,6,8,11278
+etaCore,Legacy Constant b-corr,8,10,5688
+etaCore,Legacy Constant b-corr,10,12,3831
+etaCore,Legacy Constant b-corr,12,15,3865
+etaCore,Legacy Constant b-corr,15,20,3116
+etaCore,Legacy Constant b-corr,20,30,1469
+etaCore,Energy/|z_{vtx}|-Dep b-correction,2,4,93135
+etaCore,Energy/|z_{vtx}|-Dep b-correction,4,6,37199
+etaCore,Energy/|z_{vtx}|-Dep b-correction,6,8,11278
+etaCore,Energy/|z_{vtx}|-Dep b-correction,8,10,5688
+etaCore,Energy/|z_{vtx}|-Dep b-correction,10,12,3831
+etaCore,Energy/|z_{vtx}|-Dep b-correction,12,15,3865
+etaCore,Energy/|z_{vtx}|-Dep b-correction,15,20,3116
+etaCore,Energy/|z_{vtx}|-Dep b-correction,20,30,1469
+etaCore,Energy/|#eta|-Dep b-correction,2,4,93135
+etaCore,Energy/|#eta|-Dep b-correction,4,6,37199
+etaCore,Energy/|#eta|-Dep b-correction,6,8,11278
+etaCore,Energy/|#eta|-Dep b-correction,8,10,5688
+etaCore,Energy/|#eta|-Dep b-correction,10,12,3831
+etaCore,Energy/|#eta|-Dep b-correction,12,15,3865
+etaCore,Energy/|#eta|-Dep b-correction,15,20,3116
+etaCore,Energy/|#eta|-Dep b-correction,20,30,1469
+etaCore,Energy-Dep b-correction,2,4,93135
+etaCore,Energy-Dep b-correction,4,6,37199
+etaCore,Energy-Dep b-correction,6,8,11278
+etaCore,Energy-Dep b-correction,8,10,5688
+etaCore,Energy-Dep b-correction,10,12,3831
+etaCore,Energy-Dep b-correction,12,15,3865
+etaCore,Energy-Dep b-correction,15,20,3116
+etaCore,Energy-Dep b-correction,20,30,1469
+etaCore,EA-mix,2,4,93135
+etaCore,EA-mix,4,6,37199
+etaCore,EA-mix,6,8,11278
+etaCore,EA-mix,8,10,5688
+etaCore,EA-mix,10,12,3831
+etaCore,EA-mix,12,15,3865
+etaCore,EA-mix,15,20,3116
+etaCore,EA-mix,20,30,1469
+etaCore,PDC-raw,2,4,93135
+etaCore,PDC-raw,4,6,37199
+etaCore,PDC-raw,6,8,11278
+etaCore,PDC-raw,8,10,5688
+etaCore,PDC-raw,10,12,3831
+etaCore,PDC-raw,12,15,3865
+etaCore,PDC-raw,15,20,3116
+etaCore,PDC-raw,20,30,1469
+etaCore,PDC-corr,2,4,93135
+etaCore,PDC-corr,4,6,37199
+etaCore,PDC-corr,6,8,11278
+etaCore,PDC-corr,8,10,5688
+etaCore,PDC-corr,10,12,3831
+etaCore,PDC-corr,12,15,3865
+etaCore,PDC-corr,15,20,3116
+etaCore,PDC-corr,20,30,1469
+etaMid,No Correction,2,4,209660
+etaMid,No Correction,4,6,99454
+etaMid,No Correction,6,8,34006
+etaMid,No Correction,8,10,14759
+etaMid,No Correction,10,12,9568
+etaMid,No Correction,12,15,9765
+etaMid,No Correction,15,20,8642
+etaMid,No Correction,20,30,4599
+etaMid,Legacy Constant b-corr,2,4,209660
+etaMid,Legacy Constant b-corr,4,6,99454
+etaMid,Legacy Constant b-corr,6,8,34006
+etaMid,Legacy Constant b-corr,8,10,14759
+etaMid,Legacy Constant b-corr,10,12,9568
+etaMid,Legacy Constant b-corr,12,15,9765
+etaMid,Legacy Constant b-corr,15,20,8642
+etaMid,Legacy Constant b-corr,20,30,4599
+etaMid,Energy/|z_{vtx}|-Dep b-correction,2,4,209660
+etaMid,Energy/|z_{vtx}|-Dep b-correction,4,6,99454
+etaMid,Energy/|z_{vtx}|-Dep b-correction,6,8,34006
+etaMid,Energy/|z_{vtx}|-Dep b-correction,8,10,14759
+etaMid,Energy/|z_{vtx}|-Dep b-correction,10,12,9568
+etaMid,Energy/|z_{vtx}|-Dep b-correction,12,15,9765
+etaMid,Energy/|z_{vtx}|-Dep b-correction,15,20,8642
+etaMid,Energy/|z_{vtx}|-Dep b-correction,20,30,4599
+etaMid,Energy/|#eta|-Dep b-correction,2,4,209660
+etaMid,Energy/|#eta|-Dep b-correction,4,6,99454
+etaMid,Energy/|#eta|-Dep b-correction,6,8,34006
+etaMid,Energy/|#eta|-Dep b-correction,8,10,14759
+etaMid,Energy/|#eta|-Dep b-correction,10,12,9568
+etaMid,Energy/|#eta|-Dep b-correction,12,15,9765
+etaMid,Energy/|#eta|-Dep b-correction,15,20,8642
+etaMid,Energy/|#eta|-Dep b-correction,20,30,4599
+etaMid,Energy-Dep b-correction,2,4,209660
+etaMid,Energy-Dep b-correction,4,6,99454
+etaMid,Energy-Dep b-correction,6,8,34006
+etaMid,Energy-Dep b-correction,8,10,14759
+etaMid,Energy-Dep b-correction,10,12,9568
+etaMid,Energy-Dep b-correction,12,15,9765
+etaMid,Energy-Dep b-correction,15,20,8642
+etaMid,Energy-Dep b-correction,20,30,4599
+etaMid,EA-mix,2,4,209660
+etaMid,EA-mix,4,6,99454
+etaMid,EA-mix,6,8,34006
+etaMid,EA-mix,8,10,14759
+etaMid,EA-mix,10,12,9568
+etaMid,EA-mix,12,15,9765
+etaMid,EA-mix,15,20,8642
+etaMid,EA-mix,20,30,4599
+etaMid,PDC-raw,2,4,209660
+etaMid,PDC-raw,4,6,99454
+etaMid,PDC-raw,6,8,34006
+etaMid,PDC-raw,8,10,14759
+etaMid,PDC-raw,10,12,9568
+etaMid,PDC-raw,12,15,9765
+etaMid,PDC-raw,15,20,8642
+etaMid,PDC-raw,20,30,4599
+etaMid,PDC-corr,2,4,209660
+etaMid,PDC-corr,4,6,99454
+etaMid,PDC-corr,6,8,34006
+etaMid,PDC-corr,8,10,14759
+etaMid,PDC-corr,10,12,9568
+etaMid,PDC-corr,12,15,9765
+etaMid,PDC-corr,15,20,8642
+etaMid,PDC-corr,20,30,4599
+etaEdge,No Correction,2,4,116898
+etaEdge,No Correction,4,6,76630
+etaEdge,No Correction,6,8,39978
+etaEdge,No Correction,8,10,19241
+etaEdge,No Correction,10,12,9662
+etaEdge,No Correction,12,15,8397
+etaEdge,No Correction,15,20,7883
+etaEdge,No Correction,20,30,6361
+etaEdge,Legacy Constant b-corr,2,4,116898
+etaEdge,Legacy Constant b-corr,4,6,76630
+etaEdge,Legacy Constant b-corr,6,8,39978
+etaEdge,Legacy Constant b-corr,8,10,19241
+etaEdge,Legacy Constant b-corr,10,12,9662
+etaEdge,Legacy Constant b-corr,12,15,8397
+etaEdge,Legacy Constant b-corr,15,20,7883
+etaEdge,Legacy Constant b-corr,20,30,6361
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,2,4,116898
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,4,6,76630
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,6,8,39978
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,8,10,19241
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,10,12,9662
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,12,15,8397
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,15,20,7883
+etaEdge,Energy/|z_{vtx}|-Dep b-correction,20,30,6361
+etaEdge,Energy/|#eta|-Dep b-correction,2,4,116898
+etaEdge,Energy/|#eta|-Dep b-correction,4,6,76630
+etaEdge,Energy/|#eta|-Dep b-correction,6,8,39978
+etaEdge,Energy/|#eta|-Dep b-correction,8,10,19241
+etaEdge,Energy/|#eta|-Dep b-correction,10,12,9662
+etaEdge,Energy/|#eta|-Dep b-correction,12,15,8397
+etaEdge,Energy/|#eta|-Dep b-correction,15,20,7883
+etaEdge,Energy/|#eta|-Dep b-correction,20,30,6361
+etaEdge,Energy-Dep b-correction,2,4,116898
+etaEdge,Energy-Dep b-correction,4,6,76630
+etaEdge,Energy-Dep b-correction,6,8,39978
+etaEdge,Energy-Dep b-correction,8,10,19241
+etaEdge,Energy-Dep b-correction,10,12,9662
+etaEdge,Energy-Dep b-correction,12,15,8397
+etaEdge,Energy-Dep b-correction,15,20,7883
+etaEdge,Energy-Dep b-correction,20,30,6361
+etaEdge,EA-mix,2,4,116898
+etaEdge,EA-mix,4,6,76630
+etaEdge,EA-mix,6,8,39978
+etaEdge,EA-mix,8,10,19241
+etaEdge,EA-mix,10,12,9662
+etaEdge,EA-mix,12,15,8397
+etaEdge,EA-mix,15,20,7883
+etaEdge,EA-mix,20,30,6361
+etaEdge,PDC-raw,2,4,116898
+etaEdge,PDC-raw,4,6,76630
+etaEdge,PDC-raw,6,8,39978
+etaEdge,PDC-raw,8,10,19241
+etaEdge,PDC-raw,10,12,9662
+etaEdge,PDC-raw,12,15,8397
+etaEdge,PDC-raw,15,20,7883
+etaEdge,PDC-raw,20,30,6361
+etaEdge,PDC-corr,2,4,116898
+etaEdge,PDC-corr,4,6,76630
+etaEdge,PDC-corr,6,8,39978
+etaEdge,PDC-corr,8,10,19241
+etaEdge,PDC-corr,10,12,9662
+etaEdge,PDC-corr,12,15,8397
+etaEdge,PDC-corr,15,20,7883
+etaEdge,PDC-corr,20,30,6361

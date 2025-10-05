@@ -1,17 +1,17 @@
 series,variant,residual,E,mu,dmu,sigma,dsigma
-0,Constant-b (Production) Uncorr,eta,3,2.22313e-05,1.86957e-05,0.00434361,1.32199e-05
-0,Constant-b (Production) Uncorr,eta,5,1.73209e-05,1.74853e-05,0.00413678,1.2364e-05
-0,Constant-b (Production) Uncorr,eta,7,-9.65706e-06,1.65049e-05,0.00405011,1.16708e-05
-0,Constant-b (Production) Uncorr,eta,9,-1.72165e-05,1.61355e-05,0.004031,1.14095e-05
-0,Constant-b (Production) Uncorr,eta,11,-3.42238e-05,1.59451e-05,0.0039914,1.12749e-05
-0,Constant-b (Production) Uncorr,eta,13.5,3.26867e-06,1.29906e-05,0.0039682,9.18575e-06
-0,Constant-b (Production) Uncorr,eta,17.5,-9.20443e-06,9.9729e-06,0.00392676,7.0519e-06
-0,Constant-b (Production) Uncorr,eta,25,-2.49616e-05,6.77927e-06,0.00379216,4.79367e-06
-1,(Production) CP(EA geom),eta,3,-1.00782e-05,1.83117e-05,0.0042544,1.29484e-05
-1,(Production) CP(EA geom),eta,5,-2.05456e-07,1.60887e-05,0.00380636,1.13764e-05
-1,(Production) CP(EA geom),eta,7,-2.10496e-05,1.45974e-05,0.00358201,1.03219e-05
-1,(Production) CP(EA geom),eta,9,-3.78859e-05,1.40002e-05,0.00349755,9.89962e-06
-1,(Production) CP(EA geom),eta,11,-2.18397e-05,1.36077e-05,0.00340629,9.62207e-06
-1,(Production) CP(EA geom),eta,13.5,-1.97942e-05,1.10145e-05,0.00336457,7.78844e-06
-1,(Production) CP(EA geom),eta,17.5,-1.27327e-05,8.39045e-06,0.00330369,5.93295e-06
-1,(Production) CP(EA geom),eta,25,-2.36001e-05,5.54698e-06,0.00310285,3.92231e-06
+0,Constant-b (Production) Uncorr,eta,3,1.43704e-05,1.93009e-05,0.00428411,1.36478e-05
+0,Constant-b (Production) Uncorr,eta,5,8.83159e-06,1.80829e-05,0.00410219,1.27865e-05
+0,Constant-b (Production) Uncorr,eta,7,-1.36709e-05,1.70002e-05,0.00401622,1.2021e-05
+0,Constant-b (Production) Uncorr,eta,9,-2.74665e-05,1.65628e-05,0.00400128,1.17117e-05
+0,Constant-b (Production) Uncorr,eta,11,-4.4149e-05,1.62987e-05,0.00396062,1.15249e-05
+0,Constant-b (Production) Uncorr,eta,13.5,-1.45072e-06,1.32073e-05,0.00393075,9.33899e-06
+0,Constant-b (Production) Uncorr,eta,17.5,-1.20399e-05,1.00929e-05,0.00388564,7.13676e-06
+0,Constant-b (Production) Uncorr,eta,25,-3.3956e-05,6.85254e-06,0.00375268,4.84548e-06
+1,(Production) CP(|vz| + E),eta,3,-2.19412e-05,1.76014e-05,0.00390688,1.24461e-05
+1,(Production) CP(|vz| + E),eta,5,-1.67208e-05,1.56208e-05,0.00354364,1.10455e-05
+1,(Production) CP(|vz| + E),eta,7,-2.72701e-05,1.42502e-05,0.00336654,1.00764e-05
+1,(Production) CP(|vz| + E),eta,9,-4.8936e-05,1.36245e-05,0.00329143,9.63395e-06
+1,(Production) CP(|vz| + E),eta,11,-3.86452e-05,1.32421e-05,0.00321786,9.36358e-06
+1,(Production) CP(|vz| + E),eta,13.5,-2.24042e-05,1.06548e-05,0.00317107,7.53409e-06
+1,(Production) CP(|vz| + E),eta,17.5,-1.68438e-05,8.07791e-06,0.00310989,5.71195e-06
+1,(Production) CP(|vz| + E),eta,25,-3.593e-05,5.34458e-06,0.00292688,3.77919e-06

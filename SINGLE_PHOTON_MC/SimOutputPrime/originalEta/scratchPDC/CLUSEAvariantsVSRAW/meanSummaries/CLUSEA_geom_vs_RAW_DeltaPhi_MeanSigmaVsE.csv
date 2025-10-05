@@ -1,0 +1,17 @@
+series,variant,residual,E,mu,dmu,sigma,dsigma
+0,Constant-b (Production) Uncorr,phi,3,-0.000200359,1.90913e-05,0.00423763,1.34996e-05
+0,Constant-b (Production) Uncorr,phi,5,-7.08126e-05,1.82338e-05,0.00413743,1.28933e-05
+0,Constant-b (Production) Uncorr,phi,7,-7.3942e-05,1.71863e-05,0.00406027,1.21526e-05
+0,Constant-b (Production) Uncorr,phi,9,-0.000110052,1.71581e-05,0.00414272,1.21326e-05
+0,Constant-b (Production) Uncorr,phi,11,-7.43098e-05,1.75279e-05,0.00425763,1.23941e-05
+0,Constant-b (Production) Uncorr,phi,13.5,-3.55945e-05,1.46381e-05,0.00435632,1.03507e-05
+0,Constant-b (Production) Uncorr,phi,17.5,4.1175e-05,1.12985e-05,0.00434968,7.98923e-06
+0,Constant-b (Production) Uncorr,phi,25,-3.86608e-05,7.36727e-06,0.00403457,5.20944e-06
+1,(Production) CP(|vz| + E),phi,3,-0.000113753,1.6179e-05,0.00359119,1.14403e-05
+1,(Production) CP(|vz| + E),phi,5,1.98493e-05,1.42831e-05,0.00324097,1.00997e-05
+1,(Production) CP(|vz| + E),phi,7,2.81291e-06,1.30639e-05,0.00308635,9.23759e-06
+1,(Production) CP(|vz| + E),phi,9,-1.93413e-05,1.32071e-05,0.00318878,9.33886e-06
+1,(Production) CP(|vz| + E),phi,11,-8.55889e-07,1.37864e-05,0.00334879,9.74846e-06
+1,(Production) CP(|vz| + E),phi,13.5,6.11571e-05,1.1782e-05,0.00350633,8.3311e-06
+1,(Production) CP(|vz| + E),phi,17.5,0.000114113,8.91143e-06,0.00343071,6.30133e-06
+1,(Production) CP(|vz| + E),phi,25,1.47231e-05,5.37574e-06,0.00294394,3.80122e-06

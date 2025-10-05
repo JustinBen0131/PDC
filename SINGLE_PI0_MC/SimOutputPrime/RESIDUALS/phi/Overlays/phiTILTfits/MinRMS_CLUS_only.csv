@@ -1,0 +1,9 @@
+E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
+2,4,"No Correction",0.006831,"Energy-dep Only #phi and |#eta|-dep in #eta",0.006876,0.000045,"Constant-b (legacy)",0.015179,"Energy-Dep b",0.015240,0.000061
+4,6,"No Correction",0.007160,"Energy-dep Only #phi and |#eta|-dep in #eta",0.007257,0.000098,"Constant-b (legacy)",0.011807,"Energy-Dep b",0.011851,0.000044
+6,8,"Constant-b (legacy)",0.006446,"Energy + |v_{z}|-dep b",0.006449,0.000003,"Constant-b (legacy)",0.009125,"Energy-Dep b",0.009128,0.000004
+8,10,"Energy + |v_{z}|-dep b",0.005390,"Energy + |#eta|-dep b",0.005390,0.000000,"Energy-Dep b",0.007231,"Energy-dep Only #phi and |#eta|-dep in #eta",0.007233,0.000002
+10,12,"Energy + |#eta|-dep b",0.004731,"Energy-dep Only #phi and |#eta|-dep in #eta",0.004733,0.000002,"Energy + |v_{z}|-dep b",0.005983,"Energy-dep Only #phi and |#eta|-dep in #eta",0.005996,0.000013
+12,15,"Energy + |#eta|-dep b",0.004383,"Energy-dep Only #phi and |#eta|-dep in #eta",0.004385,0.000002,"Energy + |v_{z}|-dep b",0.005047,"Energy + |#eta|-dep b",0.005083,0.000035
+15,20,"Energy + |#eta|-dep b",0.003996,"Energy-dep Only #phi and |#eta|-dep in #eta",0.003998,0.000002,"Energy + |v_{z}|-dep b",0.004273,"Energy + |#eta|-dep b",0.004323,0.000050
+20,30,"Energy + |#eta|-dep b",0.003370,"Energy-Dep b",0.003372,0.000002,"Energy + |v_{z}|-dep b",0.003652,"Energy + |#eta|-dep b",0.003702,0.000050

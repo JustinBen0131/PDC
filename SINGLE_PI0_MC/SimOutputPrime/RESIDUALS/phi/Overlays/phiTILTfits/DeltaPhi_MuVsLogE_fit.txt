@@ -1,0 +1,10 @@
+# ---- Δφ: μ vs ln(E) linear fits (intercept first, slope second) ----
+  {ETiltVariant::CLUS_RAW, { 3.916197e-04, -1.196117e-04 }},  // no corr, cluster
+  {ETiltVariant::CLUS_CP, { 5.926478e-04, -2.066163e-04 }},  // CorrectPosition, cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 5.851351e-04, -2.012265e-04 }},  // CorrectPosition(EA geom), cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 5.824417e-04, -2.014188e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 5.873753e-04, -2.038984e-04 }},  // CorrectPosition(EA E-only), cluster
+  {ETiltVariant::CLUS_CP_EA_MIX, { 5.873503e-04, -2.037416e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
+  {ETiltVariant::CLUS_BCORR, { 5.586197e-04, -1.894009e-04 }},  // b(E) corr, cluster
+  {ETiltVariant::PDC_RAW, { 4.149851e-04, -1.358697e-04 }},  // no corr, scratch
+  {ETiltVariant::PDC_CORR, { 5.726067e-04, -2.061206e-04 }},  // b(E) corr, scratch

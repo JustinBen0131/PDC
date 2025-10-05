@@ -97,7 +97,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
 {
   _eventcounter = 0;
   /* vertex‑Z limits                                                     */
-  m_vzTightCut  = 10.f;           // |z| ≤ 10 cm  → “physics” histograms
+  m_vzTightCut  = 60.f;           // |z| ≤ 10 cm  → “physics” histograms
   m_vzSliceMax  = vzEdge.back();
   m_nWinRAW = m_nWinCP = m_nWinBCorr = 0;
   s_verbosityLevel.store( Verbosity() );
@@ -3827,22 +3827,41 @@ void PositionDependentCorrection::processClusterPairs(
 
     TLorentzVector photon2;  photon2.SetPtEtaPhiE(clus2Pt, clus2Eta, clus2Phi, clus2E);
 
-      // 2) optional truth matching (MC)
+      // 2) optional truth matching (MC) – align with residuals logic:
+      //     • try π0-daughter first (m_truth_pi0_photons) with dR<0.03 & 0.7<Er/Eg<1.5
+      //     • then fall back to generic meson photons (truth_meson_photons)
       bool           match2       = false;
       TLorentzVector ph2_trEtaPhi(0,0,0,0);
       if (isMC) {
-        for (const auto& trPhot : truth_meson_photons) {
-          const float dR    = photon2.DeltaR(trPhot);
-          const float ratio = (trPhot.E()>0 ? photon2.E()/trPhot.E() : 1e9f);
-          if (dR < 0.02f && ratio > 0.7f && ratio < 1.5f) {
-            ph2_trEtaPhi.SetPtEtaPhiE( clus2E / TMath::CosH(trPhot.Eta()),
-                                       trPhot.Eta(), trPhot.Phi(), clus2E );
-            if (match1) match2 = true;  // require both photons matched
-            break;
+        auto tryMatch = [&](const TLorentzVector& reco, float recoE,
+                            TLorentzVector& outTr)->bool {
+          // π0 daughter first (same thresholds as residuals)
+          for (const auto& tp : m_truth_pi0_photons) {
+            const float dR    = reco.DeltaR(tp.p4);
+            const float ratio = (tp.p4.E()>0 ? reco.E()/tp.p4.E() : 1e9f);
+            if (dR < 0.03f && ratio > 0.7f && ratio < 1.5f) {
+              outTr.SetPtEtaPhiE( recoE / TMath::CosH(tp.p4.Eta()),
+                                  tp.p4.Eta(), tp.p4.Phi(), recoE );
+              return true;
+            }
           }
-        }
+          // generic meson-photon fallback (η, etc.)
+          for (const auto& trPhot : truth_meson_photons) {
+            const float dR    = reco.DeltaR(trPhot);
+            const float ratio = (trPhot.E()>0 ? reco.E()/trPhot.E() : 1e9f);
+            if (dR < 0.03f && ratio > 0.7f && ratio < 1.5f) {
+              outTr.SetPtEtaPhiE( recoE / TMath::CosH(trPhot.Eta()),
+                                  trPhot.Eta(), trPhot.Phi(), recoE );
+              return true;
+            }
+          }
+          return false;
+        };
+
+        match2 = tryMatch(photon2, clus2E, ph2_trEtaPhi);
         if (vb) std::cout << "  [truth] match1="<<match1<<" match2="<<match2<<"\n";
       }
+
 
     // 3) π0 candidate (reco) and “truth-kinematics” variant
     const TLorentzVector pi0Reco   = photon1 + photon2;
@@ -3864,20 +3883,30 @@ void PositionDependentCorrection::processClusterPairs(
       // --- Per-variant π0 mass hists for ALL reconstructed pairs that land in a valid E-slice.
       if (iSlice >= 0 && iSlice < N_Ebins)
       {
-          // Optional: truth diagnostics (does NOT gate filling)
+          // Truth diagnostics + (optionally) gate variant-fills by same-π0-mother on single-π0 MC
+          bool truthPairSameMother = false;
           if (isMC) {
             auto motherIdFor = [&](const TLorentzVector& pReco)->int {
               for (const auto& tp : m_truth_pi0_photons) {
                 const float dR    = pReco.DeltaR(tp.p4);
                 const float ratio = (tp.p4.E()>0 ? pReco.E()/tp.p4.E() : 1e9f);
-                if (dR < 0.02f && ratio > 0.7f && ratio < 1.5f) return tp.mother_id;
+                // Use SAME thresholds as residuals (dR<0.03, 0.7<Er/Eg<1.5)
+                if (dR < 0.03f && ratio > 0.7f && ratio < 1.5f) return tp.mother_id;
               }
               return -1;
             };
             const int mother1 = motherIdFor(photon1);
             const int mother2 = motherIdFor(photon2);
-            if (mother1 >= 0 && mother1 == mother2) { ++ct.truthPairOK; s_cuts.truth_pairs_ok++; }
+            truthPairSameMother = (mother1 >= 0 && mother2 >= 0 && mother1 == mother2);
+            if (truthPairSameMother) { ++ct.truthPairOK; s_cuts.truth_pairs_ok++; }
           }
+
+        // Detect single-π0 dataset via environment (set by your submit scripts)
+        const char* dsEnv = std::getenv("PDC_DATASET");
+        const bool datasetIsSinglePi0 =
+            (dsEnv && (std::string(dsEnv)=="singlePi0" || std::string(dsEnv)=="singlepi0"
+                    || std::string(dsEnv)=="pi0"      || std::string(dsEnv)=="Pi0"));
+        const bool requireTruthPairForVariants = (isMC && datasetIsSinglePi0);
 
         // Build block coord for clus2 (like clus1 did upstream)
         std::pair<float,float> blkCoord2{0.5f,0.5f};
@@ -4010,13 +4039,14 @@ void PositionDependentCorrection::processClusterPairs(
             p2v[v] = buildPhotonTLV(clus2, static_cast<VarPi0>(v), blkCoord2, blkPhiCoarse2);
             const double m = (p1v[v] + p2v[v]).M();
 
-            if (std::isfinite(m) && h_m_pi0_var[v][iSlice]) {
-              // Always fill the base (η-agnostic) per-variant histogram
+            const bool passTruthGate = (!requireTruthPairForVariants) || truthPairSameMother;
+
+            if (passTruthGate && std::isfinite(m) && h_m_pi0_var[v][iSlice]) {
+              // Base (η-agnostic) per-variant histogram
               h_m_pi0_var[v][iSlice]->Fill(m);
               ++ct.varMassFills; s_cuts.variant_mass_fills++;
 
-              // NEW: Fill η-sliced per-variant histograms with the same gating
-              // used for the uncorrected 3D block-coordinate maps.
+              // η-sliced per-variant histograms, same η-gating as 3D maps
               if (absEta1 <= 1.10 && h_m_pi0_var_eta[0][v][iSlice]) {
                 h_m_pi0_var_eta[0][v][iSlice]->Fill(m); // fullEta
               }

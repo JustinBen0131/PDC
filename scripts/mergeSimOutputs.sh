@@ -108,6 +108,12 @@ DO_FILE_CHECK=false
 : "${SIM_DST_LIST:="${SIM_LIST_DIR}/DST_CALO_CLUSTER.list"}"
 : "${SIM_HITS_LIST:="${SIM_LIST_DIR}/G4Hits.list"}"
 
+# Single-π0 list files (used when 'singlePi0' flag is present)
+: "${SIM_LIST_DIR_PI0:="/sphenix/u/patsfan753/scratch/PDCrun24pp/simListFiles/run24_type14_pi0_pt_200_40000"}"
+: "${SIM_DST_LIST_PI0:="${SIM_LIST_DIR_PI0}/DST_CALO_CLUSTER.list"}"
+: "${SIM_HITS_LIST_PI0:="${SIM_LIST_DIR_PI0}/G4Hits.list"}"
+
+
 usage() {
   echo "Usage:"
   echo "  $0 condor [test|firstHalf|asManyAsCan]"
@@ -139,21 +145,25 @@ SUB3="${4:-}"
 # Detect flags anywhere (case-insensitive), but DO NOT include them in SUBMODE
 MINBIAS=false
 DATA_MODE=false
+SINGLEPI0=false
 for tok in "$SUB1" "$SUB2" "$SUB3"; do
   case "$tok" in
     MINBIAS|minbias|MinBias) MINBIAS=true ;;
     DATA|data|Data)          DATA_MODE=true ;;
+    singlePi0|singlepi0|pi0|Pi0) SINGLEPI0=true ;;
   esac
 done
 
-# Build SUBMODE from remaining tokens (exclude MINBIAS/DATA tokens)
+
+# Build SUBMODE from remaining tokens (exclude MINBIAS/DATA/singlePi0 tokens)
 SUBMODE=""
 for tok in "$SUB1" "$SUB2" "$SUB3"; do
   case "$tok" in
-    ""|MINBIAS|minbias|MinBias|DATA|data|Data) continue ;;
+    ""|MINBIAS|minbias|MinBias|DATA|data|Data|singlePi0|singlepi0|pi0|Pi0) continue ;;
     *) SUBMODE="${SUBMODE:+$SUBMODE }$tok" ;;
   esac
 done
+
 
 
 [[ "$MODE" != "condor" && "$MODE" != "local" && "$MODE" != "addChunks" && "$MODE" != "checkFileOutput" ]] && usage
@@ -179,6 +189,29 @@ if $MINBIAS; then
 
   # Avoid cross-run clobbering of the master list file
   LISTFILE="${OUTPUT_DIR%/}/sim_chunks_fulllist_minbias.txt"
+
+  # Chunk filename prefix (no suffix used in MB)
+  CHUNK_NAME_PREFIX="PositionDep_sim"
+elif $SINGLEPI0; then
+  # Produced outputs for single-π0 go here
+  SIM_CHUNK_DIR="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut_singlePi0/9999"
+
+  # Expected-input lists for single-π0 checks
+  SIM_LIST_DIR="$SIM_LIST_DIR_PI0"
+  SIM_DST_LIST="$SIM_DST_LIST_PI0"
+  SIM_HITS_LIST="$SIM_HITS_LIST_PI0"
+
+  # Keep all merge artifacts separate from single-γ
+  OUTPUT_DIR="${OUTPUT_DIR%/}/singlePi0"
+  TMP_SUBDIR="${TMP_SUBDIR%/}/singlePi0"
+  TMP_SUPERDIR="${TMP_SUPERDIR%/}/singlePi0"
+
+  # Separate master list
+  LISTFILE="${OUTPUT_DIR%/}/sim_chunks_fulllist_singlePi0.txt"
+
+  # Suffix-aware chunk prefix & final filename
+  CHUNK_NAME_PREFIX="PositionDep_sim_singlePi0"
+  MERGED_FILE="PositionDep_sim_singlePi0_ALL.root"
 fi
 
 # Apply 'data' overrides: per-run inputs under $DATA_RUN_BASE, write per-run partials under $OUTPUT_DIR_DATA
@@ -187,6 +220,11 @@ if $DATA_MODE; then
   MERGED_FILE="PositionDep_data_ALL.root"
   PARTIAL_PREFIX="chunkMerge_run"
 fi
+
+# Default chunk prefix (single-γ) and glob
+: "${CHUNK_NAME_PREFIX:=PositionDep_sim}"
+CHUNK_GLOB="${CHUNK_NAME_PREFIX}_*.root"
+
 
 echo "============================================================================"
 echo "[mergeSimOutputs.sh] START  $(date)"
@@ -215,8 +253,7 @@ if [[ "$MODE" == "checkFileOutput" && "$DO_FILE_CHECK" == true ]]; then
   mapfile -t pairs < <(paste -d' ' "$SIM_DST_LIST" "$SIM_HITS_LIST" | sort -k1,1V)
   totalExpected=${#pairs[@]}
 
-  # present outputs (any produced files)
-  presentOutputs=$(find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name 'PositionDep_sim_*.root' | wc -l)
+  presentOutputs=$(find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "$CHUNK_GLOB" | wc -l)
 
   echo "======================================================================="
   echo "[checkFileOutput] BEGIN ($(date))"
@@ -233,16 +270,14 @@ if [[ "$MODE" == "checkFileOutput" && "$DO_FILE_CHECK" == true ]]; then
   for idx in "${!pairs[@]}"; do
     read -r dstPath hitsPath <<< "${pairs[$idx]}"
 
-    # try common naming patterns used by different production modes
     candidates=(
-      "$SIM_CHUNK_DIR/PositionDep_sim_${idx}.root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_$(printf "%06d" "$idx").root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_pair${idx}.root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_pair$(printf "%06d" "$idx").root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_chunk${idx}.root"
-      "$SIM_CHUNK_DIR/PositionDep_sim_$(basename "$dstPath")"
+      "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_${idx}.root"
+      "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_$(printf "%06d" "$idx").root"
+      "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_pair${idx}.root"
+      "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_pair$(printf "%06d" "$idx").root"
+      "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_chunk${idx}.root"
+      "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_$(basename "$dstPath")"
     )
-
     found=false
     for c in "${candidates[@]}"; do
       if [[ -f "$c" ]]; then
@@ -300,7 +335,7 @@ if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
 
       mapfile -t pairs < <(paste -d' ' "$SIM_DST_LIST" "$SIM_HITS_LIST" | sort -k1,1V)
       totalExpected=${#pairs[@]}
-      presentOutputs=$(find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name 'PositionDep_sim_*.root' | wc -l)
+      presentOutputs=$(find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "$CHUNK_GLOB" | wc -l)
 
       echo "  SIM_CHUNK_DIR : $SIM_CHUNK_DIR"
       echo "  SIM_DST_LIST  : $SIM_DST_LIST"
@@ -314,7 +349,8 @@ if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
     rm -rf "$TMP_SUBDIR" "$TMP_SUPERDIR"
 
     echo "[LOCAL] Scanning chunk directory: $SIM_CHUNK_DIR"
-    find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" | sort -V > "$LISTFILE"
+    find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "$CHUNK_GLOB" | sort -V > "$LISTFILE"
+
     [[ ! -s "$LISTFILE" ]] && { echo "[ERROR][LOCAL] No chunk files found"; exit 1; }
 
     totalToMerge=$(wc -l < "$LISTFILE")
@@ -382,12 +418,13 @@ if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
     for idx in "${!pairs[@]}"; do
       read -r dstPath hitsPath <<< "${pairs[$idx]}"
       candidates=(
-        "$SIM_CHUNK_DIR/PositionDep_sim_${idx}.root"
-        "$SIM_CHUNK_DIR/PositionDep_sim_$(printf "%06d" "$idx").root"
-        "$SIM_CHUNK_DIR/PositionDep_sim_pair${idx}.root"
-        "$SIM_CHUNK_DIR/PositionDep_sim_pair$(printf "%06d" "$idx").root"
-        "$SIM_CHUNK_DIR/PositionDep_sim_chunk${idx}.root"
+        "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_${idx}.root"
+        "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_$(printf "%06d" "$idx").root"
+        "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_pair${idx}.root"
+        "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_pair$(printf "%06d" "$idx").root"
+        "$SIM_CHUNK_DIR/${CHUNK_NAME_PREFIX}_chunk${idx}.root"
       )
+
       found=false
       for c in "${candidates[@]}"; do
         [[ -f "$c" ]] && { found=true; break; }
@@ -513,7 +550,8 @@ EOT
   # SIM MODE on CONDOR: group by FILES_PER_GROUP (original behavior)
   ###########################################################################
   echo "[CONDOR][SIM] Grouping by FILES_PER_GROUP=$FILES_PER_GROUP from $SIM_CHUNK_DIR"
-  find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "PositionDep_sim_*.root" | sort -V > "$LISTFILE"
+  find "$SIM_CHUNK_DIR" -maxdepth 1 -type f -name "$CHUNK_GLOB" | sort -V > "$LISTFILE"
+
   [[ ! -s "$LISTFILE" ]] && { echo "[ERROR] No chunk files found after precheck"; exit 1; }
 
   totalToMerge=$(wc -l < "$LISTFILE")

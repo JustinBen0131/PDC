@@ -1,0 +1,17 @@
+series,variant,residual,E,mu,dmu,sigma,dsigma
+0,Constant-b (Production) Uncorr,eta,3,1.4791e-06,3.32209e-05,0.0156679,2.34907e-05
+0,Constant-b (Production) Uncorr,eta,5,4.67675e-05,2.81994e-05,0.0123275,1.994e-05
+0,Constant-b (Production) Uncorr,eta,7,5.19309e-05,2.70559e-05,0.00956839,1.91314e-05
+0,Constant-b (Production) Uncorr,eta,9,6.53073e-05,2.38368e-05,0.00757744,1.68552e-05
+0,Constant-b (Production) Uncorr,eta,11,4.81057e-06,2.0051e-05,0.00624067,1.41782e-05
+0,Constant-b (Production) Uncorr,eta,13.5,8.20282e-06,1.33428e-05,0.0052666,9.43478e-06
+0,Constant-b (Production) Uncorr,eta,17.5,4.8829e-06,8.28772e-06,0.00453259,5.8603e-06
+0,Constant-b (Production) Uncorr,eta,25,1.55252e-05,4.80435e-06,0.00407715,3.39719e-06
+1,(Production) CP(EA E-only),eta,3,3.02959e-06,3.23134e-05,0.0152412,2.2849e-05
+1,(Production) CP(EA E-only),eta,5,6.87147e-05,2.71094e-05,0.0118518,1.91692e-05
+1,(Production) CP(EA E-only),eta,7,7.21893e-05,2.58223e-05,0.00913226,1.82591e-05
+1,(Production) CP(EA E-only),eta,9,9.05812e-05,2.27662e-05,0.0072371,1.60981e-05
+1,(Production) CP(EA E-only),eta,11,3.61825e-05,1.93058e-05,0.00600873,1.36513e-05
+1,(Production) CP(EA E-only),eta,13.5,1.89474e-05,1.29239e-05,0.00510124,9.13855e-06
+1,(Production) CP(EA E-only),eta,17.5,1.28701e-05,7.94789e-06,0.00434674,5.62001e-06
+1,(Production) CP(EA E-only),eta,25,1.93228e-05,4.38776e-06,0.00372362,3.10261e-06

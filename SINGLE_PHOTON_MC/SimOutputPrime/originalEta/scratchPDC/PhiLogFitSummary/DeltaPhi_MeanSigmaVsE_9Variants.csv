@@ -1,0 +1,73 @@
+series,variant,residual,E,mu,dmu,sigma,dsigma
+0,PDC raw,phi,3,-0.000114484,1.8809e-05,0.00417495,1.32999e-05
+0,PDC raw,phi,5,-1.72568e-05,1.77934e-05,0.00403746,1.25819e-05
+0,PDC raw,phi,7,-4.74433e-05,1.68027e-05,0.00396964,1.18813e-05
+0,PDC raw,phi,9,-7.02204e-05,1.67866e-05,0.00405302,1.18699e-05
+0,PDC raw,phi,11,-4.36503e-05,1.7155e-05,0.00416704,1.21304e-05
+0,PDC raw,phi,13.5,-1.82291e-05,1.42885e-05,0.0042523,1.01035e-05
+0,PDC raw,phi,17.5,3.26532e-05,1.09866e-05,0.00422962,7.76871e-06
+0,PDC raw,phi,25,-3.86575e-05,7.1813e-06,0.00393272,5.07795e-06
+1,PDC corrected,phi,3,-0.000126439,1.62158e-05,0.00359935,1.14663e-05
+1,PDC corrected,phi,5,2.20051e-05,1.42372e-05,0.00323055,1.00672e-05
+1,PDC corrected,phi,7,5.41083e-06,1.30502e-05,0.0030831,9.22786e-06
+1,PDC corrected,phi,9,-2.19316e-05,1.32521e-05,0.00319964,9.37066e-06
+1,PDC corrected,phi,11,-1.24146e-05,1.38339e-05,0.00336033,9.78205e-06
+1,PDC corrected,phi,13.5,3.99754e-05,1.17466e-05,0.0034958,8.30607e-06
+1,PDC corrected,phi,17.5,8.81019e-05,8.86036e-06,0.00341106,6.26522e-06
+1,PDC corrected,phi,25,-5.2517e-07,5.35505e-06,0.00293261,3.78659e-06
+2,no corr, cluster,phi,3,-0.000200359,1.90913e-05,0.00423763,1.34996e-05
+2,no corr, cluster,phi,5,-7.08126e-05,1.82338e-05,0.00413743,1.28933e-05
+2,no corr, cluster,phi,7,-7.3942e-05,1.71863e-05,0.00406027,1.21526e-05
+2,no corr, cluster,phi,9,-0.000110052,1.71581e-05,0.00414272,1.21326e-05
+2,no corr, cluster,phi,11,-7.43098e-05,1.75279e-05,0.00425763,1.23941e-05
+2,no corr, cluster,phi,13.5,-3.55945e-05,1.46381e-05,0.00435632,1.03507e-05
+2,no corr, cluster,phi,17.5,4.1175e-05,1.12985e-05,0.00434968,7.98923e-06
+2,no corr, cluster,phi,25,-3.86608e-05,7.36727e-06,0.00403457,5.20944e-06
+3,CorrectPosition, cluster,phi,3,-0.000120268,1.68002e-05,0.00372908,1.18795e-05
+3,CorrectPosition, cluster,phi,5,1.86645e-05,1.46452e-05,0.00332314,1.03557e-05
+3,CorrectPosition, cluster,phi,7,7.23833e-06,1.33382e-05,0.00315115,9.43154e-06
+3,CorrectPosition, cluster,phi,9,-1.19822e-05,1.34033e-05,0.00323615,9.47759e-06
+3,CorrectPosition, cluster,phi,11,5.51667e-06,1.39338e-05,0.0033846,9.85271e-06
+3,CorrectPosition, cluster,phi,13.5,6.78865e-05,1.18745e-05,0.00353388,8.39655e-06
+3,CorrectPosition, cluster,phi,17.5,0.000117682,8.94005e-06,0.00344173,6.32157e-06
+3,CorrectPosition, cluster,phi,25,2.22422e-05,5.40363e-06,0.00295921,3.82094e-06
+4,b(E) corr, cluster,phi,3,-0.000160212,1.65966e-05,0.00368388,1.17355e-05
+4,b(E) corr, cluster,phi,5,1.18086e-05,1.48348e-05,0.00336617,1.04898e-05
+4,b(E) corr, cluster,phi,7,6.43208e-06,1.36229e-05,0.00321841,9.63284e-06
+4,b(E) corr, cluster,phi,9,-2.30637e-05,1.3702e-05,0.00330825,9.68875e-06
+4,b(E) corr, cluster,phi,11,4.23707e-08,1.43189e-05,0.00347815,1.0125e-05
+4,b(E) corr, cluster,phi,13.5,6.21507e-05,1.21608e-05,0.00361909,8.599e-06
+4,b(E) corr, cluster,phi,17.5,0.000109727,9.22557e-06,0.00355165,6.52346e-06
+4,b(E) corr, cluster,phi,25,3.29273e-06,5.62176e-06,0.00307867,3.97519e-06
+5,CorrectPosition(EA geom), cluster,phi,3,-0.000113753,1.6179e-05,0.00359119,1.14403e-05
+5,CorrectPosition(EA geom), cluster,phi,5,1.98493e-05,1.42831e-05,0.00324097,1.00997e-05
+5,CorrectPosition(EA geom), cluster,phi,7,2.81291e-06,1.30639e-05,0.00308635,9.23759e-06
+5,CorrectPosition(EA geom), cluster,phi,9,-1.93413e-05,1.32071e-05,0.00318878,9.33886e-06
+5,CorrectPosition(EA geom), cluster,phi,11,-8.55889e-07,1.37864e-05,0.00334879,9.74846e-06
+5,CorrectPosition(EA geom), cluster,phi,13.5,6.11571e-05,1.1782e-05,0.00350633,8.3311e-06
+5,CorrectPosition(EA geom), cluster,phi,17.5,0.000114113,8.91143e-06,0.00343071,6.30133e-06
+5,CorrectPosition(EA geom), cluster,phi,25,1.47231e-05,5.37574e-06,0.00294394,3.80122e-06
+6,CorrectPosition(EA |#eta|+E), cluster,phi,3,-0.000115011,1.61546e-05,0.00358578,1.14231e-05
+6,CorrectPosition(EA |#eta|+E), cluster,phi,5,1.84121e-05,1.42692e-05,0.00323781,1.00898e-05
+6,CorrectPosition(EA |#eta|+E), cluster,phi,7,2.31125e-06,1.3046e-05,0.00308211,9.22491e-06
+6,CorrectPosition(EA |#eta|+E), cluster,phi,9,-2.03877e-05,1.31922e-05,0.00318517,9.32828e-06
+6,CorrectPosition(EA |#eta|+E), cluster,phi,11,-2.82189e-06,1.37762e-05,0.0033463,9.74122e-06
+6,CorrectPosition(EA |#eta|+E), cluster,phi,13.5,6.14619e-05,1.17766e-05,0.00350473,8.3273e-06
+6,CorrectPosition(EA |#eta|+E), cluster,phi,17.5,0.000114288,8.90324e-06,0.00342756,6.29554e-06
+6,CorrectPosition(EA |#eta|+E), cluster,phi,25,1.32293e-05,5.36702e-06,0.00293916,3.79505e-06
+7,CorrectPosition(EA E-only), cluster,phi,3,-0.000112982,1.61702e-05,0.00358924,1.14341e-05
+7,CorrectPosition(EA E-only), cluster,phi,5,2.06456e-05,1.42844e-05,0.00324127,1.01006e-05
+7,CorrectPosition(EA E-only), cluster,phi,7,3.70875e-06,1.3062e-05,0.00308591,9.23626e-06
+7,CorrectPosition(EA E-only), cluster,phi,9,-1.89639e-05,1.32095e-05,0.00318935,9.34054e-06
+7,CorrectPosition(EA E-only), cluster,phi,11,-2.27955e-06,1.37859e-05,0.00334867,9.7481e-06
+7,CorrectPosition(EA E-only), cluster,phi,13.5,6.10781e-05,1.1784e-05,0.00350693,8.33251e-06
+7,CorrectPosition(EA E-only), cluster,phi,17.5,0.000113539,8.91151e-06,0.00343075,6.30139e-06
+7,CorrectPosition(EA E-only), cluster,phi,25,1.42996e-05,5.37548e-06,0.0029438,3.80104e-06
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,3,-0.000113225,1.61479e-05,0.0035843,1.14183e-05
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,5,2.13642e-05,1.42763e-05,0.00323943,1.00949e-05
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,7,3.87e-06,1.30558e-05,0.00308443,9.23183e-06
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,9,-1.91011e-05,1.32064e-05,0.0031886,9.33833e-06
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,11,-2.51682e-06,1.37838e-05,0.00334817,9.74664e-06
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,13.5,6.21055e-05,1.178e-05,0.00350575,8.32971e-06
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,17.5,0.000114227,8.90835e-06,0.00342953,6.29915e-06
+8,CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster,phi,25,1.52199e-05,5.37298e-06,0.00294243,3.79927e-06

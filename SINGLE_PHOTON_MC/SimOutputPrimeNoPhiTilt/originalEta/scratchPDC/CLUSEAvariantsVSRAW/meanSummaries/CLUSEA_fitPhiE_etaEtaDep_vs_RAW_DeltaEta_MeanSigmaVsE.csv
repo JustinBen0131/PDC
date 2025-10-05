@@ -1,17 +1,17 @@
 series,variant,residual,E,mu,dmu,sigma,dsigma
-0,Constant-b (Production) Uncorr,eta,3,2.22313e-05,1.86957e-05,0.00434361,1.32199e-05
-0,Constant-b (Production) Uncorr,eta,5,1.73209e-05,1.74853e-05,0.00413678,1.2364e-05
-0,Constant-b (Production) Uncorr,eta,7,-9.65706e-06,1.65049e-05,0.00405011,1.16708e-05
-0,Constant-b (Production) Uncorr,eta,9,-1.72165e-05,1.61355e-05,0.004031,1.14095e-05
-0,Constant-b (Production) Uncorr,eta,11,-3.42238e-05,1.59451e-05,0.0039914,1.12749e-05
-0,Constant-b (Production) Uncorr,eta,13.5,3.26867e-06,1.29906e-05,0.0039682,9.18575e-06
-0,Constant-b (Production) Uncorr,eta,17.5,-9.20443e-06,9.9729e-06,0.00392676,7.0519e-06
-0,Constant-b (Production) Uncorr,eta,25,-2.49616e-05,6.77927e-06,0.00379216,4.79367e-06
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,3,-1.7044e-06,1.72705e-05,0.00401248,1.22121e-05
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,5,4.42177e-06,1.5283e-05,0.00361575,1.08067e-05
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,7,-1.92892e-05,1.39546e-05,0.00342429,9.86741e-06
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,9,-3.26785e-05,1.34299e-05,0.00335508,9.49636e-06
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,11,-2.43293e-05,1.3077e-05,0.00327346,9.24685e-06
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,13.5,-1.06205e-05,1.05929e-05,0.00323579,7.49034e-06
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,17.5,-1.01204e-05,8.0569e-06,0.00317235,5.69709e-06
-1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,25,-2.45301e-05,5.33848e-06,0.00298621,3.77487e-06
+0,Constant-b (Production) Uncorr,eta,3,1.43704e-05,1.93009e-05,0.00428411,1.36478e-05
+0,Constant-b (Production) Uncorr,eta,5,8.83159e-06,1.80829e-05,0.00410219,1.27865e-05
+0,Constant-b (Production) Uncorr,eta,7,-1.36709e-05,1.70002e-05,0.00401622,1.2021e-05
+0,Constant-b (Production) Uncorr,eta,9,-2.74665e-05,1.65628e-05,0.00400128,1.17117e-05
+0,Constant-b (Production) Uncorr,eta,11,-4.4149e-05,1.62987e-05,0.00396062,1.15249e-05
+0,Constant-b (Production) Uncorr,eta,13.5,-1.45072e-06,1.32073e-05,0.00393075,9.33899e-06
+0,Constant-b (Production) Uncorr,eta,17.5,-1.20399e-05,1.00929e-05,0.00388564,7.13676e-06
+0,Constant-b (Production) Uncorr,eta,25,-3.3956e-05,6.85254e-06,0.00375268,4.84548e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,3,-1.93432e-05,1.75114e-05,0.00388691,1.23824e-05
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,5,-1.40003e-05,1.555e-05,0.00352758,1.09955e-05
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,7,-2.78076e-05,1.41802e-05,0.00335,1.00269e-05
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,9,-4.87132e-05,1.35761e-05,0.00327973,9.59972e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,11,-3.86452e-05,1.3179e-05,0.00320252,9.31895e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,13.5,-2.03044e-05,1.06013e-05,0.00315514,7.49623e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,17.5,-1.64052e-05,8.02801e-06,0.00309068,5.67666e-06
+1,(Production) CP(EA #varphi:E-only, #eta:|#eta|+E),eta,25,-3.57799e-05,5.30454e-06,0.00290494,3.75087e-06

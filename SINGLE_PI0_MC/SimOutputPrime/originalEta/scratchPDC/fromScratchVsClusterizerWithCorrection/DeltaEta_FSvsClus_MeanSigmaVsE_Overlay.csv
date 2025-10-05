@@ -1,0 +1,17 @@
+series,variant,residual,E,mu,dmu,sigma,dsigma
+0,from scratch (corr),eta,3,-3.35389e-05,3.21602e-05,0.015169,2.27407e-05
+0,from scratch (corr),eta,5,1.45912e-05,2.68804e-05,0.011752,1.90073e-05
+0,from scratch (corr),eta,7,-7.91519e-06,2.54424e-05,0.00899797,1.79905e-05
+0,from scratch (corr),eta,9,9.307e-06,2.22987e-05,0.00708851,1.57676e-05
+0,from scratch (corr),eta,11,-3.96614e-05,1.88339e-05,0.00586186,1.33176e-05
+0,from scratch (corr),eta,13.5,-2.96919e-05,1.25817e-05,0.00496619,8.89661e-06
+0,from scratch (corr),eta,17.5,-1.70225e-05,7.70207e-06,0.0042123,5.44619e-06
+0,from scratch (corr),eta,25,-7.70495e-06,4.21285e-06,0.00357519,2.97894e-06
+1,clusterizer (corr),eta,3,3.08345e-06,3.21855e-05,0.0151811,2.27586e-05
+1,clusterizer (corr),eta,5,7.34668e-05,2.7011e-05,0.0118089,1.90997e-05
+1,clusterizer (corr),eta,7,7.96728e-05,2.5808e-05,0.0091272,1.8249e-05
+1,clusterizer (corr),eta,9,9.57963e-05,2.29326e-05,0.00729001,1.62158e-05
+1,clusterizer (corr),eta,11,4.345e-05,1.96477e-05,0.00611514,1.3893e-05
+1,clusterizer (corr),eta,13.5,2.1932e-05,1.33161e-05,0.00525606,9.41589e-06
+1,clusterizer (corr),eta,17.5,1.4652e-05,8.29938e-06,0.00453897,5.86855e-06
+1,clusterizer (corr),eta,25,1.86979e-05,4.60837e-06,0.00391083,3.25861e-06

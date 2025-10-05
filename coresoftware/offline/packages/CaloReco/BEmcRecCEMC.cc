@@ -244,15 +244,17 @@ void BEmcRecCEMC::SetPhiTiltVariant(ETiltVariant v)
   // (a,b) in radians for φ(E) = a − b·lnE.  If you later calibrate EA flavours,
   // update the four CLUS_CP_EA_* entries below.
   static const std::unordered_map<ETiltVariant,std::pair<double,double>> lut = {
-      {ETiltVariant::CLUS_RAW, { 2.634138e-03, 8.197368e-04 }},  // no corr, cluster
-      {ETiltVariant::CLUS_CP, { 1.943936e-03, 7.964160e-04 }},  // CorrectPosition, cluster
-      {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 1.818732e-03, 7.311745e-04 }},  // CorrectPosition(EA geom), cluster
-      {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.111407e-03, 8.281758e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
-      {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.110158e-03, 8.290417e-04 }},  // CorrectPosition(EA E-only), cluster
-      {ETiltVariant::CLUS_CP_EA_MIX, { 2.110239e-03, 8.290575e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
-      {ETiltVariant::CLUS_BCORR, { 2.147911e-03, 8.244258e-04 }},  // b(E) corr, cluster
-      {ETiltVariant::PDC_RAW, { 2.728010e-03, 8.246884e-04 }},  // no corr, scratch
-      {ETiltVariant::PDC_CORR, { 2.268857e-03, 8.313311e-04 }},  // b(E) corr, scratch
+      {ETiltVariant::CLUS_RAW, { 2.641645e-03, 8.117525e-04 }},  // no corr, cluster
+      {ETiltVariant::CLUS_CP, { 1.925290e-03, 7.915014e-04 }},  // CorrectPosition, cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 2.084768e-03, 8.199622e-04 }},  // CorrectPosition(EA |z| + E), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.090636e-03, 8.208976e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.085796e-03, 8.203957e-04 }},  // CorrectPosition(EA E-only), cluster
+      {ETiltVariant::CLUS_CP_EA_MIX, { 2.101579e-03, 8.261614e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
+      {ETiltVariant::CLUS_BCORR, { 2.119625e-03, 8.130756e-04 }},  // b(E) corr, cluster
+      {ETiltVariant::PDC_RAW, { 2.739621e-03, 8.204782e-04 }},  // no corr, scratch
+      {ETiltVariant::PDC_CORR, { 2.244311e-03, 8.253109e-04 }},  // b(E) corr, scratch
+
+
       
       {ETiltVariant::DEFAULT,               { 8.654924e-04, 8.490399e-04}}   // legacy numbers
   };
@@ -285,7 +287,7 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
        *        φ(E) =  a  –  b · ln E      with  E in GeV
        *
     * -------------------------------------------------------------- */
-    bool doPhiTilt = false; // <<< set to false internally to disable
+    bool doPhiTilt = true; // <<< set to false internally to disable
     if (doPhiTilt)
     {
         /* variant–dependent tilt constants (set via SetPhiTiltVariant) */

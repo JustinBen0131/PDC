@@ -85,17 +85,26 @@ echo "[INFO] Output directory = $outDir"
 
 
 #############################
-# 5) Construct output filename
+# 5) Construct output filename (tag single-π0 if requested)
 #############################
-fileBaseName=$(basename "$chunkFile1")     # DST_CALO_run2pp_…‑00000.root
+fileBaseName=$(basename "$chunkFile1")
 fileTag=${fileBaseName%.*}
 
+datasetSuffix=""
+if [[ -n "${PDC_DATASET:-}" ]]; then
+  case "${PDC_DATASET,,}" in
+    singlepi0|pi0|single_pi0) datasetSuffix="_singlePi0" ;;
+    *) datasetSuffix="" ;;
+  esac
+fi
+
 if [[ "$dataOrSim" == "sim" ]]; then
-  outFile="${outDir}/PositionDep_sim_${fileTag}.root"
+  outFile="${outDir}/PositionDep_sim${datasetSuffix}_${fileTag}.root"
 else
-  outFile="${outDir}/PositionDep_data_${fileTag}.root"
+  outFile="${outDir}/PositionDep_data${datasetSuffix}_${fileTag}.root"
 fi
 echo "[INFO] Final output file: $outFile"
+
 
 #############################
 # 6) Run the macro directly
