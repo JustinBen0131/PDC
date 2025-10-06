@@ -1497,15 +1497,167 @@ EOL
 }
 
 
-# --------------------------- DATA RESUBMISSION (single-job per ID) ---------------------------
+# --------------------------- DATA RESUBMISSION (cluster-aware + legacy) ---------------------------
 resubmit_data_jobs() {
   # Usage:
-  #   resubmitDataJobs         -> harvest IDs, remove each job and resubmit the exact list
-  #   resubmitDataJobs TEST    -> harvest IDs and print file; NO removal/resubmit
+  #   resubmitDataJobs                -> harvest ALL IDs, remove each job, resubmit one-by-one (legacy)
+  #   resubmitDataJobs TEST           -> harvest ALL IDs and print; NO removal/resubmission
+  #   resubmit_data_jobs CLUSTER <ClusterId>
+  #
+  # The CLUSTER path is invoked by:  dataOnly doAllResSubmit <ClusterId>
+
+  local mode="${1:-}"
+  local owner="${USER:-patsfan753}"
+
+  # -------------------- CLUSTER MODE (batch requeue in one go) --------------------
+  if [[ "$mode" == "CLUSTER" ]]; then
+    local cluster="${2:-}"
+    [[ -n "$cluster" && "$cluster" =~ ^[0-9]+$ ]] || { echo "[ERROR] CLUSTER mode requires a numeric ClusterId"; return 1; }
+
+    command -v condor_q  >/dev/null 2>&1 || { echo "[ERROR] condor_q not in PATH"; return 1; }
+    command -v condor_rm >/dev/null 2>&1 || { echo "[ERROR] condor_rm not in PATH"; return 1; }
+    command -v condor_submit >/dev/null 2>&1 || { echo "[ERROR] condor_submit not in PATH"; return 1; }
+
+    echo "══════════════════════════════════════════════════════════════════════════"
+    echo "[DATA-RESUBMIT][AUTO] Harvesting data jobs from cluster ${cluster} (owner=${owner})"
+
+    # Count jobs in the cluster (ground truth)
+    local qcount
+    qcount=$(condor_q -nobatch -const "Owner==\"${owner}\" && ClusterId==${cluster}" -af:tq ProcId 2>/dev/null | wc -l | awk '{print $1}')
+    qcount=${qcount:-0}
+    if (( qcount <= 0 )); then
+      echo "[DATA-RESUBMIT][ERROR] ClusterId=${cluster} has 0 jobs in condor_q for Owner=${owner}."
+      return 1
+    fi
+    echo "[DATA-RESUBMIT][AUTO] condor_q reports ${qcount} job(s) in the cluster."
+
+    # Extract (runNum, listFile) from Arguments/Args for every proc in the cluster
+    local tmpPairs
+    tmpPairs="$(mktemp -p "${LOG_DIR}" .data_cluster_pairs_XXXXXX)" || { echo "[ERROR] mktemp failed (LOG_DIR=${LOG_DIR})"; return 1; }
+
+    if ! condor_q -nobatch -const "Owner==\"${owner}\" && ClusterId==${cluster}" -af:tq Arguments Args 2>/dev/null \
+      | awk -F'\t' '
+          {
+            a1=$1; a2=$2;
+            gsub(/^"+|"+$/, "", a1); gsub(/^"+|"+$/, "", a2);
+            args = (a1!="" && a1!="(null)" && a1!="undefined") ? a1 : a2;
+            if (args=="") next;
+            # Expected: <runNum> <listFile> data <Cluster> 0 <chunkIdx> NONE <OUTDIR_DATA>
+            n=split(args,A,/[[:space:]]+/);
+            if (n>=2 && A[1] ~ /^[0-9]+$/) {
+              print A[1] "\t" A[2];
+            }
+          }
+        ' > "$tmpPairs"
+    then
+      echo "[DATA-RESUBMIT][ERROR] Failed to parse Arguments from condor_q."
+      rm -f "$tmpPairs" >/dev/null 2>&1 || true
+      return 1
+    fi
+
+    local nuniq
+    nuniq="$(wc -l < "$tmpPairs" 2>/dev/null | awk '{print ($1==""?0:$1)}')"
+    echo "[DATA-RESUBMIT][AUTO] Parsed ${nuniq} (run, list) pair(s) from the cluster."
+
+    if (( nuniq <= 0 )); then
+      echo "[DATA-RESUBMIT][ERROR] No parsable (run,list) pairs discovered for ClusterId=${cluster}."
+      rm -f "$tmpPairs" >/dev/null 2>&1 || true
+      return 1
+    fi
+
+    # Verify each list file exists; keep only good pairs
+    local tmpVerified
+    tmpVerified="$(mktemp -p "${LOG_DIR}" .data_cluster_verified_XXXXXX)" || { echo "[ERROR] mktemp failed (LOG_DIR=${LOG_DIR})"; rm -f "$tmpPairs"; return 1; }
+
+    local good=0 missing=0
+    while IFS=$'\t' read -r runNum listFile; do
+      [[ -z "$runNum" || -z "$listFile" ]] && continue
+      if [[ -f "$listFile" ]]; then
+        printf "%s\t%s\n" "$runNum" "$listFile" >> "$tmpVerified"
+        (( ++good ))
+      else
+        echo "[DATA-RESUBMIT][WARN] Missing list file on disk: $listFile"
+        (( ++missing ))
+      fi
+    done < "$tmpPairs"
+    rm -f "$tmpPairs" >/dev/null 2>&1 || true
+
+    if (( good <= 0 )); then
+      echo "[DATA-RESUBMIT][ERROR] After verification, no valid list files remain. Abort."
+      rm -f "$tmpVerified" >/dev/null 2>&1 || true
+      return 1
+    fi
+    echo "[DATA-RESUBMIT][AUTO] Verified ${good} list(s); missing ${missing}."
+
+    # Remove the entire original cluster
+    echo "[DATA-RESUBMIT][CLEANUP] Removing existing Condor jobs for ClusterId=${cluster}"
+    if ! condor_rm -const "Owner==\"${owner}\" && ClusterId==${cluster}"; then
+      echo "[DATA-RESUBMIT][WARN] condor_rm returned non-zero; will still verify removal."
+    fi
+
+    # Wait until the cluster disappears (bounded)
+    local max_wait=60 waited=0
+    while :; do
+      local remain
+      remain=$(condor_q -nobatch -const "Owner==\"${owner}\" && ClusterId==${cluster}" -af:tq ProcId 2>/dev/null | wc -l | awk '{print $1}')
+      remain=${remain:-0}
+      if (( remain == 0 )); then
+        echo "[DATA-RESUBMIT][CLEANUP] condor_q shows 0 remaining jobs for ClusterId=${cluster}."
+        break
+      fi
+      (( ++waited ))
+      if (( waited > max_wait )); then
+        echo "[DATA-RESUBMIT][ERROR] Jobs still present after condor_rm (remain=${remain}) – aborting resubmission."
+        rm -f "$tmpVerified" >/dev/null 2>&1 || true
+        return 1
+      fi
+      echo "[DATA-RESUBMIT][CLEANUP] Waiting for queue to drain… remaining=${remain}"
+      sleep 1
+    done
+
+    # Build one combined submit file and requeue all jobs at once
+    mkdir -p "$LOG_DIR" "$LOG_DIR/log" "$LOG_DIR/stdout" "$LOG_DIR/error" || true
+    local subFile="PositionDependentCorrect_data_resubmit_cluster_${cluster}.sub"
+    rm -f "$subFile" 2>/dev/null || true
+    cat > "$subFile" <<EOS
+universe      = vanilla
+executable    = /sphenix/u/patsfan753/scratch/PDCrun24pp/PositionDependentCorrect_Condor.sh
+initialdir    = /sphenix/u/patsfan753/scratch/PDCrun24pp
+getenv        = True
+log           = ${LOG_DIR}/log/job.\$(Cluster).\$(Process).log
+output        = ${LOG_DIR}/stdout/job.\$(Cluster).\$(Process).out
+error         = ${LOG_DIR}/error/job.\$(Cluster).\$(Process).err
+request_memory= 1000MB
+should_transfer_files   = NO
+stream_output           = True
+stream_error            = True
+environment   = PDC_MODE=DATA;PDC_RUNNUMBER=24
+# Args: <runNum> <listFile> <data|sim> <clusterID> <nEvents> <chunkIdx> <hitsList> <destBase>
+EOS
+
+    local idx=0
+    while IFS=$'\t' read -r runNum listFile; do
+      printf 'arguments = %s %s data $(Cluster) 0 0 NONE %s\nqueue\n\n' \
+             "$runNum" "$listFile" "$OUTDIR_DATA" >> "$subFile"
+      (( ++idx ))
+    done < "$tmpVerified"
+    rm -f "$tmpVerified" >/dev/null 2>&1 || true
+
+    if (( idx <= 0 )); then
+      echo "[DATA-RESUBMIT][ERROR] No jobs queued into submit file."
+      rm -f "$subFile" >/dev/null 2>&1 || true
+      return 1
+    fi
+
+    echo "══════════════════════════════════════════════════════════════════════════"
+    echo "[DATA-RESUBMIT] condor_submit → $subFile  (jobs queued = $idx)"
+    condor_submit "$subFile"
+    return 0
+  fi
+
+  # -------------------- LEGACY MODE (harvest all IDs) --------------------
   local testMode=false
   [[ "${1:-}" =~ ^[Tt][Ee][Ss][Tt]$ ]] && testMode=true
-
-  local owner="${USER:-patsfan753}"
 
   command -v condor_q  >/dev/null 2>&1 || { echo "[ERROR] condor_q not in PATH"; return 1; }
   if ! $testMode; then
@@ -1513,12 +1665,10 @@ resubmit_data_jobs() {
     command -v condor_submit >/dev/null 2>&1 || { echo "[ERROR] condor_submit not in PATH"; return 1; }
   fi
 
-  # Temp file of ClusterId.ProcId
   mkdir -p "$LOG_DIR" "$LOG_DIR/log" "$LOG_DIR/stdout" "$LOG_DIR/error" || true
   local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
   local idsFile="${LOG_DIR}/data_resubmit_ids_${stamp}.txt"
 
-  # Harvest IDs as ClusterId.ProcId, unique
   condor_q "$owner" -nobatch -af:tq ClusterId ProcId 2>/dev/null \
     | awk 'NF==2{print $1 "." $2}' \
     | sort -u > "$idsFile"
@@ -1532,19 +1682,16 @@ resubmit_data_jobs() {
     return 0
   fi
 
-  # For each ID: get its Arguments, extract <runNum> and <listFile>, remove job, and resubmit a single job
   while IFS= read -r jid; do
     [[ -z "$jid" ]] && continue
     echo "------------------------------------------------------------------"
     echo "[DATA-RESUBMIT] Processing $jid"
 
-    # Pull Arguments (fall back to Args if empty)
     local args
     args=$(condor_q -nobatch "$jid" -af:tq Arguments 2>/dev/null | head -n1)
     if [[ -z "$args" || "$args" == "(null)" || "$args" == "undefined" ]]; then
       args=$(condor_q -nobatch "$jid" -af:tq Args 2>/dev/null | head -n1)
     fi
-    # Strip surrounding quotes if present
     args="${args%\"}"; args="${args#\"}"
 
     if [[ -z "$args" || "$args" == "(null)" || "$args" == "undefined" ]]; then
@@ -1552,8 +1699,6 @@ resubmit_data_jobs() {
       continue
     fi
 
-    # Your data job arguments are:
-    #   <runNum> <listFile> data <Cluster> 0 <chunkIdx> NONE <OUTDIR_DATA>
     local runNum listFile
     runNum=$(echo "$args" | awk '{print $1}')
     listFile=$(echo "$args" | awk '{print $2}')
@@ -1569,12 +1714,10 @@ resubmit_data_jobs() {
 
     echo "[DATA-RESUBMIT] run=${runNum}  list=$(basename "$listFile")"
 
-    # Remove the existing job (best-effort)
     if ! condor_rm "$jid"; then
       echo "[WARN] condor_rm failed for $jid, attempting to continue."
     fi
 
-    # Build a single-job submit file mirroring your data path
     local subFile="PositionDependentCorrect_data_resubmit_${runNum}_$(basename "$listFile" .list).sub"
     cat > "$subFile" <<EOS
 universe      = vanilla
@@ -1601,6 +1744,8 @@ EOS
 
   echo "[DATA-RESUBMIT] Completed."
 }
+
+
 
 #############################
 # 4) MAIN LOGIC
@@ -1672,6 +1817,16 @@ case "$MODE" in
 
             condorFirstTen)
                 submit_data_condor "condor" "firstTen" ;;
+
+            doAllResSubmit)
+                # Syntax: ./PositionDependentCorrect_Condor_submit.sh dataOnly doAllResSubmit <ClusterId>
+                if [[ -z "$3" || ! "$3" =~ ^[0-9]+$ ]]; then
+                  echo "[ERROR] dataOnly doAllResSubmit requires a numeric ClusterId as the third argument."
+                  exit 1
+                fi
+                resubmit_data_jobs CLUSTER "$3"
+                exit 0
+                ;;
 
              condor)
                 # -----------------------------------------------------------------

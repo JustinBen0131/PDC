@@ -430,39 +430,95 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
       };
       const double yMax = std::max(maxWithErr(hR), std::max(maxWithErr(hB), maxWithErr(hC)));
       hR->SetMinimum(0.0);
-      hR->SetMaximum(yMax * 1.2);
+      hR->SetMaximum(yMax * 1.35);
       hR->Draw("E1"); hB->Draw("E1 SAME"); hC->Draw("E1 SAME");
 
       drawTotalModel(iv,vR,i);
       drawTotalModel(iv,vB,i);
       drawTotalModel(iv,vC,i);
 
-      TLegend L(0.58,0.64,0.88,0.89); L.SetBorderSize(0); L.SetFillStyle(0);
-      L.AddEntry(hR, kVarPretty[vR], "lep");
-      L.AddEntry(hB, kVarPretty[vB], "lep");
-      L.AddEntry(hC, kVarPretty[vC], "lep"); L.Draw();
+        // Legend without error bars in entries: use "p" (markers only)
+        TLegend L(0.58,0.64,0.88,0.89);
+        L.SetBorderSize(0);
+        L.SetFillStyle(0);
+        L.AddEntry(hR, kVarPretty[vR], "p");
+        L.AddEntry(hB, kVarPretty[vB], "p");
+        L.AddEntry(hC, kVarPretty[vC], "p");
+        L.Draw();
 
-      TLatex tx; tx.SetNDC(); tx.SetTextSize(0.03);
-      double y=0.87, dy=0.047;
-      const auto &RR=summaryV[iv][vR][i], &RB=summaryV[iv][vB][i], &RC=summaryV[iv][vC][i];
-      tx.SetTextColor(kVarColor[vR]);
-      if (RR.ok) tx.DrawLatex(0.14,y,Form("%s: #mu=%.4f#pm%.4f, #sigma=%.4f#pm%.4f",
-                          kVarPretty[vR],RR.mean,RR.meanErr,RR.sig,RR.sigErr));
-      else tx.DrawLatex(0.14,y,Form("%s: fit n/a",kVarPretty[vR])); y-=dy;
-      tx.SetTextColor(kVarColor[vB]);
-      if (RB.ok) tx.DrawLatex(0.14,y,Form("%s: #mu=%.4f#pm%.4f, #sigma=%.4f#pm%.4f",
-                          kVarPretty[vB],RB.mean,RB.meanErr,RB.sig,RB.sigErr));
-      else tx.DrawLatex(0.14,y,Form("%s: fit n/a",kVarPretty[vB])); y-=dy;
-      tx.SetTextColor(kVarColor[vC]);
-      if (RC.ok) tx.DrawLatex(0.14,y,Form("%s: #mu=%.4f#pm%.4f, #sigma=%.4f#pm%.4f",
-                          kVarPretty[vC],RC.mean,RC.meanErr,RC.sig,RC.sigErr));
-      else tx.DrawLatex(0.14,y,Form("%s: fit n/a",kVarPretty[vC]));
-      tx.SetTextColor(kBlack);
+        // Per-plot text
+        TLatex tx; tx.SetNDC(); tx.SetTextSize(0.024);
+        double y=0.87, dy=0.047;
+        const auto &RR=summaryV[iv][vR][i], &RB=summaryV[iv][vB][i], &RC=summaryV[iv][vC][i];
+        tx.SetTextColor(kVarColor[vR]);
+        if (RR.ok) tx.DrawLatex(0.14,y,Form("%s: #mu=%.4f#pm%.4f, #sigma=%.4f#pm%.4f",
+                            kVarPretty[vR],RR.mean,RR.meanErr,RR.sig,RR.sigErr));
+        else       tx.DrawLatex(0.14,y,Form("%s: fit n/a",kVarPretty[vR]));
+        y -= dy;
 
-      const TString outP = outDir + "/" + TString::Format("overlay3_%s_%s_%s_%s.png",
-                                     kSaveTag(vR), kSaveTag(vB), kSaveTag(vC), eLabel(i).Data());
+        tx.SetTextColor(kVarColor[vB]);
+        if (RB.ok) tx.DrawLatex(0.14,y,Form("%s: #mu=%.4f#pm%.4f, #sigma=%.4f#pm%.4f",
+                            kVarPretty[vB],RB.mean,RB.meanErr,RB.sig,RB.sigErr));
+        else       tx.DrawLatex(0.14,y,Form("%s: fit n/a",kVarPretty[vB]));
+        y -= dy;
 
-      c.Modified(); c.Update(); c.SaveAs(outP);
+        tx.SetTextColor(kVarColor[vC]);
+        if (RC.ok) tx.DrawLatex(0.14,y,Form("%s: #mu=%.4f#pm%.4f, #sigma=%.4f#pm%.4f",
+                            kVarPretty[vC],RC.mean,RC.meanErr,RC.sig,RC.sigErr));
+        else       tx.DrawLatex(0.14,y,Form("%s: fit n/a",kVarPretty[vC]));
+        tx.SetTextColor(kBlack);
+
+        // --------- Clean ANSI percentage-only table to terminal for CLUSRAW_CLUSCP_CLUSEAonly ----------
+        // Prints Δ% resolution (σ/μ) vs RAW for: Legacy Constant b-corr (CP) and Energy-Dep b-correction (E-only)
+        if (outDir.Contains("CLUSRAW_CLUSCP_CLUSEAonly")) {
+          // Header once per view (on the first bin)
+          if (i == 0) {
+            std::cout << "\n\033[1m[Overlay] Δ% resolution vs RAW (σ/μ)  —  View: "
+                      << kViews[iv].pretty << "\033[0m\n";
+            std::cout << "\033[1m"
+                      << std::left  << std::setw(16) << "E-bin"
+                      << " | " << std::setw(16) << "Legacy Const-b"
+                      << " | " << std::setw(16) << "Energy-Dep b"
+                      << "\033[0m\n";
+            std::cout << std::string(16 + 3 + 16 + 3 + 16, '-') << "\n";
+          }
+
+          auto pct = [](double num)->std::string {
+            if (!std::isfinite(num)) return std::string("      n/a      ");
+            std::ostringstream os; os.setf(std::ios::fixed);
+            os << std::setprecision(2) << std::showpos << num << "%" << std::noshowpos;
+            return os.str();
+          };
+
+          // Percent change in RESOLUTION (sigma/mu) vs RAW
+          auto safe_res = [](const FitRes& R)->double {
+            if (!R.ok || !std::isfinite(R.sig) || !std::isfinite(R.mean) || R.sig<=0.0 || R.mean<=0.0)
+              return std::numeric_limits<double>::quiet_NaN();
+            return R.sig / R.mean;
+          };
+
+          const double resRAW = safe_res(RR);  // RAW = No Correction
+          const double resCP  = safe_res(RB);  // Legacy Constant b-corr
+          const double resEO  = safe_res(RC);  // Energy-Dep b-correction
+
+          double dCP = std::numeric_limits<double>::quiet_NaN();
+          double dEO = std::numeric_limits<double>::quiet_NaN();
+          if (std::isfinite(resRAW) && resRAW > 0.0 && std::isfinite(resCP))
+            dCP = 100.0 * (resCP - resRAW) / resRAW;
+          if (std::isfinite(resRAW) && resRAW > 0.0 && std::isfinite(resEO))
+            dEO = 100.0 * (resEO - resRAW) / resRAW;
+
+          std::cout << std::left << std::setw(16) << ePretty(i).Data()
+                    << " | " << std::setw(16) << pct(dCP)
+                    << " | " << std::setw(16) << pct(dEO)
+                    << "\n";
+        }
+
+
+        const TString outP = outDir + "/" + TString::Format("overlay3_%s_%s_%s_%s.png",
+                                       kSaveTag(vR), kSaveTag(vB), kSaveTag(vC), eLabel(i).Data());
+
+        c.Modified(); c.Update(); c.SaveAs(outP);
     }
   };
 
@@ -987,195 +1043,303 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
     }
   }
 
-  // -------------------------- Resolution overlay (σ/μ) across variants (all E bins) --------------------------
-  {
-    int vRAW   = -1, vCP=-1, vEAone=-1, vEAeta=-1, vEAgeo=-1;
-    for (int v = 0; v < NVAR; ++v) {
-      const std::string tag = kVarTags[v];
-      if      (tag == "CLUSRAW") vRAW   = v;
-      else if (tag == "CLUSCP")  vCP    = v;
-      else if (tag == "EAEonly") vEAone = v;
-      else if (tag == "EAetaE")  vEAeta = v;
-      else if (tag == "EAgeom")  vEAgeo = v;
-    }
-    if (vRAW < 0 || vCP < 0 || vEAone < 0 || vEAeta < 0 || vEAgeo < 0) {
-      std::cerr << "[ResolutionOverlay] Missing one of required variants (CLUSRAW, CLUSCP, EAEonly, EAetaE, EAgeom) — skipping overlay.\n";
-    } else if (N_E <= 0) {
-      std::cerr << "[ResolutionOverlay] No energy bins available — skipping overlay.\n";
-    } else {
-      for (int iE = 0; iE < N_E; ++iE) {
-        std::vector<double> x = {1.0, 2.0, 3.0, 4.0, 5.0};
-        const char* xlabels[5] = {
-          kVarPretty[vRAW],
-          kVarPretty[vCP],
-          kVarPretty[vEAone],
-          kVarPretty[vEAeta],
-          kVarPretty[vEAgeo]
-        };
+    // -------------------------- Resolution overlay (σ/μ) across variants (all E bins) --------------------------
+    {
+      int vRAW   = -1, vCP=-1, vEAone=-1, vEAeta=-1, vEAgeo=-1;
+      for (int v = 0; v < NVAR; ++v) {
+        const std::string tag = kVarTags[v];
+        if      (tag == "CLUSRAW") vRAW   = v;
+        else if (tag == "CLUSCP")  vCP    = v;
+        else if (tag == "EAEonly") vEAone = v;
+        else if (tag == "EAetaE")  vEAeta = v;
+        else if (tag == "EAgeom")  vEAgeo = v;
+      }
+      if (vRAW < 0 || vCP < 0 || vEAone < 0 || vEAeta < 0 || vEAgeo < 0) {
+        std::cerr << "[ResolutionOverlay] Missing one of required variants (CLUSRAW, CLUSCP, EAEonly, EAetaE, EAgeom) — skipping overlay.\n";
+      } else if (N_E <= 0) {
+        std::cerr << "[ResolutionOverlay] No energy bins available — skipping overlay.\n";
+      } else {
+        for (int iE = 0; iE < N_E; ++iE) {
+          // Category x-positions (bin centers)
+          std::vector<double> x = {1.0, 2.0, 3.0, 4.0, 5.0};
 
-        auto makeViewGraphRes = [&](int iview, double xoff, Style_t mstyle, Color_t col)->std::unique_ptr<TGraphErrors>
-        {
-          std::vector<double> y, ey;
-          auto push = [&](const FitRes& R) {
-            if (R.ok && std::isfinite(R.sig) && std::isfinite(R.mean) && R.sig>0.0 && R.mean>0.0) {
-              const double res = R.sig / R.mean;
-              const double err = res * std::sqrt( std::pow(R.sigErr / R.sig,  2.0) +
-                                                  std::pow(R.meanErr / R.mean, 2.0) );
-              y.push_back(res); ey.push_back(err);
-            } else {
-              y.push_back(std::numeric_limits<double>::quiet_NaN()); ey.push_back(0.0);
-            }
+          // Local label shortener: ONLY used to build x-axis bin labels for this block.
+          auto shortLabel = [&](const char* s)->const char* {
+            if (!s) return "";
+            if (strcmp(s, "No Correction") == 0)                      return "Raw";
+            if (strcmp(s, "Legacy Constant b-corr") == 0)             return "Const-b";
+            if (strcmp(s, "Energy-Dep b-correction") == 0)            return "Energy-Dep b";
+            if (strcmp(s, "Energy/|#eta|-Dep b-correction") == 0)     return "Energy/|#eta|-Dep b";
+            if (strcmp(s, "Energy/|z_{vtx}|-Dep b-correction") == 0)  return "Energy/|z_{vtx}|-Dep b";
+            return s; // fallback unchanged
           };
 
-          // Order matches x: CLUSRAW, CLUSCP, EAEonly, EAetaE, EAgeom
-          push(summaryV[iview][vRAW][iE]);
-          push(summaryV[iview][vCP][iE]);
-          push(summaryV[iview][vEAone][iE]);
-          push(summaryV[iview][vEAeta][iE]);
-          push(summaryV[iview][vEAgeo][iE]);
+          // Build the x-axis labels with the short mapping
+          const char* xlabels_short[5] = {
+            shortLabel(kVarPretty[vRAW]),
+            shortLabel(kVarPretty[vCP]),
+            shortLabel(kVarPretty[vEAone]),
+            shortLabel(kVarPretty[vEAeta]),
+            shortLabel(kVarPretty[vEAgeo])
+          };
 
-          // Filter NaNs while preserving x order; apply per-series x offset
-          std::vector<double> xf, yf, exf, eyf;
-          for (size_t k = 0; k < y.size(); ++k) {
-            if (!std::isfinite(y[k])) continue;
-            xf.push_back(x[k] + xoff);
-            yf.push_back(y[k]);
-            exf.push_back(0.0);
-            eyf.push_back(ey[k]);
-          }
+          auto makeViewGraphRes = [&](int iview, double xoff, Style_t mstyle, Color_t col)->std::unique_ptr<TGraphErrors>
+          {
+            std::vector<double> y, ey;
+            auto push = [&](const FitRes& R) {
+              if (R.ok && std::isfinite(R.sig) && std::isfinite(R.mean) && R.sig>0.0 && R.mean>0.0) {
+                const double res = R.sig / R.mean;
+                const double err = res * std::sqrt( std::pow(R.sigErr / R.sig,  2.0) +
+                                                    std::pow(R.meanErr / R.mean, 2.0) );
+                y.push_back(res); ey.push_back(err);
+              } else {
+                y.push_back(std::numeric_limits<double>::quiet_NaN()); ey.push_back(0.0);
+              }
+            };
 
-          auto g = std::make_unique<TGraphErrors>(
-            (int)xf.size(),
-            xf.empty()?nullptr:&xf[0],
-            yf.empty()?nullptr:&yf[0],
-            exf.empty()?nullptr:&exf[0],
-            eyf.empty()?nullptr:&eyf[0]
-          );
-          g->SetMarkerStyle(mstyle);
-          g->SetMarkerSize(1.5);
-          g->SetMarkerColor(col);
-          g->SetLineColor(col);
-          g->SetLineWidth(2);
-          return g;
-        };
+            // Order matches x: CLUSRAW, CLUSCP, EAEonly, EAetaE, EAgeom
+            push(summaryV[iview][vRAW][iE]);
+            push(summaryV[iview][vCP][iE]);
+            push(summaryV[iview][vEAone][iE]);
+            push(summaryV[iview][vEAeta][iE]);
+            push(summaryV[iview][vEAgeo][iE]);
 
-        auto r_core = makeViewGraphRes(2, -0.18, 20, kBlue+1);
-        auto r_mid  = makeViewGraphRes(3, -0.06, 21, kGreen+2);
-        auto r_edge = makeViewGraphRes(4,  0.06, 22, kMagenta+1);
-        auto r_full = makeViewGraphRes(1,  0.18, 24, kRed+1);
+            // Filter NaNs while preserving x order; apply per-series x offset
+            std::vector<double> xf, yf, exf, eyf;
+            for (size_t k = 0; k < y.size(); ++k) {
+              if (!std::isfinite(y[k])) continue;
+              xf.push_back(x[k] + xoff);
+              yf.push_back(y[k]);
+              exf.push_back(0.0);
+              eyf.push_back(ey[k]);
+            }
 
-        // Dynamic y-range
-        double rymin = +1e30, rymax = -1e30, RX, RY;
-        auto rupd = [&](TGraphErrors* g) {
-          if (!g) return;
-          for (int k = 0; k < g->GetN(); ++k) {
-            g->GetPoint(k, RX, RY);
-            const double eY = g->GetErrorY(k);
-            rymin = std::min(rymin, RY - eY);
-            rymax = std::max(rymax, RY + eY);
-          }
-        };
-        rupd(r_core.get()); rupd(r_mid.get()); rupd(r_edge.get()); rupd(r_full.get());
-        if (!(std::isfinite(rymin) && std::isfinite(rymax))) { rymin = 0.10; rymax = 0.20; }
-        double rspan = rymax - rymin; if (rspan <= 0) rspan = 1e-3;
-        const double rpadB = 0.18 * rspan;
-        const double rpadT = 0.5 * rspan;
-        rymin = std::max(0.0, rymin - rpadB);
-        rymax = rymax + rpadT;
+            auto g = std::make_unique<TGraphErrors>(
+              (int)xf.size(),
+              xf.empty()?nullptr:&xf[0],
+              yf.empty()?nullptr:&yf[0],
+              exf.empty()?nullptr:&exf[0],
+              eyf.empty()?nullptr:&eyf[0]
+            );
+            g->SetMarkerStyle(mstyle);
+            g->SetMarkerSize(1.5);
+            g->SetMarkerColor(col);
+            g->SetLineColor(col);
+            g->SetLineWidth(2);
+            return g;
+          };
 
-        // Frame and draw
-        TCanvas cR(Form("cResolutionOverlay_%02d", iE), "Gaussian resolution (E bin)", 1000, 700);
-        cR.SetLeftMargin(0.18);
-        cR.SetBottomMargin(0.18);
+          auto r_core = makeViewGraphRes(2, -0.18, 20, kBlue+1);
+          auto r_mid  = makeViewGraphRes(3, -0.06, 21, kGreen+2);
+          auto r_edge = makeViewGraphRes(4,  0.06, 22, kMagenta+1);
+          auto r_full = makeViewGraphRes(1,  0.18, 24, kRed+1);
 
-        TH1F frr("fr_resolution", "", 5, 0.5, 5.5);
-        frr.SetStats(0);
-        frr.GetYaxis()->SetTitle("Gaussian resolution  #sigma / #mu");
-        frr.GetYaxis()->SetLabelSize(0.025);
-        frr.GetYaxis()->SetRangeUser(rymin, rymax);
-        frr.GetXaxis()->SetTitle("");
-        frr.GetXaxis()->SetTitleSize(0.0);
-        frr.GetXaxis()->SetLabelSize(0.032);
-        frr.GetYaxis()->SetTitleOffset(1.55);
-        for (int ib = 1; ib <= 5; ++ib) frr.GetXaxis()->SetBinLabel(ib, xlabels[ib-1]);
-        frr.GetXaxis()->CenterLabels(true);
-        frr.Draw();
-
-        if (r_core && r_core->GetN() > 0) r_core->Draw("P SAME");
-        if (r_mid  && r_mid->GetN()  > 0) r_mid->Draw("P SAME");
-        if (r_edge && r_edge->GetN() > 0) r_edge->Draw("P SAME");
-        if (r_full && r_full->GetN() > 0) r_full->Draw("P SAME");
-
-        TLegend LR(0.62, 0.70, 0.88, 0.88); LR.SetBorderSize(0); LR.SetFillStyle(0);
-        LR.AddEntry(r_core.get(), kViews[2].pretty, "p");
-        LR.AddEntry(r_mid.get(),  kViews[3].pretty, "p");
-        LR.AddEntry(r_edge.get(), kViews[4].pretty, "p");
-        LR.AddEntry(r_full.get(), kViews[1].pretty, "p");
-        LR.Draw();
-
-        TLatex txR; txR.SetNDC(); txR.SetTextSize(0.035);
-        txR.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} / #mu_{#pi^{0}} (%s) across variants", ePretty(iE).Data()));
-
-        const TString outR = Form("%s/pi0Resolution_Ebin_%02d.png", baseOut.Data(), iE);
-        cR.Modified(); cR.Update(); cR.SaveAs(outR);
-        std::cout << "[ResolutionOverlay] Wrote: " << outR << "\n";
-
-        // No-Core version (exclude etaCore) — still 5 categories on x
-        {
-          double r2min = +1e30, r2max = -1e30, XX, YY;
-          auto rupd2 = [&](TGraphErrors* g) {
+          // Dynamic y-range
+          double rymin = +1e30, rymax = -1e30, RX, RY;
+          auto rupd = [&](TGraphErrors* g) {
             if (!g) return;
             for (int k = 0; k < g->GetN(); ++k) {
-              g->GetPoint(k, XX, YY);
+              g->GetPoint(k, RX, RY);
               const double eY = g->GetErrorY(k);
-              r2min = std::min(r2min, YY - eY);
-              r2max = std::max(r2max, YY + eY);
+              rymin = std::min(rymin, RY - eY);
+              rymax = std::max(rymax, RY + eY);
             }
           };
-          rupd2(r_mid.get()); rupd2(r_edge.get()); rupd2(r_full.get());
-          if (!(std::isfinite(r2min) && std::isfinite(r2max))) { r2min = 0.10; r2max = 0.20; }
-          double rsp2 = r2max - r2min; if (rsp2 <= 0) rsp2 = 1e-3;
-          const double r2padB = 0.06 * rsp2;
-          const double r2padT = 0.10 * rsp2;
-          r2min = std::max(0.0, r2min - r2padB);
-          r2max = r2max + r2padT;
+          rupd(r_core.get()); rupd(r_mid.get()); rupd(r_edge.get()); rupd(r_full.get());
+          if (!(std::isfinite(rymin) && std::isfinite(rymax))) { rymin = 0.10; rymax = 0.20; }
+          double rspan = rymax - rymin; if (rspan <= 0) rspan = 1e-3;
+          const double rpadB = 0.18 * rspan;
+          const double rpadT = 0.5 * rspan;
+          rymin = std::max(0.0, rymin - rpadB);
+          rymax = rymax + rpadT;
 
-          TCanvas cR2(Form("cResolutionOverlay_noCore_%02d", iE), "Gaussian resolution (no etaCore)", 1000, 700);
-          cR2.SetLeftMargin(0.18);
-          cR2.SetBottomMargin(0.18);
+          // Frame and draw
+          TCanvas cR(Form("cResolutionOverlay_%02d", iE), "Gaussian resolution (E bin)", 1000, 700);
+          cR.SetLeftMargin(0.18);
+          cR.SetBottomMargin(0.18);
 
-          TH1F frr2("fr_resolution_noCore", "", 5, 0.5, 5.5);
-          frr2.SetStats(0);
-          frr2.GetYaxis()->SetTitle("Gaussian resolution  #sigma / #mu");
-          frr2.GetYaxis()->SetRangeUser(r2min, r2max);
-          frr2.GetXaxis()->SetTitle("");
-          frr2.GetXaxis()->SetTitleSize(0.0);
-          frr2.GetXaxis()->SetLabelSize(0.032);
-          frr2.GetYaxis()->SetTitleOffset(1.55);
-          for (int ib = 1; ib <= 5; ++ib) frr2.GetXaxis()->SetBinLabel(ib, xlabels[ib-1]);
-          frr2.GetXaxis()->CenterLabels(true);
-          frr2.Draw();
+          TH1F frr("fr_resolution", "", 5, 0.5, 5.5);
+          frr.SetStats(0);
+          frr.GetYaxis()->SetTitle("Gaussian resolution  #sigma / #mu");
+          frr.GetYaxis()->SetLabelSize(0.025);
+          frr.GetYaxis()->SetRangeUser(rymin, rymax);
 
+          // X-axis cosmetics + mapped labels
+          frr.GetXaxis()->SetTitle("");
+          frr.GetXaxis()->SetTitleSize(0.0);
+          frr.GetXaxis()->SetLabelSize(0.035);
+          frr.GetXaxis()->SetLabelOffset(0.010); // a bit closer to ticks
+          frr.GetXaxis()->CenterLabels(true);
+          frr.LabelsOption("h","X");             // force horizontal bin labels
+
+          frr.GetYaxis()->SetTitleOffset(1.55);
+
+          for (int ib = 1; ib <= 5; ++ib)
+            frr.GetXaxis()->SetBinLabel(ib, xlabels_short[ib-1]);
+
+          frr.Draw();
+
+          if (r_core && r_core->GetN() > 0) r_core->Draw("P SAME");
           if (r_mid  && r_mid->GetN()  > 0) r_mid->Draw("P SAME");
           if (r_edge && r_edge->GetN() > 0) r_edge->Draw("P SAME");
           if (r_full && r_full->GetN() > 0) r_full->Draw("P SAME");
 
-          TLegend LR2(0.62, 0.70, 0.88, 0.88); LR2.SetBorderSize(0); LR2.SetFillStyle(0);
-          LR2.AddEntry(r_mid.get(),  kViews[3].pretty, "p");
-          LR2.AddEntry(r_edge.get(), kViews[4].pretty, "p");
-          LR2.AddEntry(r_full.get(), kViews[1].pretty, "p");
-          LR2.Draw();
+          TLegend LR(0.62, 0.70, 0.88, 0.88); LR.SetBorderSize(0); LR.SetFillStyle(0);
+          LR.AddEntry(r_core.get(), kViews[2].pretty, "p");
+          LR.AddEntry(r_mid.get(),  kViews[3].pretty, "p");
+          LR.AddEntry(r_edge.get(), kViews[4].pretty, "p");
+          LR.AddEntry(r_full.get(), kViews[1].pretty, "p");
+          LR.Draw();
 
-          TLatex txR2; txR2.SetNDC(); txR2.SetTextSize(0.035);
-          txR2.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} / #mu_{#pi^{0}} (%s) across variants  —  no |#eta| #leq 0.20", ePretty(iE).Data()));
+          TLatex txR; txR.SetNDC(); txR.SetTextSize(0.035);
+          txR.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} / #mu_{#pi^{0}} (%s) across variants", ePretty(iE).Data()));
 
-          const TString outR2 = Form("%s/pi0Resolution_Ebin_%02d_noCore.png", baseOut.Data(), iE);
-          cR2.Modified(); cR2.Update(); cR2.SaveAs(outR2);
-          std::cout << "[ResolutionOverlay] Wrote: " << outR2 << "\n";
-        }
-      } // iE
+          const TString outR = Form("%s/pi0Resolution_Ebin_%02d.png", baseOut.Data(), iE);
+          cR.Modified(); cR.Update(); cR.SaveAs(outR);
+          std::cout << "[ResolutionOverlay] Wrote: " << outR << "\n";
+
+          // No-Core version (exclude etaCore) — still 5 categories on x
+          {
+            double r2min = +1e30, r2max = -1e30, XX, YY;
+            auto rupd2 = [&](TGraphErrors* g) {
+              if (!g) return;
+              for (int k = 0; k < g->GetN(); ++k) {
+                g->GetPoint(k, XX, YY);
+                const double eY = g->GetErrorY(k);
+                r2min = std::min(r2min, YY - eY);
+                r2max = std::max(r2max, YY + eY);
+              }
+            };
+            rupd2(r_mid.get()); rupd2(r_edge.get()); rupd2(r_full.get());
+            if (!(std::isfinite(r2min) && std::isfinite(r2max))) { r2min = 0.10; r2max = 0.20; }
+            double rsp2 = r2max - r2min; if (rsp2 <= 0) rsp2 = 1e-3;
+            const double r2padB = 0.06 * rsp2;
+            const double r2padT = 0.10 * rsp2;
+            r2min = std::max(0.0, r2min - r2padB);
+            r2max = r2max + r2padT;
+
+            TCanvas cR2(Form("cResolutionOverlay_noCore_%02d", iE), "Gaussian resolution (no etaCore)", 1000, 700);
+            cR2.SetLeftMargin(0.18);
+            cR2.SetBottomMargin(0.18);
+
+            TH1F frr2("fr_resolution_noCore", "", 5, 0.5, 5.5);
+            frr2.SetStats(0);
+            frr2.GetYaxis()->SetTitle("Gaussian resolution  #sigma / #mu");
+            frr2.GetYaxis()->SetRangeUser(r2min, r2max);
+
+            // X-axis cosmetics + mapped labels (same mapping as above)
+            frr2.GetXaxis()->SetTitle("");
+            frr2.GetXaxis()->SetTitleSize(0.0);
+            frr2.GetXaxis()->SetLabelSize(0.032);
+            frr2.GetXaxis()->SetLabelOffset(0.010);
+            frr2.GetXaxis()->CenterLabels(true);
+            frr2.LabelsOption("h","X");
+
+            frr2.GetYaxis()->SetTitleOffset(1.55);
+
+            for (int ib = 1; ib <= 5; ++ib)
+              frr2.GetXaxis()->SetBinLabel(ib, xlabels_short[ib-1]);
+
+            frr2.Draw();
+
+            if (r_mid  && r_mid->GetN()  > 0) r_mid->Draw("P SAME");
+            if (r_edge && r_edge->GetN() > 0) r_edge->Draw("P SAME");
+            if (r_full && r_full->GetN() > 0) r_full->Draw("P SAME");
+
+            TLegend LR2(0.62, 0.70, 0.88, 0.88); LR2.SetBorderSize(0); LR2.SetFillStyle(0);
+            LR2.AddEntry(r_mid.get(),  kViews[3].pretty, "p");
+            LR2.AddEntry(r_edge.get(), kViews[4].pretty, "p");
+            LR2.AddEntry(r_full.get(), kViews[1].pretty, "p");
+            LR2.Draw();
+
+            TLatex txR2; txR2.SetNDC(); txR2.SetTextSize(0.035);
+            txR2.DrawLatex(0.14, 0.93, Form("#sigma_{#pi^{0}} / #mu_{#pi^{0}} (%s) across variants  —  no |#eta| #leq 0.20", ePretty(iE).Data()));
+
+              const TString outR = Form("%s/pi0Resolution_Ebin_%02d.png", baseOut.Data(), iE);
+              cR.Modified(); cR.Update(); cR.SaveAs(outR);
+              std::cout << "[ResolutionOverlay] Wrote: " << outR << "\n";
+
+              /* ---------- ADD: well-formatted summary table (per η-view) ---------- */
+              auto shortVarName = [&](int v)->const char* {
+                if      (v == vRAW)   return "Raw";
+                else if (v == vCP)    return "Const-b";
+                else if (v == vEAone) return "Energy-Dep b";
+                else if (v == vEAeta) return "Energy/|#eta|-Dep b";
+                else if (v == vEAgeo) return "Energy/|z_{vtx}|-Dep b";
+                return kVarPretty[v];
+              };
+              auto resOf = [&](int iview, int v)->double {
+                const FitRes& R = summaryV[iview][v][iE];
+                if (!R.ok || !std::isfinite(R.sig) || !std::isfinite(R.mean) || R.sig<=0.0 || R.mean<=0.0)
+                  return std::numeric_limits<double>::quiet_NaN();
+                return R.sig / R.mean;
+              };
+              auto nEventsOf = [&](int iview, int v)->Long64_t {
+                if (iview < 0 || iview >= N_VIEW) return 0;
+                if (v < 0 || v >= NVAR) return 0;
+                if (!hKeepV[iview][v][iE]) return 0;
+                return static_cast<Long64_t>( hKeepV[iview][v][iE]->GetEntries() );
+              };
+              auto fmtD = [](double x, int p=5)->std::string{
+                if (!std::isfinite(x)) return std::string("   n/a   ");
+                std::ostringstream os; os.setf(std::ios::fixed); os<<std::setprecision(p)<<x; return os.str();
+              };
+              auto fmtPct = [](double x)->std::string{
+                if (!std::isfinite(x)) return std::string("   n/a   ");
+                std::ostringstream os; os.setf(std::ios::fixed); os<<std::showpos<<std::setprecision(2)<<x<<"%"<<std::noshowpos; return os.str();
+              };
+
+              const int W_ETA = 18, W_VAR = 20, W_N = 10, W_RES = 12, W_D = 12;
+
+              // print one table per η-view (in the same order as the plot: Core, Mid, Edge, Full)
+              std::vector<int> ivList = {2, 3, 4, 1}; // etaCore, etaMid, etaEdge, fullEta
+
+              std::cout << "\n\033[1m[ResolutionOverlay] Summary (σ/μ)   E-bin = ["
+                        << std::fixed << std::setprecision(0) << E_edges[iE] << "," << E_edges[iE+1]
+                        << ") GeV\033[0m\n";
+              std::cout << std::left << std::setw(W_ETA) << "η-range"
+                        << " | " << std::setw(W_VAR) << "Variant"
+                        << " | " << std::setw(W_N)   << "nEvents"
+                        << " | " << std::setw(W_RES) << "RES(σ/μ)"
+                        << " | " << std::setw(W_D)   << "Δ vs RAW"
+                        << "\n";
+              std::cout << std::string(W_ETA+3 + W_VAR+3 + W_N+3 + W_RES+3 + W_D, '-') << "\n";
+
+              for (int iview : ivList) {
+                // precompute RAW for this η view
+                const double resRAW = resOf(iview, vRAW);
+
+                // print a block header line for the η view
+                std::cout << std::left << std::setw(W_ETA) << kViews[iview].pretty
+                          << " | " << std::setw(W_VAR) << shortVarName(vRAW)
+                          << " | " << std::setw(W_N)   << nEventsOf(iview, vRAW)
+                          << " | " << std::setw(W_RES) << fmtD(resRAW, 5)
+                          << " | " << std::setw(W_D)   << fmtPct(0.0)
+                          << "\n";
+
+                // the rest of the variants in the fixed order
+                const int vList[4] = {vCP, vEAone, vEAeta, vEAgeo};
+                for (int vv : vList) {
+                  const double r = resOf(iview, vv);
+                  const double d = (std::isfinite(resRAW) && resRAW>0.0 && std::isfinite(r))
+                                   ? ( (r/resRAW - 1.0) * 100.0 ) : std::numeric_limits<double>::quiet_NaN();
+
+                  std::cout << std::left << std::setw(W_ETA) << ""
+                            << " | " << std::setw(W_VAR) << shortVarName(vv)
+                            << " | " << std::setw(W_N)   << nEventsOf(iview, vv)
+                            << " | " << std::setw(W_RES) << fmtD(r, 5)
+                            << " | " << std::setw(W_D)   << fmtPct(d)
+                            << "\n";
+                }
+                // separator between η-views
+                std::cout << std::string(W_ETA+3 + W_VAR+3 + W_N+3 + W_RES+3 + W_D, '-') << "\n";
+              }
+              /* ---------- END add ---------- */
+
+          }
+        } // iE
+      }
     }
-  }
 
   // -------------------------- Sigma RATIO vs E across η-views (money plots) --------------------------
   {
@@ -1393,7 +1557,7 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
     }
   }
 
-    // -------------------------- NEW: resolutionRatios (originalEta only, up to 10–12 GeV) --------------------------
+    // -------------------------- NEW: resolutionRatios (originalEta only, 8/10/15 GeV variants) --------------------------
     {
       // Variant indices
       int vRAW=-1, vCP=-1, vEAgeo=-1, vEAeta=-1, vEAone=-1;
@@ -1401,219 +1565,390 @@ void RunPi0MassAnalysis(const char* inFilePath, const char* outBaseDir)
         std::string t = kVarTags[v];
         if      (t=="CLUSRAW") vRAW  = v;
         else if (t=="CLUSCP")  vCP   = v;
-        else if (t=="EAgeom")  vEAgeo= v; // z_vtx dep
+        else if (t=="EAgeom")  vEAgeo= v; // |z_vtx| dep
         else if (t=="EAetaE")  vEAeta= v; // |eta|+E dep
         else if (t=="EAEonly") vEAone= v; // E-only
       }
 
-      // Proceed only if all 5 are available
-      if (vRAW>=0 && vCP>=0 && vEAgeo>=0 && vEAeta>=0 && vEAone>=0) {
+      auto makeOneResolutionRatioPlot = [&](double E_hi_cap, const char* suffix)
+      {
+        // proceed only if all 5 are available
+        if (!(vRAW>=0 && vCP>=0 && vEAgeo>=0 && vEAeta>=0 && vEAone>=0)) return;
+
         const int iv = 0; // originalEta
 
-        // Determine max energy bin to include: prefer exact [10,12) if present; else all bins with E_hi <= 12
+        // Determine max energy bin to include:
+        // prefer exact [E_hi_cap-3, E_hi_cap) if present; else all bins with E_hi <= E_hi_cap
         int iMax = -1, iExact = -1;
         for (int i=0; i<N_E; ++i) {
-          if (std::fabs(E_edges[i]-10.0) < 1e-6 && std::fabs(E_edges[i+1]-12.0) < 1e-6) iExact = i;
-          if (E_edges[i+1] <= 12.0+1e-9) iMax = i;
+          if (std::fabs(E_edges[i+1] - E_hi_cap) < 1e-6) iExact = i;                // exact terminal bin ends at cap
+          if (E_edges[i+1] <= E_hi_cap + 1e-9)   iMax   = i;                        // <= cap
         }
         if (iExact >= 0) iMax = iExact;
+        if (iMax < 0) return; // nothing within cap
 
-        if (iMax >= 0) {
-          gSystem->mkdir(baseOut + "/resolutionRatios", true);
+        gSystem->mkdir(baseOut + "/resolutionRatios", true);
 
-          // Per-series X offsets inside each E-bin (fraction of bin width):
-          // RAW << CP < Center (E-only) < EA(|eta|+E) << EA(|z_vtx|+E)
-          auto xOffsetFrac = [&](int vIdx)->double {
-            if      (vIdx==vRAW)   return -0.16;
-            else if (vIdx==vCP)    return -0.08;
-            else if (vIdx==vEAone) return  0.00;
-            else if (vIdx==vEAeta) return  0.08;
-            else if (vIdx==vEAgeo) return  0.16;
+        // Per-series X offsets inside each E-bin (fraction of bin width):
+        // RAW << CP < Center (E-only) < EA(|eta|+E) << EA(|z_vtx|+E)
+        auto xOffsetFrac = [&](int vIdx)->double {
+          if      (vIdx==vRAW)   return -0.16;
+          else if (vIdx==vCP)    return -0.08;
+          else if (vIdx==vEAone) return  0.00;
+          else if (vIdx==vEAeta) return  0.08;
+          else if (vIdx==vEAgeo) return  0.16;
+          return 0.0;
+        };
+
+        // Build Gaussian resolution points (sigma/mu) for a variant, with per-bin X offsets
+        auto makeResGraph = [&](int vIdx, Color_t col, Style_t mk)->std::unique_ptr<TGraphErrors>{
+          std::vector<double> x, y, ex, ey;
+          x.reserve(iMax+1); y.reserve(iMax+1); ex.clear(); ey.reserve(iMax+1);
+          for (int i=0; i<=iMax; ++i) {
+            const auto &R = summaryV[iv][vIdx][i];
+            if (R.ok && std::isfinite(R.sig) && std::isfinite(R.mean) && R.sig>0.0 && R.mean>0.0) {
+              const double res  = R.sig / R.mean;
+              const double dres = res * std::sqrt( std::pow(R.sigErr/std::max(R.sig,1e-12),2.0) +
+                                                   std::pow(R.meanErr/std::max(R.mean,1e-12),2.0) );
+              const double eLo  = E_edges[i];
+              const double eHi  = E_edges[i+1];
+              const double eCtr = 0.5*(eLo + eHi);
+              const double eWid = (eHi - eLo);
+              const double xOff = xOffsetFrac(vIdx) * eWid;
+              x.push_back( eCtr + xOff );
+              y.push_back( res );
+              ey.push_back( dres );
+            }
+          }
+          ex.assign(x.size(), 0.0);
+          auto g = std::make_unique<TGraphErrors>((int)x.size(),
+                             x.empty()?nullptr:&x[0],
+                             y.empty()?nullptr:&y[0],
+                             ex.empty()?nullptr:&ex[0],
+                             ey.empty()?nullptr:&ey[0]);
+          g->SetMarkerStyle(mk); g->SetMarkerSize(1.2);
+          g->SetMarkerColor(col); g->SetLineColor(col); g->SetLineWidth(2);
+          return g;
+        };
+
+        auto gRAW   = makeResGraph(vRAW  , kVarColor[vRAW  ], 20);  // No Correction
+        auto gCP    = makeResGraph(vCP   , kVarColor[vCP   ], 20);  // Legacy Constant b-corr
+        auto gZDEP  = makeResGraph(vEAgeo, kVarColor[vEAgeo], 20);  // Energy/|z_{vtx}|-Dep
+        auto gETADE = makeResGraph(vEAeta, kVarColor[vEAeta], 20);  // Energy/|#eta|-Dep
+        auto gEONLY = makeResGraph(vEAone, kVarColor[vEAone], 20);  // Energy-Dep
+
+        // Only draw if we have RAW and at least one corrected curve
+        if (!(gRAW && (gCP || gZDEP || gETADE || gEONLY))) return;
+
+        // X & Y ranges (use bin edges up to iMax; show last edge at cap)
+        const double xl = E_edges[0];
+        const double xr = E_edges[iMax+1];
+        const double xr_tick = xr + 1e-6; // ensure terminal tick/label at edge is drawn
+
+        auto scanY = [&](const TGraphErrors* G, double& lo, double& hi){
+          if (!G) return;
+          for (int k=0;k<G->GetN();++k){ double X,Y; G->GetPoint(k,X,Y); const double e=G->GetErrorY(k);
+            lo = std::min(lo, Y - e); hi = std::max(hi, Y + e); }
+        };
+        double ylo=+1e30, yhi=-1e30;
+        scanY(gRAW.get(),   ylo,yhi);
+        scanY(gCP.get(),    ylo,yhi);
+        scanY(gZDEP.get(),  ylo,yhi);
+        scanY(gETADE.get(), ylo,yhi);
+        scanY(gEONLY.get(), ylo,yhi);
+        if (!(ylo<yhi)) { ylo=0.05; yhi=0.35; }
+        // Asymmetric padding: modest lower pad, larger upper headroom
+        const double span      = (yhi - ylo);
+        const double padBottom = 0.10 * span;  // keep lower buffer small
+        const double padTop    = 0.35 * span;  // increase upper buffer
+        ylo = std::max(0.0, ylo - padBottom);
+        yhi = yhi + padTop;
+
+        // Canvas & pads  (reduced inter-pad gap; bottom pad slightly taller)
+        TCanvas c("cResTopBot","Resolution & Ratios (originalEta)",1000,850);
+        TPad topP("topP","",0,0.36,1,1);  topP.SetBottomMargin(0.008); topP.SetLeftMargin(0.15); topP.SetRightMargin(0.06); topP.Draw();
+        TPad botP("botP","",0,0.00,1,0.36); botP.SetTopMargin(0.012);  botP.SetLeftMargin(0.15); botP.SetRightMargin(0.06); botP.SetBottomMargin(0.20); botP.Draw();
+
+        // ---------------- TOP panel ----------------
+        topP.cd();
+        TH2F frU("frU","",100,xl,xr_tick,100,ylo,yhi);
+        // No x-axis labels/ticks/title on the TOP panel
+        frU.SetTitle("; ;RES = #sigma_{Gaus}/#mu_{Gaus}");
+        frU.GetXaxis()->SetLabelSize(0.0);
+        frU.GetXaxis()->SetTitleSize(0.0);
+        frU.GetXaxis()->SetTickLength(0.0);
+        // Encourage integer ticks including terminal edge
+          // Ticks: for the 8 GeV cap, force integer ticks (2,3,...,8); else keep optimized
+          if (std::fabs(E_hi_cap - 8.0) < 1e-6) {
+            // Range [2,8] → 6 primary intervals → labels at each integer
+            frU.GetXaxis()->SetNdivisions(6, kFALSE);
+          } else {
+            frU.GetXaxis()->SetNdivisions(515, kTRUE);
+          }
+
+        // Make TOP-panel Y title larger and a bit closer
+        frU.GetYaxis()->SetTitleSize(0.039);
+        frU.GetYaxis()->SetTitleOffset(1.15);
+        frU.Draw();
+
+        if (gRAW)   gRAW->Draw("P SAME");
+        if (gCP)    gCP->Draw("P SAME");
+        if (gZDEP)  gZDEP->Draw("P SAME");
+        if (gETADE) gETADE->Draw("P SAME");
+        if (gEONLY) gEONLY->Draw("P SAME");
+
+        // Requested top-left, two-column legend with the exact ordering/layout
+        TLegend legL(0.16,0.74,0.46,0.90); legL.SetBorderSize(0); legL.SetFillStyle(0); legL.SetTextSize(0.037);
+        TLegend legR(0.48,0.74,0.92,0.90); legR.SetBorderSize(0); legR.SetFillStyle(0); legR.SetTextSize(0.037);
+        if (gRAW)   legL.AddEntry(gRAW.get(),   kVarPretty[vRAW]  , "p"); // No Correction
+        if (gCP)    legL.AddEntry(gCP.get(),    kVarPretty[vCP]   , "p"); // Legacy Constant b-corr
+        if (gEONLY) legR.AddEntry(gEONLY.get(), kVarPretty[vEAone], "p"); // Energy-Dep b-correction
+        if (gETADE) legR.AddEntry(gETADE.get(), kVarPretty[vEAeta], "p"); // Energy/|#eta|-Dep b-corr
+        if (gZDEP)  legR.AddEntry(gZDEP.get(),  kVarPretty[vEAgeo], "p"); // Energy/|z_vtx|-Dep b-corr
+        legL.Draw(); legR.Draw();
+
+        // ---------------- BOTTOM panel ----------------
+        botP.cd();
+
+        auto makeResAt = [&](int vIdx, int i, double& res, double& err)->bool{
+          const auto &R = summaryV[iv][vIdx][i];
+          if (R.ok && std::isfinite(R.sig) && std::isfinite(R.mean) && R.sig>0.0 && R.mean>0.0) {
+            res  = R.sig / R.mean;
+            err  = res * std::sqrt( std::pow(R.sigErr/std::max(R.sig,1e-12),2.0) +
+                                    std::pow(R.meanErr/std::max(R.mean,1e-12),2.0) );
+            return true;
+          }
+          return false;
+        };
+
+        auto makeRatioGraphToRAW = [&](int vIdx, Color_t col, Style_t mk)->std::unique_ptr<TGraphErrors>{
+          // Bottom-panel bin offsets: center intentionally left empty.
+          auto bottomOffsetFrac = [&](int vv)->double {
+            if      (vv == vCP)    return -0.12;
+            else if (vv == vEAone) return -0.04;
+            else if (vv == vEAeta) return  0.04;
+            else if (vv == vEAgeo) return  0.12;
             return 0.0;
           };
 
-          // Build Gaussian resolution points (sigma/mu) for a variant, with per-bin X offsets
-          auto makeResGraph = [&](int vIdx, Color_t col, Style_t mk)->std::unique_ptr<TGraphErrors>{
-            std::vector<double> x, y, ex, ey;
-            x.reserve(iMax+1); y.reserve(iMax+1); ex.clear(); ey.reserve(iMax+1);
-            for (int i=0; i<=iMax; ++i) {
-              const auto &R = summaryV[iv][vIdx][i];
-              if (R.ok && std::isfinite(R.sig) && std::isfinite(R.mean) && R.sig>0.0 && R.mean>0.0) {
-                const double res  = R.sig / R.mean;
-                const double dres = res * std::sqrt( std::pow(R.sigErr/std::max(R.sig,1e-12),2.0) +
-                                                     std::pow(R.meanErr/std::max(R.mean,1e-12),2.0) );
-                const double eLo  = E_edges[i];
-                const double eHi  = E_edges[i+1];
-                const double eCtr = 0.5*(eLo + eHi);
-                const double eWid = (eHi - eLo);
-                const double xOff = xOffsetFrac(vIdx) * eWid;
-                x.push_back( eCtr + xOff );
-                y.push_back( res );
-                ey.push_back( dres );
-              }
+          std::vector<double> x,y,ex,ey;
+          for (int i=0; i<=iMax; ++i) {
+            double rv, dv, rr, dr;
+            if (makeResAt(vIdx, i, rv, dv) && makeResAt(vRAW, i, rr, dr) && rv>0.0 && rr>0.0) {
+              const double ratio = rv / rr;
+              const double erel2 = std::pow(dv/std::max(rv,1e-12),2.0) + std::pow(dr/std::max(rr,1e-12),2.0);
+              const double eLo   = E_edges[i], eHi = E_edges[i+1];
+              const double eCtr  = 0.5*(eLo + eHi);
+              const double eWid  = (eHi - eLo);
+              const double xOff  = bottomOffsetFrac(vIdx) * eWid;
+              x.push_back(eCtr + xOff);
+              y.push_back(ratio);
+              ey.push_back(ratio * std::sqrt(erel2));
             }
-            ex.assign(x.size(), 0.0);
-            auto g = std::make_unique<TGraphErrors>((int)x.size(),
-                           x.empty()?nullptr:&x[0],
-                           y.empty()?nullptr:&y[0],
-                           ex.empty()?nullptr:&ex[0],
-                           ey.empty()?nullptr:&ey[0]);
-            g->SetMarkerStyle(mk); g->SetMarkerSize(1.2);
-            g->SetMarkerColor(col); g->SetLineColor(col); g->SetLineWidth(2);
-            return g;
-          };
+          }
+          ex.assign(x.size(), 0.0);
+          auto g = std::make_unique<TGraphErrors>((int)x.size(),
+                         x.empty()?nullptr:&x[0],
+                         y.empty()?nullptr:&y[0],
+                         ex.empty()?nullptr:&ex[0],
+                         ey.empty()?nullptr:&ey[0]);
+          g->SetMarkerStyle(mk); g->SetMarkerSize(1.2);
+          g->SetMarkerColor(col); g->SetLineColor(col); g->SetLineWidth(2);
+          return g;
+        };
 
+        // Bottom ratio panel — all solid circles (style 20)
+        auto rCP    = makeRatioGraphToRAW(vCP   , kVarColor[vCP]   , 20);
+        auto rZDEP  = makeRatioGraphToRAW(vEAgeo, kVarColor[vEAgeo], 20);
+        auto rETADE = makeRatioGraphToRAW(vEAeta, kVarColor[vEAeta], 20);
+        auto rEONLY = makeRatioGraphToRAW(vEAone, kVarColor[vEAone], 20);
 
-            auto gRAW   = makeResGraph(vRAW  , kVarColor[vRAW  ], 20);  // No Correction
-            auto gCP    = makeResGraph(vCP   , kVarColor[vCP   ], 20);  // Legacy Constant b-corr
-            auto gZDEP  = makeResGraph(vEAgeo, kVarColor[vEAgeo], 20);  // Energy/|z_{vtx}|-Dep
-            auto gETADE = makeResGraph(vEAeta, kVarColor[vEAeta], 20);  // Energy/|#eta|-Dep
-            auto gEONLY = makeResGraph(vEAone, kVarColor[vEAone], 20);  // Energy-Dep
+        double rlo=+1e30, rhi=-1e30;
+        auto scanRY = [&](const TGraphErrors* G){
+          if(!G) return;
+          for(int k=0;k<G->GetN();++k){ double X,Y; G->GetPoint(k,X,Y);
+            const double e=G->GetErrorY(k); rlo=std::min(rlo,Y-e); rhi=std::max(rhi,Y+e); }
+        };
+        scanRY(rCP.get()); scanRY(rZDEP.get()); scanRY(rETADE.get()); scanRY(rEONLY.get());
+        if (!(rlo<rhi)) { rlo=0.9; rhi=1.1; }
+        const double rpad = 0.06*(rhi-rlo);
+        rlo -= rpad; rhi += rpad;
 
+        TH2F frL("frL","",100,xl,xr_tick,100,rlo,rhi);
+        frL.SetTitle(";E  [GeV];RES(Corr)/RES(Raw)");
+        // Y-axis cosmetics
+        frL.GetYaxis()->SetTitleSize(0.065);
+        frL.GetYaxis()->SetTitleOffset(0.7);
+        frL.GetYaxis()->SetLabelSize(0.050);
+        // X-axis cosmetics
+        frL.GetXaxis()->SetLabelSize(0.055);
+        frL.GetXaxis()->SetTitleSize(0.052);
+        frL.GetXaxis()->SetTitleOffset(1.05);
+        frL.GetXaxis()->SetTickLength(0.045);
+          if (std::fabs(E_hi_cap - 8.0) < 1e-6) {
+            frL.GetXaxis()->SetNdivisions(6, kFALSE);  // integer ticks: 2..8
+          } else {
+            frL.GetXaxis()->SetNdivisions(515, kTRUE);
+          }
 
-          // Only draw if we have RAW and at least one corrected curve
-          if (gRAW && (gCP || gZDEP || gETADE || gEONLY)) {
-            // X & Y ranges (use bin edges up to iMax)
-            const double xl = E_edges[0]       - 0.5;
-            const double xr = E_edges[iMax+1]  - 0.5;
+        frL.Draw();
 
-            auto scanY = [&](const TGraphErrors* G, double& lo, double& hi){
-              if (!G) return;
-              for (int k=0;k<G->GetN();++k){ double X,Y; G->GetPoint(k,X,Y); const double e=G->GetErrorY(k);
-                lo = std::min(lo, Y - e); hi = std::max(hi, Y + e); }
-            };
-            double ylo=+1e30, yhi=-1e30;
-            scanY(gRAW.get(),   ylo,yhi);
-            scanY(gCP.get(),    ylo,yhi);
-            scanY(gZDEP.get(),  ylo,yhi);
-            scanY(gETADE.get(), ylo,yhi);
-            scanY(gEONLY.get(), ylo,yhi);
-            if (!(ylo<yhi)) { ylo=0.05; yhi=0.35; }
-            const double pad = 0.15*(yhi-ylo);
-            ylo = std::max(0.0, ylo - pad); yhi += pad;
+        TLine l1(xl,1.0,xr,1.0); l1.SetLineStyle(2); l1.SetLineColor(kGray+2); l1.Draw();
 
-            // Canvas & pads
-            TCanvas c("cResTopBot","Resolution & Ratios (originalEta)",1000,850);
-            TPad topP("topP","",0,0.35,1,1);  topP.SetBottomMargin(0.02); topP.SetLeftMargin(0.15); topP.SetRightMargin(0.06); topP.Draw();
-            TPad botP("botP","",0,0.00,1,0.35); botP.SetTopMargin(0.04);  botP.SetLeftMargin(0.15); botP.SetRightMargin(0.06); botP.SetBottomMargin(0.18); botP.Draw();
+        if (rCP)    rCP->Draw("P SAME");
+        if (rETADE) rETADE->Draw("P SAME");
+        if (rZDEP)  rZDEP->Draw("P SAME");
+        if (rEONLY) rEONLY->Draw("P SAME");
 
-            // TOP: resolution overlay
-            topP.cd();
-            TH2F frU("frU","",100,xl,xr,100,ylo,yhi);
-            frU.SetTitle(";E  [GeV];Gaussian resolution  #sigma / #mu");
-            frU.Draw();
-            if (gRAW)   gRAW->Draw("P SAME");
-            if (gCP)    gCP->Draw("P SAME");
-            if (gZDEP)  gZDEP->Draw("P SAME");
-            if (gETADE) gETADE->Draw("P SAME");
-            if (gEONLY) gEONLY->Draw("P SAME");
+        const TString outPNG = baseOut + "/resolutionRatios/resolutionRatios_originalEta_upto"
+                               + TString::Format("%.0fGeV", E_hi_cap) + (suffix?TString(suffix):"") + ".png";
+        c.Modified(); c.Update(); c.SaveAs(outPNG);
 
-            // Requested top-left, two-column legend with the exact ordering/layout
-            // Left column:  [No Correction]           [Legacy Constant b-corr]
-            // Right column: [Energy-Dep b-correction] [Energy/|#eta|-Dep b-correction]
-            //               [Energy/|z_{vtx}|-Dep b-correction]
-            TLegend legL(0.16,0.74,0.46,0.90); legL.SetBorderSize(0); legL.SetFillStyle(0); legL.SetTextSize(0.037);
-            TLegend legR(0.48,0.74,0.92,0.90); legR.SetBorderSize(0); legR.SetFillStyle(0); legR.SetTextSize(0.037);
+        // ---------- TEXT TABLES (TOP: absolute RES; BOTTOM: ratios to RAW) ----------
+        auto fmt   = [](double v, int p=5)->std::string {
+          if (!std::isfinite(v)) return std::string("   n/a   ");
+          std::ostringstream os; os.setf(std::ios::fixed); os << std::setprecision(p) << v;
+          return os.str();
+        };
+        auto pct   = [](double v)->std::string {
+          if (!std::isfinite(v)) return std::string("    n/a    ");
+          std::ostringstream os; os.setf(std::ios::fixed); os << std::setprecision(2) << v*100.0 << "%";
+          return os.str();
+        };
+        auto safe_res_tbl = [&](int vIdx, int i)->double {
+          const auto &R = summaryV[iv][vIdx][i];
+          if (!R.ok || !std::isfinite(R.sig) || !std::isfinite(R.mean) || R.sig<=0.0 || R.mean<=0.0)
+            return std::numeric_limits<double>::quiet_NaN();
+          return R.sig / R.mean;
+        };
 
-            if (gRAW)   legL.AddEntry(gRAW.get(),   kVarPretty[vRAW]  , "p"); // No Correction
-            if (gCP)    legL.AddEntry(gCP.get(),    kVarPretty[vCP]   , "p"); // Legacy Constant b-corr
+        std::cout << "\n\033[1m[resolutionRatios] Tables (view=" << kViews[iv].pretty
+                  << ", E up to " << E_edges[iMax+1] << " GeV)\033[0m\n";
 
-            if (gEONLY) legR.AddEntry(gEONLY.get(), kVarPretty[vEAone], "p"); // Energy-Dep b-correction
-            if (gETADE) legR.AddEntry(gETADE.get(), kVarPretty[vEAeta], "p"); // Energy/|#eta|-Dep b-corr
-            if (gZDEP)  legR.AddEntry(gZDEP.get(),  kVarPretty[vEAgeo], "p"); // Energy/|z_vtx|-Dep b-corr
+        // TOP: absolute RES
+        {
+          std::cout << "\n\033[1mTOP (absolute RES = σ/μ)\033[0m\n";
+          std::cout << std::left << std::setw(12) << "E-bin"
+                    << " | " << std::setw(10) << "RAW"
+                    << " | " << std::setw(10) << "Legacy"
+                    << " | " << std::setw(10) << "E-only"
+                    << " | " << std::setw(10) << "|η|-dep"
+                    << " | " << std::setw(10) << "|z_vtx|-dep"
+                    << "\n";
+          std::cout << std::string(12+3+10+3+10+3+10+3+10+3+12, '-') << "\n";
 
-            legL.Draw(); legR.Draw();
+          for (int i = 0; i <= iMax; ++i) {
+            const double Rraw  = safe_res_tbl(vRAW  , i);
+            const double Rcp   = safe_res_tbl(vCP   , i);
+            const double Reo   = safe_res_tbl(vEAone, i);
+            const double Reta  = safe_res_tbl(vEAeta, i);
+            const double Rzdep = safe_res_tbl(vEAgeo, i);
 
-            // BOTTOM: ratio curves to RAW (same X-offset scheme per variant)
-            botP.cd();
+            std::ostringstream ebin; ebin.setf(std::ios::fixed);
+            ebin << std::setprecision(0) << E_edges[i] << "-" << E_edges[i+1];
 
-            auto makeResAt = [&](int vIdx, int i, double& res, double& err)->bool{
-              const auto &R = summaryV[iv][vIdx][i];
-              if (R.ok && std::isfinite(R.sig) && std::isfinite(R.mean) && R.sig>0.0 && R.mean>0.0) {
-                res  = R.sig / R.mean;
-                err  = res * std::sqrt( std::pow(R.sigErr/std::max(R.sig,1e-12),2.0) +
-                                        std::pow(R.meanErr/std::max(R.mean,1e-12),2.0) );
-                return true;
-              }
-              return false;
-            };
-
-              auto makeRatioGraphToRAW = [&](int vIdx, Color_t col, Style_t mk)->std::unique_ptr<TGraphErrors>{
-                // Bottom-panel bin offsets: center intentionally left empty.
-                //   Legacy Constant b-corr  (CLUSCP)         -> slightly left of E-only
-                //   Energy-Dep b-correction (EAEonly)        -> slightly left of center
-                //   Energy/|#eta|-Dep b     (EAetaE)         -> slightly right of center
-                //   Energy/|z_{vtx}|-Dep b  (EAgeom)         -> a bit further right
-                auto bottomOffsetFrac = [&](int vv)->double {
-                  if      (vv == vCP)    return -0.12;  // furthest left among ratios
-                  else if (vv == vEAone) return -0.04;  // just left of center
-                  else if (vv == vEAeta) return  0.04;  // just right of center
-                  else if (vv == vEAgeo) return  0.12;  // furthest right
-                  // RAW is not drawn in the ratio panel; keep 0 as a safe default.
-                  return 0.0;
-                };
-
-                std::vector<double> x,y,ex,ey;
-                for (int i=0; i<=iMax; ++i) {
-                  double rv, dv, rr, dr;
-                  if (makeResAt(vIdx, i, rv, dv) && makeResAt(vRAW, i, rr, dr) && rv>0.0 && rr>0.0) {
-                    const double ratio = rv / rr;
-                    const double erel2 = std::pow(dv/std::max(rv,1e-12),2.0) + std::pow(dr/std::max(rr,1e-12),2.0);
-                    const double eLo   = E_edges[i], eHi = E_edges[i+1];
-                    const double eCtr  = 0.5*(eLo + eHi);
-                    const double eWid  = (eHi - eLo);
-                    const double xOff  = bottomOffsetFrac(vIdx) * eWid; // use the dedicated bottom offset
-                    x.push_back(eCtr + xOff);
-                    y.push_back(ratio);
-                    ey.push_back(ratio * std::sqrt(erel2));
-                  }
-                }
-                ex.assign(x.size(), 0.0);
-                auto g = std::make_unique<TGraphErrors>((int)x.size(),
-                               x.empty()?nullptr:&x[0],
-                               y.empty()?nullptr:&y[0],
-                               ex.empty()?nullptr:&ex[0],
-                               ey.empty()?nullptr:&ey[0]);
-                g->SetMarkerStyle(mk); g->SetMarkerSize(1.2);
-                g->SetMarkerColor(col); g->SetLineColor(col); g->SetLineWidth(2);
-                return g;
-              };
-
-
-              // Bottom ratio panel — all solid circles (style 20)
-              auto rCP    = makeRatioGraphToRAW(vCP   , kVarColor[vCP]   , 20);
-              auto rZDEP  = makeRatioGraphToRAW(vEAgeo, kVarColor[vEAgeo], 20);
-              auto rETADE = makeRatioGraphToRAW(vEAeta, kVarColor[vEAeta], 20);
-              auto rEONLY = makeRatioGraphToRAW(vEAone, kVarColor[vEAone], 20);
-
-
-            double rlo=+1e30, rhi=-1e30;
-            auto scanRY = [&](const TGraphErrors* G){
-              if(!G) return;
-              for(int k=0;k<G->GetN();++k){ double X,Y; G->GetPoint(k,X,Y);
-                const double e=G->GetErrorY(k); rlo=std::min(rlo,Y-e); rhi=std::max(rhi,Y+e); }
-            };
-            scanRY(rCP.get()); scanRY(rZDEP.get()); scanRY(rETADE.get()); scanRY(rEONLY.get());
-            if (!(rlo<rhi)) { rlo=0.9; rhi=1.1; }
-            const double rpad = 0.06*(rhi-rlo);
-            rlo -= rpad; rhi += rpad;
-
-            TH2F frL("frL","",100,xl,xr,100,rlo,rhi);
-            frL.SetTitle(";E  [GeV];Resolution / RAW");
-            frL.Draw();
-            TLine l1(xl,1.0,xr,1.0); l1.SetLineStyle(2); l1.SetLineColor(kGray+2); l1.Draw();
-
-            if (rCP)    rCP->Draw("P SAME");
-            if (rETADE) rETADE->Draw("P SAME");
-            if (rZDEP)  rZDEP->Draw("P SAME");
-            if (rEONLY) rEONLY->Draw("P SAME");
-
-            const TString outPNG = baseOut + "/resolutionRatios/resolutionRatios_originalEta_upto12GeV.png";
-            c.Modified(); c.Update(); c.SaveAs(outPNG);
+            std::cout << std::left << std::setw(12) << ebin.str()
+                      << " | " << std::setw(10) << fmt(Rraw)
+                      << " | " << std::setw(10) << fmt(Rcp)
+                      << " | " << std::setw(10) << fmt(Reo)
+                      << " | " << std::setw(10) << fmt(Reta)
+                      << " | " << std::setw(10) << fmt(Rzdep)
+                      << "\n";
           }
         }
-      }
+
+        // BOTTOM: ΔRES vs RAW
+        {
+          constexpr int W_EBIN  = 10;
+          constexpr int W_COL   = 12;
+          constexpr int W_WIN   = 22;
+
+          auto colorPadPct = [&](double val, int width)->std::string {
+            if (!std::isfinite(val)) {
+              const std::string raw = "   n/a   ";
+              return raw + std::string(std::max(0, width - (int)raw.size()), ' ');
+            }
+            const char* col = (val < 0.0 ? "\033[32m" : (val > 0.0 ? "\033[31m" : "\033[37m"));
+            std::ostringstream os; os.setf(std::ios::fixed);
+            os << std::showpos << std::setprecision(2) << val << "%" << std::noshowpos;
+            const std::string raw = os.str();
+            const int pad = std::max(0, width - (int)raw.size());
+            return std::string(col) + raw + "\033[0m" + std::string(pad, ' ');
+          };
+          auto pctVal = [&](double Rraw, double Rv)->double {
+            if (!std::isfinite(Rraw) || Rraw<=0.0 || !std::isfinite(Rv)) return std::numeric_limits<double>::quiet_NaN();
+            return (Rv / Rraw - 1.0) * 100.0;
+          };
+          auto padTo = [&](std::string s, int w)->std::string {
+            if ((int)s.size() < w) s += std::string(w - (int)s.size(), ' ');
+            else if ((int)s.size() > w) s = s.substr(0, w);
+            return s;
+          };
+
+          std::cout << "\n\033[1mBOTTOM — ΔRES vs RAW (percent; negative = better)\033[0m\n";
+          std::cout << std::left << std::setw(W_EBIN) << "E-bin"
+                    << " | " << std::setw(W_COL) << "ΔLegacy"
+                    << " | " << std::setw(W_COL) << "ΔE-only"
+                    << " | " << std::setw(W_COL) << "Δ|η|-dep"
+                    << " | " << std::setw(W_COL) << "Δ|z_vtx|-dep"
+                    << " | " << std::setw(W_WIN) << "Winner"
+                    << "\n";
+          std::cout << std::string(W_EBIN+3 + W_COL+3 + W_COL+3 + W_COL+3 + W_COL+3 + W_WIN, '-') << "\n";
+
+          for (int i = 0; i <= iMax; ++i) {
+            const double Rraw  = safe_res_tbl(vRAW  , i);
+            const double Rcp   = safe_res_tbl(vCP   , i);
+            const double Reo   = safe_res_tbl(vEAone, i);
+            const double Reta  = safe_res_tbl(vEAeta, i);
+            const double Rzdep = safe_res_tbl(vEAgeo, i);
+
+            const double d_cp   = pctVal(Rraw, Rcp);
+            const double d_eo   = pctVal(Rraw, Reo);
+            const double d_eta  = pctVal(Rraw, Reta);
+            const double d_zdep = pctVal(Rraw, Rzdep);
+
+            struct Entry { const char* label; double val; };
+            std::vector<Entry> cand = {
+              {"Legacy",      d_cp  },
+              {"E-only",      d_eo  },
+              {"|η|-dep",     d_eta },
+              {"|z_vtx|-dep", d_zdep}
+            };
+            cand.erase(std::remove_if(cand.begin(), cand.end(),
+                       [](const Entry& e){ return !std::isfinite(e.val); }), cand.end());
+
+            std::string winner = "n/a";
+            if (!cand.empty()){
+              const auto best = *std::min_element(cand.begin(), cand.end(),
+                                [](const Entry& a, const Entry& b){ return a.val < b.val; });
+              std::ostringstream w; w.setf(std::ios::fixed);
+              w << best.label << " (" << std::showpos << std::setprecision(2) << best.val << "%" << std::noshowpos << ")";
+              winner = w.str();
+            }
+            winner = padTo(winner, W_WIN);
+
+            std::ostringstream ebin; ebin.setf(std::ios::fixed);
+            ebin << std::setprecision(0) << E_edges[i] << "-" << E_edges[i+1];
+
+            std::cout << std::left << std::setw(W_EBIN) << ebin.str()
+                      << " | " << colorPadPct(d_cp  , W_COL)
+                      << " | " << colorPadPct(d_eo  , W_COL)
+                      << " | " << colorPadPct(d_eta , W_COL)
+                      << " | " << colorPadPct(d_zdep, W_COL)
+                      << " | " << winner
+                      << "\n";
+          }
+          std::cout << std::endl;
+        }
+        // ---------- END TEXT TABLES ----------
+      }; // end lambda
+
+      // Generate the three parallel plots: up to 15 GeV (current), up to 10 GeV, up to 8 GeV
+      makeOneResolutionRatioPlot(15.0, "");                 // existing (2..15)
+      makeOneResolutionRatioPlot(10.0, "_upto10GeV");       // new (2..10)
+      makeOneResolutionRatioPlot(8.0 , "_upto8GeV");        // new (2..8)
     }
+
 
     std::cout << "[Pi0MassAna] DONE. Outputs → " << baseOut << "\n";
 }
@@ -1740,12 +2075,14 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
   // Uncorrected table
   TCanvas c2D_unc("c2D_unc","Uncorrected 2D block coords vs E",2400,1200);
   c2D_unc.Divide(4,2);
-  for (int p=1; p<=8; ++p) {
-    TPad *pad = (TPad*) c2D_unc.cd(p);
-    pad->SetRightMargin(0.18);
-    pad->SetLeftMargin (0.12);
-    pad->SetBottomMargin(0.12);
-  }
+    for (int p=1; p<=8; ++p) {
+      TPad *pad = (TPad*) c2D_unc.cd(p);
+      pad->SetRightMargin(0.18);
+      pad->SetLeftMargin (0.12);
+      pad->SetBottomMargin(0.12);
+      pad->SetTopMargin   (0.16);  // space for header
+    }
+
 
   for (int i=0;i<N;++i)
   {
@@ -1762,18 +2099,21 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
     if (!h2) continue;
     h2->SetDirectory(nullptr);
     h2->SetName(Form("h2_unc_xy_Ebin%d", i));
-    h2->SetTitle(Form("Uncorr: E=[%.1f,%.1f)  (%s)", eLo, eHi, etaPretty));
-    h2->GetZaxis()->SetTitle("Entries");
-    h2->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
-    h2->GetYaxis()->SetTitle("block #varphi_{local, 2#times 2}");
-    tuneAxes(h2);
+      h2->SetTitle("");  // avoid drawing a histogram title; use TLatex header instead
+      h2->GetZaxis()->SetTitle("Entries");
+      h2->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+      h2->GetYaxis()->SetTitle("block #varphi_{local, 2#times 2}");
+      tuneAxes(h2);
 
-    c2D_unc.cd(i+1);
-    h2->Draw("COLZ");
+      c2D_unc.cd(i+1);
+      h2->Draw("COLZ");
 
-    TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
-    tl.SetTextSize(0.045); tl.SetTextAlign(22);
-    tl.DrawLatex(0.50, 0.97, hdrTxt);
+      TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
+      // left-top header; sits inside the pad, clear of the color bar
+      tl.SetTextSize(0.050); tl.SetTextAlign(13);
+      tl.DrawLatex(0.14, 0.96, Form("UNCORR:  E = %.1f - %.1f GeV   %s", eLo, eHi, etaPretty));
+
+
   }
 
   TString out2D_unc = Form("%s/BlockCoord2D_E_unc.png", outDir);
@@ -1784,12 +2124,14 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
   {
     TCanvas c2D_cor("c2D_cor","Corrected 2D block coords vs E",2400,1200);
     c2D_cor.Divide(4,2);
-    for (int p=1; p<=8; ++p) {
-      TPad *pad = (TPad*) c2D_cor.cd(p);
-      pad->SetRightMargin(0.18);
-      pad->SetLeftMargin (0.12);
-      pad->SetBottomMargin(0.12);
-    }
+      for (int p=1; p<=8; ++p) {
+        TPad *pad = (TPad*) c2D_cor.cd(p);
+        pad->SetRightMargin(0.18);
+        pad->SetLeftMargin (0.12);
+        pad->SetBottomMargin(0.12);
+        pad->SetTopMargin   (0.16);  // space for header
+      }
+
 
     for (int i=0;i<N;++i)
     {
@@ -1806,18 +2148,19 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
       if (!h2) continue;
       h2->SetDirectory(nullptr);
       h2->SetName(Form("h2_cor_xy_Ebin%d", i));
-      h2->SetTitle(Form("Corr: E=[%.1f,%.1f)  (%s)", eLo, eHi, etaPretty));
-      h2->GetZaxis()->SetTitle("Entries");
-      h2->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
-      h2->GetYaxis()->SetTitle("block #varphi_{local, 2#times 2}");
-      tuneAxes(h2);
+        h2->SetTitle("");  // hide histogram title
+        h2->GetZaxis()->SetTitle("Entries");
+        h2->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+        h2->GetYaxis()->SetTitle("block #varphi_{local, 2#times 2}");
+        tuneAxes(h2);
 
-      c2D_cor.cd(i+1);
-      h2->Draw("COLZ");
+        c2D_cor.cd(i+1);
+        h2->Draw("COLZ");
 
-      TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
-      tl.SetTextSize(0.045); tl.SetTextAlign(22);
-      tl.DrawLatex(0.50, 0.97, hdrTxt);
+        TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
+        tl.SetTextSize(0.050); tl.SetTextAlign(13);
+        tl.DrawLatex(0.14, 0.96, Form("CORR:    E = %.1f - %.1f GeV   %s", eLo, eHi, etaPretty));
+
     }
 
     TString out2D_cor = Form("%s/BlockCoord2D_E_cor.png", outDir);
@@ -3761,7 +4104,7 @@ static void MakeFourWaySummaries(
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PI0_MC/PositionDep_sim_singlePi0_ALL_noTruthMatching_z60.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -8292,13 +8635,14 @@ namespace {
     std::string etaPrefix;  // histogram name prefix for η residuals
     Color_t     color;      // ROOT color
   };
+//  static const Color_t kVarColor[] = { kBlack, kRed+1, kBlue+1, kGreen+2, kMagenta+1, kOrange+7, kCyan+2, kGray+2 };
 
   // Palette consistent with your earlier request
-  const Color_t C_CLUSRAW        = kRed+1;
-  const Color_t C_CLUSCP         = kBlue+1;
-  const Color_t C_CLUSCP_EA      = kGreen+2;
-  const Color_t C_CLUSCP_EA_vz   = kOrange+3;
-  const Color_t C_CLUSCP_EA_eta  = kMagenta+1;  // purple
+  const Color_t C_CLUSRAW        = kBlack;
+  const Color_t C_CLUSCP         = kRed+1;
+  const Color_t C_CLUSCP_EA      = kMagenta+1;
+  const Color_t C_CLUSCP_EA_vz   = kBlue+1;
+  const Color_t C_CLUSCP_EA_eta  = kGreen+2;  // purple
   const Color_t C_PDCraw         = kBlack;
   const Color_t C_PDCcor         = kGray+2;
   const Color_t C_CP_BVALS       = kOrange+7;
@@ -9026,7 +9370,7 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       const double yMaxU  =  (absMax + padMu);
 
         TH1F frU("frU","",1,xMin,xMax);
-        frU.SetTitle(Form("Residual means vs E (%s)%s;E  [GeV];#mu(%s)",
+        frU.SetTitle(Form("Residual means vs E (%s)%s;E  [GeV];#mu(%s) [rad]",
                           kind.tag.c_str(),
                           (vzNoteStr?vzNoteStr:""),
                           (kind.tag=="phi"?"#Delta#phi":"#Delta#eta")));
@@ -9131,7 +9475,7 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       const double padS = 0.12*(sHi - sLo + 1e-12);
 
         TH1F frL("frL","",1,xMin,xMax);
-        frL.SetTitle(Form(";E  [GeV];#sigma_{RMS}(%s)", (kind.tag=="phi"?"#Delta#phi":"#Delta#eta")));
+        frL.SetTitle(Form(";E  [GeV];#sigma_{RMS}(%s) [rad]", (kind.tag=="phi"?"#Delta#phi":"#Delta#eta")));
         frL.SetMinimum(std::max(0.0, sLo - padS));
         frL.SetMaximum(sHi + padS);
 
@@ -9201,10 +9545,10 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
         }
       }
       if (!(sLo < sHi)) { sLo = 0.0; sHi = 0.06; }
-      const double padS = 0.12*(sHi - sLo + 1e-12);
+      const double padS = 0.4*(sHi - sLo + 1e-12);
 
       TH1F frU("frU","",1,xMin,xMax);
-      frU.SetTitle(Form("RMS vs E (%s)%s;E  [GeV];RMS(%s)",
+      frU.SetTitle(Form("RMS vs E (%s)%s;E  [GeV];#sigma_{RMS}(%s) [rad]",
                         kind.tag.c_str(),
                         (vzNoteStr?vzNoteStr:""),
                         (kind.tag=="phi"?"#Delta#phi":"#Delta#eta")));
@@ -9223,19 +9567,74 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
         std::vector<std::unique_ptr<TGraphErrors>> keepU;
         std::map<std::string,TGraphErrors*> gByKey;
 
-        for (const auto& k : which){
-          if (!S.count(k)) continue;
-          auto g = mkGraph(eCenters, S.at(k).rms, S.at(k).drms, color_of(k));
-          if (g->GetN()>0){
-            g->SetLineColor(g->GetMarkerColor());
-            g->SetLineWidth(1);
-            g->Draw("P SAME");
-            gByKey[k] = g.get();
-            keepU.emplace_back(std::move(g));
+        // Define once near the start of sigma_ratio_overlay() so it's visible everywhere in this function:
+        const TString outNameTL(outPng.c_str());
+
+        // TOP: draw graphs (with optional left/right bin offsets)
+        {
+          const bool useBinOffsets =
+              outNameTL.Contains("sigma_vsE_ratio_to_CLUSCP_EA_vz_eta_withEonly.png");
+
+            // ---- Tunable, even-in-bin offsets (TOP & BOTTOM) -----------------------
+            // Single knob: set the per-slot step as a fraction of the bin width.
+            // Suggested range: 0.06–0.18 (keeps markers well within the bin).
+            const double kBinOffset = 0.12;
+
+            // Discrete slot per variant: 0=center (kept empty for readability), ±1, ±2 ...
+            auto slotOf = [&](const std::string& key)->int {
+              if (key == "CLUSCP")            return -2; // Constant-b (legacy)
+              if (key == "CLUSCP_EA_etaDep")  return -1; // Energy + |η|-dep b
+              if (key == "CLUSCP_EA_vzDep")   return +1; // Energy + |z_vtx|-dep b
+              if (key == "CLUSCP_EA")         return +2; // Energy-Dep b (E-only)
+              return 0;                                   // others (if any) on center (usually unused)
+            };
+
+            // Fractional X-offset inside the bin; multiply by bin width (eHi-eLo)
+            auto xOffsetFrac = [&](const std::string& key)->double {
+              return slotOf(key) * kBinOffset;
+            };
+
+          for (const auto& k : which){
+            if (!S.count(k)) continue;
+
+            // Build shifted X, Y, dY
+            std::vector<double> X, Y, dX, dY;
+            X.reserve(NB); Y.reserve(NB); dX.assign(NB,0.0); dY.reserve(NB);
+            for (int i=0;i<NB;++i){
+              const double y  = (i<(int)S.at(k).rms.size()? S.at(k).rms[i]  : std::numeric_limits<double>::quiet_NaN());
+              const double dy = (i<(int)S.at(k).drms.size()? S.at(k).drms[i]: 0.0);
+              if (!std::isfinite(y)) continue;
+              const double eLo  = eSlices[i].first;
+              const double eHi  = eSlices[i].second;
+              const double eCtr = 0.5*(eLo + eHi);
+              const double eWid = (eHi - eLo);
+                const double xOff = (useBinOffsets ? xOffsetFrac(k) : 0.0) * eWid;
+              X.push_back(eCtr + xOff);
+              Y.push_back(y);
+              dY.push_back(dy);
+            }
+
+            auto g = std::make_unique<TGraphErrors>(
+              (int)X.size(),
+              X.empty()?nullptr:&X[0],
+              Y.empty()?nullptr:&Y[0],
+              dX.empty()?nullptr:&dX[0],
+              dY.empty()?nullptr:&dY[0]
+            );
+              if (g->GetN()>0){
+                g->SetMarkerColor( color_of(k) );
+                g->SetLineColor(   color_of(k) );
+                g->SetLineWidth(1);
+                g->SetMarkerStyle(kMkStyle);   // ensure visible filled circles
+                g->SetMarkerSize(1.10);        // enlarge so they show up over error bars
+                g->Draw("P SAME");
+                gByKey[k] = g.get();
+                keepU.emplace_back(std::move(g));
+              }
           }
         }
 
-        const TString outNameTL(outPng.c_str());
+        // outNameTL is already defined above.
         // Match both the base name and the "_withEonly" variant by testing the stem
         const bool useSingleRightLegend =
             outNameTL.Contains("sigma_vsE_ratio_to_CLUSCP_EA_vz_eta");
@@ -9268,7 +9667,7 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
           leg1->Draw();
         } else {
           // --- Default: two-column, row-aligned legends ---
-          TLegend* legLeft  = new TLegend(0.16, 0.73, 0.52, 0.92, "", "brNDC");
+          TLegend* legLeft  = new TLegend(0.4, 0.73, 0.52, 0.92, "", "brNDC");
           TLegend* legRight = new TLegend(0.56, 0.73, 0.92, 0.9, "", "brNDC");
           for (auto* L : {legLeft, legRight}) {
             L->SetBorderSize(0); L->SetFillStyle(0); L->SetTextSize(0.040);
@@ -9306,53 +9705,187 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       std::vector<std::unique_ptr<TGraphErrors>> keepL;
       std::vector<double> yminCand, ymaxCand;
 
-      for (const auto& k : which){
-        if (k==baselineKey || !S.count(k)) continue;
+        // BOTTOM: build ratio graphs (use the same offset pattern as TOP)
+        {
+          const bool useBinOffsets =
+              outNameTL.Contains("sigma_vsE_ratio_to_CLUSCP_EA_vz_eta_withEonly.png");
 
-        std::vector<double> y(NB, std::numeric_limits<double>::quiet_NaN());
-        std::vector<double> e(NB, 0.0);
-        for (int i=0;i<NB;++i){
-          const double s  = S.at(k).rms[i];
-          const double se = S.at(k).drms[i];
-          const double r  = B.rms[i];
-          const double re = B.drms[i];
-          if (std::isfinite(s) && std::isfinite(r) && r>0){
-            y[i] = s/r;
-            const double erel2 = ( (se>0&&s>0? (se/s)*(se/s) : 0.0) +
-                                   (re>0&&r>0? (re/r)*(re/r) : 0.0) );
-            e[i] = y[i] * std::sqrt(erel2);
-            yminCand.push_back(y[i] - e[i]);
-            ymaxCand.push_back(y[i] + e[i]);
+          // Bottom-panel offset scheme (mirrors TOP). Center slot intentionally left empty.
+          const double kBinOffsetBottom = 0.12;
+          auto slotOfBot = [&](const std::string& key)->int {
+            if (key == "CLUSCP")            return -2; // Constant-b (legacy)
+            if (key == "CLUSCP_EA_etaDep")  return -1; // Energy + |η|-dep b
+            if (key == "CLUSCP_EA_vzDep")   return +1; // Energy + |z_vtx|-dep b
+            if (key == "CLUSCP_EA")         return +2; // Energy-Dep b (E-only)
+            return 0;
+          };
+          auto xOffsetFracBot = [&](const std::string& key)->double {
+            return slotOfBot(key) * kBinOffsetBottom;
+          };
+
+          for (const auto& k : which){
+            if (k==baselineKey || !S.count(k)) continue;
+
+            std::vector<double> X, Y, dX, dY;
+            X.reserve(NB); Y.reserve(NB); dX.assign(NB,0.0); dY.reserve(NB);
+
+
+            for (int i=0;i<NB;++i){
+              const double s  = S.at(k).rms[i];
+              const double se = S.at(k).drms[i];
+              const double r  = B.rms[i];
+              const double re = B.drms[i];
+              if (std::isfinite(s) && std::isfinite(r) && r>0.0){
+                const double ratio = s/r;
+                const double erel2 = ( (se>0&&s>0? (se/s)*(se/s) : 0.0) +
+                                       (re>0&&r>0? (re/r)*(re/r) : 0.0) );
+                const double eLo  = eSlices[i].first;
+                const double eHi  = eSlices[i].second;
+                const double eCtr = 0.5*(eLo + eHi);
+                const double eWid = (eHi - eLo);
+                const double xOff = (useBinOffsets ? xOffsetFracBot(k) : 0.0) * eWid;
+
+
+                X.push_back(eCtr + xOff);
+                Y.push_back(ratio);
+                dY.push_back(ratio * std::sqrt(erel2));
+                yminCand.push_back(ratio - dY.back());
+                ymaxCand.push_back(ratio + dY.back());
+              }
+            }
+
+            auto g = std::make_unique<TGraphErrors>(
+              (int)X.size(),
+              X.empty()?nullptr:&X[0],
+              Y.empty()?nullptr:&Y[0],
+              dX.empty()?nullptr:&dX[0],
+              dY.empty()?nullptr:&dY[0]
+            );
+              if (g->GetN()>0){
+                g->SetMarkerColor( color_of(k) );
+                g->SetLineColor(   color_of(k) ); // keep error bars
+                g->SetLineWidth(1);
+                g->SetMarkerStyle(kMkStyle);   // same visible marker as top
+                g->SetMarkerSize(1.10);
+                keepL.emplace_back(std::move(g));
+              }
           }
         }
-          auto g = mkGraph(eCenters, y, e, color_of(k));
-          if (g->GetN()>0){
-            g->SetLineColor(g->GetMarkerColor()); // keep error bars
-            g->SetLineWidth(1);
-            keepL.emplace_back(std::move(g));
-          }
-      }
 
       // Auto y-range centered around 1 with small padding; fallback if empty
       double yLo = 0.98, yHi = 1.02;
       if (!yminCand.empty() && !ymaxCand.empty()){
         yLo = *std::min_element(yminCand.begin(), yminCand.end());
         yHi = *std::max_element(ymaxCand.begin(), ymaxCand.end());
-        const double pad = 0.03*(yHi - yLo + 1e-12);
+        const double pad = 0.07*(yHi - yLo + 1e-12);
         yLo -= pad; yHi += pad;
       }
 
-      TH1F frL("frL","",1,xMin,xMax);
-      frL.SetTitle(";E  [GeV];RMS / baseline");
-      frL.SetMinimum(yLo); frL.SetMaximum(yHi);
-      frL.Draw("AXIS");
+        TH1F frL("frL","",1,xMin,xMax);
+        frL.SetTitle(";E  [GeV];#sigma_{RMS} Corr / #sigma_{RMS} Raw");
+        frL.SetMinimum(yLo);
+        frL.SetMaximum(yHi);
+
+        // Enlarge Y-axis ticks and title on the bottom subpanel
+        frL.GetYaxis()->SetLabelSize(0.055);   // tick label size
+        frL.GetYaxis()->SetTitleSize(0.065);   // title font size
+        frL.GetYaxis()->SetTitleOffset(0.8);  // bring title closer
+
+        frL.Draw("AXIS");
 
       TLine l1(xMin,1.0,xMax,1.0); l1.SetLineStyle(2); l1.SetLineColor(kGray+2); l1.Draw();
 
       for (auto& g : keepL) g->Draw("P SAME");
 
+        // -------- Console table: ratios to baseline for all overlaid variants --------
+        {
+          // Build the list of variants that are actually being drawn (exclude the baseline)
+          std::vector<std::string> vars;
+          vars.reserve(which.size());
+          for (const auto& k : which) if (k != baselineKey && S.count(k)) vars.push_back(k);
+
+          // Sort into a stable, readable order if present
+          auto pos = [&](const std::string& k)->int {
+            if (k=="CLUSCP")            return 0;  // Legacy constant-b
+            if (k=="CLUSCP_EA_etaDep")  return 1;  // |η|-dep
+            if (k=="CLUSCP_EA_vzDep")   return 2;  // |z_vtx|-dep
+            if (k=="CLUSCP_EA")         return 3;  // Energy-only
+            if (k=="CLUSRAW")           return 4;  // (shouldn't be here, but keep stable)
+            return 5;
+          };
+          std::sort(vars.begin(), vars.end(), [&](const std::string& a, const std::string& b){
+            if (pos(a)!=pos(b)) return pos(a)<pos(b);
+            return a<b;
+          });
+
+          // Friendly column names (reuse legend label helper defined above)
+          auto colName = [&](const std::string& k)->std::string {
+            return std::string(legend_label(k));
+          };
+
+          // Header
+          std::cout << "\n\033[1m[RMS ratio table]  baseline = " << baselineKey
+                    << "   (" << kind.tag << (vzNoteStr?vzNoteStr:"") << ")\033[0m\n";
+
+          const int Wbin = 12;
+          const int Wcol = 18;
+
+          // First header row
+          std::cout << std::left << std::setw(Wbin) << "E-bin";
+          for (const auto& k : vars) {
+            std::ostringstream h; h << colName(k);
+            std::cout << " | " << std::setw(Wcol) << h.str();
+          }
+          std::cout << "\n";
+
+          // Second header row: what each column shows
+          std::cout << std::left << std::setw(Wbin) << "";
+          for (size_t j=0;j<vars.size();++j) {
+            std::cout << " | " << std::setw(Wcol) << "ratio (Δ%)";
+          }
+          std::cout << "\n";
+
+          // Rule
+          std::cout << std::string(Wbin + (int)vars.size()*(3+Wcol), '-') << "\n";
+
+          // Per energy bin rows
+          for (int i=0; i<NB; ++i) {
+            // skip empty baseline points
+            if (!(i<(int)B.rms.size()) || !std::isfinite(B.rms[i]) || B.rms[i]<=0.0) continue;
+
+            // E-bin label from the configured slices
+            std::ostringstream ebin; ebin.setf(std::ios::fixed);
+            ebin << std::setprecision(0) << eSlices[i].first << "-" << eSlices[i].second;
+            std::cout << std::left << std::setw(Wbin) << ebin.str();
+
+            for (const auto& k : vars) {
+              const auto &V = S.at(k);
+              double ratio = std::numeric_limits<double>::quiet_NaN();
+              if (i<(int)V.rms.size() && std::isfinite(V.rms[i]) && V.rms[i]>0.0) {
+                ratio = V.rms[i] / B.rms[i];
+              }
+              std::ostringstream cell; cell.setf(std::ios::fixed);
+              if (std::isfinite(ratio)) {
+                const double dPct = (ratio - 1.0) * 100.0;
+                cell << std::setprecision(4) << ratio
+                     << " (" << std::showpos << std::setprecision(2) << dPct << "%)";
+              } else {
+                cell << "  n/a";
+              }
+              std::string s = cell.str();
+              if ((int)s.size() < Wcol) s += std::string(Wcol - (int)s.size(), ' ');
+              std::cout << " | " << s;
+            }
+            std::cout << "\n";
+          }
+          std::cout << std::endl;
+        }
+        // -----------------------------------------------------------------------------
+
+
         // Save the main file
         c.SaveAs(outPng.c_str());
+
 
         // --- Also emit a second version that includes the Energy-only series (CLUSCP_EA) ---
         // Only trigger for ".../sigma_vsE_ratio_to_CLUSCP_EA_vz_eta.png" and only if CLUSCP_EA
@@ -10578,8 +11111,8 @@ void PDCAnalysisPrime()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PI0_MC/PositionDep_sim_singlePi0_ALL_noTruthMatching_z60.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PI0_MC/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/SimOutputPrime";
 
   EnsureDir(outBaseDir);
 
@@ -10665,10 +11198,135 @@ void PDCAnalysisPrime()
         SaveTH3Lego(hUnc, (outDir + "/lego_unc.png").c_str(), kEtaPretty.at(v.key).c_str());
         Plot2DBlockEtaPhi(hUnc, hCor, isFirstPass, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
         OverlayUncorrPhiEta (hUnc, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
-        BVecs bv = MakeBvaluesVsEnergyPlot(hUnc, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
-        phiByVariant[v.key]    = bv.bphi;  phiErrByVariant[v.key] = bv.bphiErr;
-        etaByVariant[v.key]    = bv.beta;  etaErrByVariant[v.key] = bv.betaErr;
-        if (bOut.is_open()) WriteBValuesTxt(hUnc, eEdges, bOut, v.key.c_str(), "originalZRange");
+          // 1) Make the standard (filled) b(E) plot for this view and cache values
+          BVecs bv = MakeBvaluesVsEnergyPlot(hUnc, eEdges, outDir.c_str(), kEtaPretty.at(v.key).c_str());
+          phiByVariant[v.key]    = bv.bphi;  phiErrByVariant[v.key] = bv.bphiErr;
+          etaByVariant[v.key]    = bv.beta;  etaErrByVariant[v.key] = bv.betaErr;
+          if (bOut.is_open()) WriteBValuesTxt(hUnc, eEdges, bOut, v.key.c_str(), "originalZRange");
+
+//          // 2) For originalEta ONLY: read sim file, compute b(E), and save an overlay PNG
+//          if (v.key == "originalEta")
+//          {
+//            const char* simPath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root";
+//            std::unique_ptr<TFile> fSim(TFile::Open(simPath, "READ"));
+//            if (fSim && !fSim->IsZombie())
+//            {
+//              // try both booking name styles for the uncorrected 3D (same as your production)
+//              TH3F* hSimUnc = GetTH3FByNames(fSim.get(), {
+//                "h3_blockCoord_E_range", "h3_blockCoord_E_disc"
+//              });
+//              if (hSimUnc)
+//              {
+//                hSimUnc->SetDirectory(nullptr);
+//
+//                // --- compute sim b(E) without making its own plot
+//                auto computeBvecsNoPlot = [&](TH3F* h3, const std::vector<std::pair<double,double>>& edges)->BVecs
+//                {
+//                  BVecs R;
+//                  if (!h3) return R;
+//                  const int Nbin = static_cast<int>(edges.size());
+//                  R.ecenters.reserve(Nbin); R.bphi.reserve(Nbin); R.beta.reserve(Nbin);
+//                  R.bphiErr.reserve(Nbin); R.betaErr.reserve(Nbin);
+//
+//                  for (int i=0; i<Nbin; ++i)
+//                  {
+//                    const double eLo = edges[i].first, eHi = edges[i].second;
+//                    const int zLo = std::max(1, h3->GetZaxis()->FindBin(eLo + 1e-9));
+//                    const int zHi = std::min(h3->GetNbinsZ(), h3->GetZaxis()->FindBin(eHi - 1e-9));
+//
+//                    // φ (Y projection)
+//                    h3->GetZaxis()->SetRange(zLo, zHi);
+//                    h3->GetXaxis()->SetRange(1, h3->GetNbinsX());
+//                    TH1D* hPhi = static_cast<TH1D*>(h3->Project3D("y"));
+//                    if (!hPhi) continue;
+//                    hPhi->SetDirectory(nullptr);
+//
+//                    // η (X projection)
+//                    h3->GetYaxis()->SetRange(1, h3->GetNbinsY());
+//                    TH1D* hEta = static_cast<TH1D*>(h3->Project3D("x"));
+//                    if (!hEta) { delete hPhi; continue; }
+//                    hEta->SetDirectory(nullptr);
+//
+//                    const BRes bPhi = FitAsinh1D(hPhi);
+//                    const BRes bEta = FitAsinh1D(hEta);
+//
+//                    R.ecenters.push_back(0.5*(eLo+eHi));
+//                    R.bphi.push_back(bPhi.val);
+//                    R.beta.push_back(bEta.val);
+//                    R.bphiErr.push_back(bPhi.err);
+//                    R.betaErr.push_back(bEta.err);
+//
+//                    delete hPhi;
+//                    delete hEta;
+//                  }
+//                  return R;
+//                };
+//
+//                BVecs bSim = computeBvecsNoPlot(hSimUnc, eEdges);
+//
+//                // --- build an overlay canvas with BOTH: data (filled) & sim (open circle)
+//                TCanvas cOvB("bValuesOverlay","b values overlay (data vs sim)", 900, 700);
+//
+//                // Find sensible Y range across both sets (go lower than before)
+//                double ymin=+1e9, ymax=-1e9;
+//                auto upd = [&](const std::vector<double>& v){
+//                  for (double q : v) if (std::isfinite(q)) { ymin = std::min(ymin,q); ymax = std::max(ymax,q); }
+//                };
+//                upd(bv.bphi); upd(bv.beta); upd(bSim.bphi); upd(bSim.beta);
+//                if (!(std::isfinite(ymin)&&std::isfinite(ymax))) { ymin=0.0; ymax=1.0; }
+//                const double span = std::max(1e-6, ymax - ymin);
+//                const double yLo  = ymin - 0.50*span;             // ↓ more headroom below than before
+//                const double yHi  = ymax + 0.25*span;
+//
+//                const double xLo = E_edges[0]-0.5, xHi = E_edges[eEdges.size()]-0.5;
+//
+//                TH2F* fr = new TH2F("bFrameOverlay",
+//                                    Form("best-fit  b  vs  E  (#scale[0.8]{%s});E  [GeV];b", kEtaPretty.at(v.key).c_str()),
+//                                    100, xLo, xHi, 100, yLo, yHi);
+//                fr->SetStats(0);
+//                fr->Draw();
+//
+//                // Data (filled) — use CLOSED CIRCLES for b_phi (red) and keep b_eta (blue) as closed circles
+//                TGraphErrors gPhi_data(bv.ecenters.size(), &bv.ecenters[0], &bv.bphi[0],  nullptr, &bv.bphiErr[0]);
+//                TGraphErrors gEta_data(bv.ecenters.size(), &bv.ecenters[0], &bv.beta[0],  nullptr, &bv.betaErr[0]);
+//                gPhi_data.SetMarkerStyle(20); gPhi_data.SetMarkerColor(kRed+1);   gPhi_data.SetLineColor(kRed+1);   // closed red circle
+//                gEta_data.SetMarkerStyle(20); gEta_data.SetMarkerColor(kBlue+1);  gEta_data.SetLineColor(kBlue+1);  // closed blue circle
+//
+//                // Simulation (open circle markers), same colors
+//                TGraphErrors gPhi_sim(bSim.ecenters.size(), &bSim.ecenters[0], &bSim.bphi[0],  nullptr, &bSim.bphiErr[0]);
+//                TGraphErrors gEta_sim(bSim.ecenters.size(), &bSim.ecenters[0], &bSim.beta[0],  nullptr, &bSim.betaErr[0]);
+//                gPhi_sim.SetMarkerStyle(24); gPhi_sim.SetMarkerColor(kRed+1);   gPhi_sim.SetLineColor(kRed+1);     // open red circle
+//                gEta_sim.SetMarkerStyle(24); gEta_sim.SetMarkerColor(kBlue+1);  gEta_sim.SetLineColor(kBlue+1);    // open blue circle
+//
+//                // Draw order: data first, then sim on top
+//                gPhi_data.Draw("P SAME");
+//                gEta_data.Draw("P SAME");
+//                gPhi_sim.Draw("P SAME");
+//                gEta_sim.Draw("P SAME");
+//
+//                // Legend (top-right) — TWO COLUMNS: left=DATA, right=SIM; top row=b_phi, bottom row=b_eta
+//                TLegend legB(0.58,0.78,0.9,0.90);
+//                legB.SetBorderSize(0); legB.SetFillStyle(0); legB.SetTextSize(0.040);
+//                legB.SetNColumns(2);
+//                legB.SetColumnSeparation(0.10);
+//                // row 1: b_phi (data, sim)
+//                legB.AddEntry(&gPhi_data, "b_{#varphi} data", "lp");
+//                legB.AddEntry(&gPhi_sim , "b_{#varphi}  sim", "lp");
+//                // row 2: b_eta (data, sim)
+//                legB.AddEntry(&gEta_data, "b_{#eta} data", "lp");
+//                legB.AddEntry(&gEta_sim , "b_{#eta}  sim", "lp");
+//                legB.Draw();
+//
+//                // Save alongside the standard product in originalEta/
+//                TString outOverlay = Form("%s/bValuesOverlay.png", outDir.c_str());
+//                cOvB.SaveAs(outOverlay);
+//
+//                delete fr;
+//                delete hSimUnc;
+//              } // if hSimUnc
+//            }   // if fSim ok
+//          }     // if originalEta
+
 
         if (!isFirstPass && hCor) { SaveTH3Lego(hCor, (outDir + "/lego_cor.png").c_str(), kEtaPretty.at(v.key).c_str());
                                     FitLocalPhiEta(hUnc, hCor, false, eEdges, outDir.c_str()); }

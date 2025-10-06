@@ -1,0 +1,9 @@
+E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
+2,4,"",nan,"",nan,nan,"",nan,"",nan,nan
+4,6,"",nan,"",nan,nan,"",nan,"",nan,nan
+6,8,"",nan,"",nan,nan,"",nan,"",nan,nan
+8,10,"",nan,"",nan,nan,"",nan,"",nan,nan
+10,12,"",nan,"",nan,nan,"",nan,"",nan,nan
+12,15,"",nan,"",nan,nan,"",nan,"",nan,nan
+15,20,"",nan,"",nan,nan,"",nan,"",nan,nan
+20,30,"",nan,"",nan,nan,"",nan,"",nan,nan
