@@ -1,9 +1,9 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"Energy-dep Only #phi and |#eta|-dep in #eta",0.003571,"Energy + |#eta|-dep b",0.003573,0.000002,"2x2 Block-Local With Corr",0.003833,"2x2 block b-values applied to No Corr Prod",0.003857,0.000024
-4,6,"2x2 Block-Local With Corr",0.003219,"Energy + |#eta|-dep b",0.003224,0.000005,"2x2 Block-Local With Corr",0.003469,"2x2 block b-values applied to No Corr Prod",0.003494,0.000025
-6,8,"2x2 Block-Local With Corr",0.003068,"Energy + |#eta|-dep b",0.003068,0.000000,"2x2 Block-Local With Corr",0.003282,"2x2 block b-values applied to No Corr Prod",0.003317,0.000034
-8,10,"Energy + |#eta|-dep b",0.003171,"Energy-dep Only #phi and |#eta|-dep in #eta",0.003174,0.000003,"2x2 Block-Local With Corr",0.003190,"2x2 block b-values applied to No Corr Prod",0.003245,0.000055
-10,12,"Energy + |#eta|-dep b",0.003333,"Energy-dep Only #phi and |#eta|-dep in #eta",0.003335,0.000002,"2x2 Block-Local With Corr",0.003103,"2x2 block b-values applied to No Corr Prod",0.003169,0.000066
-12,15,"2x2 Block-Local With Corr",0.003483,"Energy + |#eta|-dep b",0.003492,0.000009,"2x2 Block-Local With Corr",0.003054,"2x2 block b-values applied to No Corr Prod",0.003119,0.000065
-15,20,"2x2 Block-Local With Corr",0.003397,"Energy + |#eta|-dep b",0.003414,0.000018,"2x2 Block-Local With Corr",0.002982,"2x2 block b-values applied to No Corr Prod",0.003059,0.000077
-20,30,"2x2 Block-Local With Corr",0.002918,"Energy + |#eta|-dep b",0.002924,0.000006,"2x2 Block-Local With Corr",0.002796,"2x2 block b-values applied to No Corr Prod",0.002871,0.000075
+2,4,"",nan,"",nan,nan,"",nan,"",nan,nan
+4,6,"",nan,"",nan,nan,"",nan,"",nan,nan
+6,8,"",nan,"",nan,nan,"",nan,"",nan,nan
+8,10,"",nan,"",nan,nan,"",nan,"",nan,nan
+10,12,"",nan,"",nan,nan,"",nan,"",nan,nan
+12,15,"",nan,"",nan,nan,"",nan,"",nan,nan
+15,20,"",nan,"",nan,nan,"",nan,"",nan,nan
+20,30,"",nan,"",nan,nan,"",nan,"",nan,nan

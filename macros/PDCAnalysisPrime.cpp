@@ -81,14 +81,16 @@ static const std::map<std::string, std::string> kEtaPretty = {
 
 // Pretty labels for |z_vtx| slices (COARSE) and fixed draw order
 static const std::map<std::string, std::string> kZPretty = {
-  {"z00to10", "|z_{vtx}| 0-10 cm"},
-  {"z10to20", "|z_{vtx}| 10-20 cm"},
-  {"z20to30", "|z_{vtx}| 20-30 cm"},
-  {"z30to45", "|z_{vtx}| 30-45 cm"},
-  {"z45to60", "|z_{vtx}| 45-60 cm"}
+  {"z00to10",   "|z_{vtx}| 0-10 cm"},
+  {"z10to20",   "|z_{vtx}| 10-20 cm"},
+  {"z20to30",   "|z_{vtx}| 20-30 cm"},
+  {"z30to45",   "|z_{vtx}| 30-45 cm"},
+  {"z45to60",   "|z_{vtx}| 45-60 cm"},
+  {"z60to100",  "|z_{vtx}| 60-100 cm"},
+  {"z100to150", "|z_{vtx}| 100-150 cm"}
 };
 static const std::vector<std::string> kZOrder = {
-  "z00to10","z10to20","z20to30","z30to45","z45to60"
+  "z00to10","z10to20","z20to30","z30to45","z45to60","z60to100","z100to150"
 };
 
 // Pretty labels for |z_vtx| slices (FINE 0-10 cm: 0-2,2-4,4-6,6-8,8-10) and fixed draw order
@@ -2624,13 +2626,15 @@ static void SaveOverlayAcrossVariants(
     double yLo = ymin - 0.05 * std::fabs(ymin);
     double yHi = ymax + 0.10 * std::fabs(ymax);
 
-    // Force axis range for η overlays with "_zOnly" suffix
-    // Top fixed at 0.42; add extra bottom buffer down to 0.14
+    // For η overlays with "_zOnly", do NOT force a fixed y-range.
+    // Let data decide, with slightly tighter margins around the extrema.
     if (!isPhi && outSuffix && std::string(outSuffix).find("_zOnly") != std::string::npos) {
-      yHi = 0.42;
-      yLo = 0.14;
-      // safety: if yLo accidentally crosses yHi, keep at least a small span
-      if (yLo >= yHi - 1e-6) yLo = std::max(0.0, yHi - 0.10);
+      const double padTop = 0.06 * std::fabs(ymax); // ~6% headroom
+      const double padBot = 0.03 * std::fabs(ymin); // ~3% footroom
+      yLo = std::max(0.0, ymin - padBot);
+      yHi = ymax + padTop;
+      // Ensure a minimal visible span in pathological cases
+      if (yHi - yLo < 1e-4) { yLo -= 0.01; yHi += 0.01; }
     }
 
     // ----------------------------- canvas & frame -----------------------------
@@ -4104,7 +4108,7 @@ static void MakeFourWaySummaries(
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -11111,8 +11115,8 @@ void PDCAnalysisPrime()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/SimOutputPrime";
 
   EnsureDir(outBaseDir);
 
@@ -11204,128 +11208,128 @@ void PDCAnalysisPrime()
           etaByVariant[v.key]    = bv.beta;  etaErrByVariant[v.key] = bv.betaErr;
           if (bOut.is_open()) WriteBValuesTxt(hUnc, eEdges, bOut, v.key.c_str(), "originalZRange");
 
-//          // 2) For originalEta ONLY: read sim file, compute b(E), and save an overlay PNG
-//          if (v.key == "originalEta")
-//          {
-//            const char* simPath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root";
-//            std::unique_ptr<TFile> fSim(TFile::Open(simPath, "READ"));
-//            if (fSim && !fSim->IsZombie())
-//            {
-//              // try both booking name styles for the uncorrected 3D (same as your production)
-//              TH3F* hSimUnc = GetTH3FByNames(fSim.get(), {
-//                "h3_blockCoord_E_range", "h3_blockCoord_E_disc"
-//              });
-//              if (hSimUnc)
-//              {
-//                hSimUnc->SetDirectory(nullptr);
-//
-//                // --- compute sim b(E) without making its own plot
-//                auto computeBvecsNoPlot = [&](TH3F* h3, const std::vector<std::pair<double,double>>& edges)->BVecs
-//                {
-//                  BVecs R;
-//                  if (!h3) return R;
-//                  const int Nbin = static_cast<int>(edges.size());
-//                  R.ecenters.reserve(Nbin); R.bphi.reserve(Nbin); R.beta.reserve(Nbin);
-//                  R.bphiErr.reserve(Nbin); R.betaErr.reserve(Nbin);
-//
-//                  for (int i=0; i<Nbin; ++i)
-//                  {
-//                    const double eLo = edges[i].first, eHi = edges[i].second;
-//                    const int zLo = std::max(1, h3->GetZaxis()->FindBin(eLo + 1e-9));
-//                    const int zHi = std::min(h3->GetNbinsZ(), h3->GetZaxis()->FindBin(eHi - 1e-9));
-//
-//                    // φ (Y projection)
-//                    h3->GetZaxis()->SetRange(zLo, zHi);
-//                    h3->GetXaxis()->SetRange(1, h3->GetNbinsX());
-//                    TH1D* hPhi = static_cast<TH1D*>(h3->Project3D("y"));
-//                    if (!hPhi) continue;
-//                    hPhi->SetDirectory(nullptr);
-//
-//                    // η (X projection)
-//                    h3->GetYaxis()->SetRange(1, h3->GetNbinsY());
-//                    TH1D* hEta = static_cast<TH1D*>(h3->Project3D("x"));
-//                    if (!hEta) { delete hPhi; continue; }
-//                    hEta->SetDirectory(nullptr);
-//
-//                    const BRes bPhi = FitAsinh1D(hPhi);
-//                    const BRes bEta = FitAsinh1D(hEta);
-//
-//                    R.ecenters.push_back(0.5*(eLo+eHi));
-//                    R.bphi.push_back(bPhi.val);
-//                    R.beta.push_back(bEta.val);
-//                    R.bphiErr.push_back(bPhi.err);
-//                    R.betaErr.push_back(bEta.err);
-//
-//                    delete hPhi;
-//                    delete hEta;
-//                  }
-//                  return R;
-//                };
-//
-//                BVecs bSim = computeBvecsNoPlot(hSimUnc, eEdges);
-//
-//                // --- build an overlay canvas with BOTH: data (filled) & sim (open circle)
-//                TCanvas cOvB("bValuesOverlay","b values overlay (data vs sim)", 900, 700);
-//
-//                // Find sensible Y range across both sets (go lower than before)
-//                double ymin=+1e9, ymax=-1e9;
-//                auto upd = [&](const std::vector<double>& v){
-//                  for (double q : v) if (std::isfinite(q)) { ymin = std::min(ymin,q); ymax = std::max(ymax,q); }
-//                };
-//                upd(bv.bphi); upd(bv.beta); upd(bSim.bphi); upd(bSim.beta);
-//                if (!(std::isfinite(ymin)&&std::isfinite(ymax))) { ymin=0.0; ymax=1.0; }
-//                const double span = std::max(1e-6, ymax - ymin);
-//                const double yLo  = ymin - 0.50*span;             // ↓ more headroom below than before
-//                const double yHi  = ymax + 0.25*span;
-//
-//                const double xLo = E_edges[0]-0.5, xHi = E_edges[eEdges.size()]-0.5;
-//
-//                TH2F* fr = new TH2F("bFrameOverlay",
-//                                    Form("best-fit  b  vs  E  (#scale[0.8]{%s});E  [GeV];b", kEtaPretty.at(v.key).c_str()),
-//                                    100, xLo, xHi, 100, yLo, yHi);
-//                fr->SetStats(0);
-//                fr->Draw();
-//
-//                // Data (filled) — use CLOSED CIRCLES for b_phi (red) and keep b_eta (blue) as closed circles
-//                TGraphErrors gPhi_data(bv.ecenters.size(), &bv.ecenters[0], &bv.bphi[0],  nullptr, &bv.bphiErr[0]);
-//                TGraphErrors gEta_data(bv.ecenters.size(), &bv.ecenters[0], &bv.beta[0],  nullptr, &bv.betaErr[0]);
-//                gPhi_data.SetMarkerStyle(20); gPhi_data.SetMarkerColor(kRed+1);   gPhi_data.SetLineColor(kRed+1);   // closed red circle
-//                gEta_data.SetMarkerStyle(20); gEta_data.SetMarkerColor(kBlue+1);  gEta_data.SetLineColor(kBlue+1);  // closed blue circle
-//
-//                // Simulation (open circle markers), same colors
-//                TGraphErrors gPhi_sim(bSim.ecenters.size(), &bSim.ecenters[0], &bSim.bphi[0],  nullptr, &bSim.bphiErr[0]);
-//                TGraphErrors gEta_sim(bSim.ecenters.size(), &bSim.ecenters[0], &bSim.beta[0],  nullptr, &bSim.betaErr[0]);
-//                gPhi_sim.SetMarkerStyle(24); gPhi_sim.SetMarkerColor(kRed+1);   gPhi_sim.SetLineColor(kRed+1);     // open red circle
-//                gEta_sim.SetMarkerStyle(24); gEta_sim.SetMarkerColor(kBlue+1);  gEta_sim.SetLineColor(kBlue+1);    // open blue circle
-//
-//                // Draw order: data first, then sim on top
-//                gPhi_data.Draw("P SAME");
-//                gEta_data.Draw("P SAME");
-//                gPhi_sim.Draw("P SAME");
-//                gEta_sim.Draw("P SAME");
-//
-//                // Legend (top-right) — TWO COLUMNS: left=DATA, right=SIM; top row=b_phi, bottom row=b_eta
-//                TLegend legB(0.58,0.78,0.9,0.90);
-//                legB.SetBorderSize(0); legB.SetFillStyle(0); legB.SetTextSize(0.040);
-//                legB.SetNColumns(2);
-//                legB.SetColumnSeparation(0.10);
-//                // row 1: b_phi (data, sim)
-//                legB.AddEntry(&gPhi_data, "b_{#varphi} data", "lp");
-//                legB.AddEntry(&gPhi_sim , "b_{#varphi}  sim", "lp");
-//                // row 2: b_eta (data, sim)
-//                legB.AddEntry(&gEta_data, "b_{#eta} data", "lp");
-//                legB.AddEntry(&gEta_sim , "b_{#eta}  sim", "lp");
-//                legB.Draw();
-//
-//                // Save alongside the standard product in originalEta/
-//                TString outOverlay = Form("%s/bValuesOverlay.png", outDir.c_str());
-//                cOvB.SaveAs(outOverlay);
-//
-//                delete fr;
-//                delete hSimUnc;
-//              } // if hSimUnc
-//            }   // if fSim ok
-//          }     // if originalEta
+          // 2) For originalEta ONLY: read sim file, compute b(E), and save an overlay PNG
+          if (v.key == "originalEta")
+          {
+            const char* simPath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root";
+            std::unique_ptr<TFile> fSim(TFile::Open(simPath, "READ"));
+            if (fSim && !fSim->IsZombie())
+            {
+              // try both booking name styles for the uncorrected 3D (same as your production)
+              TH3F* hSimUnc = GetTH3FByNames(fSim.get(), {
+                "h3_blockCoord_E_range", "h3_blockCoord_E_disc"
+              });
+              if (hSimUnc)
+              {
+                hSimUnc->SetDirectory(nullptr);
+
+                // --- compute sim b(E) without making its own plot
+                auto computeBvecsNoPlot = [&](TH3F* h3, const std::vector<std::pair<double,double>>& edges)->BVecs
+                {
+                  BVecs R;
+                  if (!h3) return R;
+                  const int Nbin = static_cast<int>(edges.size());
+                  R.ecenters.reserve(Nbin); R.bphi.reserve(Nbin); R.beta.reserve(Nbin);
+                  R.bphiErr.reserve(Nbin); R.betaErr.reserve(Nbin);
+
+                  for (int i=0; i<Nbin; ++i)
+                  {
+                    const double eLo = edges[i].first, eHi = edges[i].second;
+                    const int zLo = std::max(1, h3->GetZaxis()->FindBin(eLo + 1e-9));
+                    const int zHi = std::min(h3->GetNbinsZ(), h3->GetZaxis()->FindBin(eHi - 1e-9));
+
+                    // φ (Y projection)
+                    h3->GetZaxis()->SetRange(zLo, zHi);
+                    h3->GetXaxis()->SetRange(1, h3->GetNbinsX());
+                    TH1D* hPhi = static_cast<TH1D*>(h3->Project3D("y"));
+                    if (!hPhi) continue;
+                    hPhi->SetDirectory(nullptr);
+
+                    // η (X projection)
+                    h3->GetYaxis()->SetRange(1, h3->GetNbinsY());
+                    TH1D* hEta = static_cast<TH1D*>(h3->Project3D("x"));
+                    if (!hEta) { delete hPhi; continue; }
+                    hEta->SetDirectory(nullptr);
+
+                    const BRes bPhi = FitAsinh1D(hPhi);
+                    const BRes bEta = FitAsinh1D(hEta);
+
+                    R.ecenters.push_back(0.5*(eLo+eHi));
+                    R.bphi.push_back(bPhi.val);
+                    R.beta.push_back(bEta.val);
+                    R.bphiErr.push_back(bPhi.err);
+                    R.betaErr.push_back(bEta.err);
+
+                    delete hPhi;
+                    delete hEta;
+                  }
+                  return R;
+                };
+
+                BVecs bSim = computeBvecsNoPlot(hSimUnc, eEdges);
+
+                // --- build an overlay canvas with BOTH: data (filled) & sim (open circle)
+                TCanvas cOvB("bValuesOverlay","b values overlay (data vs sim)", 900, 700);
+
+                // Find sensible Y range across both sets (go lower than before)
+                double ymin=+1e9, ymax=-1e9;
+                auto upd = [&](const std::vector<double>& v){
+                  for (double q : v) if (std::isfinite(q)) { ymin = std::min(ymin,q); ymax = std::max(ymax,q); }
+                };
+                upd(bv.bphi); upd(bv.beta); upd(bSim.bphi); upd(bSim.beta);
+                if (!(std::isfinite(ymin)&&std::isfinite(ymax))) { ymin=0.0; ymax=1.0; }
+                const double span = std::max(1e-6, ymax - ymin);
+                const double yLo  = ymin - 0.50*span;             // ↓ more headroom below than before
+                const double yHi  = ymax + 0.25*span;
+
+                const double xLo = E_edges[0]-0.5, xHi = E_edges[eEdges.size()]-0.5;
+
+                TH2F* fr = new TH2F("bFrameOverlay",
+                                    Form("best-fit  b  vs  E  (#scale[0.8]{%s});E  [GeV];b", kEtaPretty.at(v.key).c_str()),
+                                    100, xLo, xHi, 100, yLo, yHi);
+                fr->SetStats(0);
+                fr->Draw();
+
+                // Data (filled) — use CLOSED CIRCLES for b_phi (red) and keep b_eta (blue) as closed circles
+                TGraphErrors gPhi_data(bv.ecenters.size(), &bv.ecenters[0], &bv.bphi[0],  nullptr, &bv.bphiErr[0]);
+                TGraphErrors gEta_data(bv.ecenters.size(), &bv.ecenters[0], &bv.beta[0],  nullptr, &bv.betaErr[0]);
+                gPhi_data.SetMarkerStyle(20); gPhi_data.SetMarkerColor(kRed+1);   gPhi_data.SetLineColor(kRed+1);   // closed red circle
+                gEta_data.SetMarkerStyle(20); gEta_data.SetMarkerColor(kBlue+1);  gEta_data.SetLineColor(kBlue+1);  // closed blue circle
+
+                // Simulation (open circle markers), same colors
+                TGraphErrors gPhi_sim(bSim.ecenters.size(), &bSim.ecenters[0], &bSim.bphi[0],  nullptr, &bSim.bphiErr[0]);
+                TGraphErrors gEta_sim(bSim.ecenters.size(), &bSim.ecenters[0], &bSim.beta[0],  nullptr, &bSim.betaErr[0]);
+                gPhi_sim.SetMarkerStyle(24); gPhi_sim.SetMarkerColor(kRed+1);   gPhi_sim.SetLineColor(kRed+1);     // open red circle
+                gEta_sim.SetMarkerStyle(24); gEta_sim.SetMarkerColor(kBlue+1);  gEta_sim.SetLineColor(kBlue+1);    // open blue circle
+
+                // Draw order: data first, then sim on top
+                gPhi_data.Draw("P SAME");
+                gEta_data.Draw("P SAME");
+                gPhi_sim.Draw("P SAME");
+                gEta_sim.Draw("P SAME");
+
+                // Legend (top-right) — TWO COLUMNS: left=DATA, right=SIM; top row=b_phi, bottom row=b_eta
+                TLegend legB(0.58,0.78,0.9,0.90);
+                legB.SetBorderSize(0); legB.SetFillStyle(0); legB.SetTextSize(0.040);
+                legB.SetNColumns(2);
+                legB.SetColumnSeparation(0.10);
+                // row 1: b_phi (data, sim)
+                legB.AddEntry(&gPhi_data, "b_{#varphi} data", "lp");
+                legB.AddEntry(&gPhi_sim , "b_{#varphi}  sim", "lp");
+                // row 2: b_eta (data, sim)
+                legB.AddEntry(&gEta_data, "b_{#eta} data", "lp");
+                legB.AddEntry(&gEta_sim , "b_{#eta}  sim", "lp");
+                legB.Draw();
+
+                // Save alongside the standard product in originalEta/
+                TString outOverlay = Form("%s/bValuesOverlay.png", outDir.c_str());
+                cOvB.SaveAs(outOverlay);
+
+                delete fr;
+                delete hSimUnc;
+              } // if hSimUnc
+            }   // if fSim ok
+          }     // if originalEta
 
 
         if (!isFirstPass && hCor) { SaveTH3Lego(hCor, (outDir + "/lego_cor.png").c_str(), kEtaPretty.at(v.key).c_str());

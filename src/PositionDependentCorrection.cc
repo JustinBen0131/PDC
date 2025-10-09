@@ -244,7 +244,7 @@ void PositionDependentCorrection::bookCommonHistograms
         14, xEdges, 14, yEdges, 8, eEdges);
   }
 
-    // --- NEW: uncorrected |z_vtx| slices (COARSE 0–60) ---
+    // --- NEW: uncorrected |z_vtx| slices (COARSE 0–150) ---
     for (int iz = 0; iz < N_VzH3Bins; ++iz)
     {
       if (!h3_blockCoord_E_vz[iz])
@@ -283,6 +283,28 @@ void PositionDependentCorrection::bookCommonHistograms
                                                 8, eEdges);  // energy slices
       }
     }
+    
+    // ------------------------------------------------------------------
+    // NEW: incidence angle vs vertex Z (global)
+    // ------------------------------------------------------------------
+    if (!h2_alphaPhi_vsVz)
+    {
+      h2_alphaPhi_vsVz = new TH2F("h2_alphaPhi_vsVz",
+                                  "Incidence #alpha_{#varphi} vs z_{vtx};z_{vtx} (cm);#alpha_{#varphi} [rad]",
+                                  200, -100, 100,   // z_vtx range and bins
+                                  180, 0.0, 0.30);  // α range 0 – 0.30 rad
+      if (hm) hm->registerHisto(h2_alphaPhi_vsVz);
+    }
+    if (!h2_alphaEta_vsVz)
+    {
+      h2_alphaEta_vsVz = new TH2F("h2_alphaEta_vsVz",
+                                  "Incidence #alpha_{#eta} vs z_{vtx};z_{vtx} (cm);#alpha_{#eta} [rad]",
+                                  200, -100, 100,
+                                  180, 0.0, 0.30);
+      if (hm) hm->registerHisto(h2_alphaEta_vsVz);
+    }
+
+    
   // QA: Δ between property raw CoG and recomputed raw CoG vs E
   if (!h_dx_prop_vsE)
   {
@@ -2697,6 +2719,14 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_EONLY);
     float xEA_fitE = xCG, yEA_fitE = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(eReco, xCG, yCG, xEA_fitE, yEA_fitE);
+    
+    // NEW: fill αφ vs z_vtx (geometry-only incidence from the correction)
+    if (h2_alphaPhi_vsVz)
+    {
+      const float aPhi = m_bemcRec->lastAlphaPhi();
+      if (std::isfinite(aPhi)) h2_alphaPhi_vsVz->Fill(vtxZ, aPhi);
+    }
+    
     const float phiEA_fitE  = cg2GlobalPhi(m_bemcRec, eReco, xEA_fitE, yEA_fitE);
     const float dphiEA_fitE = foldToTowerPitch(phiEA_fitE - phiTruth);
     if (vb > 3)
@@ -3310,6 +3340,13 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     // Variant C: E-only fits
     float xEA_fitE = xCG, yEA_fitE = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(eReco, xCG, yCG, xEA_fitE, yEA_fitE);
+    
+    if (h2_alphaEta_vsVz)
+    {
+      const float aEta = m_bemcRec->lastAlphaEta();
+      if (std::isfinite(aEta)) h2_alphaEta_vsVz->Fill(vtxZ, aEta);
+    }
+    
     const float etaEA_fitE  = cg2ShowerEta(m_bemcRec, eReco, xEA_fitE, yEA_fitE, vtxZ);
     const float dEtaEA_fitE = etaEA_fitE - etaTruth;
     if (vb > 3)
@@ -4504,8 +4541,7 @@ void PositionDependentCorrection::finalClusterLoop(
       {
         const float absVz = std::fabs(vtx_z);
 
-        // COARSE 0–60
-        const int iz = getVzH3Slice(absVz);   // 0..4 for [0–60), -1 otherwise
+        const int iz = getVzH3Slice(absVz);
         if (iz >= 0 && iz < N_VzH3Bins && h3_blockCoord_E_vz[iz])
         {
           h3_blockCoord_E_vz[iz]->Fill(blkCoord.first,   // local-η in block [0,1]

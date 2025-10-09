@@ -43,6 +43,10 @@ class BEmcRecCEMC : public BEmcRec
     void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
 
 
+    // --- incidence angles recorded by last correction call (radians) ---
+    float lastAlphaPhi() const { return m_lastAlphaPhi; }
+    float lastAlphaEta() const { return m_lastAlphaEta; }
+
 
   void LoadProfile(const std::string &fname) override;
   //  float GetProb(std::vector<EmcModule> HitList, float e, float xg, float yg, float zg, float &chi2, int &ndf) override;
@@ -72,6 +76,9 @@ class BEmcRecCEMC : public BEmcRec
  private:
   //  BEmcProfile *_emcprof;
   ETiltVariant                   m_tiltVariant {ETiltVariant::DEFAULT};
+  float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
+  float m_lastAlphaEta { std::numeric_limits<float>::quiet_NaN() };
+    
   std::pair<double,double>       m_abTiltCurrent { 8.654924e-04, 8.490399e-04 };
 
 

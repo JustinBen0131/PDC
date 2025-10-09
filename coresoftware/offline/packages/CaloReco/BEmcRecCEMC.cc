@@ -2,6 +2,7 @@
 
 #include "BEmcCluster.h"
 #include "BEmcProfile.h"
+#include "TVector3.h"
 
 #include <cmath>
 #include <iostream>
@@ -776,9 +777,57 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x,
 
     auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
 
-    const float bx = clamp_b(B0_PHI + M_PHI * lnE);  // φ-direction b(E)
-    const float by = clamp_b(B0_ETA + M_ETA * lnE);  // η-direction b(E)
-    
+    // base (angle–zero) scales from energy-only laws
+    const float bphi_E = clamp_b(B0_PHI + M_PHI * lnE);   // φ baseline
+    const float beta_E = clamp_b(B0_ETA + M_ETA * lnE);   // η baseline
+
+    // --- geometry-only incidence from detailed tower geometry -----------------------
+    // use the same integer anchor as your local tower coordinates (no extra lookup later)
+    const int ix_geom = EmcCluster::lowint(x + 0.5f);
+    const int iy_geom = EmcCluster::lowint(y + 0.5f);
+
+    // fetch per-tower geometry already filled by SetTowerGeometry(...)
+    TowerGeom g{};
+    bool haveGeom = GetTowerGeometry(ix_geom, iy_geom, g);   // your existing helper
+
+    float bx = bphi_E;   // defaults (if geometry missing)
+    float by = beta_E;
+
+    if (haveGeom)
+    {
+      // local face tangents and depth (fiber) axis
+      TVector3 ephi(g.dX[0], g.dY[0], g.dZ[0]); ephi = ephi.Unit();
+      TVector3 eeta(g.dX[1], g.dY[1], g.dZ[1]); eeta = eeta.Unit();
+      TVector3 n = (ephi.Cross(eeta)).Unit();
+
+      // orient axis toward IP (projective SPACAL)
+      TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
+      if (n.Dot(-C) < 0.0) n = -n;
+
+      // ray from actual vertex to tower center (adequate for incidence)
+      TVector3 V(0., 0., fVz);
+      TVector3 p = (C - V).Unit();
+
+      // component angles via atan2; use cosine for the geometric foreshortening
+      const double pn   = p.Dot(n);
+      const double pphi = p.Dot(ephi);
+      const double peta = p.Dot(eeta);
+
+      // cos(α_dir) = (p·n) / sqrt( (p·n)^2 + (p·e_dir)^2 )
+      const double cos_alpha_phi = std::max(1e-6, std::abs(pn) / std::sqrt(pn*pn + pphi*pphi));
+      const double cos_alpha_eta = std::max(1e-6, std::abs(pn) / std::sqrt(pn*pn + peta*peta));
+
+      // record incident angles (radians) for downstream QA fills
+      m_lastAlphaPhi = static_cast<float>(std::acos(std::min(1.0, cos_alpha_phi)));
+      m_lastAlphaEta = static_cast<float>(std::acos(std::min(1.0, cos_alpha_eta)));
+
+      // geometry-only correction: b_dir^eff = b_dir(E) * sec(α_dir) = b_dir(E) / cos(α_dir)
+      bx = clamp_b( bphi_E / static_cast<float>(cos_alpha_phi) );
+      by = clamp_b( beta_E / static_cast<float>(cos_alpha_eta) );
+    }
+    // -------------------------------------------------------------------------------
+    // bx/by are now the angle-aware scales used by the inverse-asinh below
+
 
   // ============================== φ ===================================
   float x_corr = x;

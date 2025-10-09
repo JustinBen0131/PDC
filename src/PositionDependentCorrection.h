@@ -570,15 +570,15 @@ class PositionDependentCorrection : public SubsysReco
 
     
     /* --------------------  NEW: |z_vtx| slice TH3s (uncorrected)  -------------------- */
-    /* COARSE bins for 0–60 cm: 0–10, 10–20, 20–30, 30–45, 45–60 cm */
-    static constexpr int   N_VzH3Bins = 5;
-    static constexpr float vzH3Edges[N_VzH3Bins + 1] = { 0.f, 10.f, 20.f, 30.f, 45.f, 60.f };
+    /* COARSE bins for 0–150 cm: 0–10, 10–20, 20–30, 30–45, 45–60, 60–100, 100–150 cm */
+    static constexpr int   N_VzH3Bins = 7;
+    static constexpr float vzH3Edges[N_VzH3Bins + 1] = { 0.f, 10.f, 20.f, 30.f, 45.f, 60.f, 100.f, 150.f };
 
-    /* FINE bins for 0–10 cm: 0–2, 2–4, 4–6, 6–8, 8–10 cm */
+    /* FINE bins for 0–10 cm: 0–2, 2–4, 4–6, 6–8, 8–10 cm (unchanged) */
     static constexpr int   N_VzH3FineBins = 5;
     static constexpr float vzH3FineEdges[N_VzH3FineBins + 1] = { 0.f, 2.f, 4.f, 6.f, 8.f, 10.f };
 
-    /* Helper: map |z| to 0..N_VzH3Bins-1 (returns -1 if outside 0–60) */
+    /* Helper: map |z| to 0..N_VzH3Bins-1 (returns -1 if outside 0–150) */
     inline int getVzH3Slice(float absVz) const
     {
       for (int i = 0; i < N_VzH3Bins; ++i)
@@ -606,6 +606,7 @@ class PositionDependentCorrection : public SubsysReco
                                   (int)std::lround(vzH3FineEdges[i+1]));
     }
 
+
     /* Hist arrays: one uncorrected TH3 per |z| bin (coarse and fine) */
     TH3F* h3_blockCoord_E_vz      [N_VzH3Bins]     {};
     TH3F* h3_blockCoord_E_vz_fine [N_VzH3FineBins]{};
@@ -625,7 +626,8 @@ class PositionDependentCorrection : public SubsysReco
     TH3F* h3_blockCoord_E_vz_fine_corr [N_VzH3FineBins]{};
 
     
-    
+    TH2F* h2_alphaPhi_vsVz {nullptr};
+    TH2F* h2_alphaEta_vsVz {nullptr};
     
   TH2F* h2_phi_diff_vsEta_RAW_E     [N_Ebins]{};
   TH2F* h2_phi_diff_vsEta_CP_E      [N_Ebins]{};
