@@ -1394,7 +1394,7 @@ ${ENV_LINE}
 # Args: <runNum=9999> <listFileData> <sim> <Cluster> <nEvents=0> <processID> [<listFileHits>]
 EOL
   # How many (DST,G4) pairs per Condor job:
-  local GROUP_SIZE_SIM=5
+  local GROUP_SIZE_SIM=4
 
   # Verbose grouping plan
   echo "[PLAN] Building grouped lists for submission:"

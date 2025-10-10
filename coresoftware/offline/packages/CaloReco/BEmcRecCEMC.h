@@ -23,22 +23,22 @@ class BEmcRecCEMC : public BEmcRec
                                     float& xc, float& yc,
                                     float* out_bphi = nullptr,
                                     float* out_beta = nullptr);
+    
+    void CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(float Energy, float vtxZ_cm,
+                                                       float x, float y,
+                                                       float& xc, float& yc);
 
-    // EA variant #1: |z_vtx|-dependent + energy-dependent fits (uses vtxZ_cm)
     void CorrectPositionEnergyAwareZVTXAndEnergyDep(float Energy, float vtxZ_cm, float x, float y,
                                                     float& xc, float& yc);
 
-    // EA variant #2: |η|-dependent + energy-dependent fits for both φ and η
     void CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float x, float y,
                                                    float& xc, float& yc);
 
-    // EA variant #3: energy-only fits (no |η| dependence) for both φ and η
+    void CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Energy, float x, float y,
+                                                             float& xc, float& yc);
+    
     void CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x, float y,
                                                  float& xc, float& yc);
-
-    // EA variant #4: φ uses energy-only fits; η uses |η|-dependent fits
-    void CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float Energy, float x, float y,
-                                                                float& xc, float& yc);
 
     void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
 
@@ -60,10 +60,11 @@ class BEmcRecCEMC : public BEmcRec
 
       // CLUS-CP(EA) flavours
       CLUS_CP_EA,                 // backward-compat alias to CLUS_CP
+      CLUS_CP_EA_FIT_ZDEP_ETADEP,
       CLUS_CP_EA_FIT_ZDEP,        // EA with |z|-dep + E-dep fits
       CLUS_CP_EA_FIT_ETADEP,      // EA with |η|-dep + E-dep fits
-      CLUS_CP_EA_FIT_EONLY,       // EA with E-only fits
-      CLUS_CP_EA_MIX,             // EA φ(E-only), η(|η|+E)
+      CLUS_CP_EA_FIT_EandIncident,       // EA with E-only fits
+      CLUS_CP_EA_FIT_EONLY,             // EA φ(E-only), η(|η|+E)
 
       CLUS_BCORR,
       PDC_RAW,

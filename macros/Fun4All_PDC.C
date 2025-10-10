@@ -294,9 +294,9 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBEmcRec(bemcPtr);          // lead-tower finder from the clusteriser
   pdc->setIsSimulation(isSimulation);
-  pdc->setFirstPassBvaluesOnly(true);
+  pdc->setFirstPassBvaluesOnly(false);
     
-    pdc->UseSurveyGeometry(true);      // load barrel-tilt from CDB (recommended)
+    pdc->UseSurveyGeometry(false);      // load barrel-tilt from CDB (recommended)
     pdc->UseSignedVz(false);
       // Automatically configure single-photon vs MinBias, with manual override via $PDC_DATASET:
       //  - default = (runNo != 21)  → single-photon

@@ -1,9 +1,0 @@
-series,variant,residual,E,mu,dmu,sigma,dsigma
-0,no corr, cluster,eta,3,0,0,0,0
-0,no corr, cluster,eta,5,0,0,0,0
-0,no corr, cluster,eta,7,0,0,0,0
-0,no corr, cluster,eta,9,0,0,0,0
-0,no corr, cluster,eta,11,0,0,0,0
-0,no corr, cluster,eta,13.5,0,0,0,0
-0,no corr, cluster,eta,17.5,0,0,0,0
-0,no corr, cluster,eta,25,0,0,0,0

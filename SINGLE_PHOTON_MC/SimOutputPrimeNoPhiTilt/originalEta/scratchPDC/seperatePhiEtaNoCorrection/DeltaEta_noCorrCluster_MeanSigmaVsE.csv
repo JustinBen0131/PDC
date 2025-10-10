@@ -1,9 +1,0 @@
-series,variant,residual,E,mu,dmu,sigma,dsigma
-0,no corr, cluster,eta,3,1.43704e-05,1.93009e-05,0.00428411,1.36478e-05
-0,no corr, cluster,eta,5,8.83159e-06,1.80829e-05,0.00410219,1.27865e-05
-0,no corr, cluster,eta,7,-1.36709e-05,1.70002e-05,0.00401622,1.2021e-05
-0,no corr, cluster,eta,9,-2.74665e-05,1.65628e-05,0.00400128,1.17117e-05
-0,no corr, cluster,eta,11,-4.4149e-05,1.62987e-05,0.00396062,1.15249e-05
-0,no corr, cluster,eta,13.5,-1.45072e-06,1.32073e-05,0.00393075,9.33899e-06
-0,no corr, cluster,eta,17.5,-1.20399e-05,1.00929e-05,0.00388564,7.13676e-06
-0,no corr, cluster,eta,25,-3.3956e-05,6.85254e-06,0.00375268,4.84548e-06

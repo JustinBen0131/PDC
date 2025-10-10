@@ -221,8 +221,12 @@ if $DATA_MODE; then
   PARTIAL_PREFIX="chunkMerge_run"
 fi
 
-# Default chunk prefix (single-γ) and glob
-: "${CHUNK_NAME_PREFIX:=PositionDep_sim}"
+# Select chunk prefix strictly from the parsed dataset flag (ignore env)
+if $SINGLEPI0; then
+  CHUNK_NAME_PREFIX="PositionDep_sim_singlePi0"
+else
+  CHUNK_NAME_PREFIX="PositionDep_sim"
+fi
 CHUNK_GLOB="${CHUNK_NAME_PREFIX}_*.root"
 
 

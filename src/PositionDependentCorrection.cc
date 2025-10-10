@@ -97,7 +97,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
 {
   _eventcounter = 0;
   /* vertex‑Z limits                                                     */
-  m_vzTightCut  = 60.f;           // |z| ≤ 10 cm  → “physics” histograms
+  m_vzTightCut  = 10.f;           // |z| ≤ 10 cm  → “physics” histograms
   m_vzSliceMax  = vzEdge.back();
   m_nWinRAW = m_nWinCP = m_nWinBCorr = 0;
   s_verbosityLevel.store( Verbosity() );
@@ -243,7 +243,6 @@ void PositionDependentCorrection::bookCommonHistograms
            "Uncorrected local block coords vs. E_{centre} (0.70 < |#eta| #leq 1.10)"),
         14, xEdges, 14, yEdges, 8, eEdges);
   }
-
     // --- NEW: uncorrected |z_vtx| slices (COARSE 0–150) ---
     for (int iz = 0; iz < N_VzH3Bins; ++iz)
     {
@@ -281,6 +280,70 @@ void PositionDependentCorrection::bookCommonHistograms
                                                14, xEdges,   // local-η (block η) axis
                                                14, yEdges,   // local-φ (block φ) axis
                                                 8, eEdges);  // energy slices
+      }
+    }
+
+    // --- NEW: cross-slice uncorrected η-view × |z_vtx| variants (coarse and fine) ---
+    {
+      // Names and titles consistent with your η‑view conventions elsewhere
+      const char* viewTag   [kNEtaViews] = {"fullEta","etaCore","etaMid","etaEdge"};
+      const char* viewTitle [kNEtaViews] = {
+        "|#eta| #leq 1.10",
+        "|#eta| #leq 0.20",
+        "0.20 < |#eta| #leq 0.70",
+        "0.70 < |#eta| #leq 1.10"
+      };
+
+      // Coarse |z| bins
+      for (int vi = 0; vi < kNEtaViews; ++vi)
+      {
+        for (int iz = 0; iz < N_VzH3Bins; ++iz)
+        {
+          if (!h3_blockCoord_E_eta_vz[vi][iz])
+          {
+            const std::string ztag = vzH3RangeTag(iz); // e.g. "z00to10"
+            const char* name  = Form("h3_blockCoord_E_%s_%s_%s",
+                                     viewTag[vi], ztag.c_str(), modeTag);
+            const char* title = (m_binningMode == EBinningMode::kRange)
+              ? Form("Uncorrected local block coords vs. E_{slice} (%s, |z_{vtx}| in %d–%d cm)",
+                     viewTitle[vi],
+                     (int)std::lround(vzH3Edges[iz]), (int)std::lround(vzH3Edges[iz+1]))
+              : Form("Uncorrected local block coords vs. E_{centre} (%s, |z_{vtx}| in %d–%d cm)",
+                     viewTitle[vi],
+                     (int)std::lround(vzH3Edges[iz]), (int)std::lround(vzH3Edges[iz+1]));
+
+            h3_blockCoord_E_eta_vz[vi][iz] = new TH3F(name, title,
+                                                      14, xEdges,
+                                                      14, yEdges,
+                                                       8, eEdges);
+          }
+        }
+      }
+
+      // Fine 0–10 cm |z| bins
+      for (int vi = 0; vi < kNEtaViews; ++vi)
+      {
+        for (int iz = 0; iz < N_VzH3FineBins; ++iz)
+        {
+          if (!h3_blockCoord_E_eta_vz_fine[vi][iz])
+          {
+            const std::string ztag = vzH3FineRangeTag(iz); // e.g. "z00to02"
+            const char* name  = Form("h3_blockCoord_E_%s_%s_%s",
+                                     viewTag[vi], ztag.c_str(), modeTag);
+            const char* title = (m_binningMode == EBinningMode::kRange)
+              ? Form("Uncorrected local block coords vs. E_{slice} (%s, |z_{vtx}| in %d–%d cm)",
+                     viewTitle[vi],
+                     (int)std::lround(vzH3FineEdges[iz]), (int)std::lround(vzH3FineEdges[iz+1]))
+              : Form("Uncorrected local block coords vs. E_{centre} (%s, |z_{vtx}| in %d–%d cm)",
+                     viewTitle[vi],
+                     (int)std::lround(vzH3FineEdges[iz]), (int)std::lround(vzH3FineEdges[iz+1]));
+
+            h3_blockCoord_E_eta_vz_fine[vi][iz] = new TH3F(name, title,
+                                                           14, xEdges,
+                                                           14, yEdges,
+                                                            8, eEdges);
+          }
+        }
       }
     }
     
@@ -373,11 +436,11 @@ void PositionDependentCorrection::bookCommonHistograms
 
     // Book per-variant π0 mass histograms (8 variants × N_Ebins) — COMMON (data & MC)
     {
-      const char* vtag[] = {
-        "CLUSRAW", "CLUSCP",
-        "EAgeom", "EAetaE", "EAEonly", "EAmix",
-        "PDCraw", "PDCcorr"
-      };
+        const char* vtag[] = {
+          "CLUSRAW", "CLUSCP",
+          "EAgeom", "EAetaE", "EAEonly", "EAEonlyIncident",
+          "EAzvtxEtaE", "PDCraw", "PDCcorr"
+        };
       // pretty η-view titles and tags for names
       const char* viewTag   [kNEtaViews] = {"fullEta","etaCore","etaMid","etaEdge"};
       const char* viewTitle [kNEtaViews] = {
@@ -564,11 +627,26 @@ void PositionDependentCorrection::bookCommonHistograms
                  (int)std::lround(vzH3Edges[iz]), (int)std::lround(vzH3Edges[iz+1]))
           : Form("Corrected local block coords vs. E_{centre} (|z_{vtx}| in %d–%d cm)",
                  (int)std::lround(vzH3Edges[iz]), (int)std::lround(vzH3Edges[iz+1]));
-
-        h3_blockCoord_E_vz_corr[iz] = new TH3F(name, title,
-                                               14, xEdges,   // local-η (block η) axis
-                                               14, yEdges,   // local-φ (block φ) axis
-                                                8, eEdges);  // energy slices
+        h3_blockCoord_E_vz_corr[iz] = new TH3F(name, title, 14, xEdges, 14, yEdges, 8, eEdges);
+      }
+      /* NEW: corrected η×z (coarse) */
+      const char* viewTag[kNEtaViews] = {"fullEta","etaCore","etaMid","etaEdge"};
+      const char* viewTitle[kNEtaViews] = {
+        "|#eta| #leq 1.10","|#eta| #leq 0.20","0.20 < |#eta| #leq 0.70","0.70 < |#eta| #leq 1.10"
+      };
+      for (int vi = 0; vi < kNEtaViews; ++vi)
+      {
+        if (!h3_blockCoord_E_eta_vz_corr[vi][iz])
+        {
+          const std::string ztag = vzH3RangeTag(iz);
+          const char* nm  = Form("h3_blockCoord_Ecorr_%s_%s_%s", viewTag[vi], ztag.c_str(), modeTag);
+          const char* ttl = (m_binningMode == EBinningMode::kRange)
+            ? Form("Corrected local block coords vs. E_{slice} (%s, |z_{vtx}| in %d–%d cm)",
+                   viewTitle[vi], (int)std::lround(vzH3Edges[iz]), (int)std::lround(vzH3Edges[iz+1]))
+            : Form("Corrected local block coords vs. E_{centre} (%s, |z_{vtx}| in %d–%d cm)",
+                   viewTitle[vi], (int)std::lround(vzH3Edges[iz]), (int)std::lround(vzH3Edges[iz+1]));
+          h3_blockCoord_E_eta_vz_corr[vi][iz] = new TH3F(nm, ttl, 14, xEdges, 14, yEdges, 8, eEdges);
+        }
       }
     }
 
@@ -584,11 +662,26 @@ void PositionDependentCorrection::bookCommonHistograms
                  (int)std::lround(vzH3FineEdges[iz]), (int)std::lround(vzH3FineEdges[iz+1]))
           : Form("Corrected local block coords vs. E_{centre} (|z_{vtx}| in %d–%d cm)",
                  (int)std::lround(vzH3FineEdges[iz]), (int)std::lround(vzH3FineEdges[iz+1]));
-
-        h3_blockCoord_E_vz_fine_corr[iz] = new TH3F(name, title,
-                                                    14, xEdges,   // local-η (block η) axis
-                                                    14, yEdges,   // local-φ (block φ) axis
-                                                     8, eEdges);  // energy slices
+        h3_blockCoord_E_vz_fine_corr[iz] = new TH3F(name, title, 14, xEdges, 14, yEdges, 8, eEdges);
+      }
+      /* NEW: corrected η×z (fine) */
+      const char* viewTag[kNEtaViews] = {"fullEta","etaCore","etaMid","etaEdge"};
+      const char* viewTitle[kNEtaViews] = {
+        "|#eta| #leq 1.10","|#eta| #leq 0.20","0.20 < |#eta| #leq 0.70","0.70 < |#eta| #leq 1.10"
+      };
+      for (int vi = 0; vi < kNEtaViews; ++vi)
+      {
+        if (!h3_blockCoord_E_eta_vz_fine_corr[vi][iz])
+        {
+          const std::string ztag = vzH3FineRangeTag(iz);
+          const char* nm  = Form("h3_blockCoord_Ecorr_%s_%s_%s", viewTag[vi], ztag.c_str(), modeTag);
+          const char* ttl = (m_binningMode == EBinningMode::kRange)
+            ? Form("Corrected local block coords vs. E_{slice} (%s, |z_{vtx}| in %d–%d cm)",
+                   viewTitle[vi], (int)std::lround(vzH3FineEdges[iz]), (int)std::lround(vzH3FineEdges[iz+1]))
+            : Form("Corrected local block coords vs. E_{centre} (%s, |z_{vtx}| in %d–%d cm)",
+                   viewTitle[vi], (int)std::lround(vzH3FineEdges[iz]), (int)std::lround(vzH3FineEdges[iz+1]));
+          h3_blockCoord_E_eta_vz_fine_corr[vi][iz] = new TH3F(nm, ttl, 14, xEdges, 14, yEdges, 8, eEdges);
+        }
       }
     }
 
@@ -714,10 +807,12 @@ PositionDependentCorrection::bookSimulationHistograms
       h_phi_diff_cpCorr_E[i] = new TH1F(
             Form("h_phi_diff_cpCorr_%s", lab.c_str()),
             "#Delta#phi CP‑corr;#Delta#phi (rad);Counts",  200, -0.1, 0.1);
-      // --- EA φ: four variants, uniquely named
+      
+      
+      // --- EA φ: five variants, uniquely named
       h_phi_diff_cpCorrEA_fitZVTXDep_E[i] = new TH1F(
-            Form("h_phi_diff_cpCorrEA_geom_%s", lab.c_str()),
-            "#Delta#phi CP-corr(EA geom);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
+            Form("h_phi_diff_cpCorrEA_fitZVTXDep_%s", lab.c_str()),
+            "#Delta#phi CP-corr(EA |z|+E fits);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
 
       h_phi_diff_cpCorrEA_fitEtaDep_E[i] = new TH1F(
             Form("h_phi_diff_cpCorrEA_fitEtaDep_%s", lab.c_str()),
@@ -727,9 +822,15 @@ PositionDependentCorrection::bookSimulationHistograms
             Form("h_phi_diff_cpCorrEA_fitEnergyOnly_%s", lab.c_str()),
             "#Delta#phi CP-corr(EA E-only fits);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
 
-      h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E[i] = new TH1F(
-            Form("h_phi_diff_cpCorrEA_fitPhiE_etaEtaDep_%s", lab.c_str()),
-            "#Delta#phi CP-corr(EA: #varphi E-only, #eta |#eta|+E);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
+      h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[i] = new TH1F(
+            Form("h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_%s", lab.c_str()),
+            "#Delta#phi CP-corr(EA E-only + incident-angle);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
+
+      h_phi_diff_cpCorrEA_fitZVTXEtaDep_E[i] = new TH1F(
+            Form("h_phi_diff_cpCorrEA_fitZVTXEtaDep_%s", lab.c_str()),
+            "#Delta#phi CP-corr(EA |z|+|#eta|+E fits);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
+      
+      
 
       h_phi_diff_cpBcorr_E[i] = new TH1F(
             Form("h_phi_diff_cpBcorr_%s", lab.c_str()),
@@ -741,10 +842,10 @@ PositionDependentCorrection::bookSimulationHistograms
       h_eta_diff_cpCorr_E[i] = new TH1F(
             Form("h_eta_diff_cpCorr_%s", lab.c_str()),
             "#Delta#eta CP‑corr;#Delta#eta;Counts",        200, -0.1, 0.1);
-      // --- EA η: four variants, uniquely named
+      // --- EA η: five variants, uniquely named
       h_eta_diff_cpCorrEA_fitZVTXDep_E[i] = new TH1F(
-            Form("h_eta_diff_cpCorrEA_geom_%s", lab.c_str()),
-            "#Delta#eta CP-corr(EA geom);#Delta#eta;Counts", 200, -0.1, 0.1);
+            Form("h_eta_diff_cpCorrEA_fitZVTXDep_%s", lab.c_str()),
+            "#Delta#eta CP-corr(EA |z|+E fits);#Delta#eta;Counts", 200, -0.1, 0.1);
 
       h_eta_diff_cpCorrEA_fitEtaDep_E[i] = new TH1F(
             Form("h_eta_diff_cpCorrEA_fitEtaDep_%s", lab.c_str()),
@@ -754,9 +855,13 @@ PositionDependentCorrection::bookSimulationHistograms
             Form("h_eta_diff_cpCorrEA_fitEnergyOnly_%s", lab.c_str()),
             "#Delta#eta CP-corr(EA E-only fits);#Delta#eta;Counts", 200, -0.1, 0.1);
 
-      h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E[i] = new TH1F(
-            Form("h_eta_diff_cpCorrEA_fitPhiE_etaEtaDep_%s", lab.c_str()),
-            "#Delta#eta CP-corr(EA: #varphi E-only, #eta |#eta|+E);#Delta#eta;Counts", 200, -0.1, 0.1);
+      h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[i] = new TH1F(
+            Form("h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_%s", lab.c_str()),
+            "#Delta#eta CP-corr(EA E-only + incident-angle);#Delta#eta;Counts", 200, -0.1, 0.1);
+
+      h_eta_diff_cpCorrEA_fitZVTXEtaDep_E[i] = new TH1F(
+            Form("h_eta_diff_cpCorrEA_fitZVTXEtaDep_%s", lab.c_str()),
+            "#Delta#eta CP-corr(EA |z|+|#eta|+E fits);#Delta#eta;Counts", 200, -0.1, 0.1);
 
       h_eta_diff_cpBcorr_E[i] = new TH1F(
             Form("h_eta_diff_cpBcorr_%s", lab.c_str()),
@@ -767,264 +872,19 @@ PositionDependentCorrection::bookSimulationHistograms
       hm->registerHisto(h_phi_diff_cpCorrEA_fitZVTXDep_E[i]);
       hm->registerHisto(h_phi_diff_cpCorrEA_fitEtaDep_E[i]);
       hm->registerHisto(h_phi_diff_cpCorrEA_fitEnergyOnly_E[i]);
-      hm->registerHisto(h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E[i]);
+      hm->registerHisto(h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[i]);
+      hm->registerHisto(h_phi_diff_cpCorrEA_fitZVTXEtaDep_E[i]);
       hm->registerHisto(h_phi_diff_cpBcorr_E[i]);
+
       hm->registerHisto(h_eta_diff_cpRaw_E [i]);
       hm->registerHisto(h_eta_diff_cpCorr_E[i]);
       hm->registerHisto(h_eta_diff_cpCorrEA_fitZVTXDep_E[i]);
       hm->registerHisto(h_eta_diff_cpCorrEA_fitEtaDep_E[i]);
       hm->registerHisto(h_eta_diff_cpCorrEA_fitEnergyOnly_E[i]);
-      hm->registerHisto(h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E[i]);
+      hm->registerHisto(h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[i]);
+      hm->registerHisto(h_eta_diff_cpCorrEA_fitZVTXEtaDep_E[i]);
       hm->registerHisto(h_eta_diff_cpBcorr_E[i]);
 
-      // ---------- NEW: |z| ≤ 60 cm gated duplicates (suffix: _0_60vz) ----------
-      // Δφ “scratch” (RAW / CORR)
-      if (!h_phi_diff_raw_E_0_60vz[i]) {
-        h_phi_diff_raw_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_raw_%s_0_60vz", lab.c_str()),
-          (m_binningMode==EBinningMode::kRange ?
-             Form("#Delta#phi raw;%.0f < E < %.0f GeV", eLo, eHi) :
-             Form("#Delta#phi raw;E = %.0f GeV",        eLo)),
-          200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_raw_E_0_60vz[i]);
-      }
-      if (!h_phi_diff_corrected_E_0_60vz[i]) {
-        h_phi_diff_corrected_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_corr_%s_0_60vz", lab.c_str()),
-          (m_binningMode==EBinningMode::kRange ?
-             Form("#Delta#phi corrected;%.0f < E < %.0f GeV", eLo, eHi) :
-             Form("#Delta#phi corrected;E = %.0f GeV",        eLo)),
-          200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_corrected_E_0_60vz[i]);
-      }
-
-      // Δφ “cluster” family
-      if (!h_phi_diff_cpRaw_E_0_60vz[i]) {
-        h_phi_diff_cpRaw_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_cpRaw_%s_0_60vz", lab.c_str()),
-          "#Delta#phi RAW‑CP;#Delta#phi (rad);Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_cpRaw_E_0_60vz[i]);
-      }
-      if (!h_phi_diff_cpCorr_E_0_60vz[i]) {
-        h_phi_diff_cpCorr_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_cpCorr_%s_0_60vz", lab.c_str()),
-          "#Delta#phi CP‑corr;#Delta#phi (rad);Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_cpCorr_E_0_60vz[i]);
-      }
-      if (!h_phi_diff_cpCorrEA_fitZVTXDep_E_0_60vz[i]) {
-        h_phi_diff_cpCorrEA_fitZVTXDep_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_cpCorrEA_geom_%s_0_60vz", lab.c_str()),
-          "#Delta#phi CP-corr(EA geom);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_cpCorrEA_fitZVTXDep_E_0_60vz[i]);
-      }
-      if (!h_phi_diff_cpCorrEA_fitEtaDep_E_0_60vz[i]) {
-        h_phi_diff_cpCorrEA_fitEtaDep_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_cpCorrEA_fitEtaDep_%s_0_60vz", lab.c_str()),
-          "#Delta#phi CP-corr(EA |#eta|+E fits);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_cpCorrEA_fitEtaDep_E_0_60vz[i]);
-      }
-      if (!h_phi_diff_cpCorrEA_fitEnergyOnly_E_0_60vz[i]) {
-        h_phi_diff_cpCorrEA_fitEnergyOnly_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_cpCorrEA_fitEnergyOnly_%s_0_60vz", lab.c_str()),
-          "#Delta#phi CP-corr(EA E-only fits);#Delta#phi (rad);Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_cpCorrEA_fitEnergyOnly_E_0_60vz[i]);
-      }
-      if (!h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz[i]) {
-        h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_cpCorrEA_fitPhiE_etaEtaDep_%s_0_60vz", lab.c_str()),
-          "#Delta#phi CP-corr(EA: #varphi E-only, #eta |#eta|+E);#Delta#phi (rad);Counts",
-          200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz[i]);
-      }
-      if (!h_phi_diff_cpBcorr_E_0_60vz[i]) {
-        h_phi_diff_cpBcorr_E_0_60vz[i] = new TH1F(
-          Form("h_phi_diff_cpBcorr_%s_0_60vz", lab.c_str()),
-          "#Delta#phi b‑corr;#Delta#phi (rad);Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_phi_diff_cpBcorr_E_0_60vz[i]);
-      }
-
-      // Δη “scratch” (RAW / CORR)
-      if (!h_eta_diff_raw_E_0_60vz[i]) {
-        h_eta_diff_raw_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_raw_%s_0_60vz", lab.c_str()),
-          (m_binningMode==EBinningMode::kRange ?
-             Form("#Delta#eta raw;%.0f < E < %.0f GeV", eLo, eHi) :
-             Form("#Delta#eta raw;E = %.0f GeV",        eLo)),
-          200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_raw_E_0_60vz[i]);
-      }
-      if (!h_eta_diff_corrected_E_0_60vz[i]) {
-        h_eta_diff_corrected_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_corr_%s_0_60vz", lab.c_str()),
-          (m_binningMode==EBinningMode::kRange ?
-             Form("#Delta#eta corr;%.0f < E < %.0f GeV", eLo, eHi) :
-             Form("#Delta#eta corr;E = %.0f GeV",        eLo)),
-          200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_corrected_E_0_60vz[i]);
-      }
-
-      // Δη “cluster” family
-      if (!h_eta_diff_cpRaw_E_0_60vz[i]) {
-        h_eta_diff_cpRaw_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_cpRaw_%s_0_60vz", lab.c_str()),
-          "#Delta#eta RAW‑CP;#Delta#eta;Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_cpRaw_E_0_60vz[i]);
-      }
-      if (!h_eta_diff_cpCorr_E_0_60vz[i]) {
-        h_eta_diff_cpCorr_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_cpCorr_%s_0_60vz", lab.c_str()),
-          "#Delta#eta CP‑corr;#Delta#eta;Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_cpCorr_E_0_60vz[i]);
-      }
-      if (!h_eta_diff_cpCorrEA_fitZVTXDep_E_0_60vz[i]) {
-        h_eta_diff_cpCorrEA_fitZVTXDep_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_cpCorrEA_geom_%s_0_60vz", lab.c_str()),
-          "#Delta#eta CP-corr(EA geom);#Delta#eta;Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_cpCorrEA_fitZVTXDep_E_0_60vz[i]);
-      }
-      if (!h_eta_diff_cpCorrEA_fitEtaDep_E_0_60vz[i]) {
-        h_eta_diff_cpCorrEA_fitEtaDep_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_cpCorrEA_fitEtaDep_%s_0_60vz", lab.c_str()),
-          "#Delta#eta CP-corr(EA |#eta|+E fits);#Delta#eta;Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_cpCorrEA_fitEtaDep_E_0_60vz[i]);
-      }
-      if (!h_eta_diff_cpCorrEA_fitEnergyOnly_E_0_60vz[i]) {
-        h_eta_diff_cpCorrEA_fitEnergyOnly_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_cpCorrEA_fitEnergyOnly_%s_0_60vz", lab.c_str()),
-          "#Delta#eta CP-corr(EA E-only fits);#Delta#eta;Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_cpCorrEA_fitEnergyOnly_E_0_60vz[i]);
-      }
-      if (!h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz[i]) {
-        h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_cpCorrEA_fitPhiE_etaEtaDep_%s_0_60vz", lab.c_str()),
-          "#Delta#eta CP-corr(EA: #varphi E-only, #eta |#eta|+E);#Delta#eta;Counts",
-          200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz[i]);
-      }
-      if (!h_eta_diff_cpBcorr_E_0_60vz[i]) {
-        h_eta_diff_cpBcorr_E_0_60vz[i] = new TH1F(
-          Form("h_eta_diff_cpBcorr_%s_0_60vz", lab.c_str()),
-          "#Delta#eta b‑corr;#Delta#eta;Counts", 200, -0.1, 0.1);
-        hm->registerHisto(h_eta_diff_cpBcorr_E_0_60vz[i]);
-      }
-
-      
-      /* ------------------------------------------------------------------ *
-       * (IIa)  NEW  Δφ(E, vz) histograms – one loop over |z| slices
-       * ------------------------------------------------------------------ */
-      for (int iVz = 0; iVz < N_VzBins; ++iVz)
-        {
-          const float vzLo = vzEdge[iVz];
-          const float vzHi = vzEdge[iVz+1];
-          const std::string vzTag = Form("vz%.0f_%.0f", vzLo, vzHi);
-
-          h_phi_diff_raw_E_vz[i][iVz] = new TH1F(
-                Form("h_phi_diff_raw_%s_%s",  lab.c_str(), vzTag.c_str()),
-                Form("#Delta#phi raw;%.0f<E<%.0f GeV, %.0f<|z_{vtx}|<%.0f cm",
-                     eLo, eHi, vzLo, vzHi), 200, -0.1, 0.1);
-
-          h_phi_diff_corrected_E_vz[i][iVz] = new TH1F(
-                Form("h_phi_diff_corr_%s_%s", lab.c_str(), vzTag.c_str()),
-                Form("#Delta#phi corr;%.0f<E<%.0f GeV, %.0f<|z_{vtx}|<%.0f cm",
-                     eLo, eHi, vzLo, vzHi), 200, -0.1, 0.1);
-
-          /* CP variants */
-          h_phi_diff_cpRaw_E_vz [i][iVz] = new TH1F(
-                Form("h_phi_diff_cpRaw_%s_%s",  lab.c_str(), vzTag.c_str()),
-                "#Delta#phi RAW‑CP;#Delta#phi(rad);Counts", 200,-0.1,0.1);
-          h_phi_diff_cpCorr_E_vz[i][iVz] = new TH1F(
-                Form("h_phi_diff_cpCorr_%s_%s", lab.c_str(), vzTag.c_str()),
-                "#Delta#phi CP‑corr;#Delta#phi(rad);Counts",200,-0.1,0.1);
-          h_phi_diff_cpBcorr_E_vz[i][iVz] = new TH1F(
-                Form("h_phi_diff_cpBcorr_%s_%s", lab.c_str(), vzTag.c_str()),
-                "#Delta#phi BCORR;#Delta#phi(rad);Counts", 200,-0.1,0.1);
-
-          hm->registerHisto(h_phi_diff_raw_E_vz       [i][iVz]);
-          hm->registerHisto(h_phi_diff_corrected_E_vz [i][iVz]);
-          hm->registerHisto(h_phi_diff_cpRaw_E_vz     [i][iVz]);
-          hm->registerHisto(h_phi_diff_cpCorr_E_vz    [i][iVz]);
-          hm->registerHisto(h_phi_diff_cpBcorr_E_vz   [i][iVz]);
-        }
-
-        /* ---------- OPTIONAL signed‑z booking (north / south) ---------- */
-        if (m_useSignedVz)
-        {
-          for (int iVz = 0; iVz < N_VzBinsSigned; ++iVz)
-          {
-            const bool  isNorth = (iVz < N_VzBins);
-            const int   idxAbs  = isNorth ? iVz : iVz - N_VzBins;
-            const float vzLo = vzEdge[idxAbs];
-            const float vzHi = vzEdge[idxAbs+1];
-            const std::string vzTag = Form("%s_vz%s%.0f_%.0f",
-                                           lab.c_str(), isNorth?"P":"N",
-                                           vzLo, vzHi);
-
-            h_phi_diff_raw_E_vzsgn[i][iVz] = new TH1F(
-                  Form("h_phi_diff_raw_%s", vzTag.c_str()),
-                  Form("#Delta#phi raw;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
-                       eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
-                  200,-0.1,0.1);
-
-            h_phi_diff_corrected_E_vzsgn[i][iVz] = new TH1F(
-                  Form("h_phi_diff_corr_%s", vzTag.c_str()),
-                  Form("#Delta#phi corr;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
-                       eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
-                  200,-0.1,0.1);
-
-            h_phi_diff_cpRaw_E_vzsgn [i][iVz] = new TH1F(
-                  Form("h_phi_diff_cpRaw_%s",  vzTag.c_str()),
-                  "#Delta#phi RAW‑CP;#Delta#phi;Counts", 200,-0.1,0.1);
-            h_phi_diff_cpCorr_E_vzsgn[i][iVz] = new TH1F(
-                  Form("h_phi_diff_cpCorr_%s", vzTag.c_str()),
-                  "#Delta#phi CP‑corr;#Delta#phi;Counts",200,-0.1,0.1);
-            h_phi_diff_cpBcorr_E_vzsgn[i][iVz] = new TH1F(
-                  Form("h_phi_diff_cpBcorr_%s", vzTag.c_str()),
-                  "#Delta#phi BCORR;#Delta#phi;Counts", 200,-0.1,0.1);
-
-            hm->registerHisto(h_phi_diff_raw_E_vzsgn       [i][iVz]);
-            hm->registerHisto(h_phi_diff_corrected_E_vzsgn [i][iVz]);
-            hm->registerHisto(h_phi_diff_cpRaw_E_vzsgn     [i][iVz]);
-            hm->registerHisto(h_phi_diff_cpCorr_E_vzsgn    [i][iVz]);
-            hm->registerHisto(h_phi_diff_cpBcorr_E_vzsgn   [i][iVz]);
-          }
-      }
-        
-      /* ------------------------------------------------------------------ *
-       * (II)  NEW  Δη(E, vz) histograms – one extra loop over vz slices
-       * ------------------------------------------------------------------ */
-      for (int iVz = 0; iVz < N_VzBins; ++iVz)
-      {
-        const float vzLo = vzEdge[iVz];
-        const float vzHi = vzEdge[iVz+1];
-        const std::string vzTag = Form("vz%.0f_%.0f", vzLo, vzHi);
-
-        h_eta_diff_raw_E_vz[i][iVz] = new TH1F(
-              Form("h_eta_diff_raw_%s_%s",  lab.c_str(), vzTag.c_str()),
-              Form("#Delta#eta raw;%.0f<E<%.0f GeV, %.0f<|z_{vtx}|<%.0f cm",
-                   eLo, eHi, vzLo, vzHi), 200, -0.1, 0.1);
-
-        h_eta_diff_corrected_E_vz[i][iVz] = new TH1F(
-              Form("h_eta_diff_corr_%s_%s", lab.c_str(), vzTag.c_str()),
-              Form("#Delta#eta corr;%.0f<E<%.0f GeV, %.0f<|z_{vtx}|<%.0f cm",
-                   eLo, eHi, vzLo, vzHi), 200, -0.1, 0.1);
-
-        /* CP variants */
-        h_eta_diff_cpRaw_E_vz [i][iVz] = new TH1F(
-              Form("h_eta_diff_cpRaw_%s_%s",  lab.c_str(), vzTag.c_str()),
-              "#Delta#eta RAW‑CP;#Delta#eta;Counts", 200, -0.1, 0.1);
-        h_eta_diff_cpCorr_E_vz[i][iVz] = new TH1F(
-              Form("h_eta_diff_cpCorr_%s_%s", lab.c_str(), vzTag.c_str()),
-              "#Delta#eta CP‑corr;#Delta#eta;Counts", 200, -0.1, 0.1);
-        h_eta_diff_cpBcorr_E_vz[i][iVz] = new TH1F(
-              Form("h_eta_diff_cpBcorr_%s_%s", lab.c_str(), vzTag.c_str()),
-              "#Delta#eta BCORR;#Delta#eta;Counts", 200, -0.1, 0.1);
-
-        hm->registerHisto(h_eta_diff_raw_E_vz     [i][iVz]);
-        hm->registerHisto(h_eta_diff_corrected_E_vz[i][iVz]);
-        hm->registerHisto(h_eta_diff_cpRaw_E_vz   [i][iVz]);
-        hm->registerHisto(h_eta_diff_cpCorr_E_vz  [i][iVz]);
-        hm->registerHisto(h_eta_diff_cpBcorr_E_vz [i][iVz]);
-    }
 
       for (int ieEA = 0; ieEA < N_Ebins; ++ieEA)
       {
@@ -1058,61 +918,14 @@ PositionDependentCorrection::bookSimulationHistograms
           if (hm) hm->registerHisto(h2_eta_diffEA_vs_beta_E[ieEA]);
         }
       }
-
-
-      
-    /* ---------- OPTIONAL signed‑z booking (north / south) ---------- */
-    if (m_useSignedVz)
-    {
-          for (int iVz = 0; iVz < N_VzBinsSigned; ++iVz)
-          {
-            const bool  isNorth = (iVz < N_VzBins);
-            const int   idxAbs  =  isNorth ?  iVz : iVz - N_VzBins;
-            const float vzLo    = vzEdge[idxAbs];
-            const float vzHi    = vzEdge[idxAbs+1];
-            const std::string vzTag = Form("%s_vz%s%.0f_%.0f",
-                                           lab.c_str(),
-                                           isNorth ? "P" : "N",
-                                           vzLo, vzHi);  // “P” = +z, “N” = –z
-
-            /* book once per slice */
-            h_eta_diff_raw_E_vzsgn[i][iVz] = new TH1F(
-                   Form("h_eta_diff_raw_%s", vzTag.c_str()),
-                   Form("#Delta#eta raw;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
-                        eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
-                   200, -0.1, 0.1);
-
-            h_eta_diff_corrected_E_vzsgn[i][iVz] = new TH1F(
-                   Form("h_eta_diff_corr_%s", vzTag.c_str()),
-                   Form("#Delta#eta corr;%.0f<E<%.0f GeV, %c %.0f<z<%.0f cm",
-                        eLo, eHi, isNorth?'+':'-', vzLo, vzHi),
-                   200, -0.1, 0.1);
-
-            h_eta_diff_cpRaw_E_vzsgn  [i][iVz] = new TH1F(
-                   Form("h_eta_diff_cpRaw_%s",  vzTag.c_str()),
-                   "#Delta#eta RAW‑CP;#Delta#eta;Counts", 200, -0.1, 0.1);
-            h_eta_diff_cpCorr_E_vzsgn [i][iVz] = new TH1F(
-                   Form("h_eta_diff_cpCorr_%s", vzTag.c_str()),
-                   "#Delta#eta CP‑corr;#Delta#eta;Counts", 200, -0.1, 0.1);
-            h_eta_diff_cpBcorr_E_vzsgn[i][iVz] = new TH1F(
-                   Form("h_eta_diff_cpBcorr_%s", vzTag.c_str()),
-                   "#Delta#eta BCORR;#Delta#eta;Counts", 200, -0.1, 0.1);
-
-            hm->registerHisto(h_eta_diff_raw_E_vzsgn       [i][iVz]);
-            hm->registerHisto(h_eta_diff_corrected_E_vzsgn [i][iVz]);
-            hm->registerHisto(h_eta_diff_cpRaw_E_vzsgn     [i][iVz]);
-            hm->registerHisto(h_eta_diff_cpCorr_E_vzsgn    [i][iVz]);
-            hm->registerHisto(h_eta_diff_cpBcorr_E_vzsgn   [i][iVz]);
-        } // signed‑vz loop
-     }   // if(m_useSignedVz)
   }     // E‑slice loop
 
 
-    // ────────────────────────────────────────────────────────────────
-    // Ash/Log scans (per‑E TProfiles).  Also seed default scan grids
-    // if the macro didn't pre-fill m_bScan / m_w0Scan.
-    // ────────────────────────────────────────────────────────────────
-    auto makeEdges = [](const std::vector<double>& grid) {
+  // ────────────────────────────────────────────────────────────────
+  // Ash/Log scans (per‑E TProfiles).  Also seed default scan grids
+  // if the macro didn't pre-fill m_bScan / m_w0Scan.
+  // ────────────────────────────────────────────────────────────────
+  auto makeEdges = [](const std::vector<double>& grid) {
       std::vector<double> edges;
       if (grid.size() < 2) return edges;
       const int n = static_cast<int>(grid.size());
@@ -1121,10 +934,10 @@ PositionDependentCorrection::bookSimulationHistograms
       edges[0] = grid[0] - 0.5*(grid[1] - grid[0]);
       edges[n] = grid[n-1] + 0.5*(grid[n-1] - grid[n-2]);
       return edges;
-    };
+  };
 
-    // 3a) Sane **defaults** (coarse pass) if not set by the macro
-    if (m_bScan.empty()) {
+  // 3a) Sane **defaults** (coarse pass) if not set by the macro
+  if (m_bScan.empty()) {
       // Ash b: tower‑space parameter used by BEmcRec; cover common 0.10–0.30
       // Use a moderate step to keep Condor jobs light; we refine later around minima.
       for (double b = 0.10; b <= 0.30 + 1e-12; b += 0.02)
@@ -1222,48 +1035,79 @@ bool PositionDependentCorrection::loadBValues(const std::string& bFilePath)
 
   std::cout << "[INFO]  Reading b-values from " << bFilePath << '\n';
 
-  // Reset per-η-view readiness and values
-  for (int v = 0; v < kNEtaViews; ++v)
-  {
-    m_bPhiReady_view[v] = false;
-    m_bEtaReady_view[v] = false;
-    for (int i = 0; i < N_Ebins; ++i)
+    // Reset per-η-view readiness and values
+    for (int v = 0; v < kNEtaViews; ++v)
     {
-      m_bValsPhi_view[v][i] = 0.f;
-      m_bValsEta_view[v][i] = 0.f;
+      m_bPhiReady_view[v] = false;
+      m_bEtaReady_view[v] = false;
+      for (int i = 0; i < N_Ebins; ++i)
+      {
+        m_bValsPhi_view[v][i] = 0.f;
+        m_bValsEta_view[v][i] = 0.f;
+      }
     }
-  }
-  // Reset per-|z| tables (coarse and fine)
-  for (int iz = 0; iz < N_VzH3Bins; ++iz)
-  {
-    m_bPhiReady_vz[iz] = false;
-    m_bEtaReady_vz[iz] = false;
-    for (int i = 0; i < N_Ebins; ++i)
+    // Reset per-|z| tables (coarse and fine)
+    for (int iz = 0; iz < N_VzH3Bins; ++iz)
     {
-      m_bValsPhi_vz[iz][i] = 0.f;
-      m_bValsEta_vz[iz][i] = 0.f;
+      m_bPhiReady_vz[iz] = false;
+      m_bEtaReady_vz[iz] = false;
+      for (int i = 0; i < N_Ebins; ++i)
+      {
+        m_bValsPhi_vz[iz][i] = 0.f;
+        m_bValsEta_vz[iz][i] = 0.f;
+      }
     }
-  }
-  for (int izf = 0; izf < N_VzH3FineBins; ++izf)
-  {
-    m_bPhiReady_vz_fine[izf] = false;
-    m_bEtaReady_vz_fine[izf] = false;
-    for (int i = 0; i < N_Ebins; ++i)
+    for (int izf = 0; izf < N_VzH3FineBins; ++izf)
     {
-      m_bValsPhi_vz_fine[izf][i] = 0.f;
-      m_bValsEta_vz_fine[izf][i] = 0.f;
+      m_bPhiReady_vz_fine[izf] = false;
+      m_bEtaReady_vz_fine[izf] = false;
+      for (int i = 0; i < N_Ebins; ++i)
+      {
+        m_bValsPhi_vz_fine[izf][i] = 0.f;
+        m_bValsEta_vz_fine[izf][i] = 0.f;
+      }
     }
-  }
+    // Reset NEW per-(η×z) tables (coarse & fine)
+    for (int v = 0; v < kNEtaViews; ++v)
+    {
+      for (int iz = 0; iz < N_VzH3Bins; ++iz)
+      {
+        m_bPhiReady_eta_vz[v][iz] = false;
+        m_bEtaReady_eta_vz[v][iz] = false;
+        for (int i = 0; i < N_Ebins; ++i)
+        {
+          m_bValsPhi_eta_vz[v][iz][i] = 0.f;
+          m_bValsEta_eta_vz[v][iz][i] = 0.f;
+        }
+      }
+      for (int izf = 0; izf < N_VzH3FineBins; ++izf)
+      {
+        m_bPhiReady_eta_vz_fine[v][izf] = false;
+        m_bEtaReady_eta_vz_fine[v][izf] = false;
+        for (int i = 0; i < N_Ebins; ++i)
+        {
+          m_bValsPhi_eta_vz_fine[v][izf][i] = 0.f;
+          m_bValsEta_eta_vz_fine[v][izf][i] = 0.f;
+        }
+      }
+    }
 
-  // Track which slices we successfully filled
-  std::vector<bool> gotLegacyPhi(N_Ebins, false), gotLegacyEta(N_Ebins, false);
-  std::array<std::array<bool, N_Ebins>, kNEtaViews>    gotPhi{}; // per-η view
-  std::array<std::array<bool, N_Ebins>, kNEtaViews>    gotEta{};
+    // Track which slices we successfully filled
+    std::vector<bool> gotLegacyPhi(N_Ebins, false), gotLegacyEta(N_Ebins, false);
+    std::array<std::array<bool, N_Ebins>, kNEtaViews>    gotPhi{}; // per-η view
+    std::array<std::array<bool, N_Ebins>, kNEtaViews>    gotEta{};
 
-  std::array<std::array<bool, N_Ebins>, N_VzH3Bins>       gotPhiZ{};     // coarse |z|
-  std::array<std::array<bool, N_Ebins>, N_VzH3Bins>       gotEtaZ{};
-  std::array<std::array<bool, N_Ebins>, N_VzH3FineBins>   gotPhiZf{};    // fine |z| (0–10)
-  std::array<std::array<bool, N_Ebins>, N_VzH3FineBins>   gotEtaZf{};
+    std::array<std::array<bool, N_Ebins>, N_VzH3Bins>       gotPhiZ{};     // coarse |z|
+    std::array<std::array<bool, N_Ebins>, N_VzH3Bins>       gotEtaZ{};
+    std::array<std::array<bool, N_Ebins>, N_VzH3FineBins>   gotPhiZf{};    // fine |z| (0–10)
+    std::array<std::array<bool, N_Ebins>, N_VzH3FineBins>   gotEtaZf{};
+
+    // NEW trackers for η×z
+    std::array<std::array<std::array<bool, N_Ebins>, N_VzH3Bins>,     kNEtaViews> gotPhiEtaZ{};
+    std::array<std::array<std::array<bool, N_Ebins>, N_VzH3Bins>,     kNEtaViews> gotEtaEtaZ{};
+    std::array<std::array<std::array<bool, N_Ebins>, N_VzH3FineBins>, kNEtaViews> gotPhiEtaZf{};
+    std::array<std::array<std::array<bool, N_Ebins>, N_VzH3FineBins>, kNEtaViews> gotEtaEtaZf{};
+    
 
   auto toLower = [](std::string s){
     std::transform(s.begin(), s.end(), s.begin(),
@@ -1364,50 +1208,75 @@ bool PositionDependentCorrection::loadBValues(const std::string& bFilePath)
     int zcIdx = zCoarseIndexOf(labA); if (zcIdx < 0) zcIdx = zCoarseIndexOf(labB);
     int zfIdx = zFineIndexOf  (labA); if (zfIdx < 0) zfIdx = zFineIndexOf  (labB);
 
-    // Route to the appropriate table
-    if (zcIdx >= 0)  // coarse |z|
-    {
-      if (dim == "PHI") { m_bValsPhi_vz[zcIdx][ie] = bVal; gotPhiZ[zcIdx][ie] = true; }
-      else              { m_bValsEta_vz[zcIdx][ie] = bVal; gotEtaZ[zcIdx][ie] = true; }
-      continue;
-    }
-    if (zfIdx >= 0)  // fine |z| (0–10 cm)
-    {
-      if (dim == "PHI") { m_bValsPhi_vz_fine[zfIdx][ie] = bVal; gotPhiZf[zfIdx][ie] = true; }
-      else              { m_bValsEta_vz_fine[zfIdx][ie] = bVal; gotEtaZf[zfIdx][ie] = true; }
-      continue;
-    }
+      // Route to the appropriate table (prefer η×z if both labels present)
+      if (etaViewIdx >= 0 && zcIdx >= 0)       // η-view × coarse |z|
+      {
+        if (dim == "PHI") { m_bValsPhi_eta_vz[etaViewIdx][zcIdx][ie] = bVal; gotPhiEtaZ [etaViewIdx][zcIdx][ie] = true; }
+        else              { m_bValsEta_eta_vz[etaViewIdx][zcIdx][ie] = bVal; gotEtaEtaZ [etaViewIdx][zcIdx][ie] = true; }
+        continue;
+      }
+      if (etaViewIdx >= 0 && zfIdx >= 0)       // η-view × fine |z|
+      {
+        if (dim == "PHI") { m_bValsPhi_eta_vz_fine[etaViewIdx][zfIdx][ie] = bVal; gotPhiEtaZf[etaViewIdx][zfIdx][ie] = true; }
+        else              { m_bValsEta_eta_vz_fine[etaViewIdx][zfIdx][ie] = bVal; gotEtaEtaZf[etaViewIdx][zfIdx][ie] = true; }
+        continue;
+      }
+      if (zcIdx >= 0)                          // coarse |z| only
+      {
+        if (dim == "PHI") { m_bValsPhi_vz[zcIdx][ie] = bVal; gotPhiZ[zcIdx][ie] = true; }
+        else              { m_bValsEta_vz[zcIdx][ie] = bVal; gotEtaZ[zcIdx][ie] = true; }
+        continue;
+      }
+      if (zfIdx >= 0)                          // fine |z| only
+      {
+        if (dim == "PHI") { m_bValsPhi_vz_fine[zfIdx][ie] = bVal; gotPhiZf[zfIdx][ie] = true; }
+        else              { m_bValsEta_vz_fine[zfIdx][ie] = bVal; gotEtaZf[zfIdx][ie] = true; }
+        continue;
+      }
 
-    // Else: η-sliced or legacy default
-    if (dim == "PHI")
-    {
-      if (etaViewIdx >= 0) { m_bValsPhi_view[etaViewIdx][ie] = bVal; gotPhi[etaViewIdx][ie] = true; }
-      else                 { m_bValsPhi[ie]                  = bVal; gotLegacyPhi[ie]        = true; }
-    }
-    else // "ETA"
-    {
-      if (etaViewIdx >= 0) { m_bValsEta_view[etaViewIdx][ie] = bVal; gotEta[etaViewIdx][ie] = true; }
-      else                 { m_bValsEta[ie]                  = bVal; gotLegacyEta[ie]        = true; }
-    }
+      // Else: η-sliced or legacy default
+      if (dim == "PHI")
+      {
+        if (etaViewIdx >= 0) { m_bValsPhi_view[etaViewIdx][ie] = bVal; gotPhi[etaViewIdx][ie] = true; }
+        else                 { m_bValsPhi[ie]                  = bVal; gotLegacyPhi[ie]        = true; }
+      }
+      else // "ETA"
+      {
+        if (etaViewIdx >= 0) { m_bValsEta_view[etaViewIdx][ie] = bVal; gotEta[etaViewIdx][ie] = true; }
+        else                 { m_bValsEta[ie]                  = bVal; gotLegacyEta[ie]        = true; }
+      }
   }
   bfile.close();
 
-  // Readiness flags
-  for (int v = 0; v < kNEtaViews; ++v)
-  {
-    m_bPhiReady_view[v] = std::all_of(gotPhi[v].begin(), gotPhi[v].end(), [](bool b){ return b; });
-    m_bEtaReady_view[v] = std::all_of(gotEta[v].begin(), gotEta[v].end(), [](bool b){ return b; });
-  }
-  for (int iz = 0; iz < N_VzH3Bins; ++iz)
-  {
-    m_bPhiReady_vz[iz] = std::all_of(gotPhiZ[iz].begin(), gotPhiZ[iz].end(), [](bool b){ return b; });
-    m_bEtaReady_vz[iz] = std::all_of(gotEtaZ[iz].begin(), gotEtaZ[iz].end(), [](bool b){ return b; });
-  }
-  for (int izf = 0; izf < N_VzH3FineBins; ++izf)
-  {
-    m_bPhiReady_vz_fine[izf] = std::all_of(gotPhiZf[izf].begin(), gotPhiZf[izf].end(), [](bool b){ return b; });
-    m_bEtaReady_vz_fine[izf] = std::all_of(gotEtaZf[izf].begin(), gotEtaZf[izf].end(), [](bool b){ return b; });
-  }
+    for (int v = 0; v < kNEtaViews; ++v)
+    {
+      m_bPhiReady_view[v] = std::all_of(gotPhi[v].begin(), gotPhi[v].end(), [](bool b){ return b; });
+      m_bEtaReady_view[v] = std::all_of(gotEta[v].begin(), gotEta[v].end(), [](bool b){ return b; });
+    }
+    for (int iz = 0; iz < N_VzH3Bins; ++iz)
+    {
+      m_bPhiReady_vz[iz] = std::all_of(gotPhiZ[iz].begin(), gotPhiZ[iz].end(), [](bool b){ return b; });
+      m_bEtaReady_vz[iz] = std::all_of(gotEtaZ[iz].begin(), gotEtaZ[iz].end(), [](bool b){ return b; });
+    }
+    for (int izf = 0; izf < N_VzH3FineBins; ++izf)
+    {
+      m_bPhiReady_vz_fine[izf] = std::all_of(gotPhiZf[izf].begin(), gotPhiZf[izf].end(), [](bool b){ return b; });
+      m_bEtaReady_vz_fine[izf] = std::all_of(gotEtaZf[izf].begin(), gotEtaZf[izf].end(), [](bool b){ return b; });
+    }
+    // NEW: per-(η×z)
+    for (int v = 0; v < kNEtaViews; ++v)
+    {
+      for (int iz = 0; iz < N_VzH3Bins; ++iz)
+      {
+        m_bPhiReady_eta_vz[v][iz] = std::all_of(gotPhiEtaZ[v][iz].begin(), gotPhiEtaZ[v][iz].end(), [](bool b){ return b; });
+        m_bEtaReady_eta_vz[v][iz] = std::all_of(gotEtaEtaZ[v][iz].begin(), gotEtaEtaZ[v][iz].end(), [](bool b){ return b; });
+      }
+      for (int izf = 0; izf < N_VzH3FineBins; ++izf)
+      {
+        m_bPhiReady_eta_vz_fine[v][izf] = std::all_of(gotPhiEtaZf[v][izf].begin(), gotPhiEtaZf[v][izf].end(), [](bool b){ return b; });
+        m_bEtaReady_eta_vz_fine[v][izf] = std::all_of(gotEtaEtaZf[v][izf].begin(), gotEtaEtaZf[v][izf].end(), [](bool b){ return b; });
+      }
+    }
 
   // Legacy/default readiness (for the always-present corrected histograms)
   const bool legacyPhiReady = std::all_of(gotLegacyPhi.begin(), gotLegacyPhi.end(), [](bool b){ return b; });
@@ -1417,64 +1286,114 @@ bool PositionDependentCorrection::loadBValues(const std::string& bFilePath)
   isFitDoneForPhi = isFitDoneForPhi && legacyPhiReady;
   isFitDoneForEta = isFitDoneForEta && legacyEtaReady;
 
-  // ----- optional human-readable summary -----------------------------------
-  auto printTable = [&](const char* tag, const std::vector<bool>& got, const float* arr, bool enabled)
-  {
-    std::cout << "[INFO]  " << tag << (enabled ? "  (enabled)\n" : "  (DISABLED — missing slices)\n");
-    for (int i = 0; i < N_Ebins; ++i)
+    // ----- optional human-readable summary (show everything read) -----
+    auto printTable = [&](const char* tag, const std::vector<bool>& got, const float* arr, bool enabled)
     {
-      std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : ";
-      if (got[i]) std::cout << arr[i] << '\n';
-      else        std::cout << "-- missing --\n";
-    }
-  };
-  printTable("DEFAULT PHI b-values", gotLegacyPhi, m_bValsPhi, isFitDoneForPhi);
-  printTable("DEFAULT ETA b-values", gotLegacyEta, m_bValsEta, isFitDoneForEta);
+      std::cout << "[INFO]  " << tag << (enabled ? "  (enabled)\n" : "  (PARTIAL/disabled)\n");
+      for (int i = 0; i < N_Ebins; ++i)
+      {
+        std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : ";
+        if (got[i]) std::cout << arr[i] << '\n';
+        else        std::cout << "-- missing --\n";
+      }
+    };
+    printTable("DEFAULT PHI b-values", gotLegacyPhi, m_bValsPhi, isFitDoneForPhi);
+    printTable("DEFAULT ETA b-values", gotLegacyEta, m_bValsEta, isFitDoneForEta);
 
-  auto printView = [&](const char* name, int v)
-  {
-    std::cout << "[INFO]  view=" << name
-              << "  PHI(" << (m_bPhiReady_view[v] ? "OK" : "MISS") << ")"
-              << "  ETA(" << (m_bEtaReady_view[v] ? "OK" : "MISS") << ")\n";
-    for (int i = 0; i < N_Ebins; ++i)
+    auto printView = [&](const char* name, int v)
     {
-      std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
-                << "b_phi=" << (gotPhi[v][i] ? m_bValsPhi_view[v][i] : NAN)
-                << " | b_eta=" << (gotEta[v][i] ? m_bValsEta_view[v][i] : NAN) << '\n';
-    }
-  };
-  printView("fullEta", 0);
-  printView("etaCore", 1);
-  printView("etaMid",  2);
-  printView("etaEdge", 3);
+      std::cout << "[INFO]  view=" << name
+                << "  PHI(" << (m_bPhiReady_view[v] ? "OK" : "PART") << ")"
+                << "  ETA(" << (m_bEtaReady_view[v] ? "OK" : "PART") << ")\n";
+      for (int i = 0; i < N_Ebins; ++i)
+      {
+        std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
+                  << "b_phi=" << (gotPhi[v][i] ? m_bValsPhi_view[v][i] : NAN)
+                  << " | b_eta=" << (gotEta[v][i] ? m_bValsEta_view[v][i] : NAN) << '\n';
+      }
+    };
+    printView("fullEta", 0);
+    printView("etaCore", 1);
+    printView("etaMid",  2);
+    printView("etaEdge", 3);
 
-  auto printVz = [&](const char* tag, int iz, bool readyPhi, bool readyEta)
-  {
-    std::cout << "[INFO]  z-slice=" << tag
-              << "  PHI(" << (readyPhi ? "OK" : "MISS") << ")"
-              << "  ETA(" << (readyEta ? "OK" : "MISS") << ")\n";
-    for (int i = 0; i < N_Ebins; ++i)
+    // z-only (coarse): print values present per slice (don’t hide behind readiness)
+    auto printVz = [&](const char* tag, int iz)
     {
-      std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
-                << "b_phi=" << (readyPhi ? m_bValsPhi_vz[iz][i] : NAN)
-                << " | b_eta=" << (readyEta ? m_bValsEta_vz[iz][i] : NAN) << '\n';
-    }
-  };
-  for (int iz = 0; iz < N_VzH3Bins; ++iz)  printVz(vzH3RangeTag(iz).c_str(), iz, m_bPhiReady_vz[iz], m_bEtaReady_vz[iz]);
+      std::cout << "[INFO]  z-slice=" << tag
+                << "  PHI(" << (m_bPhiReady_vz[iz] ? "OK" : "PART") << ")"
+                << "  ETA(" << (m_bEtaReady_vz[iz] ? "OK" : "PART") << ")\n";
+      for (int i = 0; i < N_Ebins; ++i)
+      {
+        std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
+                  << "b_phi=" << (gotPhiZ[iz][i] ? m_bValsPhi_vz[iz][i] : NAN)
+                  << " | b_eta=" << (gotEtaZ[iz][i] ? m_bValsEta_vz[iz][i] : NAN) << '\n';
+      }
+    };
+    for (int iz = 0; iz < N_VzH3Bins; ++iz)
+      printVz(vzH3RangeTag(iz).c_str(), iz);
 
-  auto printVzFine = [&](const char* tag, int iz, bool readyPhi, bool readyEta)
-  {
-    std::cout << "[INFO]  z-fine=" << tag
-              << "  PHI(" << (readyPhi ? "OK" : "MISS") << ")"
-              << "  ETA(" << (readyEta ? "OK" : "MISS") << ")\n";
-    for (int i = 0; i < N_Ebins; ++i)
+    // z-only (fine 0–10): same partial-print logic
+    auto printVzFine = [&](const char* tag, int izf)
     {
-      std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
-                << "b_phi=" << (readyPhi ? m_bValsPhi_vz_fine[iz][i] : NAN)
-                << " | b_eta=" << (readyEta ? m_bValsEta_vz_fine[iz][i] : NAN) << '\n';
-    }
-  };
-  for (int izf = 0; izf < N_VzH3FineBins; ++izf)  printVzFine(vzH3FineRangeTag(izf).c_str(), izf, m_bPhiReady_vz_fine[izf], m_bEtaReady_vz_fine[izf]);
+      std::cout << "[INFO]  z-fine=" << tag
+                << "  PHI(" << (m_bPhiReady_vz_fine[izf] ? "OK" : "PART") << ")"
+                << "  ETA(" << (m_bEtaReady_vz_fine[izf] ? "OK" : "PART") << ")\n";
+      for (int i = 0; i < N_Ebins; ++i)
+      {
+        std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
+                  << "b_phi=" << (gotPhiZf[izf][i] ? m_bValsPhi_vz_fine[izf][i] : NAN)
+                  << " | b_eta=" << (gotEtaZf[izf][i] ? m_bValsEta_vz_fine[izf][i] : NAN) << '\n';
+      }
+    };
+    for (int izf = 0; izf < N_VzH3FineBins; ++izf)
+      printVzFine(vzH3FineRangeTag(izf).c_str(), izf);
+
+    // NEW: η×z (coarse) — print per view, per z bin, per energy slice
+    auto printEtaZ = [&](int viewIdx, const char* vname)
+    {
+      for (int iz = 0; iz < N_VzH3Bins; ++iz)
+      {
+        std::cout << "[INFO]  eta×z (coarse): " << vname << " × " << vzH3RangeTag(iz)
+                  << "  PHI(" << (m_bPhiReady_eta_vz[viewIdx][iz] ? "OK" : "PART") << ")"
+                  << "  ETA(" << (m_bEtaReady_eta_vz[viewIdx][iz] ? "OK" : "PART") << ")\n";
+        for (int i = 0; i < N_Ebins; ++i)
+        {
+          const bool haveP = gotPhiEtaZ[viewIdx][iz][i];
+          const bool haveE = gotEtaEtaZ[viewIdx][iz][i];
+          std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
+                    << "b_phi=" << (haveP ? m_bValsPhi_eta_vz[viewIdx][iz][i] : NAN)
+                    << " | b_eta=" << (haveE ? m_bValsEta_eta_vz[viewIdx][iz][i] : NAN) << '\n';
+        }
+      }
+    };
+    printEtaZ(0, "fullEta");
+    printEtaZ(1, "etaCore");
+    printEtaZ(2, "etaMid");
+    printEtaZ(3, "etaEdge");
+
+    // NEW: η×z (fine 0–10) — print per view, per fine z bin, per energy slice
+    auto printEtaZFine = [&](int viewIdx, const char* vname)
+    {
+      for (int izf = 0; izf < N_VzH3FineBins; ++izf)
+      {
+        std::cout << "[INFO]  eta×z (fine): " << vname << " × " << vzH3FineRangeTag(izf)
+                  << "  PHI(" << (m_bPhiReady_eta_vz_fine[viewIdx][izf] ? "OK" : "PART") << ")"
+                  << "  ETA(" << (m_bEtaReady_eta_vz_fine[viewIdx][izf] ? "OK" : "PART") << ")\n";
+        for (int i = 0; i < N_Ebins; ++i)
+        {
+          const bool haveP = gotPhiEtaZf[viewIdx][izf][i];
+          const bool haveE = gotEtaEtaZf[viewIdx][izf][i];
+          std::cout << "        [" << expectedLo[i] << ',' << expectedHi[i] << ")  : "
+                    << "b_phi=" << (haveP ? m_bValsPhi_eta_vz_fine[viewIdx][izf][i] : NAN)
+                    << " | b_eta=" << (haveE ? m_bValsEta_eta_vz_fine[viewIdx][izf][i] : NAN) << '\n';
+        }
+      }
+    };
+    printEtaZFine(0, "fullEta");
+    printEtaZFine(1, "etaCore");
+    printEtaZFine(2, "etaMid");
+    printEtaZFine(3, "etaEdge");
 
   // Return true if we can apply *any* corrections (legacy, per-η view, or per-|z|)
   auto any_of_true = [](auto& arr){ return std::any_of(arr.begin(), arr.end(), [](bool b){ return b; }); };
@@ -2481,7 +2400,7 @@ void PositionDependentCorrection::fillAshLogDx(
 }
 
 // ============================================================================
-//  Δφ – five flavours
+//  Δφ – flavors
 // ============================================================================
 void PositionDependentCorrection::fillDPhiAllVariants(
         RawCluster*                   clus,
@@ -2691,7 +2610,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     }
 
 
-    /* ------------------------ (2b) CLUS-CP(EA) — four variants ---------------- */
+    /* ------------------------ (2b) CLUS-CP(EA) — five variants ---------------- */
     // Variant A: EA with |z|-dependent + energy-dependent fits (fitZvtx)
     m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_ZDEP);
     float xEA_fitZvtx = xCG, yEA_fitZvtx = yCG;
@@ -2704,7 +2623,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  φ_SD=" << phiEA_fitZvtx
                 << "  Δφ(folded)=" << dphiEA_fitZvtx << '\n';
 
-    // Variant B: EA with |η|-dependent + energy-dependent fits
+    // Variant B: EA with |η|-dependent + energy-dependent fits (fitEta)
     m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_ETADEP);
     float xEA_fitEta = xCG, yEA_fitEta = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEtaAndEnergyDep(eReco, xCG, yCG, xEA_fitEta, yEA_fitEta);
@@ -2715,37 +2634,51 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  φ_SD=" << phiEA_fitEta
                 << "  Δφ(folded)=" << dphiEA_fitEta << '\n';
 
-    // Variant C: EA with energy-only fits (no |η| dependence)
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_EONLY);
-    float xEA_fitE = xCG, yEA_fitE = yCG;
-    m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(eReco, xCG, yCG, xEA_fitE, yEA_fitE);
-    
-    // NEW: fill αφ vs z_vtx (geometry-only incidence from the correction)
-    if (h2_alphaPhi_vsVz)
-    {
+    // Variant C: EA with energy + incident-angle fits (E+incident)
+    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_EandIncident);
+    float xEA_inc = xCG, yEA_inc = yCG;
+    m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
+                                                                   xEA_inc, yEA_inc);
+    if (h2_alphaPhi_vsVz) {
       const float aPhi = m_bemcRec->lastAlphaPhi();
       if (std::isfinite(aPhi)) h2_alphaPhi_vsVz->Fill(vtxZ, aPhi);
     }
+    const float phiEA_EandIncident   = cg2GlobalPhi(m_bemcRec, eReco, xEA_inc, yEA_inc);
+    const float dphiEA_EandIncident  = foldToTowerPitch(phiEA_EandIncident - phiTruth);
+    const float dphiEA_incident      = dphiEA_EandIncident;
+    if (vb > 3)
+      std::cout << "    CLUS-CP(EA E+incident)  loc=" << xEA_inc
+                << "  φ_SD=" << phiEA_EandIncident
+                << "  Δφ(folded)=" << dphiEA_incident << '\n';
+
+    // Variant D: EA with energy-only fits (E-only)
+    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_EONLY);
+    float xEA_fitEonly = xCG, yEA_fitEonly = yCG;
+    m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(eReco, xCG, yCG,
+                                                       xEA_fitEonly, yEA_fitEonly);
+    const float phiEA_fitEonly  = cg2GlobalPhi(m_bemcRec, eReco, xEA_fitEonly, yEA_fitEonly);
+    const float dphiEA_fitEonly = foldToTowerPitch(phiEA_fitEonly - phiTruth);
+    if (vb > 3)
+      std::cout << "    CLUS-CP(EA E-only)  loc=" << xEA_fitEonly
+                << "  φ_SD=" << phiEA_fitEonly
+                << "  Δφ(folded)=" << dphiEA_fitEonly << '\n';
+
+    // Variant E: EA with |z|+|η|+E fits (ZVTX+Eta+E)
+    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP);
+    float xEA_fitZvtxEta = xCG, yEA_fitZvtxEta = yCG;
+    m_bemcRec->CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(eReco, vtxZ, xCG, yCG,
+                                                             xEA_fitZvtxEta, yEA_fitZvtxEta);
+    const float phiEA_fitZvtxEta  = cg2GlobalPhi(m_bemcRec, eReco, xEA_fitZvtxEta, yEA_fitZvtxEta);
+    const float dphiEA_fitZvtxEta = foldToTowerPitch(phiEA_fitZvtxEta - phiTruth);
+    if (vb > 3)
+      std::cout << "    CLUS-CP(EA |z|+|η|+E fit)  loc=" << xEA_fitZvtxEta
+                << "  φ_SD=" << phiEA_fitZvtxEta
+                << "  Δφ(folded)=" << dphiEA_fitZvtxEta << '\n';
+
+    // Simple alias for E-only name used by downstream HFill
+    const float dphiEA_fitE = dphiEA_fitEonly;
     
-    const float phiEA_fitE  = cg2GlobalPhi(m_bemcRec, eReco, xEA_fitE, yEA_fitE);
-    const float dphiEA_fitE = foldToTowerPitch(phiEA_fitE - phiTruth);
-    if (vb > 3)
-      std::cout << "    CLUS-CP(EA E-only fit)  loc=" << xEA_fitE
-                << "  φ_SD=" << phiEA_fitE
-                << "  Δφ(folded)=" << dphiEA_fitE << '\n';
-
-    // Variant D: mixed — φ(E-only), η(|η|+E)
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_MIX);
-    float xEA_mix = xCG, yEA_mix = yCG;
-    m_bemcRec->CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(eReco, xCG, yCG, xEA_mix, yEA_mix);
-    const float phiEA_mix  = cg2GlobalPhi(m_bemcRec, eReco, xEA_mix, yEA_mix);
-    const float dphiEA_mix = foldToTowerPitch(phiEA_mix - phiTruth);
-    if (vb > 3)
-      std::cout << "    CLUS-CP(EA φ:E-only, η:|η|+E)  loc=" << xEA_mix
-                << "  φ_SD=" << phiEA_mix
-                << "  Δφ(folded)=" << dphiEA_mix << '\n';
-
-
+    
     /* ----------------------------- (3) CLUS-BCORR --------------------------- */
     {
       const float nX   = static_cast<float>(m_bemcRec->GetNx());
@@ -2990,61 +2923,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     etaPDCraw  = convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
     etaPDCcorr = etaPDCraw;              // φ-correction doesn’t change η in this study
 
-    /* ---- OUT-OF-WINDOW capture for CLUS & PDC variants (|Δφ| > 0.025 rad),
-           gated by the tight |z| cut via fillGlobal ---------------------- */
-    if (fillGlobal)
-    {
-      const float kOut = 0.025f;  // 25 mrad in radians
-
-      // CLUS-branch residuals
-      const float dClusRaw = rec[0].d;    // CLUS-RAW
-      const float dClusCP  = rec[1].d;    // CLUS-CP
-
-      // PDC-branch residuals
-      const float dPdcRaw  = rec[3].d;    // PDC-RAW
-      const float dPdcCorr = rec[4].d;    // PDC-CORR
-
-      auto push_row = [&](float dphi,
-                          std::vector<float>& vecDphi,
-                          std::vector<float>& vecEta,
-                          std::vector<float>& vecVz,
-                          std::vector<float>& vecE,
-                          float eta, float vz, float E)
-      {
-        vecDphi.push_back(dphi);
-        vecEta .push_back(eta);
-        vecVz  .push_back(vz);
-        vecE   .push_back(E);
-      };
-
-      // ===== CLUS-RAW =====
-      if (std::isfinite(dClusRaw)) {
-        if ( dClusRaw >= +kOut) { ++m_clusRawPos1Tw; push_row(dClusRaw, m_clusRawPos1Tw_dphi, m_clusRawPos1Tw_eta, m_clusRawPos1Tw_vz, m_clusRawPos1Tw_E, etaCLUSraw, vtxZ, eReco); }
-        if ( dClusRaw <= -kOut) { ++m_clusRawNeg1Tw; push_row(dClusRaw, m_clusRawNeg1Tw_dphi, m_clusRawNeg1Tw_eta, m_clusRawNeg1Tw_vz, m_clusRawNeg1Tw_E, etaCLUSraw, vtxZ, eReco); }
-      }
-
-      // ===== CLUS-CP =====
-      if (std::isfinite(dClusCP)) {
-        if ( dClusCP >= +kOut) { ++m_clusCPPos1Tw; push_row(dClusCP, m_clusCPPos1Tw_dphi, m_clusCPPos1Tw_eta, m_clusCPPos1Tw_vz, m_clusCPPos1Tw_E, etaCLUScp, vtxZ, eReco); }
-        if ( dClusCP <= -kOut) { ++m_clusCPNeg1Tw; push_row(dClusCP, m_clusCPNeg1Tw_dphi, m_clusCPNeg1Tw_eta, m_clusCPNeg1Tw_vz, m_clusCPNeg1Tw_E, etaCLUScp, vtxZ, eReco); }
-      }
-
-      // ===== PDC-RAW =====
-      if (std::isfinite(dPdcRaw)) {
-        if ( dPdcRaw >= +kOut) { ++m_pdcRawPos1Tw; push_row(dPdcRaw, m_pdcRawPos1Tw_dphi, m_pdcRawPos1Tw_eta, m_pdcRawPos1Tw_vz, m_pdcRawPos1Tw_E, etaPDCraw, vtxZ, eReco); }
-        if ( dPdcRaw <= -kOut) { ++m_pdcRawNeg1Tw; push_row(dPdcRaw, m_pdcRawNeg1Tw_dphi, m_pdcRawNeg1Tw_eta, m_pdcRawNeg1Tw_vz, m_pdcRawNeg1Tw_E, etaPDCraw, vtxZ, eReco); }
-      }
-
-      // ===== PDC-CORR =====
-      if (std::isfinite(dPdcCorr)) {
-        if ( dPdcCorr >= +kOut) { ++m_pdcCorrPos1Tw; push_row(dPdcCorr, m_pdcCorrPos1Tw_dphi, m_pdcCorrPos1Tw_eta, m_pdcCorrPos1Tw_vz, m_pdcCorrPos1Tw_E, etaPDCcorr, vtxZ, eReco); }
-        if ( dPdcCorr <= -kOut) { ++m_pdcCorrNeg1Tw; push_row(dPdcCorr, m_pdcCorrNeg1Tw_dphi, m_pdcCorrNeg1Tw_eta, m_pdcCorrNeg1Tw_vz, m_pdcCorrNeg1Tw_E, etaPDCcorr, vtxZ, eReco); }
-      }
-    }
-
-
-
-
     #define HFill(H,V)    do{ if((H) && std::isfinite(V))             (H)->Fill(V); }while(0)
     #define HFill2(H,X,Y) do{ if((H) && std::isfinite(X) && std::isfinite(Y)) (H)->Fill((X),(Y)); }while(0)
 
@@ -3052,10 +2930,13 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           // 1D (existing + EA) — |z| ≤ 10 cm
           HFill(hRAW [iE], rec[0].d);
           HFill(hCP  [iE], rec[1].d);
-          HFill(h_phi_diff_cpCorrEA_fitZVTXDep_E[iE], dphiEA_fitZvtx);
-          HFill(h_phi_diff_cpCorrEA_fitEtaDep_E[iE],              dphiEA_fitEta);
-          HFill(h_phi_diff_cpCorrEA_fitEnergyOnly_E[iE],          dphiEA_fitE);
-          HFill(h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E[iE], dphiEA_mix);
+        
+          HFill(h_phi_diff_cpCorrEA_fitZVTXDep_E[iE],                        dphiEA_fitZvtx);
+          HFill(h_phi_diff_cpCorrEA_fitEtaDep_E[iE],                         dphiEA_fitEta);
+          HFill(h_phi_diff_cpCorrEA_fitEnergyOnly_E[iE],                     dphiEA_fitE);
+          HFill(h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[iE],    dphiEA_incident);
+          HFill(h_phi_diff_cpCorrEA_fitZVTXEtaDep_E[iE],                     dphiEA_fitZvtxEta);
+      
           HFill(h_phi_diff_cpBcorr_E [iE], rec[2].d);
           HFill(h_phi_diff_raw_E     [iE], rec[3].d);
           HFill(h_phi_diff_corrected_E[iE], rec[4].d);
@@ -3068,97 +2949,14 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           HFill2(h2_phi_diff_vsEta_PDCraw_E [iE], etaPDCraw,  rec[3].d);
           HFill2(h2_phi_diff_vsEta_PDCcorr_E[iE], etaPDCcorr, rec[4].d);
     }
-
-    // ---------- NEW: parallel residual fills for |z| ≤ 60 cm ----------
-    if (std::fabs(vtxZ) <= 60.f) {
-          // 1D (existing + EA) — |z| ≤ 60 cm
-          HFill(h_phi_diff_cpRaw_E_0_60vz                           [iE], rec[0].d);
-          HFill(h_phi_diff_cpCorr_E_0_60vz                          [iE], rec[1].d);
-          HFill(h_phi_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [iE], dphiEA_fitZvtx);
-          HFill(h_phi_diff_cpCorrEA_fitEtaDep_E_0_60vz              [iE], dphiEA_fitEta);
-          HFill(h_phi_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [iE], dphiEA_fitE);
-          HFill(h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [iE], dphiEA_mix);
-          HFill(h_phi_diff_cpBcorr_E_0_60vz                         [iE], rec[2].d);
-          HFill(h_phi_diff_raw_E_0_60vz                             [iE], rec[3].d);
-          HFill(h_phi_diff_corrected_E_0_60vz                       [iE], rec[4].d);
-    }
-
-    /* ---------- vertex-resolved histogramming (unchanged) ---------- */
-    if (!skipVertexDep)
-    {
-        const float absVz   = std::fabs(vtxZ);
-        const int   iVzAbs  = getVzSlice(absVz);     // 0 … N_VzBins-1 or −1
-        const int   iVzSgn  = getVzSliceSigned(vtxZ);// 0 … 2*N_VzBins-1 or −1
-
-        if (iVzAbs >= 0)                             /* |z| slices */
-        {
-            HFill(h_phi_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
-            HFill(h_phi_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
-            HFill(h_phi_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
-            HFill(h_phi_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
-            HFill(h_phi_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
-        }
-
-        if (m_useSignedVz && iVzSgn >= 0)            /* +z / –z slices */
-        {
-            HFill(h_phi_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
-            HFill(h_phi_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
-            HFill(h_phi_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
-            HFill(h_phi_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
-            HFill(h_phi_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
-        }
-    }
-
    #undef  HFill
    #undef  HFill2
-    
-    // ---------- Δφ winner bookkeeping (RAW vs CLUS-CP vs 4×EA variants) ----------
-    if (fillGlobal)
-    {
-        const float aRAW         = std::fabs(rec[0].d);
-        const float aCP          = std::fabs(rec[1].d);
-        const float aEA_fitZvtx  = std::fabs(dphiEA_fitZvtx);
-        const float aEA_fitEta   = std::fabs(dphiEA_fitEta);
-        const float aEA_fitE     = std::fabs(dphiEA_fitE);
-        const float aEA_mix      = std::fabs(dphiEA_mix);
-
-        float best = aRAW; int which = 0; // 0=RAW, 1=CP, 2=fitZvtx, 3=fitEta, 4=fitE, 5=mix
-        if (aCP          < best) { best = aCP;          which = 1; }
-        if (aEA_fitZvtx  < best) { best = aEA_fitZvtx;  which = 2; }
-        if (aEA_fitEta   < best) { best = aEA_fitEta;   which = 3; }
-        if (aEA_fitE     < best) { best = aEA_fitE;     which = 4; }
-        if (aEA_mix      < best) { best = aEA_mix;      which = 5; }
-
-
-      switch (which)
-      {
-        case 0: ++m_phi6WayWin_RAW;      ++m_phi6WayWinByE_RAW[iE];      break;
-        case 1: ++m_phi6WayWin_CP;       ++m_phi6WayWinByE_CP[iE];       break;
-        case 2: ++m_phi6WayWin_EA_geom;  ++m_phi6WayWinByE_EA_geom[iE];  break;
-        case 3: ++m_phi6WayWin_EA_fitEta;++m_phi6WayWinByE_EA_fitEta[iE];break;
-        case 4: ++m_phi6WayWin_EA_fitE;  ++m_phi6WayWinByE_EA_fitE[iE];  break;
-        case 5: ++m_phi6WayWin_EA_mix;   ++m_phi6WayWinByE_EA_mix[iE];   break;
-      }
-
-      if (vb >= 2)
-      {
-          const char* tags[6] = {
-            "CLUS-RAW", "CLUS-CP", "CLUS-CP(EA |z|+E fits)",
-            "CLUS-CP(EA |eta|+E fits)", "CLUS-CP(EA E-only fits)",
-            "CLUS-CP(EA φ:E-only, η:|η|+E)"
-          };
-
-        std::cout << "  WINNER(φ per-event, RAW/CP/EA*): "
-                  << tags[which] << "  |Δφ|=" << std::fixed << std::setprecision(6) << best << '\n';
-      }
-    }
-
 }
 
 
 
 // ============================================================================
-//  Δη – five flavours
+//  Δη – flavors
 // ============================================================================
 void PositionDependentCorrection::fillDEtaAllVariants(
         RawCluster*                   clus,
@@ -3315,55 +3113,68 @@ void PositionDependentCorrection::fillDEtaAllVariants(
               PDC_detail::cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ)};
 
 
-    // 2b) CLUS-CP(EA) — four variants
+    // 2b) CLUS-CP(EA) — five variants
     // Variant A: EA with |z|-dependent + energy-dependent fits (fitZvtx)
     float xEA_fitZvtx = xCG, yEA_fitZvtx = yCG;
     m_bemcRec->CorrectPositionEnergyAwareZVTXAndEnergyDep(eReco, vtxZ, xCG, yCG,
-                                                          xEA_fitZvtx, yEA_fitZvtx);
+                                                                    xEA_fitZvtx, yEA_fitZvtx);
     const float etaEA_fitZvtx  = cg2ShowerEta(m_bemcRec, eReco, xEA_fitZvtx, yEA_fitZvtx, vtxZ);
     const float dEtaEA_fitZvtx = etaEA_fitZvtx - etaTruth;
     if (vb > 3)
-      std::cout << "    CLUS-CP(EA |z|+E fit)  loc=" << yEA_fitZvtx
-                << "  η_SD=" << etaEA_fitZvtx
-                << "  Δη=" << dEtaEA_fitZvtx << '\n';
+        std::cout << "    CLUS-CP(EA |z|+E fit)  loc=" << yEA_fitZvtx
+                          << "  η_SD=" << etaEA_fitZvtx
+                          << "  Δη=" << dEtaEA_fitZvtx << '\n';
 
-    // Variant B: |η|+E fits
+    // Variant B: |η|+E fits (fitEta)
     float xEA_fitEta = xCG, yEA_fitEta = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEtaAndEnergyDep(eReco, xCG, yCG, xEA_fitEta, yEA_fitEta);
     const float etaEA_fitEta  = cg2ShowerEta(m_bemcRec, eReco, xEA_fitEta, yEA_fitEta, vtxZ);
     const float dEtaEA_fitEta = etaEA_fitEta - etaTruth;
     if (vb > 3)
-      std::cout << "    CLUS-CP(EA |η|+E fit)  loc=" << yEA_fitEta
-                << "  η_SD=" << etaEA_fitEta
-                << "  Δη=" << dEtaEA_fitEta << '\n';
+            std::cout << "    CLUS-CP(EA |η|+E fit)  loc=" << yEA_fitEta
+                          << "  η_SD=" << etaEA_fitEta
+                          << "  Δη=" << dEtaEA_fitEta << '\n';
 
-    // Variant C: E-only fits
-    float xEA_fitE = xCG, yEA_fitE = yCG;
-    m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(eReco, xCG, yCG, xEA_fitE, yEA_fitE);
-    
-    if (h2_alphaEta_vsVz)
-    {
-      const float aEta = m_bemcRec->lastAlphaEta();
-      if (std::isfinite(aEta)) h2_alphaEta_vsVz->Fill(vtxZ, aEta);
+    // Variant C: EA with energy + incident-angle fits (E+incident)
+    float xEA_inc = xCG, yEA_inc = yCG;
+            m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
+                                                                             xEA_inc, yEA_inc);
+    if (h2_alphaEta_vsVz) {
+        const float aEta = m_bemcRec->lastAlphaEta();
+        if (std::isfinite(aEta)) h2_alphaEta_vsVz->Fill(vtxZ, aEta);
     }
-    
-    const float etaEA_fitE  = cg2ShowerEta(m_bemcRec, eReco, xEA_fitE, yEA_fitE, vtxZ);
-    const float dEtaEA_fitE = etaEA_fitE - etaTruth;
+    const float etaEA_EandIncident  = cg2ShowerEta(m_bemcRec, eReco, xEA_inc, yEA_inc, vtxZ);
+    const float dEtaEA_EandIncident = etaEA_EandIncident - etaTruth;
+    const float dEtaEA_incident     = dEtaEA_EandIncident;
     if (vb > 3)
-      std::cout << "    CLUS-CP(EA E-only fit)  loc=" << yEA_fitE
-                << "  η_SD=" << etaEA_fitE
-                << "  Δη=" << dEtaEA_fitE << '\n';
+        std::cout << "    CLUS-CP(EA E+incident)  loc=" << yEA_inc
+                          << "  η_SD=" << etaEA_EandIncident
+                          << "  Δη=" << dEtaEA_incident << '\n';
 
-    // Variant D: φ(E-only), η(|η|+E)
-    float xEA_mix = xCG, yEA_mix = yCG;
-    m_bemcRec->CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(eReco, xCG, yCG, xEA_mix, yEA_mix);
-    const float etaEA_mix  = cg2ShowerEta(m_bemcRec, eReco, xEA_mix, yEA_mix, vtxZ);
-    const float dEtaEA_mix = etaEA_mix - etaTruth;
+    // Variant D: EA with energy-only fits (E-only)
+    float xEA_fitEonly = xCG, yEA_fitEonly = yCG;
+            m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(eReco, xCG, yCG,
+                                                                 xEA_fitEonly, yEA_fitEonly);
+    const float etaEA_fitEonly  = cg2ShowerEta(m_bemcRec, eReco, xEA_fitEonly, yEA_fitEonly, vtxZ);
+    const float dEtaEA_fitEonly = etaEA_fitEonly - etaTruth;
     if (vb > 3)
-      std::cout << "    CLUS-CP(EA φ:E-only, η:|η|+E)  loc=" << yEA_mix
-                << "  η_SD=" << etaEA_mix
-                << "  Δη=" << dEtaEA_mix << '\n';
+         std::cout << "    CLUS-CP(EA E-only)  loc=" << yEA_fitEonly
+                          << "  η_SD=" << etaEA_fitEonly
+                          << "  Δη=" << dEtaEA_fitEonly << '\n';
 
+    // Variant E: EA with |z|+|η|+E fits (ZVTX+Eta+E)
+    float xEA_fitZvtxEta = xCG, yEA_fitZvtxEta = yCG;
+              m_bemcRec->CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(eReco, vtxZ, xCG, yCG,
+                                                                       xEA_fitZvtxEta, yEA_fitZvtxEta);
+    const float etaEA_fitZvtxEta  = cg2ShowerEta(m_bemcRec, eReco, xEA_fitZvtxEta, yEA_fitZvtxEta, vtxZ);
+    const float dEtaEA_fitZvtxEta = etaEA_fitZvtxEta - etaTruth;
+    if (vb > 3)
+         std::cout << "    CLUS-CP(EA |z|+|η|+E fit)  loc=" << yEA_fitZvtxEta
+                          << "  η_SD=" << etaEA_fitZvtxEta
+                          << "  Δη=" << dEtaEA_fitZvtxEta << '\n';
+
+    // Simple alias for E-only name used by downstream HFill
+    const float dEtaEA_fitE = dEtaEA_fitEonly;
 
 
   // 3) CLUS‑BCORR
@@ -3649,97 +3460,19 @@ void PositionDependentCorrection::fillDEtaAllVariants(
       // 1D (existing + EA) — |z| ≤ 10 cm
       HFill(hRAW [iE], rec[0].d);
       HFill(hCP  [iE], rec[1].d);
-      HFill(h_eta_diff_cpCorrEA_fitZVTXDep_E[iE], dEtaEA_fitZvtx);
-      HFill(h_eta_diff_cpCorrEA_fitEtaDep_E[iE],              dEtaEA_fitEta);
-      HFill(h_eta_diff_cpCorrEA_fitEnergyOnly_E[iE],          dEtaEA_fitE);
-      HFill(h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E[iE], dEtaEA_mix);
+        
+      HFill(h_eta_diff_cpCorrEA_fitZVTXDep_E[iE],                               dEtaEA_fitZvtx);
+      HFill(h_eta_diff_cpCorrEA_fitEtaDep_E[iE],                                dEtaEA_fitEta);
+      HFill(h_eta_diff_cpCorrEA_fitEnergyOnly_E[iE],                            dEtaEA_fitE);
+      HFill(h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[iE],           dEtaEA_incident);
+      HFill(h_eta_diff_cpCorrEA_fitZVTXEtaDep_E[iE],                            dEtaEA_fitZvtxEta);
+        
       HFill(h_eta_diff_cpBcorr_E [iE], rec[2].d);
       HFill(h_eta_diff_raw_E     [iE], rec[3].d);
       HFill(h_eta_diff_corrected_E[iE], rec[4].d);
     }
 
-    // ---------- NEW: parallel residual fills for |z| ≤ 60 cm ----------
-    if (std::fabs(vtxZ) <= 60.f)
-    {
-      HFill(h_eta_diff_cpRaw_E_0_60vz                           [iE], rec[0].d);
-      HFill(h_eta_diff_cpCorr_E_0_60vz                          [iE], rec[1].d);
-      HFill(h_eta_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [iE], dEtaEA_fitZvtx);
-      HFill(h_eta_diff_cpCorrEA_fitEtaDep_E_0_60vz              [iE], dEtaEA_fitEta);
-      HFill(h_eta_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [iE], dEtaEA_fitE);
-      HFill(h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [iE], dEtaEA_mix);
-      HFill(h_eta_diff_cpBcorr_E_0_60vz                         [iE], rec[2].d);
-      HFill(h_eta_diff_raw_E_0_60vz                             [iE], rec[3].d);
-      HFill(h_eta_diff_corrected_E_0_60vz                       [iE], rec[4].d);
-    }
-
-    /* ---------- vertex-resolved histogramming ---------- */
-    if (!skipVertexDep)
-    {
-        const float absVz   = std::fabs(vtxZ);
-        const int   iVzAbs  = getVzSlice(absVz);      // 0 … N_VzBins-1 or −1
-        const int   iVzSgn  = getVzSliceSigned(vtxZ); // 0 … 2*N_VzBins-1 or −1
-
-        if (iVzAbs >= 0)                              /* |z| slices */
-        {
-            HFill(h_eta_diff_cpRaw_E_vz      [iE][iVzAbs], rec[0].d);
-            HFill(h_eta_diff_cpCorr_E_vz     [iE][iVzAbs], rec[1].d);
-            HFill(h_eta_diff_cpBcorr_E_vz    [iE][iVzAbs], rec[2].d);
-            HFill(h_eta_diff_raw_E_vz        [iE][iVzAbs], rec[3].d);
-            HFill(h_eta_diff_corrected_E_vz  [iE][iVzAbs], rec[4].d);
-        }
-
-        if (m_useSignedVz && iVzSgn >= 0)             /* +z / –z slices */
-        {
-            HFill(h_eta_diff_cpRaw_E_vzsgn      [iE][iVzSgn], rec[0].d);
-            HFill(h_eta_diff_cpCorr_E_vzsgn     [iE][iVzSgn], rec[1].d);
-            HFill(h_eta_diff_cpBcorr_E_vzsgn    [iE][iVzSgn], rec[2].d);
-            HFill(h_eta_diff_raw_E_vzsgn        [iE][iVzSgn], rec[3].d);
-            HFill(h_eta_diff_corrected_E_vzsgn  [iE][iVzSgn], rec[4].d);
-        }
-    }
-
 #undef  HFill
-
-    // ----- Δη winner bookkeeping (RAW vs CLUS-CP vs 4×EA variants) -----
-    if (fillGlobal)
-    {
-        const float aRAW         = std::fabs(rec[0].d);
-        const float aCP          = std::fabs(rec[1].d);
-        const float aEA_fitZvtx  = std::fabs(dEtaEA_fitZvtx);
-        const float aEA_fitEta   = std::fabs(dEtaEA_fitEta);
-        const float aEA_fitE     = std::fabs(dEtaEA_fitE);
-        const float aEA_mix      = std::fabs(dEtaEA_mix);
-
-        float best = aRAW; int which = 0; // 0=RAW, 1=CP, 2=fitZvtx, 3=fitEta, 4=fitE, 5=mix
-        if (aCP          < best) { best = aCP;          which = 1; }
-        if (aEA_fitZvtx  < best) { best = aEA_fitZvtx;  which = 2; }
-        if (aEA_fitEta   < best) { best = aEA_fitEta;   which = 3; }
-        if (aEA_fitE     < best) { best = aEA_fitE;     which = 4; }
-        if (aEA_mix      < best) { best = aEA_mix;      which = 5; }
-
-
-      switch (which)
-      {
-        case 0: ++m_eta6WayWin_RAW;      ++m_eta6WayWinByE_RAW[iE];      break;
-        case 1: ++m_eta6WayWin_CP;       ++m_eta6WayWinByE_CP[iE];       break;
-        case 2: ++m_eta6WayWin_EA_geom;  ++m_eta6WayWinByE_EA_geom[iE];  break;
-        case 3: ++m_eta6WayWin_EA_fitEta;++m_eta6WayWinByE_EA_fitEta[iE];break;
-        case 4: ++m_eta6WayWin_EA_fitE;  ++m_eta6WayWinByE_EA_fitE[iE];  break;
-        case 5: ++m_eta6WayWin_EA_mix;   ++m_eta6WayWinByE_EA_mix[iE];   break;
-      }
-
-      if (vb >= 2)
-      {
-          const char* tags[6] = {
-            "CLUS-RAW", "CLUS-CP", "CLUS-CP(EA |z|+E fits)",
-            "CLUS-CP(EA |eta|+E fits)", "CLUS-CP(EA E-only fits)",
-            "CLUS-CP(EA φ:E-only, η:|η|+E)"
-          };
-
-        std::cout << "  WINNER(η per-event, RAW/CP/EA*): "
-                  << tags[which] << "  |Δη|=" << std::fixed << std::setprecision(6) << best << '\n';
-      }
-    }
 }
 
 
@@ -4000,31 +3733,41 @@ void PositionDependentCorrection::processClusterPairs(
             }
               case VarPi0::EA_FIT_zDEP: {
                 float xEA = xCG, yEA = yCG;
-                m_bemcRec->CorrectPositionEnergyAwareZVTXAndEnergyDep(E, vtxZ,  // pass zvtx here
+                m_bemcRec->CorrectPositionEnergyAwareZVTXAndEnergyDep(E, vtxZ,
                                                                       xCG, yCG,
                                                                       xEA, yEA);
                 etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
                 phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
                 break;
               }
-            case VarPi0::EA_FIT_ETADEP: {
-              float xEA=xCG, yEA=yCG; m_bemcRec->CorrectPositionEnergyAwareEtaAndEnergyDep(E, xCG, yCG, xEA, yEA);
-              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
-              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
-              break;
-            }
-            case VarPi0::EA_FIT_EONLY: {
-              float xEA=xCG, yEA=yCG; m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(E, xCG, yCG, xEA, yEA);
-              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
-              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
-              break;
-            }
-            case VarPi0::EA_MIX: {
-              float xEA=xCG, yEA=yCG; m_bemcRec->CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(E, xCG, yCG, xEA, yEA);
-              etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
-              phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
-              break;
-            }
+              case VarPi0::EA_FIT_ETADEP: {
+                float xEA = xCG, yEA = yCG;
+                m_bemcRec->CorrectPositionEnergyAwareEtaAndEnergyDep(E, xCG, yCG, xEA, yEA);
+                etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+                phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+                break;
+              }
+              case VarPi0::EA_FIT_EONLY: {
+                float xEA = xCG, yEA = yCG;
+                m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(E, xCG, yCG, xEA, yEA);
+                etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+                phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+                break;
+              }
+              case VarPi0::EA_FIT_EONLY_INCIDENT: {
+                float xEA = xCG, yEA = yCG;
+                m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(E, xCG, yCG, xEA, yEA);
+                etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+                phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+                break;
+              }
+              case VarPi0::EA_FIT_ZVTXETADEP: {
+                float xEA = xCG, yEA = yCG;
+                m_bemcRec->CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(E, vtxZ, xCG, yCG, xEA, yEA);
+                etaSD = PDC_detail::cg2ShowerEta(m_bemcRec, E, xEA, yEA, vtxZ);
+                phiSD = PDC_detail::cg2GlobalPhi (m_bemcRec, E, xEA, yEA);
+                break;
+              }
             case VarPi0::PDC_RAW:
             case VarPi0::PDC_CORR: {
               std::pair<float,float> blkLoc = blk;
@@ -4308,13 +4051,16 @@ void PositionDependentCorrection::finalClusterLoop(
     if (!m_firstPassBvaluesOnly && h2_chi2_tot_etaPhi)
         h2_chi2_tot_etaPhi->Fill(lt_eta, lt_phi);
 
-      if (clusE < 0.1f)
+      // NEW: skip clusters below the first TH3 energy bin edge to avoid underflow work
+      const float E_MIN_BIN = static_cast<float>(eEdge[0]);  // typically 2.0 GeV
+      if (clusE < E_MIN_BIN)
       {
-        if (Verbosity() > 11)
+        if (Verbosity() > 8)
         {
-          std::cout << "[DEBUG]  => Skipping cluster with E=" << clusE
-                    << " (<0.1). \n";
+          std::cout << "[SKIP]  => cluster E=" << clusE
+                    << " < first E-bin edge (" << E_MIN_BIN << " GeV). Skipping.\n";
         }
+        // reuse the existing "below-E" counter
         s_cuts.c1_E_below++;
         continue;
       }
@@ -4537,17 +4283,31 @@ void PositionDependentCorrection::finalClusterLoop(
           h3_cluster_block_cord_E_etaEdge->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
       }
 
-      // --- NEW: always fill uncorrected |z_vtx|-sliced TH3s (COARSE 0–60, and FINE 0–10) ---
+      // --- NEW: always fill uncorrected |z_vtx|-sliced TH3s (COARSE 0–150, and FINE 0–10)
+      //           plus the new η-view × |z| cross-variants ---
       {
-        const float absVz = std::fabs(vtx_z);
+        const float absVz  = std::fabs(vtx_z);
+        const float absEta = std::fabs(clusEta);
 
+        // COARSE |z| fills (0–150 cm)
         const int iz = getVzH3Slice(absVz);
         if (iz >= 0 && iz < N_VzH3Bins && h3_blockCoord_E_vz[iz])
         {
+          // existing coarse z-only map
           h3_blockCoord_E_vz[iz]->Fill(blkCoord.first,   // local-η in block [0,1]
                                        blkCoord.second,  // local-φ in block [0,1]
                                        clusE,            // energy
                                        kFillW);
+
+          // NEW: coarse cross-slice η-view × |z|
+          if (absEta <= 1.10f && h3_blockCoord_E_eta_vz[0][iz])
+            h3_blockCoord_E_eta_vz[0][iz]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+          if (absEta <= 0.20f && h3_blockCoord_E_eta_vz[1][iz])
+            h3_blockCoord_E_eta_vz[1][iz]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+          if (absEta > 0.20f && absEta <= 0.70f && h3_blockCoord_E_eta_vz[2][iz])
+            h3_blockCoord_E_eta_vz[2][iz]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+          if (absEta > 0.70f && absEta <= 1.10f && h3_blockCoord_E_eta_vz[3][iz])
+            h3_blockCoord_E_eta_vz[3][iz]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
 
           if (Verbosity() > 1)
           {
@@ -4571,10 +4331,21 @@ void PositionDependentCorrection::finalClusterLoop(
           const int izf = getVzH3FineSlice(absVz);   // 0..4 for [0–10), -1 otherwise
           if (izf >= 0 && izf < N_VzH3FineBins && h3_blockCoord_E_vz_fine[izf])
           {
+            // existing fine z-only map
             h3_blockCoord_E_vz_fine[izf]->Fill(blkCoord.first,   // local-η in block [0,1]
                                                blkCoord.second,  // local-φ in block [0,1]
                                                clusE,            // energy
                                                kFillW);
+
+            // NEW: fine cross-slice η-view × |z|
+            if (absEta <= 1.10f && h3_blockCoord_E_eta_vz_fine[0][izf])
+              h3_blockCoord_E_eta_vz_fine[0][izf]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+            if (absEta <= 0.20f && h3_blockCoord_E_eta_vz_fine[1][izf])
+              h3_blockCoord_E_eta_vz_fine[1][izf]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+            if (absEta > 0.20f && absEta <= 0.70f && h3_blockCoord_E_eta_vz_fine[2][izf])
+              h3_blockCoord_E_eta_vz_fine[2][izf]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+            if (absEta > 0.70f && absEta <= 1.10f && h3_blockCoord_E_eta_vz_fine[3][izf])
+              h3_blockCoord_E_eta_vz_fine[3][izf]->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
 
             if (Verbosity() > 1)
             {
@@ -4682,56 +4453,103 @@ void PositionDependentCorrection::finalClusterLoop(
         }
       }
 
-      // ---- NEW: per-|z_vtx| corrected (coarse 0–60, fine 0–10), independent of fillGlobal ----
+      // ---- NEW: per-|z_vtx| corrected (coarse 0–60, fine 0–10) + prefer η×z when available ----
       {
         const float absVz = std::fabs(vtx_z);
 
+        // Map |η| to view index for η×z tables
+        int vIdx = -1;
+        const float absEta = std::fabs(clusEta);
+        if      (absEta <= 0.20f)               vIdx = 1;      // etaCore
+        else if (absEta > 0.20f && absEta <= 0.70f) vIdx = 2;  // etaMid
+        else if (absEta > 0.70f && absEta <= 1.10f) vIdx = 3;  // etaEdge
+        else if (absEta <= 1.10f)               vIdx = 0;      // fullEta
+
         // COARSE 0–60
         const int iz = getVzH3Slice(absVz);
-        if (iz >= 0 && iz < N_VzH3Bins &&
-            (m_bPhiReady_vz[iz] || m_bEtaReady_vz[iz]) &&
-            h3_blockCoord_E_vz_corr[iz])
+        if (iz >= 0 && iz < N_VzH3Bins)
         {
-          float eZ = rawEta, pZ = rawPhi;
-          if (iEbin >= 0 && iEbin < N_Ebins)
+          // Prefer η×z if the table is complete for this (η,z)
+          if (vIdx >= 0 &&
+              (m_bPhiReady_eta_vz[vIdx][iz] || m_bEtaReady_eta_vz[vIdx][iz]) &&
+              h3_blockCoord_E_eta_vz_corr[vIdx][iz])
           {
-            if (m_bPhiReady_vz[iz]) {
-              const float bPz = m_bValsPhi_vz[iz][iEbin];
-              if (bPz > 1e-9f) pZ = doPhiBlockCorr(pZ, bPz);
+            float eZv = rawEta, pZv = rawPhi;
+            if (iEbin >= 0 && iEbin < N_Ebins)
+            {
+              if (m_bPhiReady_eta_vz[vIdx][iz]) {
+                const float bPv = m_bValsPhi_eta_vz[vIdx][iz][iEbin];
+                if (bPv > 1e-9f) pZv = doPhiBlockCorr(pZv, bPv);
+              }
+              if (m_bEtaReady_eta_vz[vIdx][iz]) {
+                const float bEv = m_bValsEta_eta_vz[vIdx][iz][iEbin];
+                if (bEv > 1e-9f) eZv = doEtaBlockCorr(eZv, bEv);
+              }
             }
-            if (m_bEtaReady_vz[iz]) {
-              const float bEz = m_bValsEta_vz[iz][iEbin];
-              if (bEz > 1e-9f) eZ = doEtaBlockCorr(eZ, bEz);
-            }
+            h3_blockCoord_E_eta_vz_corr[vIdx][iz]->Fill(eZv, pZv, clusE, kFillW);
           }
-          h3_blockCoord_E_vz_corr[iz]->Fill(eZ, pZ, clusE, kFillW);
+          else if ((m_bPhiReady_vz[iz] || m_bEtaReady_vz[iz]) && h3_blockCoord_E_vz_corr[iz]) // fallback: z-only
+          {
+            float eZ = rawEta, pZ = rawPhi;
+            if (iEbin >= 0 && iEbin < N_Ebins)
+            {
+              if (m_bPhiReady_vz[iz]) {
+                const float bPz = m_bValsPhi_vz[iz][iEbin];
+                if (bPz > 1e-9f) pZ = doPhiBlockCorr(pZ, bPz);
+              }
+              if (m_bEtaReady_vz[iz]) {
+                const float bEz = m_bValsEta_vz[iz][iEbin];
+                if (bEz > 1e-9f) eZ = doEtaBlockCorr(eZ, bEz);
+              }
+            }
+            h3_blockCoord_E_vz_corr[iz]->Fill(eZ, pZ, clusE, kFillW);
+          }
         }
 
         // FINE 0–10
         if (absVz <= 10.f)
         {
           const int izf = getVzH3FineSlice(absVz);
-          if (izf >= 0 && izf < N_VzH3FineBins &&
-              (m_bPhiReady_vz_fine[izf] || m_bEtaReady_vz_fine[izf]) &&
-              h3_blockCoord_E_vz_fine_corr[izf])
+          if (izf >= 0 && izf < N_VzH3FineBins)
           {
-            float eZf = rawEta, pZf = rawPhi;
-            if (iEbin >= 0 && iEbin < N_Ebins)
+            if (vIdx >= 0 &&
+                (m_bPhiReady_eta_vz_fine[vIdx][izf] || m_bEtaReady_eta_vz_fine[vIdx][izf]) &&
+                h3_blockCoord_E_eta_vz_fine_corr[vIdx][izf])
             {
-              if (m_bPhiReady_vz_fine[izf]) {
-                const float bPzf = m_bValsPhi_vz_fine[izf][iEbin];
-                if (bPzf > 1e-9f) pZf = doPhiBlockCorr(pZf, bPzf);
+              float eZfV = rawEta, pZfV = rawPhi;
+              if (iEbin >= 0 && iEbin < N_Ebins)
+              {
+                if (m_bPhiReady_eta_vz_fine[vIdx][izf]) {
+                  const float bPzfV = m_bValsPhi_eta_vz_fine[vIdx][izf][iEbin];
+                  if (bPzfV > 1e-9f) pZfV = doPhiBlockCorr(pZfV, bPzfV);
+                }
+                if (m_bEtaReady_eta_vz_fine[vIdx][izf]) {
+                  const float bEzfV = m_bValsEta_eta_vz_fine[vIdx][izf][iEbin];
+                  if (bEzfV > 1e-9f) eZfV = doEtaBlockCorr(eZfV, bEzfV);
+                }
               }
-              if (m_bEtaReady_vz_fine[izf]) {
-                const float bEzf = m_bValsEta_vz_fine[izf][iEbin];
-                if (bEzf > 1e-9f) eZf = doEtaBlockCorr(eZf, bEzf);
-              }
+              h3_blockCoord_E_eta_vz_fine_corr[vIdx][izf]->Fill(eZfV, pZfV, clusE, kFillW);
             }
-            h3_blockCoord_E_vz_fine_corr[izf]->Fill(eZf, pZf, clusE, kFillW);
+            else if ((m_bPhiReady_vz_fine[izf] || m_bEtaReady_vz_fine[izf]) &&
+                     h3_blockCoord_E_vz_fine_corr[izf])  // fallback: z-only
+            {
+              float eZf = rawEta, pZf = rawPhi;
+              if (iEbin >= 0 && iEbin < N_Ebins)
+              {
+                if (m_bPhiReady_vz_fine[izf]) {
+                  const float bPzf = m_bValsPhi_vz_fine[izf][iEbin];
+                  if (bPzf > 1e-9f) pZf = doPhiBlockCorr(pZf, bPzf);
+                }
+                if (m_bEtaReady_vz_fine[izf]) {
+                  const float bEzf = m_bValsEta_vz_fine[izf][iEbin];
+                  if (bEzf > 1e-9f) eZf = doEtaBlockCorr(eZf, bEzf);
+                }
+              }
+              h3_blockCoord_E_vz_fine_corr[izf]->Fill(eZf, pZf, clusE, kFillW);
+            }
           }
         }
       }
-
 
 
 
@@ -5493,157 +5311,6 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
     }
   }
 
-  // ----- Δφ – CORRECTED 6-WAY (RAW / CP / EA variants) -----
-  {
-    const std::uint64_t nTot6 =
-      m_phi6WayWin_RAW + m_phi6WayWin_CP + m_phi6WayWin_EA_geom +
-      m_phi6WayWin_EA_fitEta + m_phi6WayWin_EA_fitE + m_phi6WayWin_EA_mix;
-
-    if (Verbosity() > 0 && nTot6)
-    {
-      std::cout << '\n' << ANSI_BOLD
-                << "╭──────────────────────────────────────────────╮\n"
-                << "│   Δφ  –  CORRECTED 6-WAY (RAW / CP / EA*)     │\n"
-                << "╰──────────────────────────────────────────────╯" << ANSI_RESET << '\n'
-                << std::left << std::setw(26) << "variant"
-                << std::right<< std::setw(12)<< "wins"
-                << std::setw(12)             << "share\n"
-                << "──────────────────────────────────────────────────────\n"
-                << std::left << std::setw(26) << "CLUS-RAW"
-                << std::right<< std::setw(12)<< m_phi6WayWin_RAW
-                << std::setw(12)             << pct(m_phi6WayWin_RAW, nTot6) << '\n'
-                << std::left << std::setw(26) << "CLUS-CP"
-                << std::right<< std::setw(12)<< m_phi6WayWin_CP
-                << std::setw(12)             << pct(m_phi6WayWin_CP, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (geometry)"
-                << std::right<< std::setw(12)<< m_phi6WayWin_EA_geom
-                << std::setw(12)             << pct(m_phi6WayWin_EA_geom, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (|eta|+E fits)"
-                << std::right<< std::setw(12)<< m_phi6WayWin_EA_fitEta
-                << std::setw(12)             << pct(m_phi6WayWin_EA_fitEta, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (E-only fits)"
-                << std::right<< std::setw(12)<< m_phi6WayWin_EA_fitE
-                << std::setw(12)             << pct(m_phi6WayWin_EA_fitE, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
-                << std::right<< std::setw(12)<< m_phi6WayWin_EA_mix
-                << std::setw(12)             << pct(m_phi6WayWin_EA_mix, nTot6) << '\n';
-    }
-  }
-
-  // ----- Δη – CORRECTED 6-WAY (RAW / CP / EA variants) -----
-  {
-    const std::uint64_t nTot6 =
-      m_eta6WayWin_RAW + m_eta6WayWin_CP + m_eta6WayWin_EA_geom +
-      m_eta6WayWin_EA_fitEta + m_eta6WayWin_EA_fitE + m_eta6WayWin_EA_mix;
-
-    if (Verbosity() > 0 && nTot6)
-    {
-      std::cout << '\n' << ANSI_BOLD
-                << "╭──────────────────────────────────────────────╮\n"
-                << "│   Δη  –  CORRECTED 6-WAY (RAW / CP / EA*)     │\n"
-                << "╰──────────────────────────────────────────────╯" << ANSI_RESET << '\n'
-                << std::left << std::setw(26) << "variant"
-                << std::right<< std::setw(12)<< "wins"
-                << std::setw(12)             << "share\n"
-                << "──────────────────────────────────────────────────────\n"
-                << std::left << std::setw(26) << "CLUS-RAW"
-                << std::right<< std::setw(12)<< m_eta6WayWin_RAW
-                << std::setw(12)             << pct(m_eta6WayWin_RAW, nTot6) << '\n'
-                << std::left << std::setw(26) << "CLUS-CP"
-                << std::right<< std::setw(12)<< m_eta6WayWin_CP
-                << std::setw(12)             << pct(m_eta6WayWin_CP, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (geometry)"
-                << std::right<< std::setw(12)<< m_eta6WayWin_EA_geom
-                << std::setw(12)             << pct(m_eta6WayWin_EA_geom, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (|eta|+E fits)"
-                << std::right<< std::setw(12)<< m_eta6WayWin_EA_fitEta
-                << std::setw(12)             << pct(m_eta6WayWin_EA_fitEta, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (E-only fits)"
-                << std::right<< std::setw(12)<< m_eta6WayWin_EA_fitE
-                << std::setw(12)             << pct(m_eta6WayWin_EA_fitE, nTot6) << '\n'
-                << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
-                << std::right<< std::setw(12)<< m_eta6WayWin_EA_mix
-                << std::setw(12)             << pct(m_eta6WayWin_EA_mix, nTot6) << '\n';
-    }
-  }
-
-  /* ───────────────────────── 3) Energy-sliced 6-way (RAW / CP / EA×4) ─────────── */
-  if (Verbosity() > 5)
-  {
-    std::cout << '\n' << ANSI_BOLD
-              << "╭──────────────────────────────────────────────────────────╮\n"
-              << "│   ENERGY-SLICED  Δφ & Δη  (RAW / CP / EA_geom / EA_|η|+E / EA_E-only / EA_mix) │\n"
-              << "╰──────────────────────────────────────────────────────────╯"
-              << ANSI_RESET << '\n';
-
-    for (int ie = 0; ie < N_Ebins; ++ie)
-    {
-      // φ slice totals (6-way)
-      const std::uint64_t phiRAW   = m_phi6WayWinByE_RAW[ie];
-      const std::uint64_t phiCP    = m_phi6WayWinByE_CP[ie];
-      const std::uint64_t phiGeom  = m_phi6WayWinByE_EA_geom[ie];
-      const std::uint64_t phiFitEta= m_phi6WayWinByE_EA_fitEta[ie];
-      const std::uint64_t phiFitE  = m_phi6WayWinByE_EA_fitE[ie];
-      const std::uint64_t phiMix   = m_phi6WayWinByE_EA_mix[ie];
-      const std::uint64_t phiTOT   = phiRAW + phiCP + phiGeom + phiFitEta + phiFitE + phiMix;
-
-      // η slice totals (6-way)
-      const std::uint64_t etaRAW   = m_eta6WayWinByE_RAW[ie];
-      const std::uint64_t etaCP    = m_eta6WayWinByE_CP[ie];
-      const std::uint64_t etaGeom  = m_eta6WayWinByE_EA_geom[ie];
-      const std::uint64_t etaFitEta= m_eta6WayWinByE_EA_fitEta[ie];
-      const std::uint64_t etaFitE  = m_eta6WayWinByE_EA_fitE[ie];
-      const std::uint64_t etaMix   = m_eta6WayWinByE_EA_mix[ie];
-      const std::uint64_t etaTOT   = etaRAW + etaCP + etaGeom + etaFitEta + etaFitE + etaMix;
-
-      std::cout << ANSI_BOLD << "  • E-slice " << ie << ANSI_RESET
-                << "   (entries: Δφ=" << phiTOT << ", Δη=" << etaTOT << ")\n";
-
-      std::cout << std::left << std::setw(26) << "variant"
-                << std::right<< std::setw(12)<< "Δφ wins"
-                << std::setw(10)             << "%"
-                << std::setw(12)             << "Δη wins"
-                << std::setw(10)             << "%\n"
-                << "  ───────────────────────────────────────────────────────\n";
-
-      auto P = [&](std::uint64_t n, std::uint64_t d){ return pct(n, d); };
-
-      std::cout << std::left << std::setw(26) << "CLUS-RAW"
-                << std::right<< std::setw(12)<< phiRAW
-                << std::setw(10)             << P(phiRAW, phiTOT)
-                << std::setw(12)             << etaRAW
-                << std::setw(10)             << P(etaRAW, etaTOT) << '\n';
-
-      std::cout << std::left << std::setw(26) << "CLUS-CP"
-                << std::right<< std::setw(12)<< phiCP
-                << std::setw(10)             << P(phiCP, phiTOT)
-                << std::setw(12)             << etaCP
-                << std::setw(10)             << P(etaCP, etaTOT) << '\n';
-
-      std::cout << std::left << std::setw(26) << "EA (geometry)"
-                << std::right<< std::setw(12)<< phiGeom
-                << std::setw(10)             << P(phiGeom, phiTOT)
-                << std::setw(12)             << P(etaGeom, etaTOT) << '\n';
-
-      std::cout << std::left << std::setw(26) << "EA (|eta|+E fits)"
-                << std::right<< std::setw(12)<< phiFitEta
-                << std::setw(10)             << P(phiFitEta, phiTOT)
-                << std::setw(12)             << P(etaFitEta, etaTOT) << '\n';
-
-      std::cout << std::left << std::setw(26) << "EA (E-only fits)"
-                << std::right<< std::setw(12)<< phiFitE
-                << std::setw(10)             << P(phiFitE, phiTOT)
-                << std::setw(12)             << P(etaFitE, etaTOT) << '\n';
-
-      std::cout << std::left << std::setw(26) << "EA (φ:E-only, η:|η|+E)"
-                << std::right<< std::setw(12)<< phiMix
-                << std::setw(10)             << P(phiMix, phiTOT)
-                << std::setw(12)             << P(etaMix, etaTOT) << '\n';
-
-      std::cout << "  ───────────────────────────────────────────────────────\n";
-    }
-  }
-
   return 0;
 }
 
@@ -5729,25 +5396,6 @@ PositionDependentCorrection::getBlockCord(const std::vector<int>   &towerEtas,
                     << ANSI_RESET << '\n';
       }
   };
-    
-//auto foldOnce = [&](float &loc, int &coarse, const char *tag)
-//{
-//  if (loc <= -0.5f || loc > 1.5f)
-//  {
-//    const float before = loc;
-//    loc = std::fmod(loc + 2.0f, 2.0f);           // (0 … 2)
-//    if (loc > 1.5f) { loc -= 2.0f; ++coarse; }   // shift block by +1
-//
-//    if (coarse == kNCoarseBlocks) coarse = 0;    // φ wrap-around
-//
-//    if (Verbosity() > 0)
-//      std::cout << ANSI_YELLOW
-//                << "    • " << tag
-//                << " folded: " << before << " → " << loc
-//                << "  |  blk+1 → " << coarse
-//                << ANSI_RESET << '\n';
-//  }
-//};
 
   foldOnce(locEta, blkEta, "η");
   foldOnce(locPhi, blkPhi, "φ");
@@ -5918,7 +5566,6 @@ PositionDependentCorrection::getAvgPhi(const std::vector<int>   &towerPhis,
  *==========================================================================*/
 float PositionDependentCorrection::doPhiBlockCorr(float localPhi, float b)
 {
-  /* —————————————————— banner —————————————————— */
   if (Verbosity() > 0)
     std::cout << ANSI_BOLD << "[doPhiBlockCorr] ENTER  "
               << "localPhi = " << localPhi << " ,  b = " << b
@@ -6024,8 +5671,6 @@ float PositionDependentCorrection::doEtaBlockCorr(float  localEta,
     corrected = std::fmod(corrected + 2.f, 2.f);
     if (corrected > 1.5f) corrected -= 2.f;
   }
-//  /* If a caller supplied a non‑unity tower pitch (rare) apply it now */
-//  corrected *= dEtaTower;
 
   /* keep clusters inside the barrel acceptance (η ≈ ±1.1) */
   if (std::fabs(corrected) > 1.6f)      // 2×2 block edge + margin
@@ -6104,15 +5749,6 @@ PositionDependentCorrection::convertBlockToGlobalPhi(int   block_phi_bin,
     std::cout << "    ▸ fullPhiIndex = " << fullPhiIndex
               << "   (coarse*2 + local + 0.5)\n";
     
-//  /* --- residual φ‑bias inside an 8‑tower module (same as CorrectPosition) --- */
-//  {
-//      int  mod8   = static_cast<int>(fullPhiIndex) / 8;           // module #
-//      float x8    = fullPhiIndex - mod8 * 8.0f - 4.0f;            // −4 … +4
-//      float dBias = 0.10f * x8 / 4.0f;                            // default factors
-//      if (std::fabs(x8) > 3.3f) dBias = 0.0f;                     // edge guard
-//      fullPhiIndex -= dBias;                                      // apply bias‑undo
-//  }
-
 
   /* ─── linear → angular & wrap to (−π , +π] ──────────────────────────── */
   float globalPhi = fullPhiIndex * kRadPerBin;  // ideal grid

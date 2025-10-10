@@ -1,9 +1,0 @@
-E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2.000,4.000,"no corr, cluster",0.006839,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.006885,0.000046,"CorrectPosition, cluster",0.015181,"CP(EA E-only), cluster",0.015241,0.000060
-4.000,6.000,"no corr, cluster",0.007168,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.007266,0.000098,"CorrectPosition, cluster",0.011809,"CP(EA E-only), cluster",0.011852,0.000043
-6.000,8.000,"CorrectPosition, cluster",0.006456,"CP(EA E-only), cluster",0.006459,0.000003,"CorrectPosition, cluster",0.009127,"CP(EA E-only), cluster",0.009132,0.000005
-8.000,10.000,"CP(|vz| + E), cluster",0.005399,"CP(EA |#eta|+E), cluster",0.005400,0.000000,"CP(EA E-only), cluster",0.007237,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.007241,0.000003
-10.000,12.000,"CP(EA |#eta|+E), cluster",0.004742,"CP(|vz| + E), cluster",0.004745,0.000002,"CP(|vz| + E), cluster",0.005991,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.006004,0.000013
-12.000,15.000,"CP(EA |#eta|+E), cluster",0.004394,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.004396,0.000002,"CP(|vz| + E), cluster",0.005056,"CP(EA |#eta|+E), cluster",0.005091,0.000035
-15.000,20.000,"CP(EA |#eta|+E), cluster",0.004007,"CP(EA #varphi:E-only, #eta:|#eta|+E), cluster",0.004009,0.000002,"CP(|vz| + E), cluster",0.004284,"CP(EA |#eta|+E), cluster",0.004333,0.000049
-20.000,30.000,"CP(EA |#eta|+E), cluster",0.003383,"CP(EA E-only), cluster",0.003385,0.000002,"CP(|vz| + E), cluster",0.003664,"CP(EA |#eta|+E), cluster",0.003714,0.000050

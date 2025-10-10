@@ -8,7 +8,117 @@
 #include <iostream>
 #include <iomanip>
 #include <unordered_map>
-#include <limits>  // for quiet_NaN()
+#include <limits>   // for quiet_NaN()
+#include <fstream>  // for reading bFit_master.txt
+#include <map>
+#include <tuple>
+#include <algorithm>
+#include <cstdlib>  // getenv
+#include <string>
+
+namespace {
+
+// Key for lookup: (variantName, etaOrPhi, etaRange, zRange)
+struct BKey {
+  std::string variant, eop, etaRange, zRange;
+  bool operator<(const BKey& o) const {
+    return std::tie(variant, eop, etaRange, zRange)
+         < std::tie(o.variant, o.eop, o.etaRange, o.zRange);
+  }
+};
+
+struct Fit { double m{std::numeric_limits<double>::quiet_NaN()};
+             double b0{std::numeric_limits<double>::quiet_NaN()}; };
+
+class BFitDB {
+ public:
+  static BFitDB& instance() { static BFitDB db; return db; }
+
+  // Returns nullptr if not found
+  const Fit* get(const std::string& variant,
+                 const std::string& eop,
+                 const std::string& etaRange,
+                 const std::string& zRange) const {
+    BKey k{variant, eop, etaRange, zRange};
+    auto it = map_.find(k);
+    return (it == map_.end()) ? nullptr : &it->second;
+  }
+
+ private:
+  std::map<BKey, Fit> map_;
+  BFitDB() { load(); }
+
+  void load() {
+    const char* env = std::getenv("BEMC_BFIT_MASTER");
+    std::string path = env ? std::string(env) : std::string("bFit_master_zLT10.txt");
+
+    std::ifstream fin(path);
+    if (!fin) {
+      std::cerr << "[BEmcRecCEMC] WARNING: cannot open bFit master file: " << path << "\n";
+      return;
+    }
+
+    // Optional header: "variantName etaOrPhi etaRange zRange m b0"
+    // Safe to try skipping one line
+    {
+      std::string header;
+      std::streampos pos = fin.tellg();
+      if (std::getline(fin, header)) {
+        // If first line isn't a header, rewind to start of file
+        if (header.find("variantName") == std::string::npos) fin.seekg(pos);
+      } else {
+        return;
+      }
+    }
+
+    std::string variant, eop, etaRange, zRange;
+    double m = std::numeric_limits<double>::quiet_NaN();
+    double b0 = std::numeric_limits<double>::quiet_NaN();
+
+    while (fin >> variant >> eop >> etaRange >> zRange >> m >> b0) {
+      map_[BKey{variant, eop, etaRange, zRange}] = Fit{m, b0};
+    }
+  }
+};
+
+// Clamp b to around 0.6 (tight window 0.55–0.65)
+inline float clamp_b(float b) {
+  return (b < 0.55f) ? 0.55f : ((b > 0.65f) ? 0.65f : b);
+}
+
+// Build b(E) from fit (b0 + m ln(E/E0)); fallback to 0.15 if missing
+inline float b_from(const Fit* fp, float Energy, float E0 = 3.0f) {
+  if (!fp) return 0.15f;
+  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
+  return clamp_b(static_cast<float>(fp->b0 + fp->m * lnE));
+}
+
+// Map |η| to label
+inline std::string etaLabelFromAbsEta(float absEta) {
+  if (absEta <= 0.20f) return "etaCore";
+  if (absEta <= 0.70f) return "etaMid";
+  if (absEta <  1.10f) return "etaEdge";
+  return "fullEta";
+}
+
+// Map |z_vtx| to the preferred *fine* label for 0–10 and *coarse* label beyond
+inline std::string zLabelFromAbsZ(float z) {
+  if (z < 10.f) {
+    if      (z < 2.f) return "z00to02";
+    else if (z < 4.f) return "z02to04";
+    else if (z < 6.f) return "z04to06";
+    else if (z < 8.f) return "z06to08";
+    else              return "z08to10";
+  }
+  if (z < 20.f) return "z10to20";
+  if (z < 30.f) return "z20to30";
+  if (z < 45.f) return "z30to45";
+  if (z < 60.f) return "z45to60";
+  // Tight cut in code; clamp ≥60 to last available bin
+  return "z45to60";
+}
+
+} // namespace
 
 
 BEmcRecCEMC::BEmcRecCEMC()
@@ -247,10 +357,11 @@ void BEmcRecCEMC::SetPhiTiltVariant(ETiltVariant v)
   static const std::unordered_map<ETiltVariant,std::pair<double,double>> lut = {
       {ETiltVariant::CLUS_RAW, { 2.641645e-03, 8.117525e-04 }},  // no corr, cluster
       {ETiltVariant::CLUS_CP, { 1.925290e-03, 7.915014e-04 }},  // CorrectPosition, cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP, { 2.084768e-03, 8.199622e-04 }},  // CorrectPosition(EA |z| + E), cluster
       {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 2.084768e-03, 8.199622e-04 }},  // CorrectPosition(EA |z| + E), cluster
       {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.090636e-03, 8.208976e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
-      {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.085796e-03, 8.203957e-04 }},  // CorrectPosition(EA E-only), cluster
-      {ETiltVariant::CLUS_CP_EA_MIX, { 2.101579e-03, 8.261614e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_EandIncident, { 2.085796e-03, 8.203957e-04 }},  // CorrectPosition(EA E-only), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.101579e-03, 8.261614e-04 }},  // CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster
       {ETiltVariant::CLUS_BCORR, { 2.119625e-03, 8.130756e-04 }},  // b(E) corr, cluster
       {ETiltVariant::PDC_RAW, { 2.739621e-03, 8.204782e-04 }},  // no corr, scratch
       {ETiltVariant::PDC_CORR, { 2.244311e-03, 8.253109e-04 }},  // b(E) corr, scratch
@@ -288,7 +399,7 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
        *        φ(E) =  a  –  b · ln E      with  E in GeV
        *
     * -------------------------------------------------------------- */
-    bool doPhiTilt = true; // <<< set to false internally to disable
+    bool doPhiTilt = false; // <<< set to false internally to disable
     if (doPhiTilt)
     {
         /* variant–dependent tilt constants (set via SetPhiTiltVariant) */
@@ -504,6 +615,82 @@ void BEmcRecCEMC::CorrectPosition(float Energy, float x, float y,
 
 
 
+void BEmcRecCEMC::CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(float Energy, float vtxZ_cm,
+                                                                float x, float y,
+                                                                float& xc, float& yc)
+{
+  // Legacy gating
+  if (!m_UseCorrectPosition) { xc = x; yc = y; return; }
+  if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
+  { xc = x; yc = y; return; }
+
+  // Determine |η| slice from tower geometry
+  const int ix0 = EmcCluster::lowint(x + 0.5f);
+  const int iy0 = EmcCluster::lowint(y + 0.5f);
+
+  TowerGeom g{};
+  bool haveGeom = GetTowerGeometry(ix0, iy0, g);
+
+  float absEta = 0.f;
+  if (haveGeom) {
+    const float r = std::hypot(g.Xcenter, g.Ycenter);
+    absEta = std::fabs(std::asinh((r > 0.f ? g.Zcenter / r : 0.f)));
+  }
+  std::string etaLbl = haveGeom ? etaLabelFromAbsEta(absEta) : std::string("fullEta");
+
+  // Map |z_vtx| to label (fine for 0–10, coarse otherwise; clamp ≥60 to 45–60)
+  const float absZ = std::fabs(vtxZ_cm);
+  const std::string zLbl = zLabelFromAbsZ(absZ);
+
+  // Fetch per-(η,z) fits: variant zAndEtaAndEnergyDep
+  constexpr float E0 = 3.0f;
+  const auto* fitPhi = BFitDB::instance().get("zAndEtaAndEnergyDep", "phi", etaLbl, zLbl);
+  const auto* fitEta = BFitDB::instance().get("zAndEtaAndEnergyDep", "eta", etaLbl, zLbl);
+
+  const float bx = b_from(fitPhi, Energy, E0);
+  const float by = b_from(fitEta, Energy, E0);
+
+  // ----- identical inverse-asinh + ripple/wrap as elsewhere -----
+  float x_corr = x;
+  {
+    if (std::fabs(x - ix0) <= 0.5f) {
+      const float Sx = std::sinh(0.5f / bx);
+      x_corr = ix0 + bx * std::asinh(2.f * (x - ix0) * Sx);
+    }
+
+    // module-of-8 ripple
+    int   ix8 = int(x + 0.5f) / 8;                      // NOLINT(bugprone-incorrect-roundings)
+    float x8  = x + 0.5f - (ix8 * 8) - 4.f;             // −4 … +4
+    float dx  = 0.f;
+    if (m_UseDetailedGeometry) {
+      int local_ix8 = int(x + 0.5f) - ix8 * 8;          // NOLINT(bugprone-incorrect-roundings)
+      dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
+    } else {
+      dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+    }
+    x_corr -= dx;
+
+    while (x_corr < -0.5f)              x_corr += float(fNx);
+    while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
+  }
+  xc = x_corr;
+
+  float y_corr = y;
+  {
+    if (std::fabs(y - iy0) <= 0.5f) {
+      const float Sy = std::sinh(0.5f / by);
+      y_corr = iy0 + by * std::asinh(2.f * (y - iy0) * Sy);
+    }
+  }
+  yc = y_corr;
+}
+
+
+
+/*
+ energy and z dependent -- z < 60 tight cut in CODE
+ */
+
 void BEmcRecCEMC::CorrectPositionEnergyAwareZVTXAndEnergyDep(float Energy, float vtxZ_cm,
                                                              float x, float y,
                                                              float& xc, float& yc)
@@ -517,74 +704,16 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareZVTXAndEnergyDep(float Energy, float
   // Map |z_vtx| to a z-slice index
   const float absZ = std::fabs(vtxZ_cm);
 
-    // Bin order (9 bins total):
-    //   0:[0,2)  1:[2,4)  2:[4,6)  3:[6,8)  4:[8,10)  5:[10,20)  6:[20,30)  7:[30,45)  8:[45,60] and above
-    auto zIndex = [](float z_cm)->int {
-      // |z| is non-negative; return a valid bin for all inputs (≥60 → last bin)
-      if (z_cm <  2.f)  return 0;
-      if (z_cm <  4.f)  return 1;
-      if (z_cm <  6.f)  return 2;
-      if (z_cm <  8.f)  return 3;
-      if (z_cm < 10.f)  return 4;
-      if (z_cm < 20.f)  return 5;
-      if (z_cm < 30.f)  return 6;
-      if (z_cm < 45.f)  return 7;
-      // [45,60) → 8, and anything ≥60 cm also → 8 (clamp high)
-      return 8;
-    };
 
-    int iz = zIndex(absZ);
+  // Use per-|z| fits from the master file (zAndEnergyDep, originalEta)
+  constexpr float E0 = 3.0f;
 
-  // ---- per-|z| bin log-fit coefficients from your PDC-RAW tables (E0 = 3 GeV) ----
-  // φ: bφ(E,|z|) = b0φ + mφ * ln(E/E0)
-  // η: bη(E,|z|) = b0η + mη * ln(E/E0)
-  //
-  // Fine 0–10 cm (2-cm slices) from bValuesPhiOverlay_zFine / bValuesEtaOverlay_zFine:
-  //   z00to02:  b0φ=0.181614, mφ=-0.006720   |  b0η=0.187871, mη=-0.002202
-  //   z02to04:  b0φ=0.181808, mφ=-0.007140   |  b0η=0.187243, mη=-0.002529
-  //   z04to06:  b0φ=0.183499, mφ=-0.007598   |  b0η=0.186277, mη=-0.001018
-  //   z06to08:  b0φ=0.177695, mφ=-0.004814   |  b0η=0.189039, mη=-0.002569
-  //   z08to10:  b0φ=0.179001, mφ=-0.005619   |  b0η=0.190574, mη=-0.004268
-  //
-  // Coarse 10–60 cm from bValuesPhiOverlay_zOnly / bValuesEtaOverlay_zOnly:
-  //   z10to20:  b0φ=0.181252, mφ=-0.006485   |  b0η=0.192266, mη=-0.002334
-  //   z20to30:  b0φ=0.179671, mφ=-0.006219   |  b0η=0.207996, mη=-0.006129
-  //   z30to45:  b0φ=0.178555, mφ=-0.006275   |  b0η=0.235485, mη=-0.010342
-  //   z45to60:  b0φ=0.176307, mφ=-0.006279   |  b0η=0.322516, mη=-0.002704
-  //
-  // For 0–10 coarse in that table, you are already using the fine bins above.
+  const std::string zLbl = zLabelFromAbsZ(absZ);
+  const auto* fitPhi = BFitDB::instance().get("zAndEnergyDep", "phi", "originalEta", zLbl);
+  const auto* fitEta = BFitDB::instance().get("zAndEnergyDep", "eta", "originalEta", zLbl);
 
-  static constexpr float E0 = 3.0f;
-
-  // 9-bin arrays in the order listed above
-  static constexpr float B0_PHI_Z[9] = {
-    0.181614f, 0.181808f, 0.183499f, 0.177695f, 0.179001f,  // 0..4 : 0–10 cm fine
-    0.181252f, 0.179671f, 0.178555f, 0.176307f               // 5..8 : 10–60 cm coarse
-  };
-  static constexpr float M_PHI_Z[9] = {
-   -0.006720f,-0.007140f,-0.007598f,-0.004814f,-0.005619f,  // 0..4
-   -0.006485f,-0.006219f,-0.006275f,-0.006279f               // 5..8
-  };
-
-  static constexpr float B0_ETA_Z[9] = {
-    0.187871f, 0.187243f, 0.186277f, 0.189039f, 0.190574f,  // 0..4
-    0.192266f, 0.207996f, 0.235485f, 0.322516f               // 5..8
-  };
-  static constexpr float M_ETA_Z[9] = {
-   -0.002202f,-0.002529f,-0.001018f,-0.002569f,-0.004268f,  // 0..4
-   -0.002334f,-0.006129f,-0.010342f,-0.002704f               // 5..8
-  };
-
-  // Safety: clamp iz in [0..8]
-  if (iz < 0) iz = 0;
-  if (iz > 8) iz = 8;
-
-  // Build b(E) for φ/η at this z-slice
-  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
-  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
-
-  const float bx = clamp_b(B0_PHI_Z[iz] + M_PHI_Z[iz] * lnE); // φ-direction b(E; z)
-  const float by = clamp_b(B0_ETA_Z[iz] + M_ETA_Z[iz] * lnE); // η-direction b(E; z)
+  const float bx = b_from(fitPhi, Energy, E0);  // φ-direction b(E; z)
+  const float by = b_from(fitEta, Energy, E0);  // η-direction b(E; z)
 
   // ----- identical inverse-asinh + ripple/wrap as your other correctors -----
   const int ix0 = EmcCluster::lowint(x + 0.5f);
@@ -632,7 +761,7 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareZVTXAndEnergyDep(float Energy, float
 
 
 /*
- WITH ETA DEPENDENCY AND ENERGY DEPENDENCY FROM PDC-RAW b VALUE FITS
+ energy and |eta| dependent -- z < 60 tight cut in CODE
  */
 
 void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float x, float y,
@@ -666,48 +795,19 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
     else                      iEtaBin = 2; // up to ~1.10
   }
 
-    // ---- per-bin log-fit coefficients from PDC-RAW (E0 = 3 GeV) ----
-    // Indexing convention:
-    //   [0] |η| ≤ 0.20        (etaCore)
-    //   [1] 0.20 < |η| ≤ 0.70 (etaMid)
-    //   [2] 0.70 < |η| ≤ 1.10 (etaEdge)
-    //   [3] fallback (originalEta; no-η-dep)
+    // Use fits per η-range from the master file (etaAndEnergyDep, originalZRange)
     constexpr float E0 = 3.0f;
 
-    // φ: bφ(E,|η|) = b0φ + mφ * ln(E/E0)  (from bValuesPhiOverlay)
-    static constexpr float B0_PHI[4] = {
-      0.185809f,  // etaCore
-      0.182105f,  // etaMid
-      0.179244f,  // etaEdge
-      0.180775f   // originalEta (fallback)
-    };
-    static constexpr float M_PHI[4] = {
-     -0.006405f, // etaCore
-     -0.006936f, // etaMid
-     -0.006973f, // etaEdge
-     -0.006402f  // originalEta (fallback)
-    };
+    std::string etaRangeLbl = "fullEta";
+    if      (iEtaBin == 0) etaRangeLbl = "etaCore";
+    else if (iEtaBin == 1) etaRangeLbl = "etaMid";
+    else if (iEtaBin == 2) etaRangeLbl = "etaEdge";
 
-    // η: bη(E,|η|) = b0η + mη * ln(E/E0)  (from bValuesEtaOverlay)
-    static constexpr float B0_ETA[4] = {
-      0.177320f,  // etaCore
-      0.194483f,  // etaMid
-      0.196258f,  // etaEdge
-      0.188228f   // originalEta (fallback)
-    };
-    static constexpr float M_ETA[4] = {
-     -0.006088f, // etaCore
-     -0.005003f, // etaMid
-      0.002431f, // etaEdge (NOTE: positive slope)
-     -0.002528f  // originalEta (fallback)
-    };
+    const auto* fitPhi = BFitDB::instance().get("etaAndEnergyDep", "phi", etaRangeLbl, "originalZRange");
+    const auto* fitEta = BFitDB::instance().get("etaAndEnergyDep", "eta", etaRangeLbl, "originalZRange");
 
-
-  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
-  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
-
-  const float bx = clamp_b(B0_PHI[iEtaBin] + M_PHI[iEtaBin] * lnE);
-  const float by = clamp_b(B0_ETA[iEtaBin] + M_ETA[iEtaBin] * lnE);
+    const float bx = b_from(fitPhi, Energy, E0);  // φ-direction b(E)
+    const float by = b_from(fitEta, Energy, E0);  // η-direction b(E)
 
   // ---------------- φ inverse-asinh (legacy form) ----------------
   float x_corr = x;
@@ -752,10 +852,10 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 
 
 /*
- ENERGY ONLY NO ETA DEP FITS FROM PDC-RAW INFO
+Energy AND INCIDENT ANGLE -- z < 60 tight cut in CODE energy dep b values used
  */
 
-void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x, float y,
+void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Energy, float x, float y,
                                              float& xc, float& yc)
 {
   // ---- legacy gating -------------------------------------------------
@@ -763,23 +863,15 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x,
   if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
   { xc = x; yc = y; return; }
 
-    // ---- energy-only (no |η| dependence) log-fit laws (from PDC-RAW ‘originalEta’) ----
-    // b(E) = b0 + m * ln(E/E0)  with  E0 = 3 GeV
-    //  - PHI  (originalEta): b0 = 0.180775 , m = -0.006402
-    //  - ETA  (originalEta): b0 = 0.188228 , m = -0.002528
-    constexpr float E0     = 3.0f;
-    constexpr float B0_PHI = 0.180775f;   // originalEta (PHI)
-    constexpr float M_PHI  = -0.006402f;  // originalEta (PHI)
-    constexpr float B0_ETA = 0.188228f;   // originalEta (ETA)
-    constexpr float M_ETA  = -0.002528f;  // originalEta (ETA)
+    constexpr float E0 = 3.0f;
 
-    const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
+    // energyDepOnly, originalEta × originalZRange
+    const auto* fitPhi = BFitDB::instance().get("energyDepOnly", "phi", "originalEta", "originalZRange");
+    const auto* fitEta = BFitDB::instance().get("energyDepOnly", "eta", "originalEta", "originalZRange");
 
-    auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
-
-    // base (angle–zero) scales from energy-only laws
-    const float bphi_E = clamp_b(B0_PHI + M_PHI * lnE);   // φ baseline
-    const float beta_E = clamp_b(B0_ETA + M_ETA * lnE);   // η baseline
+    // base (angle–zero) scales from the master-file fits
+    const float bphi_E = b_from(fitPhi, Energy, E0);  // φ baseline
+    const float beta_E = b_from(fitEta, Energy, E0);  // η baseline
 
     // --- geometry-only incidence from detailed tower geometry -----------------------
     // use the same integer anchor as your local tower coordinates (no extra lookup later)
@@ -879,10 +971,7 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x,
 
 
 
-/*
- energy only in phi no eta dependence and eta dependence in eta
- */
-void BEmcRecCEMC::CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float Energy, float x, float y,
+void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x, float y,
                                              float& xc, float& yc)
 {
   // ---- legacy gating -------------------------------------------------
@@ -890,52 +979,21 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float E
   if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
   { xc = x; yc = y; return; }
 
-  // ---- determine |η| slice from tower geometry (fallback → no-η-dep) ----
-  const int ix0 = EmcCluster::lowint(x + 0.5f);
-  const int iy0 = EmcCluster::lowint(y + 0.5f);
+    constexpr float E0 = 3.0f;
 
-  TowerGeom g{};
-  const bool haveGeom = GetTowerGeometry(ix0, iy0, g);
+    // energyDepOnly, originalEta × originalZRange
+    const auto* fitPhi = BFitDB::instance().get("energyDepOnly", "phi", "originalEta", "originalZRange");
+    const auto* fitEta = BFitDB::instance().get("energyDepOnly", "eta", "originalEta", "originalZRange");
 
-  float absEta = 0.f;
-  if (haveGeom)
-  {
-    const float r = std::hypot(g.Xcenter, g.Ycenter);
-    absEta = std::fabs((r > 0.f) ? std::asinh(g.Zcenter / r) : 0.f);
-  }
-
-  // |η| bins for η-side tuning:
-  // 0: |η| ≤ 0.20, 1: (0.20,0.70], 2: (0.70,1.10], 3: fallback (no-η-dep law)
-  int iEtaBin = 3;
-  if (haveGeom)
-  {
-    if      (absEta <= 0.20f) iEtaBin = 0;
-    else if (absEta <= 0.70f) iEtaBin = 1;
-    else                      iEtaBin = 2;
-  }
-
-  // ---- log-fit coefficients from MC (E0 = 3 GeV) -------------------------
-  constexpr float E0 = 3.0f;
-
-    // φ uses the **no-|η|-dep** category ONLY
-    constexpr float B0_PHI_NOETA = 0.183330f;
-    constexpr float M_PHI_NOETA  = -0.007932f;
-
-    // η uses the **|η|-dependent** categories (0,1,2), 3=fallback(no-η-dep)
-    static constexpr float B0_ETA[4] = { 0.178946f, 0.196326f, 0.200883f, 0.191289f };
-    static constexpr float M_ETA [4] = {-0.007106f,-0.006145f,-0.001358f,-0.004542f };
-
-
-  const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
-  auto clamp_b = [](float b){ return (b < 0.10f) ? 0.10f : (b > 0.30f ? 0.30f : b); };
-
-  const float bx = clamp_b(B0_PHI_NOETA + M_PHI_NOETA * lnE);               // φ: no-|η|-dep law
-  const float by = clamp_b(B0_ETA[iEtaBin] + M_ETA[iEtaBin] * lnE);         // η: |η|-dep law
+    const float bx = b_from(fitPhi, Energy, E0);  // φ-direction b(E)
+    const float by = b_from(fitEta, Energy, E0);  // η-direction b(E)
+    
 
   // ============================== φ ===================================
   float x_corr = x;
   {
-    const float X = x - ix0;                         // (-0.5, +0.5]
+    const int ix0 = EmcCluster::lowint(x + 0.5f);
+    const float X = x - ix0;                       // in (−0.5, +0.5]
     if (std::fabs(X) <= 0.5f)
     {
       const float Sx = std::sinh(0.5f / bx);
@@ -945,12 +1003,12 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float E
     // module-of-8 ripple (identical to legacy CorrectPosition)
     // NOLINTNEXTLINE(bugprone-incorrect-roundings)
     int   ix8 = int(x + 0.5f) / 8;
-    float x8  = x + 0.5f - (ix8 * 8) - 4.f;          // −4 … +4
+    float x8  = x + 0.5f - (ix8 * 8) - 4.f;        // −4 … +4
     float dx  = 0.f;
     if (m_UseDetailedGeometry)
     {
       // NOLINTNEXTLINE(bugprone-incorrect-roundings)
-      int local_ix8 = int(x + 0.5f) - ix8 * 8;       // 0..7
+      int local_ix8 = int(x + 0.5f) - ix8 * 8;     // 0..7
       dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
     }
     else
@@ -968,7 +1026,8 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaDepOnlyForEtaEnergyForPhi(float E
   // ============================== η ===================================
   float y_corr = y;
   {
-    const float Y = y - iy0;                           // (-0.5, +0.5]
+    const int iy0 = EmcCluster::lowint(y + 0.5f);
+    const float Y = y - iy0;                      // in (−0.5, +0.5]
     if (std::fabs(Y) <= 0.5f)
     {
       const float Sy = std::sinh(0.5f / by);

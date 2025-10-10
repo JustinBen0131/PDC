@@ -4108,7 +4108,7 @@ static void MakeFourWaySummaries(
 
 
 void MakeDeltaPhiEtaPlayground(
-    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root",
+    const char* inFile = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/PositionDep_sim_ALL_noPhiTilt.root",
     const char* outDir = "/Users/patsfan753/Desktop/scratchPDC",
     double      xMin   = -0.04,
     double      xMax   =  0.04)
@@ -11115,8 +11115,8 @@ void PDCAnalysisPrime()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/PositionDep_data_ALL.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/DataOutput/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/PositionDep_sim_ALL_noPhiTilt.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/SimOutputPrimeNoPhiTilt";
 
   EnsureDir(outBaseDir);
 
@@ -11211,7 +11211,7 @@ void PDCAnalysisPrime()
           // 2) For originalEta ONLY: read sim file, compute b(E), and save an overlay PNG
           if (v.key == "originalEta")
           {
-            const char* simPath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/PositionDep_sim_ALL.root";
+            const char* simPath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/PositionDep_sim_ALL.root";
             std::unique_ptr<TFile> fSim(TFile::Open(simPath, "READ"));
             if (fSim && !fSim->IsZombie())
             {

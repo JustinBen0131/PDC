@@ -162,10 +162,9 @@ class PositionDependentCorrection : public SubsysReco
     float m_pairChi2Max{10.0f};     // threshold if partner-χ² cut is enabled
     
     
-  static constexpr std::array<float,19> vzEdge = {
+  static constexpr std::array<float,10> vzEdge = {
          0.f,  5.f, 10.f, 15.f, 20.f, 25.f, 30.f,
-        40.f, 50.f, 60.f, 70.f, 80.f, 90.f,
-       100.f,110.f,120.f,130.f,140.f,150.f
+        40.f, 50.f, 60.f
     };
   static constexpr int   N_VzBins       = vzEdge.size() - 1;
   static constexpr int   N_VzBinsSigned = 2 * N_VzBins;
@@ -471,12 +470,12 @@ class PositionDependentCorrection : public SubsysReco
 
   /* --------------------  HISTOGRAM DECLARATIONS ------------------- */
     
-    // Eight reconstruction variants for π0 studies
+    // Nine reconstruction variants for π0 studies
     enum class VarPi0 {
       CLUS_RAW=0, CLUS_CP=1,
-      EA_FIT_zDEP=2, EA_FIT_ETADEP=3, EA_FIT_EONLY=4, EA_MIX=5,
-      PDC_RAW=6, PDC_CORR=7,
-      NVAR=8
+      EA_FIT_zDEP=2, EA_FIT_ETADEP=3, EA_FIT_EONLY=4, EA_FIT_EONLY_INCIDENT=5,
+      EA_FIT_ZVTXETADEP=6, PDC_RAW=7, PDC_CORR=8,
+      NVAR=9
     };
 
     // Truth π0 photons with their mother info (filled in fillTruthInfo)
@@ -497,6 +496,12 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpCorrEA_E   [N_Ebins]{};
   TH1F* h_phi_diff_cpBcorr_E    [N_Ebins]{};
   TH1F* h_phi_diff_corrected_E  [N_Ebins]{};
+    
+  TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[N_Ebins] = {nullptr};
+  TH1F* h_phi_diff_cpCorrEA_fitZVTXEtaDep_E[N_Ebins]                  = {nullptr};
+  TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_E[N_Ebins] = {nullptr};
+  TH1F* h_eta_diff_cpCorrEA_fitZVTXEtaDep_E[N_Ebins]                  = {nullptr};
+    
     
   // --- NEW: per-slice (E) 2D maps for CP(EA) ---
   // x = b_phi  , y = Δφ(folded); one per energy bin
@@ -570,9 +575,9 @@ class PositionDependentCorrection : public SubsysReco
 
     
     /* --------------------  NEW: |z_vtx| slice TH3s (uncorrected)  -------------------- */
-    /* COARSE bins for 0–150 cm: 0–10, 10–20, 20–30, 30–45, 45–60, 60–100, 100–150 cm */
-    static constexpr int   N_VzH3Bins = 7;
-    static constexpr float vzH3Edges[N_VzH3Bins + 1] = { 0.f, 10.f, 20.f, 30.f, 45.f, 60.f, 100.f, 150.f };
+    /* COARSE bins for 0–150 cm: 0–10, 10–20, 20–30, 30–45, 45–60*/
+    static constexpr int   N_VzH3Bins = 5;
+    static constexpr float vzH3Edges[N_VzH3Bins + 1] = { 0.f, 10.f, 20.f, 30.f, 45.f, 60.f};
 
     /* FINE bins for 0–10 cm: 0–2, 2–4, 4–6, 6–8, 8–10 cm (unchanged) */
     static constexpr int   N_VzH3FineBins = 5;
@@ -610,6 +615,12 @@ class PositionDependentCorrection : public SubsysReco
     /* Hist arrays: one uncorrected TH3 per |z| bin (coarse and fine) */
     TH3F* h3_blockCoord_E_vz      [N_VzH3Bins]     {};
     TH3F* h3_blockCoord_E_vz_fine [N_VzH3FineBins]{};
+    
+    /* NEW: Cross-slice variants — per-η-view × per-|z| (coarse and fine) */
+    /* view index: 0=fullEta (|η|≤1.10), 1=etaCore (|η|≤0.20),
+       2=etaMid (0.20<|η|≤0.70), 3=etaEdge (0.70<|η|≤1.10) */
+    TH3F* h3_blockCoord_E_eta_vz      [kNEtaViews][N_VzH3Bins]{};
+    TH3F* h3_blockCoord_E_eta_vz_fine [kNEtaViews][N_VzH3FineBins]{};
 
     /* NEW: per-|z_vtx| b-tables and readiness flags (coarse and fine) */
     std::array<std::array<float, N_Ebins>, N_VzH3Bins>       m_bValsPhi_vz{};
@@ -624,6 +635,21 @@ class PositionDependentCorrection : public SubsysReco
     /* NEW: corrected counterparts per |z| slice */
     TH3F* h3_blockCoord_E_vz_corr      [N_VzH3Bins]     {};
     TH3F* h3_blockCoord_E_vz_fine_corr [N_VzH3FineBins]{};
+
+    /* NEW: corrected counterparts for cross-slice η-view × |z| (coarse & fine) */
+    TH3F* h3_blockCoord_E_eta_vz_corr      [kNEtaViews][N_VzH3Bins]     {};
+    TH3F* h3_blockCoord_E_eta_vz_fine_corr [kNEtaViews][N_VzH3FineBins] {};
+
+    /* NEW: b-tables for η×z (coarse & fine) */
+    std::array<std::array<std::array<float, N_Ebins>, N_VzH3Bins>,     kNEtaViews> m_bValsPhi_eta_vz{};
+    std::array<std::array<std::array<float, N_Ebins>, N_VzH3Bins>,     kNEtaViews> m_bValsEta_eta_vz{};
+    std::array<std::array<std::array<float, N_Ebins>, N_VzH3FineBins>, kNEtaViews> m_bValsPhi_eta_vz_fine{};
+    std::array<std::array<std::array<float, N_Ebins>, N_VzH3FineBins>, kNEtaViews> m_bValsEta_eta_vz_fine{};
+
+    std::array<std::array<bool, N_VzH3Bins>,     kNEtaViews> m_bPhiReady_eta_vz{};
+    std::array<std::array<bool, N_VzH3Bins>,     kNEtaViews> m_bEtaReady_eta_vz{};
+    std::array<std::array<bool, N_VzH3FineBins>, kNEtaViews> m_bPhiReady_eta_vz_fine{};
+    std::array<std::array<bool, N_VzH3FineBins>, kNEtaViews> m_bEtaReady_eta_vz_fine{};
 
     
     TH2F* h2_alphaPhi_vsVz {nullptr};
