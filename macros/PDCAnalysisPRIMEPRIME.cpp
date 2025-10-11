@@ -39,7 +39,7 @@
 
 // ========================= Global switches & energy bins ====================
 
-static bool isFirstPass = true;  // <-- set by the user request
+static bool isFirstPass = false;  // <-- set by the user request
 
 // Binning-mode enum used by the playground helpers
 enum class EBinningMode { kRange, kDiscrete };
@@ -1380,23 +1380,26 @@ namespace {
   const Color_t C_CLUSCP         = kRed+1;
   const Color_t C_CLUSCP_EA      = kMagenta+1;
   const Color_t C_CLUSCP_EA_vz   = kBlue+1;
-  const Color_t C_CLUSCP_EA_eta  = kGreen+2;  // purple
+  const Color_t C_CLUSCP_EA_eta  = kGreen+2;
   const Color_t C_PDCraw         = kBlack;
   const Color_t C_PDCcor         = kGray+2;
   const Color_t C_CP_BVALS       = kOrange+7;
-  const Color_t C_CLUSCP_EA_mx   = kCyan+2;
+   // NEW colors for the new EA variants
+  const Color_t C_CLUSCP_EA_vzEta = kViolet+1;  // |z| + |η| + E
+  const Color_t C_CLUSCP_EA_Einc  = kCyan+2;    // E-only + incident-angle
 
   const std::vector<VarDef> kVariants = {
-    // key                    pretty                                             phiPrefix                                     etaPrefix
-    {"CLUSRAW",              "No Correction",                                   "h_phi_diff_cpRaw_",                           "h_eta_diff_cpRaw_",                          C_CLUSRAW},
-    {"CLUSCP",               "Constant-b (legacy)",                             "h_phi_diff_cpCorr_",                          "h_eta_diff_cpCorr_",                         C_CLUSCP},
-    {"CLUSCP_EA",            "Energy-Dep b",                                    "h_phi_diff_cpCorrEA_fitEnergyOnly_",          "h_eta_diff_cpCorrEA_fitEnergyOnly_",         C_CLUSCP_EA},
-    {"CLUSCP_EA_vzDep",      "Energy + |v_{z}|-dep b",                          "h_phi_diff_cpCorrEA_geom_",                   "h_eta_diff_cpCorrEA_geom_",                  C_CLUSCP_EA_vz}, // (ZDEP)
-    {"CLUSCP_EA_etaDep",     "Energy + |#eta|-dep b",                           "h_phi_diff_cpCorrEA_fitEtaDep_",              "h_eta_diff_cpCorrEA_fitEtaDep_",             C_CLUSCP_EA_eta},
-    {"PDCraw",               "2x2 Block-Local No Correction",                   "h_phi_diff_raw_",                              "h_eta_diff_raw_",                             C_PDCraw},
-    {"PDCcor",               "2x2 Block-Local With Corr",                       "h_phi_diff_corr_",                             "h_eta_diff_corr_",                            C_PDCcor},
-    {"CLUScpDirectBvals",    "2x2 block b-values applied to No Corr Prod",      "h_phi_diff_cpBcorr_",                          "h_eta_diff_cpBcorr_",                         C_CP_BVALS},
-    {"CLUSCP_EA_mixed",      "Energy-dep Only #phi and |#eta|-dep in #eta",     "h_phi_diff_cpCorrEA_fitPhiE_etaEtaDep_",       "h_eta_diff_cpCorrEA_fitPhiE_etaEtaDep_",      C_CLUSCP_EA_mx}
+    // key                      pretty                                             phiPrefix                                                etaPrefix                                                 color
+    {"CLUSRAW",                "No Correction",                                   "h_phi_diff_cpRaw_",                                      "h_eta_diff_cpRaw_",                                       C_CLUSRAW},
+    {"CLUSCP",                 "Constant-b (legacy)",                             "h_phi_diff_cpCorr_",                                     "h_eta_diff_cpCorr_",                                      C_CLUSCP},
+    {"CLUSCP_EA",              "Energy-Dep b",                                    "h_phi_diff_cpCorrEA_fitEnergyOnly_",                     "h_eta_diff_cpCorrEA_fitEnergyOnly_",                      C_CLUSCP_EA},
+    {"CLUSCP_EA_vzDep",        "Energy + |v_{z}|-dep b",                          "h_phi_diff_cpCorrEA_geom_",                              "h_eta_diff_cpCorrEA_geom_",                               C_CLUSCP_EA_vz}, // (ZDEP)
+    {"CLUSCP_EA_etaDep",       "Energy + |#eta|-dep b",                           "h_phi_diff_cpCorrEA_fitEtaDep_",                         "h_eta_diff_cpCorrEA_fitEtaDep_",                          C_CLUSCP_EA_eta},
+    {"CLUSCP_EA_vzEtaDep",     "Energy + |z_{vtx}|+|#eta|-dep b",                 "h_phi_diff_cpCorrEA_fitZVTXEtaDep_",                     "h_eta_diff_cpCorrEA_fitZVTXEtaDep_",                      C_CLUSCP_EA_vzEta},
+    {"CLUSCP_EA_EandIncident", "Energy-only + incident-angle",                    "h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_",    "h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_",     C_CLUSCP_EA_Einc},
+    {"PDCraw",                 "2x2 Block-Local No Correction",                   "h_phi_diff_raw_",                                        "h_eta_diff_raw_",                                         C_PDCraw},
+    {"PDCcor",                 "2x2 Block-Local With Corr",                       "h_phi_diff_corr_",                                       "h_eta_diff_corr_",                                        C_PDCcor},
+    {"CLUScpDirectBvals",      "2x2 block b-values applied to No Corr Prod",      "h_phi_diff_cpBcorr_",                                    "h_eta_diff_cpBcorr_",                                     C_CP_BVALS}
   };
 
   // ---------- φ / η axis descriptors ----------
@@ -1408,14 +1411,34 @@ namespace {
   using HVec      = std::vector<TH1*>;
   using Var2Hists = std::map<std::string, HVec>;
 
-  // ---------- histogram styling ----------
-  inline void style_h(TH1* h, Color_t col) {
-    if (!h) return;
-    h->SetLineColor(col);
-    h->SetMarkerColor(col);
-    h->SetMarkerStyle(kMkStyle);
-    h->SetLineWidth(kLnWidth);
-  }
+    // ---------- histogram styling ----------
+    inline void style_h(TH1* h, Color_t col) {
+      if (!h) return;
+      h->SetLineColor(col);
+      h->SetMarkerColor(col);
+      h->SetMarkerStyle(kMkStyle);
+      h->SetLineWidth(kLnWidth);
+    }
+
+    // ---------- auto x-range tightening (20% buffer around content) ----------
+    inline void tighten_x_range(TH1* h, double frac = 0.20) {
+      if (!h) return;
+      TAxis* ax = h->GetXaxis();
+      if (!ax) return;
+      const int n = ax->GetNbins();
+      int lo = 1, hi = n;
+      while (lo <= hi && h->GetBinContent(lo) <= 0.0) ++lo;
+      while (hi >= lo && h->GetBinContent(hi) <= 0.0) --hi;
+      if (lo > hi) return; // no visible content
+      const double xminC = ax->GetBinLowEdge(lo);
+      const double xmaxC = ax->GetBinUpEdge(hi);
+      const double w     = std::max(1e-12, xmaxC - xminC);
+      const double pad   = frac * w;
+      // clamp to the histogram’s native axis limits
+      const double newMin = std::max(ax->GetXmin(), xminC - pad);
+      const double newMax = std::min(ax->GetXmax(), xmaxC + pad);
+      if (newMax > newMin) ax->SetRangeUser(newMin, newMax);
+    }
 
   // ---------- resolve energy bin from axis/title/name ----------
   // returns [-1] if not found. Records where it was resolved from in *src (optional)
@@ -1526,18 +1549,18 @@ namespace {
 
   // ---------- enumerator name (for fit table) ----------
   inline const char* enum_of(const std::string& key){
-    if (key=="CLUSRAW")             return "ETiltVariant::CLUS_RAW";
-    if (key=="CLUSCP")              return "ETiltVariant::CLUS_CP";
-    if (key=="CLUSCP_EA_vzDep")     return "ETiltVariant::CLUS_CP_EA_FIT_ZDEP";      // (geom → ZDEP)
-    if (key=="CLUSCP_EA_etaDep")    return "ETiltVariant::CLUS_CP_EA_FIT_ETADEP";
-    if (key=="CLUSCP_EA")           return "ETiltVariant::CLUS_CP_EA_FIT_EONLY";
-    if (key=="CLUSCP_EA_mixed")     return "ETiltVariant::CLUS_CP_EA_MIX";
-    if (key=="CLUScpDirectBvals")   return "ETiltVariant::CLUS_BCORR";
-    if (key=="PDCraw")              return "ETiltVariant::PDC_RAW";
-    if (key=="PDCcor")              return "ETiltVariant::PDC_CORR";
+    if (key=="CLUSRAW")                 return "ETiltVariant::CLUS_RAW";
+    if (key=="CLUSCP")                  return "ETiltVariant::CLUS_CP";
+    if (key=="CLUSCP_EA_vzEtaDep")      return "ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP";
+    if (key=="CLUSCP_EA_vzDep")         return "ETiltVariant::CLUS_CP_EA_FIT_ZDEP";
+    if (key=="CLUSCP_EA_etaDep")        return "ETiltVariant::CLUS_CP_EA_FIT_ETADEP";
+    if (key=="CLUSCP_EA_EandIncident")  return "ETiltVariant::CLUS_CP_EA_FIT_EandIncident";
+    if (key=="CLUSCP_EA")               return "ETiltVariant::CLUS_CP_EA_FIT_EONLY";
+    if (key=="CLUScpDirectBvals")       return "ETiltVariant::CLUS_BCORR";
+    if (key=="PDCraw")                  return "ETiltVariant::PDC_RAW";
+    if (key=="PDCcor")                  return "ETiltVariant::PDC_CORR";
     return "ETiltVariant::UNKNOWN";
   }
-
   // ---------- plane-residuals writer (modularized) ----------
   static void WritePlaneResiduals(const KindDef& kind,
                                   const std::string& variantKey,
@@ -1608,7 +1631,36 @@ namespace {
         style_h(h, color_of(variantKey));
         h->GetXaxis()->SetTitle(kind.axisTitle.c_str());
         h->GetYaxis()->SetTitle("Counts");
+
+        // tighten X-range around content with a 20% buffer
+        tighten_x_range(h, 0.20);
+
+        // compute Y max within the visible X-range for tighter headroom (per pad)
+        {
+            int first = h->GetXaxis()->GetFirst();
+            int last  = h->GetXaxis()->GetLast();
+            double m  = 0.0;
+            for (int b = first; b <= last; ++b) m = std::max(m, h->GetBinContent(b));
+            h->GetYaxis()->SetRangeUser(0.0, 1.25 * std::max(1.0, m));
+        }
+
         h->Draw("E1");
+
+        // tighten X-range around content with a 20% buffer
+        tighten_x_range(h, 0.20);
+
+        // compute Y max within the currently visible X-range for tighter headroom
+        double ymax = 1.0;
+        {
+            int first = h->GetXaxis()->GetFirst();
+            int last  = h->GetXaxis()->GetLast();
+            double m  = 0.0;
+            for (int b = first; b <= last; ++b) m = std::max(m, h->GetBinContent(b));
+            ymax = 1.25 * std::max(1.0, m);
+        }
+        h->GetYaxis()->SetRangeUser(0.0, ymax);
+        h->Draw("E1");
+          
         const auto& e = eSlices[i];
         TLatex hdr; hdr.SetNDC(); hdr.SetTextFont(42); hdr.SetTextSize(0.040); hdr.SetTextAlign(13);
         hdr.DrawLatex(0.12, 0.94, Form("%.0f<E<%.0f GeV%s", e.first, e.second, vz_note(isVz60)));
@@ -1812,7 +1864,7 @@ namespace {
 
       // CLUS family list (RAW, CP, CP(EA*))
       const std::vector<std::string> keysClus = {
-        "CLUSRAW","CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_mixed"
+          "CLUSRAW","CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
       };
 
       // Build sorted rankings from internal stats
@@ -1977,10 +2029,26 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       return true;
     };
 
-    for (const auto& vdef : kVariants) {
-      if (try_attach(kPhi, vdef)) break;
-      if (try_attach(kEta, vdef)) break;
-    }
+      // Longest-prefix match so generic prefixes don't swallow specific ones
+      const VarDef* bestPhi = nullptr;  size_t bestPhiLen = 0;
+      const VarDef* bestEta = nullptr;  size_t bestEtaLen = 0;
+
+      for (const auto& vdef : kVariants) {
+        const std::string& pphi = vdef.phiPrefix;
+        if (!pphi.empty() && TString(name.c_str()).BeginsWith(pphi.c_str())) {
+          if (pphi.size() > bestPhiLen) { bestPhi = &vdef; bestPhiLen = pphi.size(); }
+        }
+        const std::string& peta = vdef.etaPrefix;
+        if (!peta.empty() && TString(name.c_str()).BeginsWith(peta.c_str())) {
+          if (peta.size() > bestEtaLen) { bestEta = &vdef; bestEtaLen = peta.size(); }
+        }
+      }
+
+      if (bestPhi) {
+        try_attach(kPhi, *bestPhi);
+      } else if (bestEta) {
+        try_attach(kEta, *bestEta);
+      }
   }
 
   std::cout << "[MakeResidualsSuite] Scanned " << nKeys << " keys; usable TH1: " << nH1 << "\n";
@@ -2130,9 +2198,12 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       // y=0 dashed line (requested)
       TLine l0(xMin,0.0,xMax,0.0); l0.SetLineStyle(2); l0.SetLineColor(kGray+2); l0.Draw();
 
-        // helper: override only the vz label to "z_{vtx}"
+        // helper: provide human-friendly labels for EA flavours
         auto legend_label = [&](const std::string& key)->const char* {
-          if (key == "CLUSCP_EA_vzDep") return "Energy + |z_{vtx}|-dep b";
+          if (key == "CLUSCP_EA_vzDep")        return "Energy + |z_{vtx}|-dep b";
+          if (key == "CLUSCP_EA_etaDep")       return "Energy + |#eta|-dep b";
+          if (key == "CLUSCP_EA_vzEtaDep")     return "Energy + |z_{vtx}|+|#eta|-dep b";
+          if (key == "CLUSCP_EA_EandIncident") return "Energy-only + incident-angle";
           return pretty_of(key);
         };
 
@@ -2298,7 +2369,10 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       frU.Draw("AXIS");
 
         auto legend_label = [&](const std::string& key)->const char* {
-          if (key == "CLUSCP_EA_vzDep") return "Energy + |z_{vtx}|-dep b";
+          if (key == "CLUSCP_EA_vzDep")        return "Energy + |z_{vtx}|-dep b";
+          if (key == "CLUSCP_EA_etaDep")       return "Energy + |#eta|-dep b";
+          if (key == "CLUSCP_EA_vzEtaDep")     return "Energy + |z_{vtx}|+|#eta|-dep b";
+          if (key == "CLUSCP_EA_EandIncident") return "Energy-only + incident-angle";
           return pretty_of(key);
         };
 
@@ -2318,13 +2392,15 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
             // Suggested range: 0.06–0.18 (keeps markers well within the bin).
             const double kBinOffset = 0.12;
 
-            // Discrete slot per variant: 0=center (kept empty for readability), ±1, ±2 ...
+            // Discrete slot per variant: keep markers separated but inside the bin
             auto slotOf = [&](const std::string& key)->int {
-              if (key == "CLUSCP")            return -2; // Constant-b (legacy)
-              if (key == "CLUSCP_EA_etaDep")  return -1; // Energy + |η|-dep b
-              if (key == "CLUSCP_EA_vzDep")   return +1; // Energy + |z_vtx|-dep b
-              if (key == "CLUSCP_EA")         return +2; // Energy-Dep b (E-only)
-              return 0;                                   // others (if any) on center (usually unused)
+              if (key == "CLUSCP")                 return -3; // Constant-b (legacy)
+              if (key == "CLUSCP_EA_etaDep")       return -1; // |η|-dep
+              if (key == "CLUSCP_EA_vzDep")        return +1; // |z|-dep
+              if (key == "CLUSCP_EA_vzEtaDep")     return +3; // |z|+|η|-dep
+              if (key == "CLUSCP_EA_EandIncident") return  0; // E-only + incident-angle (center)
+              if (key == "CLUSCP_EA")              return +2; // E-only
+              return 0;
             };
 
             // Fractional X-offset inside the bin; multiply by bin width (eHi-eLo)
@@ -2393,16 +2469,16 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
           leg1->SetNColumns(1);
           leg1->SetEntrySeparation(0.0);
           leg1->SetMargin(0.18);
-
-            // Deterministic order: CP → EA(|η|+E) → EA(|z|+E) → EA(E-only) → RAW
+            // Deterministic order: CP → EA(|η|+E) → EA(|z|+E) → EA(|z|+|η|+E) → EA(E-only + incident) → EA(E-only) → RAW
             addIf(leg1, "CLUSCP");
             addIf(leg1, "CLUSCP_EA_etaDep");
             addIf(leg1, "CLUSCP_EA_vzDep");
-            addIf(leg1, "CLUSCP_EA");       // Energy-Dep b (E-only)
+            addIf(leg1, "CLUSCP_EA_vzEtaDep");
+            addIf(leg1, "CLUSCP_EA_EandIncident");
+            addIf(leg1, "CLUSCP_EA");
             addIf(leg1, "CLUSRAW");
-
-
           leg1->Draw();
+            
         } else {
           // --- Default: two-column, row-aligned legends ---
           TLegend* legLeft  = new TLegend(0.4, 0.73, 0.52, 0.92, "", "brNDC");
@@ -2450,13 +2526,16 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
 
           // Bottom-panel offset scheme (mirrors TOP). Center slot intentionally left empty.
           const double kBinOffsetBottom = 0.12;
-          auto slotOfBot = [&](const std::string& key)->int {
-            if (key == "CLUSCP")            return -2; // Constant-b (legacy)
-            if (key == "CLUSCP_EA_etaDep")  return -1; // Energy + |η|-dep b
-            if (key == "CLUSCP_EA_vzDep")   return +1; // Energy + |z_vtx|-dep b
-            if (key == "CLUSCP_EA")         return +2; // Energy-Dep b (E-only)
-            return 0;
-          };
+            auto slotOfBot = [&](const std::string& key)->int {
+              if (key == "CLUSCP")                 return -3; // Constant-b (legacy)
+              if (key == "CLUSCP_EA_etaDep")       return -1; // |η|-dep
+              if (key == "CLUSCP_EA_vzDep")        return +1; // |z|-dep
+              if (key == "CLUSCP_EA_vzEtaDep")     return +3; // |z|+|η|-dep
+              if (key == "CLUSCP_EA_EandIncident") return  0; // E-only + incident-angle
+              if (key == "CLUSCP_EA")              return +2; // E-only
+              return 0;
+            };
+            
           auto xOffsetFracBot = [&](const std::string& key)->double {
             return slotOfBot(key) * kBinOffsetBottom;
           };
@@ -2542,15 +2621,17 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
           vars.reserve(which.size());
           for (const auto& k : which) if (k != baselineKey && S.count(k)) vars.push_back(k);
 
-          // Sort into a stable, readable order if present
-          auto pos = [&](const std::string& k)->int {
-            if (k=="CLUSCP")            return 0;  // Legacy constant-b
-            if (k=="CLUSCP_EA_etaDep")  return 1;  // |η|-dep
-            if (k=="CLUSCP_EA_vzDep")   return 2;  // |z_vtx|-dep
-            if (k=="CLUSCP_EA")         return 3;  // Energy-only
-            if (k=="CLUSRAW")           return 4;  // (shouldn't be here, but keep stable)
-            return 5;
-          };
+            auto pos = [&](const std::string& k)->int {
+              if (k=="CLUSCP")                 return 0;  // Legacy constant-b
+              if (k=="CLUSCP_EA_etaDep")       return 1;  // |η|-dep
+              if (k=="CLUSCP_EA_vzDep")        return 2;  // |z|-dep
+              if (k=="CLUSCP_EA_vzEtaDep")     return 3;  // |z|+|η|-dep
+              if (k=="CLUSCP_EA_EandIncident") return 4;  // E-only + incident-angle
+              if (k=="CLUSCP_EA")              return 5;  // E-only
+              if (k=="CLUSRAW")                return 6;  // (usually not in this panel)
+              return 7;
+            };
+            
           std::sort(vars.begin(), vars.end(), [&](const std::string& a, const std::string& b){
             if (pos(a)!=pos(b)) return pos(a)<pos(b);
             return a<b;
@@ -2686,8 +2767,11 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
                         baseOut + "/sigma_vsE_ratio_to_CLUSRAW_CP_EA.png", vzn);
     sigma_ratio_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep"}, "CLUSRAW",
                         baseOut + "/sigma_vsE_ratio_to_CLUSRAW_CP_EA_vz_eta.png", vzn);
-    sigma_ratio_overlay(kind, S, {"CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep"}, "CLUSCP",
-                        baseOut + "/sigma_vsE_ratio_to_CLUSCP_EA_vz_eta.png", vzn);
+    sigma_ratio_overlay(kind, S,
+                          {"CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident","CLUSCP_EA"},
+                          "CLUSCP",
+                          baseOut + "/sigma_vsE_ratio_to_CLUSCP_EA_vz_eta.png",
+                          vzn);
     sigma_ratio_overlay(kind, S, {"CLUSRAW","PDCcor"}, "CLUSRAW",
                         baseOut + "/sigma_vsE_ratio_PDCcor_to_CLUSRAW.png", vzn);
   };
@@ -2702,7 +2786,7 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
   save_sigma_groups(kEta, S_ET,    DIR_ET + "/Overlays/sigmaRatio", false);
   save_sigma_groups(kPhi, S_PH_60, DIR_PH + "/Overlays_0_60vz/sigmaRatio", true);
   save_sigma_groups(kEta, S_ET_60, DIR_ET + "/Overlays_0_60vz/sigmaRatio", true);
-
+    
   // ------------- first-bin pair overlays (normalized shapes) -------------
   auto first_bin_pair = [&](const KindDef& kind,
                             const Var2Hists& M,
@@ -2828,7 +2912,7 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       frU.SetTitle(Form("Residual means vs E (phi)%s;E [GeV];mean(#Delta#phi)", vz_note(false)));
       frU.Draw();
 
-      TLegend legU(0.14,0.73,0.94,0.92); legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.034);
+      TLegend legU(0.14,0.73,0.94,0.92); legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.02);
       legU.SetNColumns(3);
 
       std::vector<std::unique_ptr<TGraphErrors>> gKeepMu;
@@ -2950,16 +3034,17 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       c.SaveAs((outDir + "/DeltaPhi_MuVsLogE_AllVariants.png").c_str());
 
       struct OutLine { const char* key; const char* enumName; const char* comment; };
-      const std::vector<OutLine> order = {
-        {"CLUSRAW",            "ETiltVariant::CLUS_RAW",               "no corr, cluster"},
-        {"CLUSCP",             "ETiltVariant::CLUS_CP",                "CorrectPosition, cluster"},
-        {"CLUSCP_EA_vzDep",    "ETiltVariant::CLUS_CP_EA_FIT_ZDEP",    "CorrectPosition(EA geom), cluster"},
-        {"CLUSCP_EA_etaDep",   "ETiltVariant::CLUS_CP_EA_FIT_ETADEP",  "CorrectPosition(EA |#eta|+E), cluster"},
-        {"CLUSCP_EA",          "ETiltVariant::CLUS_CP_EA_FIT_EONLY",   "CorrectPosition(EA E-only), cluster"},
-        {"CLUSCP_EA_mixed",    "ETiltVariant::CLUS_CP_EA_MIX",         "CorrectPosition(EA #varphi:E-only, #eta:|#eta|+E), cluster"},
-        {"CLUScpDirectBvals",  "ETiltVariant::CLUS_BCORR",             "b(E) corr, cluster"},
-        {"PDCraw",             "ETiltVariant::PDC_RAW",                "no corr, scratch"},
-        {"PDCcor",             "ETiltVariant::PDC_CORR",               "b(E) corr, scratch"}
+        const std::vector<OutLine> order = {
+          {"CLUSRAW",                 "ETiltVariant::CLUS_RAW",                     "no corr, cluster"},
+          {"CLUSCP",                  "ETiltVariant::CLUS_CP",                      "CorrectPosition, cluster"},
+          {"CLUSCP_EA_vzEtaDep",      "ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP",   "CorrectPosition(EA |z|+|#eta|+E), cluster"},
+          {"CLUSCP_EA_vzDep",         "ETiltVariant::CLUS_CP_EA_FIT_ZDEP",          "CorrectPosition(EA |z|+E), cluster"},
+          {"CLUSCP_EA_etaDep",        "ETiltVariant::CLUS_CP_EA_FIT_ETADEP",        "CorrectPosition(EA |#eta|+E), cluster"},
+          {"CLUSCP_EA_EandIncident",  "ETiltVariant::CLUS_CP_EA_FIT_EandIncident",  "CorrectPosition(EA E-only + incident-angle), cluster"},
+          {"CLUSCP_EA",               "ETiltVariant::CLUS_CP_EA_FIT_EONLY",         "CorrectPosition(EA E-only), cluster"},
+          {"CLUScpDirectBvals",       "ETiltVariant::CLUS_BCORR",                   "b(E) corr, cluster"},
+          {"PDCraw",                  "ETiltVariant::PDC_RAW",                      "no corr, scratch"},
+          {"PDCcor",                  "ETiltVariant::PDC_CORR",                     "b(E) corr, scratch"}
       };
 
       std::ofstream fout(outDir + "/DeltaPhi_MuVsLogE_fit.txt", std::ios::trunc);
@@ -2997,7 +3082,7 @@ void PDCAnalysisPRIMEPRIME()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_bOnlyValues.root";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_noPhiTilt.root";
   const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/SimOutputPrimeNoPhiTilt";
 
   EnsureDir(outBaseDir);
@@ -3243,6 +3328,7 @@ void PDCAnalysisPRIMEPRIME()
 
             // Uncorrected products
             SaveTH3Lego(hUnc, (outDirBase + "/lego_unc.png").c_str(), kEtaPretty.at(v.key).c_str());
+            // Plot2DBlockEtaPhi writes BOTH BlockCoord2D_E_unc.png and (if !isFirstPass && hCor) BlockCoord2D_E_cor.png
             Plot2DBlockEtaPhi(hUnc, hCor, isFirstPass, eEdges, outDirBase.c_str(), kEtaPretty.at(v.key).c_str());
             OverlayUncorrPhiEta(hUnc, eEdges, outDirBase.c_str(), kEtaPretty.at(v.key).c_str());
             MakeBvaluesVsEnergyPlot(hUnc, eEdges, outDirBase.c_str(), kEtaPretty.at(v.key).c_str());
@@ -3250,13 +3336,15 @@ void PDCAnalysisPRIMEPRIME()
             // b-values text labeling: originalEta × originalZRange
             if (bOut.is_open()) WriteBValuesTxt(hUnc, eEdges, bOut, "originalEta", "originalZRange");
 
-            // Corrected (second pass only)
+            // Corrected (second pass only): save corrected lego AND 1D corrected-vs-uncorrected overlays
             if (!isFirstPass && hCor)
             {
               SaveTH3Lego(hCor, (outDirBase + "/lego_cor.png").c_str(), kEtaPretty.at(v.key).c_str());
+              // 1D overlays (corrected vs uncorrected) in the same folder:
+              //   LocalPhiFits_4by2.png   and   LocalEtaFits_4by2.png
+              FitLocalPhiEta(hUnc, hCor, /*isFirstPassFlag*/false, eEdges, outDirBase.c_str());
             }
           }
-
           delete hUnc; if (hCor) delete hCor;
     }
 
