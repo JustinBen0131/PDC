@@ -465,7 +465,7 @@ if [[ "$MODE" == "local" || "$MODE" == "condor" ]]; then
       FILES_PER_GROUP=100
       echo "[PLAN][MINBIAS] No sub-mode supplied → FILES_PER_GROUP=${FILES_PER_GROUP} (smaller groups for MB I/O)"
     else
-      FILES_PER_GROUP=300
+      FILES_PER_GROUP=50
       echo "[PLAN] No sub-mode supplied → FILES_PER_GROUP=${FILES_PER_GROUP} (target ~40 partials for ~12k files)"
     fi
     echo "       With ${totalToMerge:-0} outputs, expected sublists ≈ $(( (totalToMerge + FILES_PER_GROUP - 1) / FILES_PER_GROUP ))"

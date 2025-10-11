@@ -4055,7 +4055,7 @@ void PositionDependentCorrection::finalClusterLoop(
       const float E_MIN_BIN = static_cast<float>(eEdge[0]);  // typically 2.0 GeV
       if (clusE < E_MIN_BIN)
       {
-        if (Verbosity() > 8)
+        if (Verbosity() > 20)
         {
           std::cout << "[SKIP]  => cluster E=" << clusE
                     << " < first E-bin edge (" << E_MIN_BIN << " GeV). Skipping.\n";

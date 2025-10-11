@@ -1,9 +1,9 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"",nan,"",nan,nan,"",nan,"",nan,nan
-4,6,"",nan,"",nan,nan,"",nan,"",nan,nan
-6,8,"",nan,"",nan,nan,"",nan,"",nan,nan
-8,10,"",nan,"",nan,nan,"",nan,"",nan,nan
-10,12,"",nan,"",nan,nan,"",nan,"",nan,nan
-12,15,"",nan,"",nan,nan,"",nan,"",nan,nan
-15,20,"",nan,"",nan,nan,"",nan,"",nan,nan
-20,30,"",nan,"",nan,nan,"",nan,"",nan,nan
+2,4,"2x2 Block-Local With Corr",0.003610,"2x2 block b-values applied to No Corr Prod",0.003693,0.000082,"2x2 Block-Local With Corr",0.003833,"2x2 block b-values applied to No Corr Prod",0.003857,0.000024
+4,6,"2x2 Block-Local With Corr",0.003220,"Constant-b (legacy)",0.003309,0.000089,"2x2 Block-Local With Corr",0.003468,"2x2 block b-values applied to No Corr Prod",0.003493,0.000025
+6,8,"2x2 Block-Local With Corr",0.003064,"Constant-b (legacy)",0.003129,0.000065,"2x2 Block-Local With Corr",0.003283,"2x2 block b-values applied to No Corr Prod",0.003317,0.000035
+8,10,"2x2 Block-Local With Corr",0.003188,"Energy-Dep b",0.003223,0.000034,"2x2 Block-Local With Corr",0.003190,"2x2 block b-values applied to No Corr Prod",0.003244,0.000054
+10,12,"2x2 Block-Local With Corr",0.003351,"Constant-b (legacy)",0.003372,0.000021,"2x2 Block-Local With Corr",0.003104,"2x2 block b-values applied to No Corr Prod",0.003170,0.000066
+12,15,"2x2 Block-Local With Corr",0.003484,"Constant-b (legacy)",0.003523,0.000039,"2x2 Block-Local With Corr",0.003055,"2x2 block b-values applied to No Corr Prod",0.003120,0.000065
+15,20,"2x2 Block-Local With Corr",0.003398,"Constant-b (legacy)",0.003433,0.000035,"2x2 Block-Local With Corr",0.002982,"2x2 block b-values applied to No Corr Prod",0.003059,0.000077
+20,30,"2x2 Block-Local With Corr",0.002920,"Constant-b (legacy)",0.002950,0.000030,"2x2 Block-Local With Corr",0.002796,"2x2 block b-values applied to No Corr Prod",0.002871,0.000075

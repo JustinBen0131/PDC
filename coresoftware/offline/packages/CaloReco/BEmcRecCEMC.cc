@@ -17,6 +17,14 @@
 #include <string>
 
 namespace {
+// Translation-unit local verbosity flag. Flip to true to see logs everywhere.
+static bool g_verbose_bfit = false;
+
+// Convenience: behaves like std::cerr only when verbose is on.
+#define VLOG() if (!::g_verbose_bfit) {} else std::cerr
+} // namespace
+
+namespace {  // ======================= VERBOSE b-value infra =======================
 
 // Key for lookup: (variantName, etaOrPhi, etaRange, zRange)
 struct BKey {
@@ -27,8 +35,15 @@ struct BKey {
   }
 };
 
-struct Fit { double m{std::numeric_limits<double>::quiet_NaN()};
-             double b0{std::numeric_limits<double>::quiet_NaN()}; };
+struct Fit {
+  double m  { std::numeric_limits<double>::quiet_NaN() };
+  double b0 { std::numeric_limits<double>::quiet_NaN() };
+};
+
+static inline std::string key_str(const BKey& k) {
+  return "{variant=" + k.variant + ", eop=" + k.eop +
+         ", eta=" + k.etaRange + ", z=" + k.zRange + "}";
+}
 
 class BFitDB {
  public:
@@ -41,32 +56,47 @@ class BFitDB {
                  const std::string& zRange) const {
     BKey k{variant, eop, etaRange, zRange};
     auto it = map_.find(k);
+    VLOG() << "[BFitDB::get] lookup " << key_str(k) << " -> "
+           << (it == map_.end() ? "MISS" :
+               ("HIT(m=" + std::to_string(it->second.m) +
+                ", b0=" + std::to_string(it->second.b0) + ")"))
+           << "\n";
     return (it == map_.end()) ? nullptr : &it->second;
   }
 
  private:
   std::map<BKey, Fit> map_;
+
   BFitDB() { load(); }
 
   void load() {
+    VLOG() << "[BFitDB::load] begin\n";
     const char* env = std::getenv("BEMC_BFIT_MASTER");
-    std::string path = env ? std::string(env) : std::string("bFit_master_zLT10.txt");
+    std::string path = env ? std::string(env) : std::string("/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/bFit_master_zLT10.txt");
+    VLOG() << "[BFitDB::load] env BEMC_BFIT_MASTER=" << (env ? env : "<unset>") << "\n";
+    VLOG() << "[BFitDB::load] opening file: " << path << "\n";
 
     std::ifstream fin(path);
     if (!fin) {
+      VLOG() << "[BFitDB::load] open FAILED: " << path << "\n";
       std::cerr << "[BEmcRecCEMC] WARNING: cannot open bFit master file: " << path << "\n";
       return;
     }
+    VLOG() << "[BFitDB::load] open OK\n";
 
-    // Optional header: "variantName etaOrPhi etaRange zRange m b0"
-    // Safe to try skipping one line
+    // Try to skip an optional header
     {
       std::string header;
       std::streampos pos = fin.tellg();
       if (std::getline(fin, header)) {
-        // If first line isn't a header, rewind to start of file
-        if (header.find("variantName") == std::string::npos) fin.seekg(pos);
+        if (header.find("variantName") == std::string::npos) {
+          fin.seekg(pos);
+          VLOG() << "[BFitDB::load] no header line detected (rewind)\n";
+        } else {
+          VLOG() << "[BFitDB::load] header: " << header << "\n";
+        }
       } else {
+        VLOG() << "[BFitDB::load] file empty; aborting\n";
         return;
       }
     }
@@ -75,47 +105,82 @@ class BFitDB {
     double m = std::numeric_limits<double>::quiet_NaN();
     double b0 = std::numeric_limits<double>::quiet_NaN();
 
+    size_t row = 0, inserted = 0, overwritten = 0;
     while (fin >> variant >> eop >> etaRange >> zRange >> m >> b0) {
-      map_[BKey{variant, eop, etaRange, zRange}] = Fit{m, b0};
+      ++row;
+      BKey k{variant, eop, etaRange, zRange};
+      auto pre = map_.find(k);
+      if (pre != map_.end()) {
+        ++overwritten;
+        VLOG() << "[BFitDB::load] duplicate key at data row " << row
+               << " " << key_str(k) << " -> overwriting old {m="
+               << pre->second.m << ", b0=" << pre->second.b0 << "} with {m="
+               << m << ", b0=" << b0 << "}\n";
+      } else {
+        VLOG() << "[BFitDB::load] row " << row << " insert "
+               << key_str(k) << " m=" << m << " b0=" << b0 << "\n";
+      }
+      map_[k] = Fit{m, b0};
+      ++inserted;
     }
+
+    VLOG() << "[BFitDB::load] done: rows_read=" << inserted
+           << ", unique_keys=" << map_.size()
+           << ", overwritten=" << overwritten << "\n";
   }
 };
 
-// Clamp b to around 0.6 (tight window 0.55–0.65)
+// No clamping — pass-through (leave only a non-finite guard)
 inline float clamp_b(float b) {
-  return (b < 0.55f) ? 0.55f : ((b > 0.65f) ? 0.65f : b);
+  if (!std::isfinite(b)) {
+    VLOG() << "[clamp_b] non-finite b -> fallback 0.15\n";
+    return 0.15f;         // your existing fallback policy
+  }
+  return b;               // return the fitted/derived value as-is
 }
 
 // Build b(E) from fit (b0 + m ln(E/E0)); fallback to 0.15 if missing
 inline float b_from(const Fit* fp, float Energy, float E0 = 3.0f) {
-  if (!fp) return 0.15f;
+  if (!fp) {
+    VLOG() << "[b_from] NO FIT available → fallback b=0.15 (E=" << Energy
+           << ", E0=" << E0 << ")\n";
+    return 0.15f;
+  }
   const float lnE = std::log(std::max(Energy, 1e-6f) / E0);
-  return clamp_b(static_cast<float>(fp->b0 + fp->m * lnE));
+  const float raw = static_cast<float>(fp->b0 + fp->m * lnE);
+  const float clamped = clamp_b(raw);
+  VLOG() << "[b_from] using {m=" << fp->m << ", b0=" << fp->b0
+         << "}, E=" << Energy << ", ln(E/E0)=" << lnE
+         << " → b_raw=" << raw << " → b=" << clamped << "\n";
+  return clamped;
 }
 
 // Map |η| to label
 inline std::string etaLabelFromAbsEta(float absEta) {
-  if (absEta <= 0.20f) return "etaCore";
-  if (absEta <= 0.70f) return "etaMid";
-  if (absEta <  1.10f) return "etaEdge";
-  return "fullEta";
+  std::string lab;
+  if      (absEta <= 0.20f) lab = "etaCore";
+  else if (absEta <= 0.70f) lab = "etaMid";
+  else if (absEta <  1.10f) lab = "etaEdge";
+  else                      lab = "fullEta";
+  VLOG() << "[etaLabelFromAbsEta] |eta|=" << absEta << " → " << lab << "\n";
+  return lab;
 }
 
 // Map |z_vtx| to the preferred *fine* label for 0–10 and *coarse* label beyond
 inline std::string zLabelFromAbsZ(float z) {
+  std::string lab;
   if (z < 10.f) {
-    if      (z < 2.f) return "z00to02";
-    else if (z < 4.f) return "z02to04";
-    else if (z < 6.f) return "z04to06";
-    else if (z < 8.f) return "z06to08";
-    else              return "z08to10";
-  }
-  if (z < 20.f) return "z10to20";
-  if (z < 30.f) return "z20to30";
-  if (z < 45.f) return "z30to45";
-  if (z < 60.f) return "z45to60";
-  // Tight cut in code; clamp ≥60 to last available bin
-  return "z45to60";
+    if      (z < 2.f) lab = "z00to02";
+    else if (z < 4.f) lab = "z02to04";
+    else if (z < 6.f) lab = "z04to06";
+    else if (z < 8.f) lab = "z06to08";
+    else              lab = "z08to10";
+  } else if (z < 20.f) lab = "z10to20";
+    else if (z < 30.f) lab = "z20to30";
+    else if (z < 45.f) lab = "z30to45";
+    else               lab = "z45to60"; // clamp ≥60 to last bin
+  VLOG() << "[zLabelFromAbsZ] |z_vtx|=" << z << " → " << lab << "\n";
+  return lab;
 }
 
 } // namespace
@@ -887,38 +952,65 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Ener
 
     if (haveGeom)
     {
-      // local face tangents and depth (fiber) axis
-      TVector3 ephi(g.dX[0], g.dY[0], g.dZ[0]); ephi = ephi.Unit();
-      TVector3 eeta(g.dX[1], g.dY[1], g.dZ[1]); eeta = eeta.Unit();
-      TVector3 n = (ephi.Cross(eeta)).Unit();
-
-      // orient axis toward IP (projective SPACAL)
+      // --- tower axis fixed toward nominal IP (origin) ---
       TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
-      if (n.Dot(-C) < 0.0) n = -n;
+      TVector3 n0 = (-C).Unit();                // projective SPACAL axis (center → IP)
 
-      // ray from actual vertex to tower center (adequate for incidence)
+      // ray from the actual vertex to the tower center
       TVector3 V(0., 0., fVz);
       TVector3 p = (C - V).Unit();
 
-      // component angles via atan2; use cosine for the geometric foreshortening
-      const double pn   = p.Dot(n);
-      const double pphi = p.Dot(ephi);
-      const double peta = p.Dot(eeta);
+      // raw face-edge directions (provided by geometry)
+      TVector3 ephi_raw(g.dX[0], g.dY[0], g.dZ[0]);
+      TVector3 eeta_raw(g.dX[1], g.dY[1], g.dZ[1]);
 
-      // cos(α_dir) = (p·n) / sqrt( (p·n)^2 + (p·e_dir)^2 )
-      const double cos_alpha_phi = std::max(1e-6, std::abs(pn) / std::sqrt(pn*pn + pphi*pphi));
-      const double cos_alpha_eta = std::max(1e-6, std::abs(pn) / std::sqrt(pn*pn + peta*peta));
+      if (ephi_raw.Mag2() < 1e-24 || eeta_raw.Mag2() < 1e-24)
+      {
+        // geometry degenerate → no incident-angle scaling this event
+        m_lastAlphaPhi = 0.f;
+        m_lastAlphaEta = 0.f;
+      }
+      else
+      {
+        // project the face directions into the plane ⟂ to the axis (Gram–Schmidt)
+        TVector3 ephi_t = ephi_raw - (ephi_raw.Dot(n0))*n0;
+        TVector3 eeta_t = eeta_raw - (eeta_raw.Dot(n0))*n0;
 
-      // record incident angles (radians) for downstream QA fills
-      m_lastAlphaPhi = static_cast<float>(std::acos(std::min(1.0, cos_alpha_phi)));
-      m_lastAlphaEta = static_cast<float>(std::acos(std::min(1.0, cos_alpha_eta)));
+        const double lphi_t = ephi_t.Mag();
+        const double leta_t = eeta_t.Mag();
+        if (lphi_t < 1e-12 || leta_t < 1e-12)
+        {
+          // numerical safety
+          m_lastAlphaPhi = 0.f;
+          m_lastAlphaEta = 0.f;
+        }
+        else
+        {
+          ephi_t *= (1.0 / lphi_t);
+          eeta_t *= (1.0 / leta_t);
 
-      // geometry-only correction: b_dir^eff = b_dir(E) * sec(α_dir) = b_dir(E) / cos(α_dir)
-      bx = clamp_b( bphi_E / static_cast<float>(cos_alpha_phi) );
-      by = clamp_b( beta_E / static_cast<float>(cos_alpha_eta) );
+          // components of p in the {n0, dir} planes
+          const double pn   = p.Dot(n0);
+          const double pphi = p.Dot(ephi_t);
+          const double peta = p.Dot(eeta_t);
+
+          // cos α_dir = |p·n0| / ||proj_{span{n0,dir}}(p)||
+          const double denom_phi = std::sqrt(pn*pn + pphi*pphi);
+          const double denom_eta = std::sqrt(pn*pn + peta*peta);
+
+          const double cos_a_phi = std::max(1e-6, std::abs(pn) / std::max(1e-12, denom_phi));
+          const double cos_a_eta = std::max(1e-6, std::abs(pn) / std::max(1e-12, denom_eta));
+
+          // record incident angles (radians) for QA
+          m_lastAlphaPhi = static_cast<float>(std::acos(std::min(1.0, cos_a_phi)));
+          m_lastAlphaEta = static_cast<float>(std::acos(std::min(1.0, cos_a_eta)));
+
+          // effective b via sec(α_dir): b_eff(E, α_dir) = b(E) / cos α_dir
+          bx = clamp_b( bphi_E / static_cast<float>(cos_a_phi) );
+          by = clamp_b( beta_E / static_cast<float>(cos_a_eta) );
+        }
+      }
     }
-    // -------------------------------------------------------------------------------
-    // bx/by are now the angle-aware scales used by the inverse-asinh below
 
 
   // ============================== φ ===================================
