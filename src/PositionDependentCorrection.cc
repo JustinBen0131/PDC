@@ -2889,6 +2889,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
     if (vb > 9) std::cout << "[φ-variants] EXIT\n";
 
+    // Compute residuals for all recorded φ variants
     for (auto& r : rec)
     {
       r.d = foldToTowerPitch(r.phi - phiTruth);
@@ -2897,9 +2898,111 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       if (vb > 3)
         std::cout << "    " << r.tag << "  loc=" << r.loc
                   << "  φ_SD=" << r.phi
-                  << "  Δφ(folded)="   << r.d << '\n';
+                  << "  Δφ(folded)=" << r.d << '\n';
     }
 
+    // --------- extra, structured summary when Verbosity() > 1 ----------
+    if (vb > 1)
+    {
+      // cluster |η| from lead tower center (front face center radius & z)
+      double etaLead = 0.0;
+      if (rFront > 1e-6) etaLead = std::asinh(zFront / rFront);
+      const float absEtaCluster = std::fabs(static_cast<float>(etaLead));
+      const float absZvtx       = std::fabs(vtxZ);
+
+      // baseline b(E) models, consistent with bFit_master.txt (E in GeV)
+      auto b_from = [](double m, double b0, double E)->double {
+        const double E0 = 3.0;
+        const double Ee = std::max(E, 1e-6);
+        return b0 + m * std::log(Ee / E0);
+      };
+
+      // choose coarse |z_vtx| bin: 0:[0-10), 1:[10-20), 2:[20-30), 3:[30-45), 4:[45-60+]
+      auto zBin = [absZvtx](){
+        if (absZvtx < 10.0f) return 0;
+        if (absZvtx < 20.0f) return 1;
+        if (absZvtx < 30.0f) return 2;
+        if (absZvtx < 45.0f) return 3;
+        return 4;
+      }();
+
+      // choose |η| bin for eta-dependent fits
+      auto eBin = [absEtaCluster](){
+        if (absEtaCluster <= 0.20f) return 0;     // etaCore
+        if (absEtaCluster <= 0.70f) return 1;     // etaMid
+        return 2;                                  // etaEdge
+      }();
+
+      // φ-direction baseline b(E) for three EA variants:
+      //  - E-only:          energyDepOnly / originalEta / originalZRange
+      //  - |z|+E (coarse):  zAndEnergyDep / originalEta / zXXtoYY
+      //  - |η|+E:           etaAndEnergyDep / (etaCore|etaMid|etaEdge) / originalZRange
+      const double bPhi_Eonly = b_from(-0.00648978, 0.180945, eReco);
+
+      double bPhi_Zdep = 0.0;
+      switch (zBin)
+      {
+        case 0:  bPhi_Zdep = b_from(-0.00648978, 0.180945, eReco); break; // 0–10
+        case 1:  bPhi_Zdep = b_from(-0.00660487, 0.181509, eReco); break; // 10–20
+        case 2:  bPhi_Zdep = b_from(-0.00612276, 0.179516, eReco); break; // 20–30
+        case 3:  bPhi_Zdep = b_from(-0.00631138, 0.178632, eReco); break; // 30–45
+        default: bPhi_Zdep = b_from(-0.00630780, 0.176338, eReco); break; // 45–60
+      }
+
+      double bPhi_Etadep = 0.0;
+      switch (eBin)
+      {
+        case 0:  bPhi_Etadep = b_from(-0.00665348, 0.186542, eReco); break; // etaCore
+        case 1:  bPhi_Etadep = b_from(-0.00699322, 0.182191, eReco); break; // etaMid
+        default: bPhi_Etadep = b_from(-0.00705560, 0.179281, eReco); break; // etaEdge
+      }
+
+      // incident angles captured by the E+incident-angle path in BEmcRecCEMC
+      const float aPhiRad = m_bemcRec->lastAlphaPhi();
+      const float aEtaRad = m_bemcRec->lastAlphaEta();
+      const float aPhiDeg = aPhiRad * 180.0f / static_cast<float>(M_PI);
+      const float aEtaDeg = aEtaRad * 180.0f / static_cast<float>(M_PI);
+
+      const float dRAW   = rec[0].d;
+      const float dCP    = rec[1].d;
+      const float dBCORR = rec[2].d;
+
+      // EA residuals already computed above
+      const float dEA_Zvtx     = dphiEA_fitZvtx;
+      const float dEA_Eta      = dphiEA_fitEta;
+      const float dEA_Incident = dphiEA_incident;
+      const float dEA_Eonly    = dphiEA_fitEonly;
+      const float dEA_ZvtxEta  = dphiEA_fitZvtxEta;
+
+      const float d_vs_Z = dEA_Incident - dEA_Zvtx;
+      const float d_vs_E = dEA_Incident - dEA_Eta;
+
+      std::cout << std::setprecision(6) << std::fixed
+                << "\n================  φ EA summary  ================\n"
+                << "E=" << eReco << " GeV"
+                << "  |η|_lead=" << absEtaCluster
+                << "  |z_vtx|=" << absZvtx << " cm\n"
+                << "b_base[φ]:  E-only=" << bPhi_Eonly
+                << "  |z|+E=" << bPhi_Zdep
+                << "  |η|+E=" << bPhi_Etadep << "\n"
+                << "incident angles:  αφ=" << aPhiDeg << "° (" << aPhiRad << " rad)"
+                << "  αη=" << aEtaDeg << "° (" << aEtaRad << " rad)\n"
+                << "Residuals Δφ (folded to ±1 tower pitch):\n"
+                << "  CLUS-RAW=" << dRAW
+                << "  CLUS-CP=" << dCP
+                << "  CLUS-BCORR=" << dBCORR << "\n"
+                << "  EA(|z|+E)=" << dEA_Zvtx
+                << "  EA(|η|+E)=" << dEA_Eta
+                << "  EA(E+incident)=" << dEA_Incident << "\n"
+                << "  EA(E-only)=" << dEA_Eonly
+                << "  EA(|z|+|η|+E)=" << dEA_ZvtxEta << "\n"
+                << "Δ(E+incident − |z|+E) = " << d_vs_Z
+                << "   |Δ|=" << std::fabs(d_vs_Z) << "\n"
+                << "Δ(E+incident − |η|+E) = " << d_vs_E
+                << "   |Δ|=" << std::fabs(d_vs_E) << "\n"
+                << "=================================================\n";
+    }
+    // ------------------------------------------------------------------
 
    //rec[0] -->Clusterizer tower2global NO CP
    //rec[1] --> Clusterizer CP with tower2global
@@ -2922,6 +3025,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     const int blkEtaCoarse = iyFine / 2; // use lead-tower row as the parent block
     etaPDCraw  = convertBlockToGlobalEta(blkEtaCoarse, blkCoord.first);
     etaPDCcorr = etaPDCraw;              // φ-correction doesn’t change η in this study
+
 
     #define HFill(H,V)    do{ if((H) && std::isfinite(V))             (H)->Fill(V); }while(0)
     #define HFill2(H,X,Y) do{ if((H) && std::isfinite(X) && std::isfinite(Y)) (H)->Fill((X),(Y)); }while(0)
@@ -3430,6 +3534,105 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                   << "  η_SD=" << r.eta
                   << "  Δη="   << r.d << '\n';
     }
+
+    // --------- extra, structured summary when Verbosity() > 1 ----------
+    if (vb > 1)
+    {
+      // cluster |η| from lead tower center
+      double etaLead = 0.0;
+      if (rFront > 1e-6) etaLead = std::asinh(tgLead->get_center_z() / rFront);
+      const float absEtaCluster = std::fabs(static_cast<float>(etaLead));
+      const float absZvtx       = std::fabs(vtxZ);
+
+      // baseline b(E) models for η-direction (bFit_master.txt, E in GeV)
+      auto b_from = [](double m, double b0, double E)->double {
+        const double E0 = 3.0;
+        const double Ee = std::max(E, 1e-6);
+        return b0 + m * std::log(Ee / E0);
+      };
+
+      // coarse |z_vtx| bin and |η| bin selection
+      auto zBin = [absZvtx](){
+        if (absZvtx < 10.0f) return 0;
+        if (absZvtx < 20.0f) return 1;
+        if (absZvtx < 30.0f) return 2;
+        if (absZvtx < 45.0f) return 3;
+        return 4;
+      }();
+      auto eBin = [absEtaCluster](){
+        if (absEtaCluster <= 0.20f) return 0;     // etaCore
+        if (absEtaCluster <= 0.70f) return 1;     // etaMid
+        return 2;                                  // etaEdge
+      }();
+
+      // η-direction baseline b(E) for three EA variants
+      const double bEta_Eonly = b_from(-0.00254355, 0.188284, eReco);
+
+      double bEta_Zdep = 0.0;
+      switch (zBin)
+      {
+        case 0:  bEta_Zdep = b_from(-0.00254355, 0.188284, eReco); break; // 0–10
+        case 1:  bEta_Zdep = b_from(-0.00246435, 0.192384, eReco); break; // 10–20
+        case 2:  bEta_Zdep = b_from(-0.00611304, 0.208018, eReco); break; // 20–30
+        case 3:  bEta_Zdep = b_from(-0.00987074, 0.234889, eReco); break; // 30–45
+        default: bEta_Zdep = b_from(-0.00287251, 0.323109, eReco); break; // 45–60
+      }
+
+      double bEta_Etadep = 0.0;
+      switch (eBin)
+      {
+        case 0:  bEta_Etadep = b_from(-0.00615566, 0.177377, eReco); break; // etaCore
+        case 1:  bEta_Etadep = b_from(-0.00494446, 0.194409, eReco); break; // etaMid
+        default: bEta_Etadep = b_from(+0.00240799, 0.196346, eReco); break; // etaEdge
+      }
+
+      // incident angles captured by the E+incident-angle path
+      const float aPhiRad = m_bemcRec->lastAlphaPhi();
+      const float aEtaRad = m_bemcRec->lastAlphaEta();
+      const float aPhiDeg = aPhiRad * 180.0f / static_cast<float>(M_PI);
+      const float aEtaDeg = aEtaRad * 180.0f / static_cast<float>(M_PI);
+
+      const float dRAW   = rec[0].d;
+      const float dCP    = rec[1].d;
+      const float dBCORR = rec[2].d;
+
+      // EA residuals for η path
+      const float dEA_Zvtx     = dEtaEA_fitZvtx;
+      const float dEA_Eta      = dEtaEA_fitEta;
+      const float dEA_Incident = dEtaEA_incident;
+      const float dEA_Eonly    = dEtaEA_fitEonly;
+      const float dEA_ZvtxEta  = dEtaEA_fitZvtxEta;
+
+      const float d_vs_Z = dEA_Incident - dEA_Zvtx;
+      const float d_vs_E = dEA_Incident - dEA_Eta;
+
+      std::cout << std::setprecision(6) << std::fixed
+                << "\n================  η EA summary  ================\n"
+                << "E=" << eReco << " GeV"
+                << "  |η|_lead=" << absEtaCluster
+                << "  |z_vtx|=" << absZvtx << " cm\n"
+                << "b_base[η]:  E-only=" << bEta_Eonly
+                << "  |z|+E=" << bEta_Zdep
+                << "  |η|+E=" << bEta_Etadep << "\n"
+                << "incident angles:  αφ=" << aPhiDeg << "° (" << aPhiRad << " rad)"
+                << "  αη=" << aEtaDeg << "° (" << aEtaRad << " rad)\n"
+                << "Residuals Δη:\n"
+                << "  CLUS-RAW=" << dRAW
+                << "  CLUS-CP=" << dCP
+                << "  CLUS-BCORR=" << dBCORR << "\n"
+                << "  EA(|z|+E)=" << dEA_Zvtx
+                << "  EA(|η|+E)=" << dEA_Eta
+                << "  EA(E+incident)=" << dEA_Incident << "\n"
+                << "  EA(E-only)=" << dEA_Eonly
+                << "  EA(|z|+|η|+E)=" << dEA_ZvtxEta << "\n"
+                << "Δ(E+incident − |z|+E) = " << d_vs_Z
+                << "   |Δ|=" << std::fabs(d_vs_Z) << "\n"
+                << "Δ(E+incident − |η|+E) = " << d_vs_E
+                << "   |Δ|=" << std::fabs(d_vs_E) << "\n"
+                << "=================================================\n";
+    }
+    // ------------------------------------------------------------------
+
     
     /* ── book‑keeping: |Δη| outside ±0.04 ───────────────────────────── */
     for (int i = 0; i < 5; ++i)

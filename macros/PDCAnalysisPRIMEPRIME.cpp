@@ -864,8 +864,12 @@ static void SaveOverlayAcrossVariants(
     return {m, b0};
   };
 
-    // ---------- write master 6-column TXT rows for ALL keys in this call ----------
+    // ---------- write master 6-column TXT rows for ALL keys in this call (DE-DUPED) ----------
     {
+      // Use a run-local set keyed by the tuple (variantName, axis, etaRange, zRange).
+      // std::map is used here (already included via <map>) to avoid needing <set>/<unordered_set>.
+      static std::map<std::string, char> g_master_seen;  // value unused; presence is enough
+
       std::ofstream mout(masterTXT, std::ios::app);
       if (mout)
       {
@@ -899,17 +903,25 @@ static void SaveOverlayAcrossVariants(
             zRange   = "originalZRange";
           }
 
-          // space-delimited row
-          mout << variantName << " "
-               << (isPhi ? "phi" : "eta") << " "
-               << etaRange << " "
-               << zRange  << " "
-               << fit.first  << " "
-               << fit.second << "\n";
+          // Build a canonical signature for de-duplication (ignore numeric fit values on purpose).
+          const std::string axis = (isPhi ? "phi" : "eta");
+          const std::string sig  = variantName + "|" + axis + "|" + etaRange + "|" + zRange;
+
+          // Only write if this (variant,axis,etaRange,zRange) hasn't been written before in this run.
+          if (!g_master_seen.count(sig)) {
+            g_master_seen[sig] = 1;
+            // space-delimited row
+            mout << variantName << " "
+                 << axis       << " "
+                 << etaRange   << " "
+                 << zRange     << " "
+                 << fit.first  << " "
+                 << fit.second << "\n";
+          }
         }
       }
     }
-    
+
     
   // ---------- Reusable renderer for ONE overlay (subset) ----------
   auto renderOverlay = [&](const std::string& sfx,
@@ -1393,7 +1405,8 @@ namespace {
     {"CLUSRAW",                "No Correction",                                   "h_phi_diff_cpRaw_",                                      "h_eta_diff_cpRaw_",                                       C_CLUSRAW},
     {"CLUSCP",                 "Constant-b (legacy)",                             "h_phi_diff_cpCorr_",                                     "h_eta_diff_cpCorr_",                                      C_CLUSCP},
     {"CLUSCP_EA",              "Energy-Dep b",                                    "h_phi_diff_cpCorrEA_fitEnergyOnly_",                     "h_eta_diff_cpCorrEA_fitEnergyOnly_",                      C_CLUSCP_EA},
-    {"CLUSCP_EA_vzDep",        "Energy + |v_{z}|-dep b",                          "h_phi_diff_cpCorrEA_geom_",                              "h_eta_diff_cpCorrEA_geom_",                               C_CLUSCP_EA_vz}, // (ZDEP)
+    {"CLUSCP_EA_vzDep",        "Energy + |v_{z}|-dep b",                          "h_phi_diff_cpCorrEA_fitZVTXDep_",                        "h_eta_diff_cpCorrEA_fitZVTXDep_",                         C_CLUSCP_EA_vz}, // (ZDEP)
+
     {"CLUSCP_EA_etaDep",       "Energy + |#eta|-dep b",                           "h_phi_diff_cpCorrEA_fitEtaDep_",                         "h_eta_diff_cpCorrEA_fitEtaDep_",                          C_CLUSCP_EA_eta},
     {"CLUSCP_EA_vzEtaDep",     "Energy + |z_{vtx}|+|#eta|-dep b",                 "h_phi_diff_cpCorrEA_fitZVTXEtaDep_",                     "h_eta_diff_cpCorrEA_fitZVTXEtaDep_",                      C_CLUSCP_EA_vzEta},
     {"CLUSCP_EA_EandIncident", "Energy-only + incident-angle",                    "h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_",    "h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_",     C_CLUSCP_EA_Einc},
@@ -1595,14 +1608,25 @@ namespace {
       h->GetXaxis()->SetTitle(kind.axisTitle.c_str());
       h->GetYaxis()->SetTitle("Counts");
 
-      const double ymax = 1.25 * std::max(1.0, h->GetMaximum());
+      // Match the 2×4 mosaic behavior: tighten X to content (with 20% pad)
+      tighten_x_range(h, 0.20);
+
+      // Compute Y max only over the currently visible X range
+      int first = h->GetXaxis()->GetFirst();
+      int last  = h->GetXaxis()->GetLast();
+      double m  = 0.0;
+      for (int b = first; b <= last; ++b) m = std::max(m, h->GetBinContent(b));
+      const double ymax = 1.25 * std::max(1.0, m);
       h->GetYaxis()->SetRangeUser(0.0, ymax);
+
       h->Draw("E1");
 
       const auto& e = eSlices[i];
       TLatex hdr; hdr.SetNDC(); hdr.SetTextFont(42); hdr.SetTextSize(0.045); hdr.SetTextAlign(13);
-      hdr.DrawLatex(0.12, 0.94, Form("%s   —   %.0f < E < %.0f GeV%s",
-                                     pretty_of(variantKey), e.first, e.second, vz_note(isVz60)));
+      // Avoid Unicode em-dash (TLatex can't render it reliably)
+      hdr.DrawLatex(0.12, 0.94, Form("%s   -   %.0f < E < %.0f GeV%s",
+                                       pretty_of(variantKey), e.first, e.second, vz_note(isVz60)));
+
 
       // stats (mean / RMS)
       TLatex st; st.SetNDC(); st.SetTextFont(42); st.SetTextSize(0.040); st.SetTextAlign(33);
@@ -1759,7 +1783,10 @@ namespace {
   }
 
     // ------------------------------------------------------------------
-    //  EmitMinRmsSummary: pretty console tables + CSVs for min RMS per E-bin
+    //  EmitMinRmsSummary (QUIET):
+    //   • Writes CSVs for min-RMS across bins (ALL / CLUS-only)
+    //   • Also writes Δ-vs-CLUSRAW CSVs for φ and η
+    //   • No console output (the final four ANSI tables are printed elsewhere)
     // ------------------------------------------------------------------
     static void EmitMinRmsSummary(const std::string& outDir,
                                   int NB,
@@ -1821,72 +1848,71 @@ namespace {
         ofs.close();
       };
 
-      auto printRankTable =
-        [&](const char* title,
-            const std::vector<std::vector<std::pair<std::string,double>>>& phiSorted,
-            const std::vector<std::vector<std::pair<std::string,double>>>& etaSorted)
-      {
-        std::cout << "\n========================================================================================\n";
-        std::cout << title << "\n";
-        std::cout << "----------------------------------------------------------------------------------------\n";
-        for (int i=0;i<NB;++i)
-        {
-          std::cout << "E bin [" << std::fixed << std::setprecision(0)
-                    << eSlices[i].first << "," << eSlices[i].second << ") GeV\n";
-
-          auto printOne = [&](const char* tag,
-                              const std::vector<std::pair<std::string,double>>& v)
-          {
-            std::cout << "  " << tag << ":";
-            if (v.empty()) { std::cout << "  (no entries)\n"; return; }
-            std::cout << "  best = {" << v[0].first << ", " << std::setprecision(6) << v[0].second << "}";
-            if (v.size()>1) {
-              const double gap = v[1].second - v[0].second;
-              std::cout << "   second = {" << v[1].first << ", " << v[1].second << "}   gap = " << gap;
-            }
-            std::cout << "\n";
-            if (v.size()>2){
-              std::cout << "    ranking:";
-              for (size_t r=0;r<v.size();++r)
-                std::cout << (r?" → ":" ") << "[" << r+1 << "] " << v[r].first << " (" << v[r].second << ")";
-              std::cout << "\n";
-            }
-          };
-          printOne("Δφ", phiSorted[i]);
-          printOne("Δη", etaSorted[i]);
-          std::cout << "----------------------------------------------------------------------------------------\n";
-        }
-      };
-
-      // ALL variants list (use keys from kVariants)
+      // Variant key lists
       std::vector<std::string> keysAll;
       for (const auto& v : kVariants) keysAll.push_back(v.key);
-
-      // CLUS family list (RAW, CP, CP(EA*))
       const std::vector<std::string> keysClus = {
-          "CLUSRAW","CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
+        "CLUSRAW","CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
       };
 
-      // Build sorted rankings from internal stats
+      // Sorted min-RMS rankings (for CSVs only)
       auto phiAllSorted  = collectSortedPerBin(keysAll , S_PH);
       auto etaAllSorted  = collectSortedPerBin(keysAll , S_ET);
       auto phiCluSorted  = collectSortedPerBin(keysClus, S_PH);
       auto etaCluSorted  = collectSortedPerBin(keysClus, S_ET);
 
-      // Print to stdout
-      printRankTable("TABLE A - Minimum RMS per energy bin across ALL variants (phi & eta)",
-                     phiAllSorted, etaAllSorted);
-      printRankTable("TABLE B - Minimum RMS per energy bin within CLUS-RAW / CLUS-CP / CLUS-CP(EA*) (phi & eta)",
-                     phiCluSorted, etaCluSorted);
-
-      // Write CSVs
+      // CSVs for min-RMS
       writeCSVwithSecond(outDir + "/MinRMS_ALL_variants.csv",  phiAllSorted, etaAllSorted);
       writeCSVwithSecond(outDir + "/MinRMS_CLUS_only.csv",     phiCluSorted, etaCluSorted);
 
-      std::cout << "[MakeResidualsSuite] Wrote CSVs:\n"
-                << "  • " << outDir + "/MinRMS_ALL_variants.csv\n"
-                << "  • " << outDir + "/MinRMS_CLUS_only.csv\n";
+      // Δ-vs-CLUSRAW CSVs (quiet)
+      auto writeDeltaCSV = [&](const std::string& csvPath,
+                               const std::map<std::string,ResStats>& S,
+                               const std::vector<std::string>& keys)
+      {
+        auto itB = S.find("CLUSRAW");
+        if (itB==S.end()) return;
+        const ResStats& B = itB->second;
+
+        std::ofstream ofs(csvPath);
+        ofs << "E_lo,E_hi";
+        for (const auto& k : keys) ofs << "," << k << "_delta_pct," << k << "_delta_pct_err";
+        ofs << "\n";
+
+        for (int i=0;i<NB;++i){
+          const double r  = (i<(int)B.rms.size()?  B.rms[i]  : NAN);
+          const double re = (i<(int)B.drms.size()? B.drms[i] : 0.0);
+          ofs << std::fixed << std::setprecision(0) << eSlices[i].first << "," << eSlices[i].second;
+
+          for (const auto& k : keys){
+            double s=NAN, se=0.0;
+            auto it = S.find(k);
+            if (it != S.end()){
+              s  = (i<(int)it->second.rms.size()?  it->second.rms[i]  : NAN);
+              se = (i<(int)it->second.drms.size()? it->second.drms[i] : 0.0);
+            }
+            if (std::isfinite(r) && r>0.0 && std::isfinite(s)){
+              const double ratio   = s/r;
+              const double varRat  = (se*se)/(r*r) + (s*s*re*re)/(r*r*r*r);
+              const double dPct    = 100.0*(1.0 - ratio);
+              const double dPctErr = 100.0*std::sqrt(std::max(0.0, varRat));
+              ofs << "," << std::setprecision(3) << dPct << "," << dPctErr;
+            } else {
+              ofs << ",,";
+            }
+          }
+          ofs << "\n";
+        }
+        ofs.close();
+      };
+
+      const std::vector<std::string> keysClusNoRaw = {
+        "CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
+      };
+      writeDeltaCSV(outDir + "/Delta_vs_CLUSRAW_phi.csv", S_PH, keysClusNoRaw);
+      writeDeltaCSV(outDir + "/Delta_vs_CLUSRAW_eta.csv", S_ET, keysClusNoRaw);
     }
+
 } // end anon namespace
 
 
@@ -1917,43 +1943,31 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
   const std::string DIR_ET  = RESID + "/eta";
   ensure_dir(DIR_PH); ensure_dir(DIR_ET);
 
-  auto scaffold_kind = [&](const std::string& base){
-    for (const auto& v : kVariants) {
-      ensure_dir(base + "/" + v.key);
-      ensure_dir(base + "/" + v.key + "/PlaneResiduals");
-    }
-    // z<=60
-    const std::string z60 = base + "/zTo60";
-    ensure_dir(z60);
-    for (const auto& v : kVariants) {
-      ensure_dir(z60 + "/" + v.key + "_vz0to60");
-      ensure_dir(z60 + "/" + v.key + "_vz0to60/PlaneResiduals");
-    }
-    // overlays
-    ensure_dir(base + "/Overlays/firstBin");
-    ensure_dir(base + "/Overlays/meansigma");
-    ensure_dir(base + "/Overlays/sigmaRatio");
-    ensure_dir(base + "/Overlays_0_60vz/firstBin");
-    ensure_dir(base + "/Overlays_0_60vz/meansigma");
-    ensure_dir(base + "/Overlays_0_60vz/sigmaRatio");
+    auto scaffold_kind = [&](const std::string& base){
+      for (const auto& v : kVariants) {
+        ensure_dir(base + "/" + v.key);
+        ensure_dir(base + "/" + v.key + "/PlaneResiduals");
+      }
+      // overlays (only |v_z| < 10 cm set)
+      ensure_dir(base + "/Overlays/firstBin");
+      ensure_dir(base + "/Overlays/meansigma");
+      ensure_dir(base + "/Overlays/sigmaRatio");
 
-    // NEW: φ tilt-fit products
-    if (base == DIR_PH) {
-      ensure_dir(base + "/Overlays/phiTILTfits");
-    }
-  };
+      // φ tilt-fit products
+      if (base == DIR_PH) {
+        ensure_dir(base + "/Overlays/phiTILTfits");
+      }
+    };
+
   scaffold_kind(DIR_PH);
   scaffold_kind(DIR_ET);
 
-  // ---------------- collect histograms (robust parse) ----------------
-  using Var2Hists = std::map<std::string, HVec>;
-  Var2Hists PH, PH_60, ET, ET_60;              // variant -> [NB] hists
-  for (const auto& v : kVariants) {
-    PH    [v.key] = HVec(NB,nullptr);
-    PH_60 [v.key] = HVec(NB,nullptr);
-    ET    [v.key] = HVec(NB,nullptr);
-    ET_60 [v.key] = HVec(NB,nullptr);
-  }
+    using Var2Hists = std::map<std::string, HVec>;
+    Var2Hists PH, ET;                            // variant -> [NB] hists
+    for (const auto& v : kVariants) {
+      PH[v.key] = HVec(NB,nullptr);
+      ET[v.key] = HVec(NB,nullptr);
+    }
 
   std::vector<ScanRow> scanRows;
   scanRows.reserve(1024);
@@ -1971,63 +1985,56 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
     if (!h) continue;
     ++nH1;
 
-    const std::string name = nm.Data();
-    const bool isVz60 = (name.size() >= 7 && name.rfind("_0_60vz") == name.size()-7);
+      const std::string name = nm.Data();
+      const bool isVz60 = false; // no 0_60 variants in this production
 
-    // Determine kind & variant by prefix match
-    auto try_attach = [&](const KindDef& kind, const VarDef& vdef)->bool {
-      const std::string& pref = (kind.tag=="phi" ? vdef.phiPrefix : vdef.etaPrefix);
-      if (!TString(name.c_str()).BeginsWith(pref.c_str())) return false;
+      // Determine kind & variant by prefix match
+      auto try_attach = [&](const KindDef& kind, const VarDef& vdef)->bool {
+        const std::string& pref = (kind.tag=="phi" ? vdef.phiPrefix : vdef.etaPrefix);
+        if (!TString(name.c_str()).BeginsWith(pref.c_str())) return false;
 
-      // Skip per-vz debug histos like "..._vz0_5", "..._vz10_15", etc.
-      // Keep only the special suite "..._0_60vz".
-      if (name.find("_vz") != std::string::npos && name.find("_0_60vz") == std::string::npos)
-          return false;
+        std::string src;
+        const int ib = resolve_energy_bin(h, name, eSlices, eCenters, &src);
+        const auto& targetES = eSlices;
+        const std::string ewin = (ib>=0 && ib<(int)targetES.size())
+                                 ? (Form("%.0f-%.0f", targetES[ib].first, targetES[ib].second))
+                                 : "";
 
-      std::string src;
-      const int ib = resolve_energy_bin(h, name, eSlices, eCenters, &src);
-      const auto& targetES = eSlices;
-      const std::string ewin = (ib>=0 && ib<(int)targetES.size())
-                               ? (Form("%.0f-%.0f", targetES[ib].first, targetES[ib].second))
-                               : "";
+        ScanRow row;
+        row.kind    = kind.tag;
+        row.variant = vdef.key;
+        row.suffix  = ""; // no 0_60 suffix
+        row.ebin    = ib;
+        row.ewin    = ewin;
+        row.name    = name;
+        row.src     = src.empty() ? "UNRES" : src;
+        row.entries = (Long64_t)h->GetEntries();
+        row.mean    = h->GetMean();
+        row.rms     = h->GetRMS();
 
-      ScanRow row;
-      row.kind    = kind.tag;
-      row.variant = vdef.key;
-      row.suffix  = (isVz60 ? "0_60vz" : "");
-      row.ebin    = ib;
-      row.ewin    = ewin;
-      row.name    = name;
-      row.src     = src.empty() ? "UNRES" : src;
-      row.entries = (Long64_t)h->GetEntries();
-      row.mean    = h->GetMean();
-      row.rms     = h->GetRMS();
-
-      bool placed = false;
-      if (ib>=0 && ib<NB) {
-        TH1* hc = dynamic_cast<TH1*>(h->Clone());
-        if (hc) {
-          hc->SetDirectory(nullptr);
-          HVec& vec = (kind.tag=="phi"
-                        ? (isVz60 ? PH_60[vdef.key] : PH[vdef.key])
-                        : (isVz60 ? ET_60[vdef.key] : ET[vdef.key]));
-          if (vec[ib]!=nullptr) {
-            std::cerr << "[MakeResidualsSuite][WARN] Duplicate for ("<<kind.tag<<","<<vdef.key<<","<<ib
-                      << (isVz60? ",0_60vz":"") << "). Keeping the first and ignoring: " << name << "\n";
-            delete hc;
-          } else {
-            vec[ib] = hc;
-            placed = true;
+        bool placed = false;
+        if (ib>=0 && ib<NB) {
+          TH1* hc = dynamic_cast<TH1*>(h->Clone());
+          if (hc) {
+            hc->SetDirectory(nullptr);
+            HVec& vec = (kind.tag=="phi" ? PH[vdef.key] : ET[vdef.key]);
+            if (vec[ib]!=nullptr) {
+              std::cerr << "[MakeResidualsSuite][WARN] Duplicate for ("<<kind.tag<<","<<vdef.key<<","<<ib<<"). Keeping the first and ignoring: " << name << "\n";
+              delete hc;
+            } else {
+              vec[ib] = hc;
+              placed = true;
+            }
           }
+        } else {
+          std::cerr << "[MakeResidualsSuite][WARN] Could not resolve energy bin for " << name
+                    << " (src=" << row.src << "). Skipping placement.\n";
         }
-      } else {
-        std::cerr << "[MakeResidualsSuite][WARN] Could not resolve energy bin for " << name
-                  << " (src=" << row.src << "). Skipping placement.\n";
-      }
-      row.used = placed;
-      scanRows.push_back(std::move(row));
-      return true;
-    };
+        row.used = placed;
+        scanRows.push_back(std::move(row));
+        return true;
+      };
+
 
       // Longest-prefix match so generic prefixes don't swallow specific ones
       const VarDef* bestPhi = nullptr;  size_t bestPhiLen = 0;
@@ -2084,35 +2091,21 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
     }
   };
 
-  Var2Stats S_PH, S_PH_60, S_ET, S_ET_60;
-  compute_stats(PH,    S_PH);
-  compute_stats(PH_60, S_PH_60);
-  compute_stats(ET,    S_ET);
-  compute_stats(ET_60, S_ET_60);
+    Var2Stats S_PH, S_ET;
+    compute_stats(PH, S_PH);
+    compute_stats(ET, S_ET);
 
-  // ------------- per-variant plane residuals (defaults + 0-60) -------------
-  for (const auto& v : kVariants) {
-    // φ defaults
-    if (PH.count(v.key)) {
-      const std::string base = DIR_PH + "/" + v.key;
-      WritePlaneResiduals(kPhi, v.key, eSlices, PH.at(v.key), base, /*isVz60=*/false);
+
+    for (const auto& v : kVariants) {
+      if (PH.count(v.key)) {
+        const std::string base = DIR_PH + "/" + v.key;
+        WritePlaneResiduals(kPhi, v.key, eSlices, PH.at(v.key), base, /*isVz60=*/false);
+      }
+      if (ET.count(v.key)) {
+        const std::string base = DIR_ET + "/" + v.key;
+        WritePlaneResiduals(kEta, v.key, eSlices, ET.at(v.key), base, /*isVz60=*/false);
+      }
     }
-    // φ 0–60
-    if (PH_60.count(v.key)) {
-      const std::string base = DIR_PH + "/zTo60/" + v.key + "_vz0to60";
-      WritePlaneResiduals(kPhi, v.key, eSlices, PH_60.at(v.key), base, /*isVz60=*/true);
-    }
-    // η defaults
-    if (ET.count(v.key)) {
-      const std::string base = DIR_ET + "/" + v.key;
-      WritePlaneResiduals(kEta, v.key, eSlices, ET.at(v.key), base, /*isVz60=*/false);
-    }
-    // η 0–60
-    if (ET_60.count(v.key)) {
-      const std::string base = DIR_ET + "/zTo60/" + v.key + "_vz0to60";
-      WritePlaneResiduals(kEta, v.key, eSlices, ET_60.at(v.key), base, /*isVz60=*/true);
-    }
-  }
 
   // ---------------- overlays (same groupings as before) ----------------
   auto mkGraph = [&](const std::vector<double>& x,
@@ -2314,18 +2307,22 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
     };
     
     
+    // sigma_ratio_overlay with per-plot LEGEND POSITION and TEXT SIZE control
+    // Usage: pass legend box (lx1,ly1,lx2,ly2) and text size (ltxt) for each output.
     std::function<void(const KindDef&,
                        const Var2Stats&,
                        const std::vector<std::string>&,
                        const std::string&,
                        const std::string&,
-                       const char*)>
+                       const char*,
+                       double,double,double,double,double)>
     sigma_ratio_overlay = [&](const KindDef& kind,
                               const Var2Stats& S,
                               const std::vector<std::string>& which,
                               const std::string& baselineKey,
                               const std::string& outPng,
-                              const char* vzNoteStr)
+                              const char* vzNoteStr,
+                              double lx1, double ly1, double lx2, double ly2, double ltxt)
     {
       const auto itB = S.find(baselineKey);
       if (itB==S.end()) return;
@@ -2337,6 +2334,14 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
 
       const double xMin = eSlices.front().first - 0.5;
       const double xMax = eSlices.back().second + 0.5;
+
+      auto legend_label = [&](const std::string& key)->const char* {
+        if (key == "CLUSCP_EA_vzDep")        return "Energy + |z_{vtx}|-dep b";
+        if (key == "CLUSCP_EA_etaDep")       return "Energy + |#eta|-dep b";
+        if (key == "CLUSCP_EA_vzEtaDep")     return "Energy + |z_{vtx}|+|#eta|-dep b";
+        if (key == "CLUSCP_EA_EandIncident") return "Energy-only + incident-angle";
+        return pretty_of(key);
+      };
 
       // ---------------- top: RMS(E) ----------------
       top.cd();
@@ -2368,228 +2373,129 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       frU.GetXaxis()->SetTickLength(0.0);
       frU.Draw("AXIS");
 
-        auto legend_label = [&](const std::string& key)->const char* {
-          if (key == "CLUSCP_EA_vzDep")        return "Energy + |z_{vtx}|-dep b";
-          if (key == "CLUSCP_EA_etaDep")       return "Energy + |#eta|-dep b";
-          if (key == "CLUSCP_EA_vzEtaDep")     return "Energy + |z_{vtx}|+|#eta|-dep b";
-          if (key == "CLUSCP_EA_EandIncident") return "Energy-only + incident-angle";
-          return pretty_of(key);
-        };
+      // --- In-bin marker offsets (consistent across TOP/BOTTOM)
+      const double kBinOffset = 0.12; // tune if you want more/less horizontal separation
+      auto slotOf = [&](const std::string& key)->int {
+        if (key == "CLUSCP")                 return -3; // Constant-b (legacy)
+        if (key == "CLUSCP_EA_etaDep")       return -1; // |η|-dep
+        if (key == "CLUSCP_EA_vzDep")        return +1; // |z|-dep
+        if (key == "CLUSCP_EA_vzEtaDep")     return +3; // |z|+|η|-dep
+        if (key == "CLUSCP_EA_EandIncident") return  0; // E-only + incident-angle (center)
+        if (key == "CLUSCP_EA")              return +2; // E-only
+        if (key == "CLUSRAW")                return -4; // raw (put slightly left of CP)
+        return 0;
+      };
+      auto xOffsetFrac = [&](const std::string& key)->double {
+        return slotOf(key) * kBinOffset;
+      };
 
-        std::vector<std::unique_ptr<TGraphErrors>> keepU;
-        std::map<std::string,TGraphErrors*> gByKey;
+      // Draw top graphs
+      std::vector<std::unique_ptr<TGraphErrors>> keepTop;
+      std::map<std::string,TGraphErrors*> gByKey;
+      for (const auto& k : which){
+        auto it = S.find(k);
+        if (it==S.end()) continue;
 
-        // Define once near the start of sigma_ratio_overlay() so it's visible everywhere in this function:
-        const TString outNameTL(outPng.c_str());
-
-        // TOP: draw graphs (with optional left/right bin offsets)
-        {
-          const bool useBinOffsets =
-              outNameTL.Contains("sigma_vsE_ratio_to_CLUSCP_EA_vz_eta_withEonly.png");
-
-            // ---- Tunable, even-in-bin offsets (TOP & BOTTOM) -----------------------
-            // Single knob: set the per-slot step as a fraction of the bin width.
-            // Suggested range: 0.06–0.18 (keeps markers well within the bin).
-            const double kBinOffset = 0.12;
-
-            // Discrete slot per variant: keep markers separated but inside the bin
-            auto slotOf = [&](const std::string& key)->int {
-              if (key == "CLUSCP")                 return -3; // Constant-b (legacy)
-              if (key == "CLUSCP_EA_etaDep")       return -1; // |η|-dep
-              if (key == "CLUSCP_EA_vzDep")        return +1; // |z|-dep
-              if (key == "CLUSCP_EA_vzEtaDep")     return +3; // |z|+|η|-dep
-              if (key == "CLUSCP_EA_EandIncident") return  0; // E-only + incident-angle (center)
-              if (key == "CLUSCP_EA")              return +2; // E-only
-              return 0;
-            };
-
-            // Fractional X-offset inside the bin; multiply by bin width (eHi-eLo)
-            auto xOffsetFrac = [&](const std::string& key)->double {
-              return slotOf(key) * kBinOffset;
-            };
-
-          for (const auto& k : which){
-            if (!S.count(k)) continue;
-
-            // Build shifted X, Y, dY
-            std::vector<double> X, Y, dX, dY;
-            X.reserve(NB); Y.reserve(NB); dX.assign(NB,0.0); dY.reserve(NB);
-            for (int i=0;i<NB;++i){
-              const double y  = (i<(int)S.at(k).rms.size()? S.at(k).rms[i]  : std::numeric_limits<double>::quiet_NaN());
-              const double dy = (i<(int)S.at(k).drms.size()? S.at(k).drms[i]: 0.0);
-              if (!std::isfinite(y)) continue;
-              const double eLo  = eSlices[i].first;
-              const double eHi  = eSlices[i].second;
-              const double eCtr = 0.5*(eLo + eHi);
-              const double eWid = (eHi - eLo);
-                const double xOff = (useBinOffsets ? xOffsetFrac(k) : 0.0) * eWid;
-              X.push_back(eCtr + xOff);
-              Y.push_back(y);
-              dY.push_back(dy);
-            }
-
-            auto g = std::make_unique<TGraphErrors>(
-              (int)X.size(),
-              X.empty()?nullptr:&X[0],
-              Y.empty()?nullptr:&Y[0],
-              dX.empty()?nullptr:&dX[0],
-              dY.empty()?nullptr:&dY[0]
-            );
-              if (g->GetN()>0){
-                g->SetMarkerColor( color_of(k) );
-                g->SetLineColor(   color_of(k) );
-                g->SetLineWidth(1);
-                g->SetMarkerStyle(kMkStyle);   // ensure visible filled circles
-                g->SetMarkerSize(1.10);        // enlarge so they show up over error bars
-                g->Draw("P SAME");
-                gByKey[k] = g.get();
-                keepU.emplace_back(std::move(g));
-              }
-          }
+        std::vector<double> X,Y,EX,EY;
+        for (int i=0;i<NB;++i){
+          const double y  = it->second.rms[i];
+          const double dy = it->second.drms[i];
+          if (!std::isfinite(y)) continue;
+          const double eLo  = eSlices[i].first;
+          const double eHi  = eSlices[i].second;
+          const double eCtr = 0.5*(eLo + eHi);
+          const double eWid = (eHi - eLo);
+          const double xOff = xOffsetFrac(k) * eWid;
+          X.push_back(eCtr + xOff);
+          Y.push_back(y);
+          EX.push_back(0.0);
+          EY.push_back(std::isfinite(dy)?dy:0.0);
         }
 
-        // outNameTL is already defined above.
-        // Match both the base name and the "_withEonly" variant by testing the stem
-        const bool useSingleRightLegend =
-            outNameTL.Contains("sigma_vsE_ratio_to_CLUSCP_EA_vz_eta");
-
-
-        auto addIf = [&](TLegend* L, const char* key){
-          auto it = gByKey.find(key);
-          if (it != gByKey.end() && it->second)
-            L->AddEntry(it->second, legend_label(key), "p");
-        };
-
-        if (useSingleRightLegend) {
-          // --- Single column legend in the top-right (requested) ---
-          TLegend* leg1 = new TLegend(0.62, 0.68, 0.92, 0.88, "", "brNDC");
-          leg1->SetBorderSize(0);
-          leg1->SetFillStyle(0);
-          leg1->SetTextSize(0.044);
-          leg1->SetNColumns(1);
-          leg1->SetEntrySeparation(0.0);
-          leg1->SetMargin(0.18);
-            // Deterministic order: CP → EA(|η|+E) → EA(|z|+E) → EA(|z|+|η|+E) → EA(E-only + incident) → EA(E-only) → RAW
-            addIf(leg1, "CLUSCP");
-            addIf(leg1, "CLUSCP_EA_etaDep");
-            addIf(leg1, "CLUSCP_EA_vzDep");
-            addIf(leg1, "CLUSCP_EA_vzEtaDep");
-            addIf(leg1, "CLUSCP_EA_EandIncident");
-            addIf(leg1, "CLUSCP_EA");
-            addIf(leg1, "CLUSRAW");
-          leg1->Draw();
-            
-        } else {
-          // --- Default: two-column, row-aligned legends ---
-          TLegend* legLeft  = new TLegend(0.4, 0.73, 0.52, 0.92, "", "brNDC");
-          TLegend* legRight = new TLegend(0.56, 0.73, 0.92, 0.9, "", "brNDC");
-          for (auto* L : {legLeft, legRight}) {
-            L->SetBorderSize(0); L->SetFillStyle(0); L->SetTextSize(0.040);
-            L->SetNColumns(1); L->SetEntrySeparation(0.0); L->SetMargin(0.18);
-          }
-
-          std::vector<std::string> leftKeys  = {"CLUSRAW"};
-          std::vector<std::string> rightKeys = {"CLUSCP"};
-
-          const bool hasEta   = gByKey.count("CLUSCP_EA_etaDep");
-          const bool hasVz    = gByKey.count("CLUSCP_EA_vzDep");
-          const bool hasEonly = gByKey.count("CLUSCP_EA");
-          const int  nEA      = (hasEta?1:0) + (hasVz?1:0) + (hasEonly?1:0);
-
-          if (nEA == 1) {
-            if (hasEta)   rightKeys.push_back("CLUSCP_EA_etaDep");
-            if (hasVz)    rightKeys.push_back("CLUSCP_EA_vzDep");
-            if (hasEonly) rightKeys.push_back("CLUSCP_EA");
-          } else {
-            if (hasEta)   leftKeys.push_back("CLUSCP_EA_etaDep");
-            if (hasEonly) leftKeys.push_back("CLUSCP_EA");
-            if (hasVz)    rightKeys.push_back("CLUSCP_EA_vzDep");
-          }
-
-          for (const auto& k : leftKeys)  addIf(legLeft,  k.c_str());
-          for (const auto& k : rightKeys) addIf(legRight, k.c_str());
-
-          legLeft->Draw();
-          legRight->Draw();
+        auto g = std::make_unique<TGraphErrors>((int)X.size(),
+                                                X.empty()?nullptr:&X[0],
+                                                Y.empty()?nullptr:&Y[0],
+                                                EX.empty()?nullptr:&EX[0],
+                                                EY.empty()?nullptr:&EY[0]);
+        if (g->GetN()>0){
+          g->SetMarkerColor(color_of(k));
+          g->SetLineColor  (color_of(k));
+          g->SetMarkerStyle(kMkStyle);
+          g->SetMarkerSize(1.10);
+          g->SetLineWidth(1);
+          g->Draw("P SAME");
+          gByKey[k] = g.get();
+          keepTop.emplace_back(std::move(g));
         }
+      }
+
+      // --- LEGEND (PER-PLOT TUNABLE) ---
+      // Tune here per plot: lx1, ly1, lx2, ly2, ltxt (passed by caller)
+      TLegend leg(lx1, ly1, lx2, ly2, "", "brNDC");
+      leg.SetBorderSize(0);
+      leg.SetFillStyle(0);
+      leg.SetTextSize(ltxt);
+      leg.SetNColumns(1);
+      leg.SetEntrySeparation(0.0);
+      leg.SetMargin(0.18);
+      for (const auto& k : which){
+        auto it = gByKey.find(k);
+        if (it!=gByKey.end() && it->second)
+          leg.AddEntry(it->second, legend_label(k), "p");
+      }
+      leg.Draw();
+
       // ---------------- bottom: RMS / baseline ----------------
       bot.cd();
 
-      // Build ratios to baseline
-      std::vector<std::unique_ptr<TGraphErrors>> keepL;
+      std::vector<std::unique_ptr<TGraphErrors>> keepBot;
       std::vector<double> yminCand, ymaxCand;
 
-        // BOTTOM: build ratio graphs (use the same offset pattern as TOP)
-        {
-          const bool useBinOffsets =
-              outNameTL.Contains("sigma_vsE_ratio_to_CLUSCP_EA_vz_eta_withEonly.png");
+      for (const auto& k : which){
+        if (k==baselineKey) continue;
+        auto it = S.find(k); if (it==S.end()) continue;
 
-          // Bottom-panel offset scheme (mirrors TOP). Center slot intentionally left empty.
-          const double kBinOffsetBottom = 0.12;
-            auto slotOfBot = [&](const std::string& key)->int {
-              if (key == "CLUSCP")                 return -3; // Constant-b (legacy)
-              if (key == "CLUSCP_EA_etaDep")       return -1; // |η|-dep
-              if (key == "CLUSCP_EA_vzDep")        return +1; // |z|-dep
-              if (key == "CLUSCP_EA_vzEtaDep")     return +3; // |z|+|η|-dep
-              if (key == "CLUSCP_EA_EandIncident") return  0; // E-only + incident-angle
-              if (key == "CLUSCP_EA")              return +2; // E-only
-              return 0;
-            };
-            
-          auto xOffsetFracBot = [&](const std::string& key)->double {
-            return slotOfBot(key) * kBinOffsetBottom;
-          };
+        std::vector<double> X,Y,EX,EY;
+        for (int i=0;i<NB;++i){
+          const double s  = it->second.rms[i];
+          const double se = it->second.drms[i];
+          const double r  = B.rms[i];
+          const double re = B.drms[i];
+          if (std::isfinite(s) && std::isfinite(r) && r>0.0){
+            const double ratio = s/r;
+            const double erel2 = ( (se>0&&s>0? (se/s)*(se/s) : 0.0) +
+                                   (re>0&&r>0? (re/r)*(re/r) : 0.0) );
+            const double eLo  = eSlices[i].first;
+            const double eHi  = eSlices[i].second;
+            const double eCtr = 0.5*(eLo + eHi);
+            const double eWid = (eHi - eLo);
+            const double xOff = xOffsetFrac(k) * eWid;
 
-          for (const auto& k : which){
-            if (k==baselineKey || !S.count(k)) continue;
-
-            std::vector<double> X, Y, dX, dY;
-            X.reserve(NB); Y.reserve(NB); dX.assign(NB,0.0); dY.reserve(NB);
-
-
-            for (int i=0;i<NB;++i){
-              const double s  = S.at(k).rms[i];
-              const double se = S.at(k).drms[i];
-              const double r  = B.rms[i];
-              const double re = B.drms[i];
-              if (std::isfinite(s) && std::isfinite(r) && r>0.0){
-                const double ratio = s/r;
-                const double erel2 = ( (se>0&&s>0? (se/s)*(se/s) : 0.0) +
-                                       (re>0&&r>0? (re/r)*(re/r) : 0.0) );
-                const double eLo  = eSlices[i].first;
-                const double eHi  = eSlices[i].second;
-                const double eCtr = 0.5*(eLo + eHi);
-                const double eWid = (eHi - eLo);
-                const double xOff = (useBinOffsets ? xOffsetFracBot(k) : 0.0) * eWid;
-
-
-                X.push_back(eCtr + xOff);
-                Y.push_back(ratio);
-                dY.push_back(ratio * std::sqrt(erel2));
-                yminCand.push_back(ratio - dY.back());
-                ymaxCand.push_back(ratio + dY.back());
-              }
-            }
-
-            auto g = std::make_unique<TGraphErrors>(
-              (int)X.size(),
-              X.empty()?nullptr:&X[0],
-              Y.empty()?nullptr:&Y[0],
-              dX.empty()?nullptr:&dX[0],
-              dY.empty()?nullptr:&dY[0]
-            );
-              if (g->GetN()>0){
-                g->SetMarkerColor( color_of(k) );
-                g->SetLineColor(   color_of(k) ); // keep error bars
-                g->SetLineWidth(1);
-                g->SetMarkerStyle(kMkStyle);   // same visible marker as top
-                g->SetMarkerSize(1.10);
-                keepL.emplace_back(std::move(g));
-              }
+            X.push_back(eCtr + xOff);
+            Y.push_back(ratio);
+            EX.push_back(0.0);
+            const double dy = ratio * std::sqrt(erel2);
+            EY.push_back(dy);
+            yminCand.push_back(ratio - dy);
+            ymaxCand.push_back(ratio + dy);
           }
         }
 
-      // Auto y-range centered around 1 with small padding; fallback if empty
+        auto g = std::make_unique<TGraphErrors>((int)X.size(),
+                                                X.empty()?nullptr:&X[0],
+                                                Y.empty()?nullptr:&Y[0],
+                                                EX.empty()?nullptr:&EX[0],
+                                                EY.empty()?nullptr:&EY[0]);
+        if (g->GetN()>0){
+          g->SetMarkerColor(color_of(k));
+          g->SetLineColor  (color_of(k));
+          g->SetMarkerStyle(kMkStyle);
+          g->SetMarkerSize(1.10);
+          g->SetLineWidth(1);
+          keepBot.emplace_back(std::move(g));
+        }
+      }
+
       double yLo = 0.98, yHi = 1.02;
       if (!yminCand.empty() && !ymaxCand.empty()){
         yLo = *std::min_element(yminCand.begin(), yminCand.end());
@@ -2598,136 +2504,24 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
         yLo -= pad; yHi += pad;
       }
 
-        TH1F frL("frL","",1,xMin,xMax);
-        frL.SetTitle(";E  [GeV];#sigma_{RMS} Corr / #sigma_{RMS} Raw");
-        frL.SetMinimum(yLo);
-        frL.SetMaximum(yHi);
-
-        // Enlarge Y-axis ticks and title on the bottom subpanel
-        frL.GetYaxis()->SetLabelSize(0.055);   // tick label size
-        frL.GetYaxis()->SetTitleSize(0.065);   // title font size
-        frL.GetYaxis()->SetTitleOffset(0.8);  // bring title closer
-
-        frL.Draw("AXIS");
+      TH1F frL("frL","",1,xMin,xMax);
+      frL.SetTitle(Form(";E  [GeV];#sigma_{RMS}(%s) / #sigma_{RMS}(%s)",
+                        (kind.tag=="phi"?"#Delta#phi":"#Delta#eta"),
+                        pretty_of(baselineKey)));
+      frL.SetMinimum(yLo);
+      frL.SetMaximum(yHi);
+      frL.GetYaxis()->SetLabelSize(0.055);
+      frL.GetYaxis()->SetTitleSize(0.065);
+      frL.GetYaxis()->SetTitleOffset(0.8);
+      frL.Draw("AXIS");
 
       TLine l1(xMin,1.0,xMax,1.0); l1.SetLineStyle(2); l1.SetLineColor(kGray+2); l1.Draw();
 
-      for (auto& g : keepL) g->Draw("P SAME");
+      for (auto& g : keepBot) g->Draw("P SAME");
 
-        // -------- Console table: ratios to baseline for all overlaid variants --------
-        {
-          // Build the list of variants that are actually being drawn (exclude the baseline)
-          std::vector<std::string> vars;
-          vars.reserve(which.size());
-          for (const auto& k : which) if (k != baselineKey && S.count(k)) vars.push_back(k);
-
-            auto pos = [&](const std::string& k)->int {
-              if (k=="CLUSCP")                 return 0;  // Legacy constant-b
-              if (k=="CLUSCP_EA_etaDep")       return 1;  // |η|-dep
-              if (k=="CLUSCP_EA_vzDep")        return 2;  // |z|-dep
-              if (k=="CLUSCP_EA_vzEtaDep")     return 3;  // |z|+|η|-dep
-              if (k=="CLUSCP_EA_EandIncident") return 4;  // E-only + incident-angle
-              if (k=="CLUSCP_EA")              return 5;  // E-only
-              if (k=="CLUSRAW")                return 6;  // (usually not in this panel)
-              return 7;
-            };
-            
-          std::sort(vars.begin(), vars.end(), [&](const std::string& a, const std::string& b){
-            if (pos(a)!=pos(b)) return pos(a)<pos(b);
-            return a<b;
-          });
-
-          // Friendly column names (reuse legend label helper defined above)
-          auto colName = [&](const std::string& k)->std::string {
-            return std::string(legend_label(k));
-          };
-
-          // Header
-          std::cout << "\n\033[1m[RMS ratio table]  baseline = " << baselineKey
-                    << "   (" << kind.tag << (vzNoteStr?vzNoteStr:"") << ")\033[0m\n";
-
-          const int Wbin = 12;
-          const int Wcol = 18;
-
-          // First header row
-          std::cout << std::left << std::setw(Wbin) << "E-bin";
-          for (const auto& k : vars) {
-            std::ostringstream h; h << colName(k);
-            std::cout << " | " << std::setw(Wcol) << h.str();
-          }
-          std::cout << "\n";
-
-          // Second header row: what each column shows
-          std::cout << std::left << std::setw(Wbin) << "";
-          for (size_t j=0;j<vars.size();++j) {
-            std::cout << " | " << std::setw(Wcol) << "ratio (Δ%)";
-          }
-          std::cout << "\n";
-
-          // Rule
-          std::cout << std::string(Wbin + (int)vars.size()*(3+Wcol), '-') << "\n";
-
-          // Per energy bin rows
-          for (int i=0; i<NB; ++i) {
-            // skip empty baseline points
-            if (!(i<(int)B.rms.size()) || !std::isfinite(B.rms[i]) || B.rms[i]<=0.0) continue;
-
-            // E-bin label from the configured slices
-            std::ostringstream ebin; ebin.setf(std::ios::fixed);
-            ebin << std::setprecision(0) << eSlices[i].first << "-" << eSlices[i].second;
-            std::cout << std::left << std::setw(Wbin) << ebin.str();
-
-            for (const auto& k : vars) {
-              const auto &V = S.at(k);
-              double ratio = std::numeric_limits<double>::quiet_NaN();
-              if (i<(int)V.rms.size() && std::isfinite(V.rms[i]) && V.rms[i]>0.0) {
-                ratio = V.rms[i] / B.rms[i];
-              }
-              std::ostringstream cell; cell.setf(std::ios::fixed);
-              if (std::isfinite(ratio)) {
-                const double dPct = (ratio - 1.0) * 100.0;
-                cell << std::setprecision(4) << ratio
-                     << " (" << std::showpos << std::setprecision(2) << dPct << "%)";
-              } else {
-                cell << "  n/a";
-              }
-              std::string s = cell.str();
-              if ((int)s.size() < Wcol) s += std::string(Wcol - (int)s.size(), ' ');
-              std::cout << " | " << s;
-            }
-            std::cout << "\n";
-          }
-          std::cout << std::endl;
-        }
-        // -----------------------------------------------------------------------------
-
-
-        // Save the main file
-        c.SaveAs(outPng.c_str());
-
-
-        // --- Also emit a second version that includes the Energy-only series (CLUSCP_EA) ---
-        // Only trigger for ".../sigma_vsE_ratio_to_CLUSCP_EA_vz_eta.png" and only if CLUSCP_EA
-        // is not already in the 'which' list.
-        {
-          TString outName(outPng.c_str());
-          const bool isTarget = outName.Contains("sigma_vsE_ratio_to_CLUSCP_EA_vz_eta.png");
-
-          bool hasEonlyAlready = false;
-          for (const auto& w : which) { if (w == "CLUSCP_EA") { hasEonlyAlready = true; break; } }
-
-          if (isTarget && !hasEonlyAlready) {
-            std::vector<std::string> whichPlus = which;
-            whichPlus.push_back("CLUSCP_EA");  // Energy-Dep b (E-only)
-
-            TString outPlus = outName;
-            outPlus.ReplaceAll(".png", "_withEonly.png");
-
-            // Re-enter this routine with the expanded variant set & new filename
-            sigma_ratio_overlay(kind, S, whichPlus, baselineKey, outPlus.Data(), vzNoteStr);
-          }
-        }
+      c.SaveAs(outPng.c_str());
     };
+
     
     
   // ------- helper to emit overlay groups for one kind -------
@@ -2757,35 +2551,104 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
                       baseOut + "/CLUSRAW_CLUSCP_EA_all3.png", vzn);
   };
 
-  auto save_sigma_groups = [&](const KindDef& kind,
-                               const Var2Stats& S,
-                               const std::string& baseOut,
-                               bool isVz60)
-  {
-    const char* vzn = vz_note(isVz60);
-    sigma_ratio_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA"}, "CLUSRAW",
-                        baseOut + "/sigma_vsE_ratio_to_CLUSRAW_CP_EA.png", vzn);
-    sigma_ratio_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep"}, "CLUSRAW",
-                        baseOut + "/sigma_vsE_ratio_to_CLUSRAW_CP_EA_vz_eta.png", vzn);
-    sigma_ratio_overlay(kind, S,
-                          {"CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident","CLUSCP_EA"},
-                          "CLUSCP",
-                          baseOut + "/sigma_vsE_ratio_to_CLUSCP_EA_vz_eta.png",
-                          vzn);
-    sigma_ratio_overlay(kind, S, {"CLUSRAW","PDCcor"}, "CLUSRAW",
-                        baseOut + "/sigma_vsE_ratio_PDCcor_to_CLUSRAW.png", vzn);
-  };
+    // Saves the required sigmaRatio overlays with per-plot LEGEND tuning and
+    // filenames built from the keys and the kind tag (phi/eta).
+    auto save_sigma_groups = [&](const KindDef& kind,
+                                 const Var2Stats& S,
+                                 const std::string& baseOut,
+                                 bool isVz60)
+    {
+      ensure_dir(baseOut);
+      const char* vzn = vz_note(isVz60);
 
-  // Emit overlays (defaults + 0–60) with vz notes in titles
-  save_meansigma_groups(kPhi, S_PH,    DIR_PH + "/Overlays/meansigma", false);
-  save_meansigma_groups(kEta, S_ET,    DIR_ET + "/Overlays/meansigma", false);
-  save_meansigma_groups(kPhi, S_PH_60, DIR_PH + "/Overlays_0_60vz/meansigma", true);
-  save_meansigma_groups(kEta, S_ET_60, DIR_ET + "/Overlays_0_60vz/meansigma", true);
+      // -------- helper: join keys for filename stem --------
+      auto join_keys = [](const std::vector<std::string>& v)->std::string {
+        std::string s;
+        for (size_t i=0;i<v.size();++i){ s += v[i]; if (i+1<v.size()) s += "__"; }
+        return s;
+      };
 
-  save_sigma_groups(kPhi, S_PH,    DIR_PH + "/Overlays/sigmaRatio", false);
-  save_sigma_groups(kEta, S_ET,    DIR_ET + "/Overlays/sigmaRatio", false);
-  save_sigma_groups(kPhi, S_PH_60, DIR_PH + "/Overlays_0_60vz/sigmaRatio", true);
-  save_sigma_groups(kEta, S_ET_60, DIR_ET + "/Overlays_0_60vz/sigmaRatio", true);
+      // -------- helper: emit one named overlay with legend tuning --------
+      auto emit_named = [&](const std::vector<std::string>& keys,
+                            const std::string& baselineKey,
+                            double lx1, double ly1, double lx2, double ly2, double ltxt)
+      {
+        const std::string pngName = baseOut + "/" + kind.tag + "__" + join_keys(keys) + ".png";
+        sigma_ratio_overlay(kind, S, keys, baselineKey, pngName, vzn,
+                            lx1, ly1, lx2, ly2, ltxt);
+      };
+
+      // ====== NEW REQUESTED OUTPUTS (NAMES BY KEYS + KIND) ======
+
+      // 1) Top: RMS overlay of { EandIncident, E-only, CP }, Bottom: ratios of {EandIncident, E-only} to CP
+      //    Keys include baseline CLUSCP so the filename reflects all plotted series.
+      {
+        std::vector<std::string> keys = {"CLUSCP_EA_EandIncident","CLUSCP_EA","CLUSCP"};
+        // LEGEND CONFIG for this PNG (tune here): x1,y1,x2,y2,textSize
+        emit_named(keys, /*baseline=*/"CLUSCP", 0.62, 0.68, 0.92, 0.88, 0.044);
+      }
+
+      // 2) Top: RMS overlay of { E-only, |z|, |eta|, |z|+|eta|, EandIncident, CP }, Bottom: ratios of all (except CP) to CP
+      {
+        std::vector<std::string> keys = {
+          "CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident","CLUSCP"
+        };
+        // LEGEND CONFIG for this PNG
+        emit_named(keys, /*baseline=*/"CLUSCP", 0.60, 0.66, 0.92, 0.90, 0.040);
+      }
+
+      // 3) For each EA variant: Top overlays {RAW, CP, VARIANT}; Bottom: ratios of {CP, VARIANT} to RAW
+      {
+        const std::vector<std::string> variants = {
+          "CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
+        };
+        for (const auto& vkey : variants){
+          std::vector<std::string> keys = {"CLUSRAW","CLUSCP", vkey};
+          // LEGEND CONFIG for each per-variant PNG
+          emit_named(keys, /*baseline=*/"CLUSRAW", 0.58, 0.68, 0.92, 0.88, 0.042);
+        }
+      }
+
+      // 4) Top: overlays {CP, all EA variants, RAW}; Bottom: ratios of {CP, all EA variants} to RAW
+      {
+        std::vector<std::string> keys = {
+          "CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident","CLUSRAW"
+        };
+        // LEGEND CONFIG for this PNG
+        emit_named(keys, /*baseline=*/"CLUSRAW", 0.55, 0.66, 0.92, 0.90, 0.038);
+      }
+
+      // ====== KEEP ORIGINAL (LEGACY-NAMED) OUTPUTS TO PRESERVE EXISTING PRODUCTS ======
+      // You can tune their legend positions/sizes here as well.
+      {
+        sigma_ratio_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA"}, "CLUSRAW",
+                            baseOut + "/sigma_vsE_ratio_to_CLUSRAW_CP_EA.png", vzn,
+                            0.62, 0.68, 0.92, 0.88, 0.044);
+
+        sigma_ratio_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep"}, "CLUSRAW",
+                            baseOut + "/sigma_vsE_ratio_to_CLUSRAW_CP_EA_vz_eta.png", vzn,
+                            0.60, 0.66, 0.92, 0.90, 0.040);
+
+        sigma_ratio_overlay(kind, S,
+                            {"CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident","CLUSCP_EA"},
+                            "CLUSCP",
+                            baseOut + "/sigma_vsE_ratio_to_CLUSCP_EA_vz_eta.png",
+                            vzn,
+                            0.55, 0.66, 0.92, 0.90, 0.038);
+
+        sigma_ratio_overlay(kind, S, {"CLUSRAW","PDCcor"}, "CLUSRAW",
+                            baseOut + "/sigma_vsE_ratio_PDCcor_to_CLUSRAW.png", vzn,
+                            0.65, 0.70, 0.92, 0.88, 0.042);
+      }
+    };
+
+    // Emit overlays (only |v_z| < 10 cm set)
+    save_meansigma_groups(kPhi, S_PH, DIR_PH + "/Overlays/meansigma", false);
+    save_meansigma_groups(kEta, S_ET, DIR_ET + "/Overlays/meansigma", false);
+
+    save_sigma_groups(kPhi, S_PH, DIR_PH + "/Overlays/sigmaRatio", false);
+    save_sigma_groups(kEta, S_ET, DIR_ET + "/Overlays/sigmaRatio", false);
+
     
   // ------------- first-bin pair overlays (normalized shapes) -------------
   auto first_bin_pair = [&](const KindDef& kind,
@@ -2838,11 +2701,6 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
   first_bin_pair(kPhi, PH,    DIR_PH + "/Overlays/firstBin", "CLUSRAW","CLUSCP_EA_vzDep",        eSlices[0], false);
   first_bin_pair(kPhi, PH,    DIR_PH + "/Overlays/firstBin", "CLUSRAW","CLUSCP_EA_etaDep",       eSlices[0], false);
   first_bin_pair(kPhi, PH,    DIR_PH + "/Overlays/firstBin", "PDCraw","PDCcor",                  eSlices[0], false);
-  first_bin_pair(kPhi, PH_60, DIR_PH + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP",          eSlices[0], true);
-  first_bin_pair(kPhi, PH_60, DIR_PH + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP_EA",       eSlices[0], true);
-  first_bin_pair(kPhi, PH_60, DIR_PH + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP_EA_vzDep", eSlices[0], true);
-  first_bin_pair(kPhi, PH_60, DIR_PH + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP_EA_etaDep",eSlices[0], true);
-  first_bin_pair(kPhi, PH_60, DIR_PH + "/Overlays_0_60vz/firstBin", "PDCraw","PDCcor",           eSlices[0], true);
 
   // η
   first_bin_pair(kEta, ET,    DIR_ET + "/Overlays/firstBin", "CLUSRAW","CLUSCP",                 eSlices[0], false);
@@ -2850,11 +2708,6 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
   first_bin_pair(kEta, ET,    DIR_ET + "/Overlays/firstBin", "CLUSRAW","CLUSCP_EA_vzDep",        eSlices[0], false);
   first_bin_pair(kEta, ET,    DIR_ET + "/Overlays/firstBin", "CLUSRAW","CLUSCP_EA_etaDep",       eSlices[0], false);
   first_bin_pair(kEta, ET,    DIR_ET + "/Overlays/firstBin", "PDCraw","PDCcor",                  eSlices[0], false);
-  first_bin_pair(kEta, ET_60, DIR_ET + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP",          eSlices[0], true);
-  first_bin_pair(kEta, ET_60, DIR_ET + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP_EA",       eSlices[0], true);
-  first_bin_pair(kEta, ET_60, DIR_ET + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP_EA_vzDep", eSlices[0], true);
-  first_bin_pair(kEta, ET_60, DIR_ET + "/Overlays_0_60vz/firstBin", "CLUSRAW","CLUSCP_EA_etaDep",eSlices[0], true);
-  first_bin_pair(kEta, ET_60, DIR_ET + "/Overlays_0_60vz/firstBin", "PDCraw","PDCcor",           eSlices[0], true);
 
   // ---------------- CSV summaries (defaults only) ----------------
   auto write_csv = [&](const KindDef& kind, const Var2Stats& S, const std::string& outCsv){
@@ -3066,13 +2919,162 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
     }
   } // end φ tilt fits wrapper
 
-  // ---- Min-RMS summary tables (console + CSVs)
-  {
-    const std::string summaryDir = DIR_PH + std::string("/Overlays/phiTILTfits");
-    EmitMinRmsSummary(summaryDir, NB, eSlices, S_PH, S_ET);
-  }
+    // ---- Min-RMS CSVs (quiet) — φ only in phiTILTfits ----
+    {
+      const std::string summaryDir = DIR_PH + std::string("/Overlays/phiTILTfits");
+      Var2Stats S_ET_dummy; // do not write any eta artifacts under phiTILTfits
+      EmitMinRmsSummary(summaryDir, NB, eSlices, S_PH, S_ET_dummy);
+    }
 
-  std::cout << "[MakeResidualsSuite] Residuals suite written under: " << RESID << "\n";
+    auto printFinalDeltaTable = [&](const char* titleTag,
+                                    const std::map<std::string, ResStats>& S,
+                                    const std::vector<std::string>& keys)
+    {
+      auto itB = S.find("CLUSRAW");
+      if (itB==S.end()) { std::cout << "[WARN] CLUSRAW baseline missing for " << titleTag << "\n"; return; }
+      const ResStats& B = itB->second;
+
+      const int Wbin = 9;    // E-bin field width
+      const int Wcol = 24;   // per-variant column width (pad BEFORE coloring)
+      const int Wwin = 18;   // Winner column width
+      const char* BOLD  = "\033[1m";
+      const char* GREEN = "\033[1;32m";
+      const char* RED   = "\033[1;31m";
+      const char* RESET = "\033[0m";
+
+      // Locate Constant-b column (for red-underperform logic)
+      int idxCP = -1;
+      for (size_t j=0; j<keys.size(); ++j) if (keys[j] == "CLUSCP") { idxCP = (int)j; break; }
+
+      // Compact, consistent header labels (keeps columns narrow & aligned)
+      auto headerLabel = [&](const std::string& k)->std::string {
+        if (k=="CLUSCP")                 return "CP (const-b)";
+        if (k=="CLUSCP_EA")              return "EA (E-only)";
+        if (k=="CLUSCP_EA_vzDep")        return "EA (|z|)";
+        if (k=="CLUSCP_EA_etaDep")       return "EA (|#eta|)";
+        if (k=="CLUSCP_EA_vzEtaDep")     return "EA (|z|+|#eta|)";
+        if (k=="CLUSCP_EA_EandIncident") return "EA (E)+θ_inc";
+        if (k=="PDCcor")                 return "PDC corr";
+        if (k=="PDCraw")                 return "PDC raw";
+        if (k=="CLUSRAW")                return "No corr";
+        if (k=="CLUScpDirectBvals")      return "b(E) apply";
+        return pretty_of(k);
+      };
+      auto truncateTo = [&](const std::string& s, int w)->std::string {
+        if ((int)s.size() <= w) return s;
+        if (w <= 1) return s.substr(0, std::max(0,w));
+        return s.substr(0, w-1) + "…";
+      };
+
+      // ===== Header (two rows: labels, then "Δ% ± err") =====
+      std::cout << "\n" << BOLD << "[FINAL ΔRMS vs CLUSRAW]  " << titleTag << RESET << "\n";
+
+      // Row 1: variant labels
+      std::cout << std::left << std::setw(Wbin) << "E-bin";
+      for (const auto& k : keys) {
+        const std::string lab = truncateTo(headerLabel(k), Wcol);
+        std::cout << " | " << std::setw(Wcol) << lab;
+      }
+      std::cout << " | " << std::setw(Wwin) << "Winner" << "\n";
+
+      // Row 2: unit/format row directly above values
+      std::cout << std::left << std::setw(Wbin) << "";
+      for (size_t j=0; j<keys.size(); ++j) {
+        std::cout << " | " << std::setw(Wcol) << "Δ% ± err";
+      }
+      std::cout << " | " << std::setw(Wwin) << "" << "\n";
+
+      // Rule
+      std::cout << std::string(Wbin + (int)keys.size()*(3+Wcol) + 3 + Wwin, '-') << "\n";
+
+      // ===== Body =====
+      for (int i=0; i<NB; ++i)
+      {
+        const double r  = (i<(int)B.rms.size()?  B.rms[i]  : std::numeric_limits<double>::quiet_NaN());
+        const double re = (i<(int)B.drms.size()? B.drms[i] : 0.0);
+
+        std::vector<double> deltaPct(keys.size(), std::numeric_limits<double>::quiet_NaN());
+        std::vector<double> deltaErr(keys.size(), std::numeric_limits<double>::quiet_NaN());
+
+        // Per-variant Δ% vs CLUSRAW
+        for (size_t j=0; j<keys.size(); ++j){
+          auto it = S.find(keys[j]);
+          if (it==S.end()) continue;
+          const ResStats& V = it->second;
+          if (!(i<(int)V.rms.size())) continue;
+          const double s  = V.rms[i];
+          const double se = (i<(int)V.drms.size()? V.drms[i] : 0.0);
+          if (std::isfinite(r) && r>0.0 && std::isfinite(s)){
+            const double ratio   = s/r;
+            const double varRat  = (se*se)/(r*r) + (s*s*re*re)/(r*r*r*r);
+            deltaPct[j] = 100.0*(1.0 - ratio);
+            deltaErr[j] = 100.0*std::sqrt(std::max(0.0, varRat));
+          }
+        }
+
+        // Winner (max Δ%)
+        int winIdx = -1; double winVal = -1e300;
+        for (size_t j=0; j<keys.size(); ++j){
+          if (std::isfinite(deltaPct[j]) && deltaPct[j] > winVal) { winVal = deltaPct[j]; winIdx = (int)j; }
+        }
+
+        // Constant-b reference for this row (if available)
+        const double cpRef = (idxCP>=0 ? deltaPct[idxCP] : std::numeric_limits<double>::quiet_NaN());
+
+        // E-bin label
+        std::ostringstream ebin; ebin.setf(std::ios::fixed);
+        ebin << std::setprecision(0) << eSlices[i].first << "-" << eSlices[i].second;
+        std::cout << std::left << std::setw(Wbin) << ebin.str();
+
+        // Values row (pad → then apply color)
+        for (size_t j=0; j<keys.size(); ++j){
+          std::string cell;
+          if (std::isfinite(deltaPct[j])){
+            std::ostringstream ss; ss.setf(std::ios::fixed);
+            ss << std::showpos << std::setprecision(2) << deltaPct[j] << "%" << std::noshowpos
+               << " ± " << std::setprecision(2) << deltaErr[j] << "%";
+            cell = ss.str();
+          } else {
+            cell = "n/a";
+          }
+          if ((int)cell.size() < Wcol) cell += std::string(Wcol - (int)cell.size(), ' ');
+
+          // Red highlight if this variant underperforms Constant-b (strictly smaller Δ%)
+          const bool underCP = (idxCP>=0 && (int)j!=idxCP &&
+                                std::isfinite(cpRef) && std::isfinite(deltaPct[j]) &&
+                                deltaPct[j] < cpRef);
+
+          const std::string colored = underCP ? (std::string(RED) + cell + RESET) : cell;
+          std::cout << " | " << colored;
+        }
+
+        // Winner column (green)
+        if (winIdx >= 0){
+          std::ostringstream w; w << GREEN << headerLabel(keys[winIdx]) << RESET;
+          std::string wt = w.str();
+          if ((int)wt.size() < Wwin) wt += std::string(Wwin - (int)wt.size(), ' ');
+          std::cout << " | " << wt << "\n";
+        } else {
+          std::cout << " | " << std::setw(Wwin) << "-" << "\n";
+        }
+      }
+    };
+
+
+    // 1) CLUS family vs CLUSRAW (φ then η)
+    const std::vector<std::string> keysClusNoRaw = {
+      "CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
+    };
+    printFinalDeltaTable("phi (Δφ) — CLUS family", S_PH, keysClusNoRaw);
+    printFinalDeltaTable("eta (Δη) — CLUS family", S_ET, keysClusNoRaw);
+
+    // 2) ALL variants vs CLUSRAW (φ then η) — exclude baseline itself
+    std::vector<std::string> keysAllNoRaw;
+    for (const auto& v : kVariants) if (v.key != "CLUSRAW") keysAllNoRaw.push_back(v.key);
+    printFinalDeltaTable("phi (Δφ) — ALL variants", S_PH, keysAllNoRaw);
+    printFinalDeltaTable("eta (Δη) — ALL variants", S_ET, keysAllNoRaw);
+
+    std::cout << "\n[MakeResidualsSuite] Residuals suite written under: " << RESID << "\n";
 }
 
 

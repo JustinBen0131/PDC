@@ -1,9 +1,9 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"Constant-b (legacy)",0.003731,"Energy-Dep b",0.003731,0.000000,"Constant-b (legacy)",0.004106,"Energy-Dep b",0.004106,0.000000
-4,6,"Constant-b (legacy)",0.003309,"Energy-Dep b",0.003309,0.000000,"Constant-b (legacy)",0.003697,"Energy-Dep b",0.003697,0.000000
-6,8,"Constant-b (legacy)",0.003129,"Energy-Dep b",0.003129,0.000000,"Constant-b (legacy)",0.003494,"Energy-Dep b",0.003494,0.000000
-8,10,"Energy-Dep b",0.003223,"Energy + |#eta|-dep b",0.003223,0.000000,"Constant-b (legacy)",0.003402,"Energy-Dep b",0.003402,0.000000
-10,12,"Constant-b (legacy)",0.003372,"Energy-Dep b",0.003372,0.000000,"Constant-b (legacy)",0.003318,"Energy-Dep b",0.003318,0.000000
-12,15,"Constant-b (legacy)",0.003523,"Energy-Dep b",0.003523,0.000000,"Constant-b (legacy)",0.003267,"Energy-Dep b",0.003267,0.000000
-15,20,"Constant-b (legacy)",0.003433,"Energy-Dep b",0.003433,0.000000,"Energy-Dep b",0.003202,"Energy + |#eta|-dep b",0.003202,0.000000
-20,30,"Constant-b (legacy)",0.002950,"Energy-Dep b",0.002950,0.000000,"Constant-b (legacy)",0.003013,"Energy-Dep b",0.003013,0.000000
+2,4,"Energy + |#eta|-dep b",0.003590,"Energy + |z_{vtx}|+|#eta|-dep b",0.003591,0.000001,"",nan,"",nan,nan
+4,6,"Energy + |#eta|-dep b",0.003223,"Energy + |z_{vtx}|+|#eta|-dep b",0.003224,0.000001,"",nan,"",nan,nan
+6,8,"Energy + |#eta|-dep b",0.003063,"Energy + |z_{vtx}|+|#eta|-dep b",0.003064,0.000001,"",nan,"",nan,nan
+8,10,"Energy + |#eta|-dep b",0.003172,"Energy + |z_{vtx}|+|#eta|-dep b",0.003172,0.000000,"",nan,"",nan,nan
+10,12,"Energy + |#eta|-dep b",0.003335,"Energy + |z_{vtx}|+|#eta|-dep b",0.003335,0.000001,"",nan,"",nan,nan
+12,15,"Energy + |#eta|-dep b",0.003493,"Energy + |z_{vtx}|+|#eta|-dep b",0.003494,0.000001,"",nan,"",nan,nan
+15,20,"Energy + |#eta|-dep b",0.003417,"Energy + |z_{vtx}|+|#eta|-dep b",0.003418,0.000001,"",nan,"",nan,nan
+20,30,"Energy + |#eta|-dep b",0.002927,"Energy + |z_{vtx}|+|#eta|-dep b",0.002928,0.000001,"",nan,"",nan,nan
