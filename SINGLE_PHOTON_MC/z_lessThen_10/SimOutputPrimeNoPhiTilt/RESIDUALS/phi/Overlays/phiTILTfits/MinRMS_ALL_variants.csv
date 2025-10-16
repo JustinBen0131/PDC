@@ -1,5 +1,5 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"Energy + |#eta|-dep b",0.003590,"Energy + |z_{vtx}|+|#eta|-dep b",0.003591,0.000001,"",nan,"",nan,nan
+2,4,"Energy-only + incident-angle",0.003588,"Energy + |#eta|-dep b",0.003590,0.000002,"",nan,"",nan,nan
 4,6,"2x2 Block-Local With Corr",0.003220,"Energy + |#eta|-dep b",0.003223,0.000003,"",nan,"",nan,nan
 6,8,"Energy + |#eta|-dep b",0.003063,"2x2 Block-Local With Corr",0.003064,0.000000,"",nan,"",nan,nan
 8,10,"Energy + |#eta|-dep b",0.003172,"Energy + |z_{vtx}|+|#eta|-dep b",0.003172,0.000000,"",nan,"",nan,nan

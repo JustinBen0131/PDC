@@ -959,17 +959,17 @@ static void SaveOverlayAcrossVariants(
     }
 
       // Auto-scale y-axis for η overlay saved as ..._zOnly_upto60.png
-      // Use the actual data (including errors) plus a small headroom.
-      // This prevents clipping of the highest z-bin points/curves.
+      // Add +40% extra top buffer relative to the existing pad.
       if (!isPhi && sfx.find("_zOnly_upto60") != std::string::npos) {
-        const double padTop = std::max(0.12 * std::fabs(ymax), 0.005);  // ≥0.005 headroom
-        const double padBot = 0.04 * std::fabs(ymin);
-        yLo = std::max(0.0, ymin - padBot);
-        yHi = ymax + padTop;
-        if (yHi - yLo < 1e-4) {                      // guard for near-flat cases
-          yLo = std::max(0.0, ymin - 0.01);
-          yHi = ymax + 0.05;
-        }
+          const double baseTop = std::max(0.12 * std::fabs(ymax), 0.005);  // ≥0.005 headroom
+          const double padTop  = baseTop * 1.95;                           // +40% extra
+          const double padBot  = 0.04 * std::fabs(ymin);
+          yLo = std::max(0.0, ymin - padBot);
+          yHi = ymax + padTop;
+          if (yHi - yLo < 1e-4) {                      // guard for near-flat cases
+              yLo = std::max(0.0, ymin - 0.01);
+              yHi = ymax + 0.1;
+          }
       }
 
     // Keys classification for ordering
@@ -1952,13 +1952,15 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       ensure_dir(base + "/Overlays/firstBin");
       ensure_dir(base + "/Overlays/meansigma");
       ensure_dir(base + "/Overlays/sigmaRatio");
+      // NEW: percent-gain overlays vs CLUSCP baseline
+      ensure_dir(base + "/Overlays/percentGain");
 
       // φ tilt-fit products
       if (base == DIR_PH) {
         ensure_dir(base + "/Overlays/phiTILTfits");
       }
     };
-
+    
   scaffold_kind(DIR_PH);
   scaffold_kind(DIR_ET);
 
@@ -2524,32 +2526,244 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
 
     
     
-  // ------- helper to emit overlay groups for one kind -------
-  auto save_meansigma_groups = [&](const KindDef& kind,
-                                   const Var2Stats& S,
-                                   const std::string& baseOut,
-                                   bool isVz60)
-  {
-    const char* vzn = vz_note(isVz60);
-    // all variants
-    { std::vector<std::string> grp; for (const auto& v : kVariants) grp.push_back(v.key);
-      meansigma_overlay(kind, S, grp, baseOut + "/allVariants.png", vzn);
-    }
-    // PDCraw vs PDCcor
-    meansigma_overlay(kind, S, {"PDCraw","PDCcor"}, baseOut + "/PDCraw_vs_PDCcor.png", vzn);
-    // PDCraw, PDCcor, CLUSRAW, CLUSCP
-    meansigma_overlay(kind, S, {"PDCraw","PDCcor","CLUSRAW","CLUSCP"}, baseOut + "/PDC_PDC_CLUSRAW_CLUSCP.png", vzn);
-    // CLUSRAW, CLUSCP, CLUSCP_EA, CLUSCP_EA_vzDep, CLUSCP_EA_etaDep
-    meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep"},
-                      baseOut + "/CLUS_five_way.png", vzn);
-    // triples
-    meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP"},                         baseOut + "/CLUSRAW_vs_CLUSCP.png", vzn);
-    meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_vzDep"},       baseOut + "/CLUSRAW_CLUSCP_CLUSCP_EA_vzDep.png", vzn);
-    meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_etaDep"},      baseOut + "/CLUSRAW_CLUSCP_CLUSCP_EA_etaDep.png", vzn);
-    meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA"},             baseOut + "/CLUSRAW_CLUSCP_CLUSCP_EA.png", vzn);
-    meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA"},
-                      baseOut + "/CLUSRAW_CLUSCP_EA_all3.png", vzn);
-  };
+    auto save_meansigma_groups = [&](const KindDef& kind,
+                                     const Var2Stats& S,
+                                     const std::string& baseOut,
+                                     bool isVz60)
+    {
+      const char* vzn = vz_note(isVz60);
+
+      // all variants
+      { std::vector<std::string> grp; for (const auto& v : kVariants) grp.push_back(v.key);
+        meansigma_overlay(kind, S, grp, baseOut + "/allVariants.png", vzn);
+      }
+      // PDCraw vs PDCcor
+      meansigma_overlay(kind, S, {"PDCraw","PDCcor"}, baseOut + "/PDCraw_vs_PDCcor.png", vzn);
+      // PDCraw, PDCcor, CLUSRAW, CLUSCP
+      meansigma_overlay(kind, S, {"PDCraw","PDCcor","CLUSRAW","CLUSCP"}, baseOut + "/PDC_PDC_CLUSRAW_CLUSCP.png", vzn);
+      // CLUSRAW, CLUSCP, CLUSCP_EA, CLUSCP_EA_vzDep, CLUSCP_EA_etaDep
+      meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep"},
+                        baseOut + "/CLUS_five_way.png", vzn);
+      // triples
+      meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP"},                         baseOut + "/CLUSRAW_vs_CLUSCP.png", vzn);
+      meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_vzDep"},       baseOut + "/CLUSRAW_CLUSCP_CLUSCP_EA_vzDep.png", vzn);
+      meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_etaDep"},      baseOut + "/CLUSRAW_CLUSCP_CLUSCP_EA_etaDep.png", vzn);
+      meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA"},             baseOut + "/CLUSRAW_CLUSCP_CLUSCP_EA.png", vzn);
+      meansigma_overlay(kind, S, {"CLUSRAW","CLUSCP","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA"},
+                        baseOut + "/CLUSRAW_CLUSCP_EA_all3.png", vzn);
+
+      // ------------------------------------------------------------------
+      // NEW: two-panel plot in meansigma:
+      //   Top: mean vs E for RAW, CP, and all EA variants
+      //   Bottom: RMS ratio to CLUSRAW for CP and all EA variants
+      //   (equal pad heights; proper error propagation; gentle x-offsets)
+      // ------------------------------------------------------------------
+      auto mean_plus_rmsratio_to_raw = [&](const std::vector<std::string>& keysMean,
+                                           const std::vector<std::string>& keysRatio,
+                                           const std::string& outPng)
+      {
+        // Baseline (RAW) for ratios
+        auto itB = S.find("CLUSRAW");
+        if (itB == S.end()) {
+          std::cerr << "[mean_plus_rmsratio_to_raw] CLUSRAW baseline missing for " << kind.tag << "\n";
+          return;
+        }
+        const ResStats& B = itB->second;
+
+        TCanvas c("cMeanR","",1000,850);
+        TPad top ("top" ,"",0,0.50,1,1);  top.SetBottomMargin(0.06); top.SetLeftMargin(0.15); top.SetRightMargin(0.06); top.Draw();
+        TPad bot ("bot" ,"",0,0.00,1,0.50); bot.SetTopMargin(0.06);  bot.SetLeftMargin(0.15); bot.SetRightMargin(0.06); bot.SetBottomMargin(0.18); bot.Draw();
+
+        const double xMin = eSlices.front().first - 0.5;
+        const double xMax = eSlices.back().second + 0.5;
+
+        // ---------- TOP: mean vs E ----------
+        top.cd();
+        double muLo = +1e30, muHi = -1e30;
+        for (const auto& k : keysMean){
+          auto it = S.find(k); if (it==S.end()) continue;
+          for (size_t i=0;i<it->second.mean.size();++i){
+            const double m  = it->second.mean[i];
+            const double dm = (i<it->second.dmean.size()? it->second.dmean[i] : 0.0);
+            if (!std::isfinite(m)) continue;
+            muLo = std::min(muLo, m - (std::isfinite(dm)?dm:0.0));
+            muHi = std::max(muHi, m + (std::isfinite(dm)?dm:0.0));
+          }
+        }
+        if (!(muLo < muHi)) { muLo = -1e-4; muHi = +1e-4; }
+        const double padMu = 0.15*(muHi - muLo + 1e-12);
+
+        TH1F frU("frU","",1,xMin,xMax);
+        frU.SetTitle(Form("Mean vs E (%s)%s;E  [GeV];#mu(%s) [rad]",
+                          kind.tag.c_str(), vzn, (kind.tag=="phi"?"#Delta#phi":"#Delta#eta")));
+        frU.SetMinimum(muLo - padMu);
+        frU.SetMaximum(muHi + padMu);
+        frU.GetXaxis()->SetLabelSize(0.0);
+        frU.GetXaxis()->SetTitleSize(0.0);
+        frU.GetXaxis()->SetTickLength(0.0);
+        frU.GetYaxis()->SetTitleSize(0.058);
+        frU.GetYaxis()->SetTitleOffset(0.90);
+        frU.GetYaxis()->SetLabelSize(0.042);
+        frU.Draw("AXIS");
+
+        TLine l0(xMin,0.0,xMax,0.0); l0.SetLineStyle(2); l0.SetLineColor(kGray+2); l0.Draw();
+
+          std::vector<std::unique_ptr<TGraphErrors>> keepU;
+          TLegend legU(0.58, 0.72, 0.92, 0.90, "", "brNDC");
+          legU.SetBorderSize(0); legU.SetFillStyle(0); legU.SetTextSize(0.040);
+
+          // Symmetric in-bin x-offsets around the bin center (7 series -> slots -3..0..+3)
+          const int nMean = static_cast<int>(keysMean.size());
+          const int halfMean = nMean / 2;                  // 3 for 7
+          const bool oddMean = (nMean % 2 == 1);
+          const double kOffsetFracMean = 0.12;             // fraction of bin width per slot
+          auto slotByIndexMean = [&](int j)->int {
+            return oddMean ? (j - halfMean)                // -half..0..+half (centered)
+                           : ((j < halfMean) ? (j - halfMean) : (j - halfMean + 1));
+          };
+
+          for (int j=0; j<nMean; ++j){
+            const std::string& k = keysMean[j];
+            auto it = S.find(k); if (it==S.end()) continue;
+
+            std::vector<double> X,Y,EX,EY;
+            const int slot = slotByIndexMean(j);
+
+            for (int i=0;i<NB;++i){
+              const double m  = it->second.mean[i];
+              const double dm = (i<(int)it->second.dmean.size()? it->second.dmean[i] : 0.0);
+              if (!std::isfinite(m)) continue;
+
+              const double eLo  = eSlices[i].first;
+              const double eHi  = eSlices[i].second;
+              const double eCtr = 0.5*(eLo + eHi);
+              const double eWid = (eHi - eLo);
+              const double xOff = slot * kOffsetFracMean * eWid;
+
+              X.push_back(eCtr + xOff);
+              Y.push_back(m);
+              EX.push_back(0.0);
+              EY.push_back(std::isfinite(dm) ? dm : 0.0);
+            }
+
+            auto g = std::make_unique<TGraphErrors>((int)X.size(),
+                                                    X.empty()?nullptr:&X[0],
+                                                    Y.empty()?nullptr:&Y[0],
+                                                    EX.empty()?nullptr:&EX[0],
+                                                    EY.empty()?nullptr:&EY[0]);
+            if (g->GetN()>0){
+              g->SetMarkerColor(color_of(k));
+              g->SetLineColor  (color_of(k));
+              g->SetLineWidth(1);
+              g->SetMarkerSize(0.95);
+              g->Draw("P SAME");
+              legU.AddEntry(g.get(), pretty_of(k), "p");
+              keepU.emplace_back(std::move(g));
+            }
+          }
+          legU.Draw();
+
+        // ---------- BOTTOM: RMS ratio to CLUSRAW ----------
+        bot.cd();
+
+          // Symmetric in-bin x-offsets with an empty center (even #series => no 0 slot)
+          const int nRatio = static_cast<int>(keysRatio.size());   // expected 6
+          const int halfR  = nRatio / 2;                           // 3
+          const double kOffsetFracRatio = 0.12;
+          auto slotByIndexRatio = [&](int j)->int {
+            // Slots: [-halfR, ..., -1, +1, ..., +halfR]  (no 0)
+            return (j < halfR) ? -(halfR - j) : (j - halfR + 1);
+          };
+
+          std::vector<std::unique_ptr<TGraphErrors>> keepL;
+          double yLo = +1e30, yHi = -1e30;
+
+          for (int j=0; j<nRatio; ++j){
+            const std::string& k = keysRatio[j];
+            auto it = S.find(k); if (it==S.end()) continue;
+
+            std::vector<double> X,Y,EX,EY;
+            const int slot = slotByIndexRatio(j);
+
+            for (int i=0;i<NB;++i){
+              const double s  = it->second.rms[i];
+              const double se = (i<(int)it->second.drms.size()? it->second.drms[i] : 0.0);
+              const double r  = B.rms[i];
+              const double re = (i<(int)B.drms.size()? B.drms[i] : 0.0);
+
+              if (std::isfinite(s) && std::isfinite(r) && r>0.0){
+                const double ratio = s/r;
+                const double erel2 = ((se>0&&s>0? (se/s)*(se/s) : 0.0) +
+                                      (re>0&&r>0? (re/r)*(re/r) : 0.0));
+                const double dy = ratio * std::sqrt(erel2);
+
+                const double eLo  = eSlices[i].first;
+                const double eHi  = eSlices[i].second;
+                const double eCtr = 0.5*(eLo + eHi);
+                const double eWid = (eHi - eLo);
+                const double xOff = slot * kOffsetFracRatio * eWid;
+
+                X.push_back(eCtr + xOff);
+                Y.push_back(ratio);
+                EX.push_back(0.0);
+                EY.push_back(dy);
+
+                yLo = std::min(yLo, ratio - dy);
+                yHi = std::max(yHi, ratio + dy);
+              }
+            }
+
+            auto g = std::make_unique<TGraphErrors>((int)X.size(),
+                                                    X.empty()?nullptr:&X[0],
+                                                    Y.empty()?nullptr:&Y[0],
+                                                    EX.empty()?nullptr:&EX[0],
+                                                    EY.empty()?nullptr:&EY[0]);
+            if (g->GetN()>0){
+              g->SetMarkerColor(color_of(k));
+              g->SetLineColor  (color_of(k));
+              g->SetMarkerStyle(kMkStyle);
+              g->SetMarkerSize(0.95);
+              g->SetLineWidth(1);
+              keepL.emplace_back(std::move(g));
+            }
+          }
+
+          if (!(yLo < yHi)) { yLo = 0.98; yHi = 1.02; }
+          const double padS = 0.07*(yHi - yLo + 1e-12);
+
+          TH1F frL("frL","",1,xMin,xMax);
+          frL.SetTitle(Form(";E  [GeV];#sigma_{RMS}(%s) / #sigma_{RMS}(%s)",
+                            (kind.tag=="phi"?"#Delta#phi":"#Delta#eta"), pretty_of("CLUSRAW")));
+          frL.SetMinimum(yLo - padS);
+          frL.SetMaximum(yHi + padS);
+          frL.GetYaxis()->SetLabelSize(0.055);
+          frL.GetYaxis()->SetTitleSize(0.065);
+          frL.GetYaxis()->SetTitleOffset(0.80);
+          frL.Draw("AXIS");
+
+          TLine l1(xMin,1.0,xMax,1.0); l1.SetLineStyle(2); l1.SetLineColor(kGray+2); l1.Draw();
+
+          for (auto& g : keepL) g->Draw("P SAME");
+
+          // NOTE: Legend intentionally omitted on the bottom subpanel.
+
+        c.SaveAs(outPng.c_str());
+      };
+
+      // Keys for the new plot
+      const std::vector<std::string> keysMean = {
+        "CLUSRAW","CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
+      };
+      const std::vector<std::string> keysRatio = {
+        "CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
+      };
+
+      // Emit the new two-panel plot (saved in the same meansigma folder)
+      mean_plus_rmsratio_to_raw(keysMean, keysRatio,
+                                baseOut + "/" + kind.tag + "__meanVsE__RMSratio_to_CLUSRAW.png");
+    };
+    
+    
 
     // Saves the required sigmaRatio overlays with per-plot LEGEND tuning and
     // filenames built from the keys and the kind tag (phi/eta).
@@ -2648,6 +2862,151 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
 
     save_sigma_groups(kPhi, S_PH, DIR_PH + "/Overlays/sigmaRatio", false);
     save_sigma_groups(kEta, S_ET, DIR_ET + "/Overlays/sigmaRatio", false);
+
+    // ------------------------------------------------------------------
+    // NEW: Percent-gain overlays wrt CLUSCP (RMS), for φ and η
+    //   y = 100 * (1 - σ_variant / σ_CLUSCP)
+    //   dy = 100 * sqrt( (σe_variant^2 / σ_CLUSCP^2) + (σ_variant^2 * σe_CLUSCP^2 / σ_CLUSCP^4) )
+    //   (same horizontal in-bin offsetting scheme as sigma_ratio_overlay)
+    // ------------------------------------------------------------------
+    auto percent_gain_overlay = [&](const KindDef& kind,
+                                    const Var2Stats& S,
+                                    const std::vector<std::string>& variants,
+                                    const std::string& baselineKey,
+                                    const std::string& outPng,
+                                    bool isVz60)
+    {
+      auto itB = S.find(baselineKey);
+      if (itB == S.end()) {
+        std::cerr << "[percentGain] Baseline " << baselineKey << " not found for " << kind.tag << "\n";
+        return;
+      }
+      const ResStats& B = itB->second;
+
+      TCanvas c("cPG","",1000,700);
+      gPad->SetLeftMargin(0.15);
+      gPad->SetRightMargin(0.06);
+      gPad->SetBottomMargin(0.14);
+
+      const double xMin = eSlices.front().first - 0.5;
+      const double xMax = eSlices.back().second + 0.5;
+
+      // Legend labels consistent with other overlays
+      auto legend_label = [&](const std::string& key)->const char* {
+        if (key == "CLUSCP_EA_vzDep")        return "Energy + |z_{vtx}|-dep b";
+        if (key == "CLUSCP_EA_etaDep")       return "Energy + |#eta|-dep b";
+        if (key == "CLUSCP_EA_vzEtaDep")     return "Energy + |z_{vtx}|+|#eta|-dep b";
+        if (key == "CLUSCP_EA_EandIncident") return "Energy-only + incident-angle";
+        if (key == "CLUSCP_EA")              return "Energy-Dep b";
+        return pretty_of(key);
+      };
+
+      // In-bin offset slots (reuse scheme for visual separation)
+      const double kBinOffset = 0.12;
+      auto slotOf = [&](const std::string& key)->int {
+        if (key == "CLUSCP_EA_etaDep")       return -1; // |η|-dep
+        if (key == "CLUSCP_EA_vzDep")        return +1; // |z|-dep
+        if (key == "CLUSCP_EA_vzEtaDep")     return +3; // |z|+|η|-dep
+        if (key == "CLUSCP_EA_EandIncident") return  0; // E-only + incident-angle
+        if (key == "CLUSCP_EA")              return +2; // E-only
+        return 0;
+      };
+
+      double yMin = +1e30, yMax = -1e30;
+      std::vector<std::unique_ptr<TGraphErrors>> keep;
+      std::map<std::string,TGraphErrors*> gByKey;
+
+      for (const auto& key : variants) {
+        auto it = S.find(key);
+        if (it == S.end()) continue;
+
+        std::vector<double> X, Y, EX, EY;
+        X.reserve(NB); Y.reserve(NB); EX.reserve(NB); EY.reserve(NB);
+
+        for (int i=0;i<NB;++i){
+          const double s  = (i<(int)it->second.rms.size()?  it->second.rms[i]  : std::numeric_limits<double>::quiet_NaN());
+          const double se = (i<(int)it->second.drms.size()? it->second.drms[i] : 0.0);
+          const double r  = (i<(int)B.rms.size()?           B.rms[i]           : std::numeric_limits<double>::quiet_NaN());
+          const double re = (i<(int)B.drms.size()?          B.drms[i]          : 0.0);
+          if (!(std::isfinite(s) && std::isfinite(r) && r>0.0)) continue;
+
+          const double imp    = 100.0 * (1.0 - s/r);
+          const double varImp = (se*se)/(r*r) + (s*s*re*re)/(r*r*r*r);
+          const double err    = 100.0 * std::sqrt(std::max(0.0, varImp));
+
+          const double eLo  = eSlices[i].first;
+          const double eHi  = eSlices[i].second;
+          const double eCtr = 0.5*(eLo + eHi);
+          const double eWid = (eHi - eLo);
+          const double xOff = slotOf(key) * kBinOffset * eWid;
+
+          X.push_back(eCtr + xOff);
+          Y.push_back(imp);
+          EX.push_back(0.0);
+          EY.push_back(err);
+
+          yMin = std::min(yMin, imp - err);
+          yMax = std::max(yMax, imp + err);
+        }
+
+        auto g = std::make_unique<TGraphErrors>((int)X.size(),
+                                                X.empty()?nullptr:&X[0],
+                                                Y.empty()?nullptr:&Y[0],
+                                                EX.empty()?nullptr:&EX[0],
+                                                EY.empty()?nullptr:&EY[0]);
+        if (g->GetN() > 0){
+          g->SetMarkerColor(color_of(key));
+          g->SetLineColor  (color_of(key));
+          g->SetMarkerStyle(kMkStyle);
+          g->SetMarkerSize(0.8);
+          g->SetLineWidth(1);
+          gByKey[key] = g.get();
+          keep.emplace_back(std::move(g));
+        }
+      }
+
+      if (!(yMin < yMax)) { yMin = -5.0; yMax = +5.0; }
+      const double padY = 0.12*(yMax - yMin + 1e-12);
+
+      TH1F fr("fr","",1,xMin,xMax);
+      fr.SetTitle(Form("Percent RMS improvement vs E (%s)%s;E  [GeV];#Delta #sigma_{RMS}(%s) wrt Legacy CP  [%%]",
+                        kind.tag.c_str(), vz_note(isVz60),
+                        (kind.tag == "phi" ? "#phi" : "#eta")));
+        
+      fr.SetMinimum(yMin - padY);
+      fr.SetMaximum(yMax + padY);
+      fr.Draw("AXIS");
+
+      TLine l0(xMin, 0.0, xMax, 0.0); l0.SetLineStyle(2); l0.SetLineColor(kGray+2); l0.Draw();
+
+      for (auto& g : keep) g->Draw("P SAME");
+
+      TLegend leg(0.60, 0.66, 0.92, 0.90, "", "brNDC");
+      leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.032);
+      leg.SetNColumns(1); leg.SetEntrySeparation(0.0); leg.SetMargin(0.18);
+      for (const auto& key : variants){
+        auto itg = gByKey.find(key);
+        if (itg != gByKey.end() && itg->second)
+          leg.AddEntry(itg->second, legend_label(key), "p");
+      }
+      leg.Draw();
+
+      c.SaveAs(outPng.c_str());
+    };
+
+    // Requested EA variants to compare against CLUSCP
+    const std::vector<std::string> kEAkeys = {
+      "CLUSCP_EA", "CLUSCP_EA_vzDep", "CLUSCP_EA_etaDep", "CLUSCP_EA_vzEtaDep", "CLUSCP_EA_EandIncident"
+    };
+
+    // One PNG each for φ and η; points at each energy bin with proper error propagation
+    percent_gain_overlay(kPhi, S_PH, kEAkeys, "CLUSCP",
+                         DIR_PH + "/Overlays/percentGain/percentGain_vs_CLUSCP_phi.png",
+                         /*isVz60=*/false);
+
+    percent_gain_overlay(kEta, S_ET, kEAkeys, "CLUSCP",
+                         DIR_ET + "/Overlays/percentGain/percentGain_vs_CLUSCP_eta.png",
+                         /*isVz60=*/false);
 
     
   // ------------- first-bin pair overlays (normalized shapes) -------------
@@ -3084,8 +3443,8 @@ void PDCAnalysisPRIMEPRIME()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_noPhiTilt.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/SimOutputPrimeNoPhiTilt";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/PositionDep_sim_ALL_bOnlyValues.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/SimOutputPrimeNoPhiTilt";
 
   EnsureDir(outBaseDir);
 

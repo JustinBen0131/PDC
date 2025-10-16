@@ -97,7 +97,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
 {
   _eventcounter = 0;
   /* vertex‑Z limits                                                     */
-  m_vzTightCut  = 10.f;           // |z| ≤ 10 cm  → “physics” histograms
+  m_vzTightCut  = 60.f;           // |z| ≤ 10 cm  → “physics” histograms
   m_vzSliceMax  = vzEdge.back();
   m_nWinRAW = m_nWinCP = m_nWinBCorr = 0;
   s_verbosityLevel.store( Verbosity() );

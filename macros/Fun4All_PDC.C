@@ -296,25 +296,25 @@ void Fun4All_PDC(int nevents = 0,
   pdc->setIsSimulation(isSimulation);
   pdc->setFirstPassBvaluesOnly(false);
     
-    pdc->UseSurveyGeometry(false);      // load barrel-tilt from CDB (recommended)
-    pdc->UseSignedVz(false);
+  pdc->UseSurveyGeometry(false);      // load barrel-tilt from CDB (recommended)
+  pdc->UseSignedVz(false);
       // Automatically configure single-photon vs MinBias, with manual override via $PDC_DATASET:
       //  - default = (runNo != 21)  → single-photon
       //  - $PDC_DATASET=singlePi0   → force π0-mode (enable pair loop)
       //  - $PDC_DATASET=singleGamma → force single-γ mode
-      const bool pdc_isMinBias = (runNo == 21);
-      bool singlePhotonMode = !pdc_isMinBias;
+  const bool pdc_isMinBias = (runNo == 21);
+  bool singlePhotonMode = !pdc_isMinBias;
 
-      if (const char* dsEnv = gSystem->Getenv("PDC_DATASET"))
-      {
+  if (const char* dsEnv = gSystem->Getenv("PDC_DATASET"))
+  {
         std::string ds = dsEnv;
         for (auto& c : ds) c = std::tolower(c);
         if (ds == "singlepi0" || ds == "pi0" || ds == "single_pi0")
           singlePhotonMode = false;
         else if (ds == "singlegamma" || ds == "gamma" || ds == "single_gamma")
           singlePhotonMode = true;
-      }
-      pdc->setIsSinglePhoton(singlePhotonMode);
+  }
+  pdc->setIsSinglePhoton(singlePhotonMode);
 
   /*------------------------------------------------------------
       2)  π0-mass-window support

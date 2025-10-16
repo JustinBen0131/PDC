@@ -1,0 +1,9 @@
+E_lo,E_hi,CLUSCP_delta_pct,CLUSCP_delta_pct_err,CLUSCP_EA_delta_pct,CLUSCP_EA_delta_pct_err,CLUSCP_EA_vzDep_delta_pct,CLUSCP_EA_vzDep_delta_pct_err,CLUSCP_EA_etaDep_delta_pct,CLUSCP_EA_etaDep_delta_pct_err,CLUSCP_EA_vzEtaDep_delta_pct,CLUSCP_EA_vzEtaDep_delta_pct_err,CLUSCP_EA_EandIncident_delta_pct,CLUSCP_EA_EandIncident_delta_pct_err
+2,4,,,,,,,,,,,,
+4,6,,,,,,,,,,,,
+6,8,,,,,,,,,,,,
+8,10,,,,,,,,,,,,
+10,12,,,,,,,,,,,,
+12,15,,,,,,,,,,,,
+15,20,,,,,,,,,,,,
+20,30,,,,,,,,,,,,
