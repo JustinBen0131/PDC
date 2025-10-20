@@ -3296,14 +3296,20 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
       const int Wbin = 9;    // E-bin field width
       const int Wcol = 24;   // per-variant column width (pad BEFORE coloring)
       const int Wwin = 18;   // Winner column width
-      const char* BOLD  = "\033[1m";
-      const char* GREEN = "\033[1;32m";
-      const char* RED   = "\033[1;31m";
-      const char* RESET = "\033[0m";
+        const char* BOLD  = "\033[1m";
+        const char* GREEN = "\033[1;32m";
+        const char* RED   = "\033[1;31m";
+        const char* BLUE  = "\033[1;34m";
+        const char* RESET = "\033[0m";
 
-      // Locate Constant-b column (for red-underperform logic)
-      int idxCP = -1;
-      for (size_t j=0; j<keys.size(); ++j) if (keys[j] == "CLUSCP") { idxCP = (int)j; break; }
+        // Locate Constant-b, EA(E-only), and EA(E)+θ_inc columns
+        int idxCP = -1, idxEAonly = -1, idxEAinc = -1;
+        for (size_t j=0; j<keys.size(); ++j) {
+          if (keys[j] == "CLUSCP")                 idxCP     = (int)j;
+          if (keys[j] == "CLUSCP_EA")              idxEAonly = (int)j;
+          if (keys[j] == "CLUSCP_EA_EandIncident") idxEAinc  = (int)j;
+        }
+
 
       // Compact, consistent header labels (keeps columns narrow & aligned)
       auto headerLabel = [&](const std::string& k)->std::string {
@@ -3377,35 +3383,51 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
           if (std::isfinite(deltaPct[j]) && deltaPct[j] > winVal) { winVal = deltaPct[j]; winIdx = (int)j; }
         }
 
-        // Constant-b reference for this row (if available)
-        const double cpRef = (idxCP>=0 ? deltaPct[idxCP] : std::numeric_limits<double>::quiet_NaN());
+          // Constant-b reference for this row (if available)
+          const double cpRef     = (idxCP>=0     ? deltaPct[idxCP]     : std::numeric_limits<double>::quiet_NaN());
+          const double eaOnlyRef = (idxEAonly>=0 ? deltaPct[idxEAonly] : std::numeric_limits<double>::quiet_NaN());
 
-        // E-bin label
-        std::ostringstream ebin; ebin.setf(std::ios::fixed);
+          // E-bin label
+          std::ostringstream ebin; ebin.setf(std::ios::fixed);
+
         ebin << std::setprecision(0) << eSlices[i].first << "-" << eSlices[i].second;
         std::cout << std::left << std::setw(Wbin) << ebin.str();
 
-        // Values row (pad → then apply color)
-        for (size_t j=0; j<keys.size(); ++j){
-          std::string cell;
-          if (std::isfinite(deltaPct[j])){
-            std::ostringstream ss; ss.setf(std::ios::fixed);
-            ss << std::showpos << std::setprecision(2) << deltaPct[j] << "%" << std::noshowpos
-               << " ± " << std::setprecision(2) << deltaErr[j] << "%";
-            cell = ss.str();
-          } else {
-            cell = "n/a";
+          // Values row (pad → then apply color)
+          for (size_t j=0; j<keys.size(); ++j){
+            std::string cell;
+            if (std::isfinite(deltaPct[j])){
+              std::ostringstream ss; ss.setf(std::ios::fixed);
+              ss << std::showpos << std::setprecision(2) << deltaPct[j] << "%" << std::noshowpos
+                 << " ± " << std::setprecision(2) << deltaErr[j] << "%";
+              cell = ss.str();
+            } else {
+              cell = "n/a";
+            }
+            if ((int)cell.size() < Wcol) cell += std::string(Wcol - (int)cell.size(), ' ');
+
+            // Red highlight: underperforms Constant-b (strictly smaller Δ%)
+            const bool underCP = (idxCP>=0 && (int)j!=idxCP &&
+                                  std::isfinite(cpRef) && std::isfinite(deltaPct[j]) &&
+                                  deltaPct[j] < cpRef);
+
+            // Blue highlight: EA(E)+θ_inc worse than EA(E-only) in the same bin
+            const bool worseThanEAonly = (idxEAinc>=0 && (int)j==idxEAinc &&
+                                          idxEAonly>=0 &&
+                                          std::isfinite(deltaPct[j]) &&
+                                          std::isfinite(eaOnlyRef) &&
+                                          deltaPct[j] < eaOnlyRef);
+
+            std::string colored = cell;
+            if (worseThanEAonly) {
+              colored = std::string(BLUE) + cell + RESET;
+            } else if (underCP) {
+              colored = std::string(RED) + cell + RESET;
+            }
+
+            std::cout << " | " << colored;
           }
-          if ((int)cell.size() < Wcol) cell += std::string(Wcol - (int)cell.size(), ' ');
 
-          // Red highlight if this variant underperforms Constant-b (strictly smaller Δ%)
-          const bool underCP = (idxCP>=0 && (int)j!=idxCP &&
-                                std::isfinite(cpRef) && std::isfinite(deltaPct[j]) &&
-                                deltaPct[j] < cpRef);
-
-          const std::string colored = underCP ? (std::string(RED) + cell + RESET) : cell;
-          std::cout << " | " << colored;
-        }
 
         // Winner column (green)
         if (winIdx >= 0){
@@ -3443,8 +3465,8 @@ void PDCAnalysisPRIMEPRIME()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/PositionDep_sim_ALL_bOnlyValues.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/SimOutputPrimeNoPhiTilt";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/PositionDep_sim_ALL.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/SimOutputPrime";
 
   EnsureDir(outBaseDir);
 
