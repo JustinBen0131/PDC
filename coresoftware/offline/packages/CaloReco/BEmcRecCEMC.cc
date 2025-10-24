@@ -462,7 +462,7 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
        *        φ(E) =  a  –  b · ln E      with  E in GeV
        *
     * -------------------------------------------------------------- */
-    bool doPhiTilt = true; // <<< set to false internally to disable
+    bool doPhiTilt = false; // <<< set to false internally to disable
     if (doPhiTilt)
     {
         /* variant–dependent tilt constants (set via SetPhiTiltVariant) */

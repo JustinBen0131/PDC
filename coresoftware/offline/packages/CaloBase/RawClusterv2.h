@@ -2,7 +2,11 @@
 #define CALOBASE_RAWCLUSTERV2_H
 
 #include "RawClusterv1.h"
+
+#include <iostream>
 #include <limits>
+
+class RawCluster;
 
 class RawClusterv2 : public RawClusterv1
 {
@@ -11,29 +15,23 @@ class RawClusterv2 : public RawClusterv1
   ~RawClusterv2() override = default;
 
   // ---- new API: tower-space CoG, in TOWER UNITS ----
-  void set_tower_cog(float xr, float yr, float xc, float yc)
-  { _x_raw = xr; _y_raw = yr; _x_corr = xc; _y_corr = yc; }
+  void set_tower_cog(float xr, float yr, float xc, float yc) override { _x_raw = xr; _y_raw = yr; _x_corr = xc; _y_corr = yc; }
 
-  float x_tower_raw()  const { return _x_raw;  }
-  float y_tower_raw()  const { return _y_raw;  }
-  float x_tower_corr() const { return _x_corr; }
-  float y_tower_corr() const { return _y_corr; }
+  float x_tower_raw()  const override { return _x_raw;  }
+  float y_tower_raw()  const override { return _y_raw;  }
+  float x_tower_corr() const override { return _x_corr; }
+  float y_tower_corr() const override { return _y_corr; }
+
+  // ---- NEW: energy-weighted mean time (units = same units as tower times) ----
+  void  set_mean_time(float t) { _t_mean = t; }
+  float mean_time() const      { return _t_mean; }
 
   // Optional: clone into the same dynamic type
   RawCluster* CloneMe() const override { return new RawClusterv2(*this); }
 
-  void Reset() override
-  {
-    RawClusterv1::Reset();
-    _x_raw  = _y_raw  = _x_corr = _y_corr = std::numeric_limits<float>::quiet_NaN();
-  }
+  void Reset() override;
 
-  void identify(std::ostream& os = std::cout) const override
-  {
-    RawClusterv1::identify(os);
-    os << "  [towerCoG raw=(" << _x_raw << "," << _y_raw << ") corr=("
-       << _x_corr << "," << _y_corr << ")]\n";
-  }
+  void identify(std::ostream& os = std::cout) const override;
 
  private:
   float _x_raw  = std::numeric_limits<float>::quiet_NaN();
@@ -41,8 +39,11 @@ class RawClusterv2 : public RawClusterv1
   float _x_corr = std::numeric_limits<float>::quiet_NaN();
   float _y_corr = std::numeric_limits<float>::quiet_NaN();
 
-  ClassDefOverride(RawClusterv2, 1)
+  // NEW: energy-weighted mean time over member towers
+  float _t_mean = std::numeric_limits<float>::quiet_NaN();
+
+  // bump I/O version because of the new data member
+  ClassDefOverride(RawClusterv2, 2)
 };
 
 #endif
-

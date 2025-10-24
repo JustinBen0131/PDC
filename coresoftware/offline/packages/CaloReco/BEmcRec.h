@@ -6,8 +6,9 @@
 // Modified from EmcSectorRec.h and EmcScSectorRec.h
 
 #include "BEmcCluster.h"
-#include "calobase/RawTowerGeom.h"
-#include "calobase/RawTowerGeomv5.h"
+
+#include <calobase/RawTowerGeom.h>
+#include <calobase/RawTowerGeomv5.h>
 
 #include <algorithm>  // for max
 #include <limits>
@@ -27,7 +28,7 @@ typedef struct TowerGeom
   float dZ[2];
   float rotX; // Tower rotation
   float rotY;
-  float rotZ; 
+  float rotZ;
 
 } TowerGeom;
 
@@ -57,6 +58,7 @@ class BEmcRec
   bool CompleteTowerGeometry();
   void PrintTowerGeometry(const std::string &fname);
   void PrintTowerGeometryDetailed(const std::string &fname);
+  void ClearInitialDetailedGeometry();
 
   void SetPlanarGeometry() { bCYL = false; }
   void SetCylindricalGeometry() { bCYL = true; }
@@ -139,6 +141,9 @@ class BEmcRec
   static void ZeroVector(float *, int);
   static void ZeroVector(EmcModule *, int);
 
+  void set_UseCorrectPosition(bool useCorrectPosition) { m_UseCorrectPosition = useCorrectPosition; }
+  void set_UseCorrectShowerDepth(bool useCorrectShowerDepth) { m_UseCorrectShowerDepth = useCorrectShowerDepth; }
+
  protected:
   // Geometry
   bool bCYL {true};  // Cylindrical?
@@ -162,9 +167,12 @@ class BEmcRec
   BEmcProfile *_emcprof {nullptr};
 
  protected:
-  bool m_UseDetailedGeometry {false};
-  // Use a more detailed calorimeter geometry
+  bool m_UseDetailedGeometry {true};
+  // Use a more detailed calorimeter geometry (default)
   // Only available for CEMC
+
+  bool m_UseCorrectPosition = true;
+  bool m_UseCorrectShowerDepth = true;
 
  private:
   std::string m_ThisName {"NOTSET"};
