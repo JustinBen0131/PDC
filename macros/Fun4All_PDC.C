@@ -30,24 +30,27 @@
 #include <phool/PHRandomSeed.h>
 #include <phool/getClass.h>
 
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/RawClusterDeadHotMask.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloGeomMapping.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/RawClusterBuilderTemplate.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/RawTowerCalibration.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloTowerCalib.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloTowerStatus.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/CaloTowerBuilder.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/RawClusterDeadHotMask.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/CaloGeomMapping.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/RawClusterBuilderTemplate.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/RawTowerCalibration.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/CaloTowerCalib.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/CaloTowerStatus.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/BEmcRecCEMC.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/CaloTowerBuilder.h"
 
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeom.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeomContainer_Cylinderv1.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfoDefs.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterv2.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerGeom.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerGeomContainer_Cylinderv1.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/TowerInfoDefs.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterv2.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/TowerInfoContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/TowerInfoContainerSimv2.h"
 
 #include <g4detectors/PHG4FullProjSpacalCellReco.h>
 #include <g4calo/RawTowerBuilder.h>
 #include <g4calo/RawTowerDigitizer.h>
 #include <calowaveformsim/CaloWaveformSim.h>
+#include <caloreco/CaloTowerCalib.h>
 #include <phparameter/PHParameterUtils.h>
 #include <globalvertex/GlobalVertexReco.h>
 #include <globalvertex/GlobalVertex.h>
@@ -198,10 +201,52 @@ void Fun4All_PDC(int nevents = 0,
   gvertex->Verbosity(0);
   se->registerSubsystem(gvertex);
     
-    BEmcRecCEMC* bemcPtr = new BEmcRecCEMC();
-    bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
-    bemcPtr->set_UseDetailedGeometry(true);   // match builder ripple/geometry
-    bemcPtr->SetTowerThreshold(0.030f);       // match builder Momenta threshold
+//    // ==========================
+//    // Calibrate towers (DATA & SIM)
+//    // ==========================
+//    std::cout << "Calibrating EMCal" << std::endl;
+//    auto* calibEMC = new CaloTowerCalib("CEMCCALIB");
+//    calibEMC->set_detector_type(CaloTowerDefs::CEMC);
+//    se->registerSubsystem(calibEMC);
+//
+//    std::cout << "Calibrating OHcal" << std::endl;
+//    auto* calibOHCal = new CaloTowerCalib("HCALOUT");
+//    calibOHCal->set_detector_type(CaloTowerDefs::HCALOUT);
+//    se->registerSubsystem(calibOHCal);
+//
+//    std::cout << "Calibrating IHcal" << std::endl;
+//    auto* calibIHCal = new CaloTowerCalib("HCALIN");
+//    calibIHCal->set_detector_type(CaloTowerDefs::HCALIN);
+//    se->registerSubsystem(calibIHCal);
+
+    // ==========================
+    // (SIM only) MC re-calibration pass for older sims
+    // Run-28 and beyond moved this into waveformSim for embedding
+    // ==========================
+    if (isSimulation && rc->get_uint64Flag("TIMESTAMP") < 28)
+    {
+      std::string MC_Calib = CDBInterface::instance()->getUrl("CEMC_MC_RECALIB");
+      if (MC_Calib.empty())
+      {
+        std::cout << "No MC calibration found :( )" << std::endl;
+        gSystem->Exit(0);
+      }
+      auto* calibEMC_MC = new CaloTowerCalib("CEMCCALIB_MC");
+      calibEMC_MC->set_detector_type(CaloTowerDefs::CEMC);
+      // read/write calibrated TowerInfo in place
+      calibEMC_MC->set_inputNodePrefix ("TOWERINFO_CALIB_");
+      calibEMC_MC->set_outputNodePrefix("TOWERINFO_CALIB_");
+      calibEMC_MC->set_directURL(MC_Calib);
+      calibEMC_MC->set_doCalibOnly(true);
+      se->registerSubsystem(calibEMC_MC);
+  }
+    
+    
+    
+  BEmcRecCEMC* bemcPtr = new BEmcRecCEMC();
+  bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
+  bemcPtr->set_UseDetailedGeometry(true);   // match builder ripple/geometry
+  bemcPtr->SetTowerThreshold(0.030f);       // match builder Momenta threshold
 
   /* 4a) Let CaloGeomMapping put "TOWERGEOM_CEMC_DETAILED" on the node-tree */
   CaloGeomMapping* geomMap = new CaloGeomMapping("CEMC_GeomFiller");
@@ -279,7 +324,7 @@ void Fun4All_PDC(int nevents = 0,
         // TowerInfo mode → node name becomes CLUSTERINFO_CEMC, v2 → CLUSTERINFO_CEMC_V2
         ClusterBuilder->set_UseTowerInfo(1);
 
-        ClusterBuilder->Verbosity(1);
+        ClusterBuilder->Verbosity(10);
         se->registerSubsystem(ClusterBuilder);
 
     }

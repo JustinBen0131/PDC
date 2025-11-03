@@ -1,9 +1,9 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"Energy-only + incident-angle",0.003569,"Energy + |#eta|-dep b",0.003573,0.000004,"",nan,"",nan,nan
-4,6,"Energy + |#eta|-dep b",0.003224,"Energy + |z_{vtx}|+|#eta|-dep b",0.003225,0.000001,"",nan,"",nan,nan
-6,8,"Energy + |#eta|-dep b",0.003068,"Energy + |z_{vtx}|+|#eta|-dep b",0.003069,0.000001,"",nan,"",nan,nan
-8,10,"Energy + |#eta|-dep b",0.003171,"Energy + |z_{vtx}|+|#eta|-dep b",0.003171,0.000000,"",nan,"",nan,nan
-10,12,"Energy + |#eta|-dep b",0.003333,"Energy + |z_{vtx}|+|#eta|-dep b",0.003333,0.000001,"",nan,"",nan,nan
-12,15,"Energy + |#eta|-dep b",0.003492,"Energy + |z_{vtx}|+|#eta|-dep b",0.003492,0.000001,"",nan,"",nan,nan
-15,20,"Energy + |#eta|-dep b",0.003414,"Energy + |z_{vtx}|+|#eta|-dep b",0.003415,0.000001,"",nan,"",nan,nan
-20,30,"Energy + |#eta|-dep b",0.002924,"Energy + |z_{vtx}|+|#eta|-dep b",0.002924,0.000001,"",nan,"",nan,nan
+2,4,"Energy-only + incident-angle",0.003588,"Energy + |#eta|-dep b",0.003590,0.000002,"",nan,"",nan,nan
+4,6,"Energy + |#eta|-dep b",0.003223,"Energy + |z_{vtx}|+|#eta|-dep b",0.003224,0.000001,"",nan,"",nan,nan
+6,8,"Energy + |#eta|-dep b",0.003063,"Energy + |z_{vtx}|+|#eta|-dep b",0.003064,0.000001,"",nan,"",nan,nan
+8,10,"Energy + |#eta|-dep b",0.003172,"Energy + |z_{vtx}|+|#eta|-dep b",0.003172,0.000000,"",nan,"",nan,nan
+10,12,"Energy + |#eta|-dep b",0.003335,"Energy + |z_{vtx}|+|#eta|-dep b",0.003335,0.000001,"",nan,"",nan,nan
+12,15,"Energy + |#eta|-dep b",0.003493,"Energy + |z_{vtx}|+|#eta|-dep b",0.003494,0.000001,"",nan,"",nan,nan
+15,20,"Energy + |#eta|-dep b",0.003417,"Energy + |z_{vtx}|+|#eta|-dep b",0.003418,0.000001,"",nan,"",nan,nan
+20,30,"Energy + |#eta|-dep b",0.002927,"Energy + |z_{vtx}|+|#eta|-dep b",0.002928,0.000001,"",nan,"",nan,nan

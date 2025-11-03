@@ -11,6 +11,7 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 class CDBTTree;
 class PHCompositeNode;
@@ -55,6 +56,11 @@ class CaloTowerStatus : public SubsysReco
   void set_badChi2_max_threshold(float threshold)
   {
     badChi2_treshold_max = threshold;
+    return;
+  }
+  void set_z_score_threshold(float threshold)
+  {
+    z_score_threshold = threshold;
     return;
   }
   void set_time_cut(float threshold)
@@ -106,6 +112,7 @@ class CaloTowerStatus : public SubsysReco
   std::string m_fieldname_chi2;
   std::string m_calibName_chi2;
   std::string m_fieldname_hotMap;
+  std::string m_fieldname_z_score;
   std::string m_calibName_hotMap;
   std::string m_inputNodePrefix{"TOWERS_"};
 
@@ -120,7 +127,21 @@ class CaloTowerStatus : public SubsysReco
   float badChi2_treshold_quadratic = {1./100};
   float badChi2_treshold_max = {1e8};
   float fraction_badChi2_threshold = {0.01};
+  float z_score_threshold = {5};
+  float z_score_threshold_default = {5};
   float time_cut = 2;  // number of samples from the mean time for the channel in the run
+
+  void LoadCalib();
+
+  struct CDBInfo
+  {
+    float fraction_badChi2{0};
+    float mean_time{0};
+    float z_score{0};
+    int hotMap_val{0};
+  };
+
+  std::vector<CDBInfo> m_cdbInfo_vec;
 };
 
 #endif  // CALOTOWERBUILDER_H

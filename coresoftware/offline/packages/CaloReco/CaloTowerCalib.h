@@ -85,7 +85,7 @@ class CaloTowerCalib : public SubsysReco
 
   void set_doCalibOnly(bool docalib = true)
   {
-    if (docalib) 
+    if (docalib)
     {
       m_dotimecalib = false;
       m_doZScrosscalib = false;
@@ -128,6 +128,17 @@ class CaloTowerCalib : public SubsysReco
   CDBTTree *cdbttree = nullptr;
   CDBTTree *cdbttree_time = nullptr;
   CDBTTree *cdbttree_ZScrosscalib = nullptr;
+
+  void LoadCalib(PHCompositeNode *topNode);
+
+  struct CDBInfo
+  {
+    float calibconst{0};
+    float crosscalibconst{0};
+    float meantime{0};
+  };
+
+  std::vector<CDBInfo> m_cdbInfo_vec;
 };
 
 #endif  // CALOTOWERBUILDER_H

@@ -455,34 +455,38 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
     logE = std::log(E);
   }
 
-    /* -------------------------------------------------------------- *
-       *  Azimuthal-tilt correction  (2025-06-25 calibration)
-       *  Internal toggle: set doPhiTilt=false to skip rotation
-       *
-       *        φ(E) =  a  –  b · ln E      with  E in GeV
-       *
-    * -------------------------------------------------------------- */
-    bool doPhiTilt = false; // <<< set to false internally to disable
-    if (doPhiTilt)
-    {
-        /* variant–dependent tilt constants (set via SetPhiTiltVariant) */
-        const double aTilt = m_abTiltCurrent.first;   // rad
-        const double bTilt = m_abTiltCurrent.second;  // rad
-
-        const double phi = aTilt - bTilt * static_cast<double>(logE);  // use logE already defined
-        const double  c  = std::cos(phi);
-        const double  s  = std::sin(phi);
-
-        /* rotate the uncorrected impact point (xA, yA) */
-        xC = xA * c - yA * s;
-        yC = xA * s + yA * c;
-    }
-    else
-    {
-        // skip tilt correction entirely
-        xC = xA;
-        yC = yA;
-    }
+    xC = xA;
+    yC = yA;
+    zC = zA;
+    
+//    /* -------------------------------------------------------------- *
+//       *  Azimuthal-tilt correction  (2025-06-25 calibration)
+//       *  Internal toggle: set doPhiTilt=false to skip rotation
+//       *
+//       *        φ(E) =  a  –  b · ln E      with  E in GeV
+//       *
+//    * -------------------------------------------------------------- */
+//    bool doPhiTilt = false; // <<< set to false internally to disable
+//    if (doPhiTilt)
+//    {
+//        /* variant–dependent tilt constants (set via SetPhiTiltVariant) */
+//        const double aTilt = m_abTiltCurrent.first;   // rad
+//        const double bTilt = m_abTiltCurrent.second;  // rad
+//
+//        const double phi = aTilt - bTilt * static_cast<double>(logE);  // use logE already defined
+//        const double  c  = std::cos(phi);
+//        const double  s  = std::sin(phi);
+//
+//        /* rotate the uncorrected impact point (xA, yA) */
+//        xC = xA * c - yA * s;
+//        yC = xA * s + yA * c;
+//    }
+//    else
+//    {
+//        // skip tilt correction entirely
+//        xC = xA;
+//        yC = yA;
+//    }
   /* -------------------------------------------------------------- */
 
   // Correction in z

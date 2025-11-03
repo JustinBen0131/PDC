@@ -53,21 +53,22 @@
 #include <map>
 #include <TSystem.h>
 #include <g4main/PHG4TruthInfoContainer.h>
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawCluster.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterv2.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterContainer.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterUtility.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTower.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerContainer.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeom.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerGeomContainer.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfo.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfoContainer.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/TowerInfoDefs.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawCluster.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawClusterContainer.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_CaloBASE/RawTowerDefs.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/BEmcRecCEMC.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawCluster.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterv2.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterUtility.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTower.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerGeom.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerGeomContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/TowerInfo.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/TowerInfoContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/TowerInfoContainerSimv2.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/TowerInfoDefs.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawCluster.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterContainer.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerDefs.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/BEmcRecCEMC.h"
 
 using namespace PDC_detail;
 PositionDependentCorrection::Pi0CutCounters PositionDependentCorrection::s_cuts{};
@@ -3784,9 +3785,8 @@ void PositionDependentCorrection::processClusterPairs(
         }
       }
 
-      // Partner cluster probability cut (optional; counted separately)
       if (m_enableC2ProbCut) {
-        const float c2Prob = clus2->get_prob();  // use get_probability() if that's your accessor
+        const float c2Prob = clus2->get_prob();
         if (!std::isfinite(c2Prob) || c2Prob < m_pairProbMin) {
           ++ct.kinematic;
           s_cuts.pairs_prob2++;  // dedicated counter for partner prob failures

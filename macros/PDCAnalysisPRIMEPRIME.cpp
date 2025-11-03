@@ -520,48 +520,145 @@ static BVecs MakeBvaluesVsEnergyPlot(TH3F* hUnc3D,
     delete hEta;
   }
 
-  // Build scatter plot
-  TGraphErrors* gPhi = new TGraphErrors(R.ecenters.size(), &R.ecenters[0], &R.bphi[0],
-                                        nullptr, &R.bphiErr[0]);
-  TGraphErrors* gEta = new TGraphErrors(R.ecenters.size(), &R.ecenters[0], &R.beta[0],
-                                        nullptr, &R.betaErr[0]);
+    // Build scatter plot + draw WLS fits and annotate m, b0 on the canvas
+    TGraphErrors* gPhi = new TGraphErrors(R.ecenters.size(), &R.ecenters[0], &R.bphi[0],
+                                          nullptr, &R.bphiErr[0]);
+    TGraphErrors* gEta = new TGraphErrors(R.ecenters.size(), &R.ecenters[0], &R.beta[0],
+                                          nullptr, &R.betaErr[0]);
 
-  gPhi->SetMarkerStyle(21);  gPhi->SetMarkerColor(kRed+1);
-  gPhi->SetLineColor  (kRed+1);
-  gEta->SetMarkerStyle(20);  gEta->SetMarkerColor(kBlue+1);
-  gEta->SetLineColor  (kBlue+1);
+    gPhi->SetMarkerStyle(21);  gPhi->SetMarkerColor(kRed+1);
+    gPhi->SetLineColor  (kRed+1);
+    gEta->SetMarkerStyle(20);  gEta->SetMarkerColor(kBlue+1);
+    gEta->SetLineColor  (kBlue+1);
 
-  double ymin = +1e9, ymax = -1e9;
-  for (size_t i=0;i<R.bphi.size();++i) { ymin = std::min(ymin, R.bphi[i]); ymax = std::max(ymax, R.bphi[i]); }
-  for (size_t i=0;i<R.beta.size(); ++i) { ymin = std::min(ymin, R.beta[i]); ymax = std::max(ymax, R.beta[i]); }
-  if (!std::isfinite(ymin) || !std::isfinite(ymax) || R.bphi.empty())
-  { ymin = 0.0; ymax = 1.0; }
-  const double yLo = ymin - 0.15*std::fabs(ymin);
-  const double yHi = ymax + 0.25*std::fabs(ymax);
+    double ymin = +1e9, ymax = -1e9;
+    for (size_t i=0;i<R.bphi.size();++i) { ymin = std::min(ymin, R.bphi[i]); ymax = std::max(ymax, R.bphi[i]); }
+    for (size_t i=0;i<R.beta.size(); ++i) { ymin = std::min(ymin, R.beta[i]); ymax = std::max(ymax, R.beta[i]); }
+    if (!std::isfinite(ymin) || !std::isfinite(ymax) || R.bphi.empty())
+    { ymin = 0.0; ymax = 1.0; }
+    const double yLo = ymin - 0.15*std::fabs(ymin);
+    const double yHi = ymax + 0.25*std::fabs(ymax);
 
-  const double xLo = E_edges[0]-0.5, xHi = E_edges[N]-0.5;
+    const double xLo = E_edges[0]-0.5, xHi = E_edges[N]-0.5;
 
-  TH2F* frame = new TH2F("bFrame", Form("best-fit  b  vs  E  (#scale[0.8]{%s});E  [GeV];b", etaPretty),
-                         100, xLo, xHi, 100, yLo, yHi);
-  frame->SetStats(0);
+    TH2F* frame = new TH2F("bFrame", Form("best-fit  b  vs  E  (#scale[0.8]{%s});E  [GeV];b", etaPretty),
+                           100, xLo, xHi, 100, yLo, yHi);
+    frame->SetStats(0);
 
-  TCanvas cB("bValues_vs_E","b values vs energy", 900, 700);
-  frame->Draw();
-  gPhi->Draw("P SAME");
-  gEta->Draw("P SAME");
+    TCanvas cB("bValues_vs_E","b values vs energy", 900, 700);
+    frame->Draw();
+    gPhi->Draw("P SAME");
+    gEta->Draw("P SAME");
 
-  TLegend leg(0.20,0.78,0.52,0.90);
-  leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.04);
-  leg.AddEntry(gPhi,"b_{#varphi}","lp");
-  leg.AddEntry(gEta,"b_{#eta}","lp");
-  leg.Draw();
+    // --- Weighted least squares on x = ln(E/E0) to match SaveOverlayAcrossVariants ---
+    const double E0 = 3.0;
 
-  TString outName = Form("%s/bValues_vs_E.png", outDir);
-  cB.SaveAs(outName);
+    auto wlsFit = [&](const std::vector<double>& E,
+                      const std::vector<double>& y,
+                      const std::vector<double>& sy,
+                      double& m, double& b0, double& dm, double& db0) -> bool
+    {
+      double S=0, Sx=0, Sy_=0, Sxx=0, Sxy=0;
+      int Nuse=0; bool haveYerrsAll=true;
+      std::vector<double> xi, yi, wi; xi.reserve(y.size()); yi.reserve(y.size()); wi.reserve(y.size());
+      for (size_t i=0;i<y.size() && i<E.size(); ++i)
+      {
+        const double Ei = E[i], yi_ = y[i];
+        if (!(std::isfinite(Ei) && Ei>0.0 && std::isfinite(yi_))) continue;
+        const double xi_ = std::log(Ei/E0);
+        double w = 1.0;
+        if (i<sy.size() && std::isfinite(sy[i]) && sy[i]>0.0) w = 1.0/(sy[i]*sy[i]); else haveYerrsAll=false;
+        S+=w; Sx+=w*xi_; Sy_+=w*yi_; Sxx+=w*xi_*xi_; Sxy+=w*xi_*yi_;
+        xi.push_back(xi_); yi.push_back(yi_); wi.push_back(w); ++Nuse;
+      }
+      const double Delta = S*Sxx - Sx*Sx;
+      if (Nuse<2 || !(Delta>0.0)) return false;
 
-  delete frame;
-  delete gPhi;
-  delete gEta;
+      m  = (S*Sxy - Sx*Sy_) / Delta;
+      b0 = (Sxx*Sy_ - Sx*Sxy) / Delta;
+
+      const double var_m  =  S / Delta;
+      const double var_b0 = Sxx / Delta;
+
+      // Goodness-of-fit and error scaling if we had to use unit weights
+      double chi2=0.0, ybar_w = Sy_/S; const int ndf = std::max(0, Nuse-2);
+      for (int i=0;i<Nuse; ++i) {
+        const double yhat = b0 + m*xi[i];
+        const double r    = yi[i] - yhat;
+        chi2 += wi[i]*r*r;
+      }
+      const double scale = (!haveYerrsAll && ndf>0) ? std::sqrt(chi2/std::max(1,ndf)) : 1.0;
+
+      dm  = std::sqrt(std::max(0.0, var_m )) * scale;
+      db0 = std::sqrt(std::max(0.0, var_b0)) * scale;
+      return true;
+    };
+
+    double m_phi=std::numeric_limits<double>::quiet_NaN(), b0_phi=std::numeric_limits<double>::quiet_NaN();
+    double dm_phi=std::numeric_limits<double>::quiet_NaN(), db0_phi=std::numeric_limits<double>::quiet_NaN();
+    double m_eta=std::numeric_limits<double>::quiet_NaN(), b0_eta=std::numeric_limits<double>::quiet_NaN();
+    double dm_eta=std::numeric_limits<double>::quiet_NaN(), db0_eta=std::numeric_limits<double>::quiet_NaN();
+
+    const bool okPhi = wlsFit(R.ecenters, R.bphi, R.bphiErr, m_phi, b0_phi, dm_phi, db0_phi);
+    const bool okEta = wlsFit(R.ecenters, R.beta, R.betaErr, m_eta, b0_eta, dm_eta, db0_eta);
+
+    // Draw the fit curves and keep them alive until after SaveAs
+    std::vector<std::unique_ptr<TF1>> keepFitLines;
+    keepFitLines.reserve(2);
+
+    if (okPhi) {
+      const auto fPhiName = Form("fPhi_line_%p", static_cast<void*>(gPhi));
+      auto fPhi = std::make_unique<TF1>(fPhiName, "[0] + [1]*log(x/[2])", xLo, xHi);
+      fPhi->SetParameters(b0_phi, m_phi, E0);
+      fPhi->FixParameter(2, E0);
+      fPhi->SetLineColor(kRed+1);
+      fPhi->SetLineWidth(2);
+      fPhi->SetNpx(800);
+      fPhi->Draw("SAME");
+      keepFitLines.emplace_back(std::move(fPhi));
+    }
+    if (okEta) {
+      const auto fEtaName = Form("fEta_line_%p", static_cast<void*>(gEta));
+      auto fEta = std::make_unique<TF1>(fEtaName, "[0] + [1]*log(x/[2])", xLo, xHi);
+      fEta->SetParameters(b0_eta, m_eta, E0);
+      fEta->FixParameter(2, E0);
+      fEta->SetLineColor(kBlue+1);
+      fEta->SetLineWidth(2);
+      fEta->SetNpx(800);
+      fEta->Draw("SAME");
+      keepFitLines.emplace_back(std::move(fEta));
+    }
+
+    // Legend for the points (as before)
+    TLegend leg(0.20,0.78,0.52,0.90);
+    leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.04);
+    leg.AddEntry(gPhi,"b_{#varphi}","lp");
+    leg.AddEntry(gEta,"b_{#eta}","lp");
+    leg.Draw();
+
+    // Stamp fit parameters in the top-right (matching colors)
+    {
+      TLatex tl; tl.SetNDC(); tl.SetTextAlign(33); tl.SetTextSize(0.040);
+      if (okPhi) { tl.SetTextColor(kRed+1);
+        tl.DrawLatex(0.88, 0.90, Form("#phi: b_{0}=%.3f #pm %.3f,  m=%.3f #pm %.3f",
+                                      b0_phi, db0_phi, m_phi, dm_phi));
+      }
+      if (okEta) { tl.SetTextColor(kBlue+1);
+        tl.DrawLatex(0.88, 0.85, Form("#eta: b_{0}=%.3f #pm %.3f,  m=%.3f #pm %.3f",
+                                      b0_eta, db0_eta, m_eta, dm_eta));
+      }
+      tl.SetTextColor(kBlack); // restore
+    }
+
+    cB.Modified();
+    cB.Update();
+    TString outName = Form("%s/bValues_vs_E.png", outDir);
+    cB.SaveAs(outName);
+
+    delete frame;
+    delete gPhi;
+    delete gEta;
+
 
   return R;
 }
@@ -1339,6 +1436,94 @@ static void SaveOverlayAcrossVariants(
                                                               : (baseSfx);
     renderOverlay(sfx, byVar, byVarErr);
   }
+}
+
+// -----------------------------------------------------------------------------
+// SaveIncidenceQA_SimpleOverlay (tight Y axis):
+//   Two clean curves: <alpha_phi>(z) and <alpha_eta>(z) as TProfiles,
+//   auto-ranged in Y to the data with a small padding.
+// -----------------------------------------------------------------------------
+static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
+{
+  if (!fin || fin->IsZombie()) { std::cerr << "[incidenceQA] bad TFile\n"; return; }
+
+  auto getH2 = [&](const char* n)->TH2F* {
+    TH2F* h=nullptr; fin->GetObject(n, h);
+    if (h) h->SetDirectory(nullptr);
+    return h;
+  };
+  std::unique_ptr<TH2F> hPhi(getH2("h2_alphaPhi_vsVz"));
+  std::unique_ptr<TH2F> hEta(getH2("h2_alphaEta_vsVz"));
+  if (!hPhi && !hEta) { std::cerr << "[incidenceQA] no α vs z histos\n"; return; }
+
+  gStyle->SetOptStat(0);
+  const double xMin=-60, xMax=+60;
+
+  auto makeProfile = [&](TH2F* h, const char* nm)->std::unique_ptr<TProfile> {
+    if (!h) return nullptr;
+    h->GetXaxis()->SetRangeUser(xMin, xMax); // consistent z-window
+    return std::unique_ptr<TProfile>(h->ProfileX(nm, 1, h->GetNbinsX())); // mean α vs z
+  };
+
+  auto pPhi = makeProfile(hPhi.get(), "pAlphaPhi");
+  auto pEta = makeProfile(hEta.get(), "pAlphaEta");
+  if (!pPhi && !pEta) { std::cerr << "[incidenceQA] empty profiles\n"; return; }
+
+  // --- compute tight y-range from the profile means ---
+  double yMin = +1e9, yMax = -1e9;
+  auto scanMinMax = [&](TProfile* p){
+    if (!p) return;
+    for (int i=1;i<=p->GetNbinsX();++i) {
+      if (p->GetBinEntries(i) <= 0) continue;           // skip empty bins
+      double y = p->GetBinContent(i);                   // mean α in this z-bin
+      if (y < yMin) yMin = y;
+      if (y > yMax) yMax = y;
+    }
+  };
+  scanMinMax(pPhi.get());
+  scanMinMax(pEta.get());
+  if (!(yMin < yMax)) { yMin = 0.0; yMax = 0.30; }      // fallback
+  const double pad = 0.05 * (yMax - yMin);              // 5% breathing room
+  yMin = std::max(0.0, yMin - pad);
+  yMax = std::min(0.40, yMax + pad);                    // cap if you want
+
+  // --- draw ---
+  const int W=900, H=600;
+  TCanvas c("c_inc_simple","Incidence vs z_{vtx}", W, H);
+  c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
+  c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
+
+  TH2F frame("frame",";z_{vtx}  (cm);#alpha  [rad]", 100, xMin, xMax, 100, yMin, yMax);
+  frame.SetStats(0);
+  frame.Draw();
+
+  // optional shaded fiducial band |z| <= 10 cm
+  TBox band(-10, yMin, +10, yMax);
+  band.SetFillColorAlpha(kGray, 0.10);
+  band.SetLineColor(0);
+  band.Draw("same");
+
+  auto drawProfile = [&](TProfile* p, Color_t col) {
+    if (!p) return;
+    p->SetLineColor(col);
+    p->SetLineWidth(3);
+    p->SetMarkerStyle(0);
+    p->Draw("hist same");    // clean line through bin centers
+  };
+  drawProfile(pPhi.get(), kBlue+1);
+  drawProfile(pEta.get(), kRed+1);
+
+  TLegend leg(0.7,0.60,0.88,0.90);
+  leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.050);
+  if (pPhi) leg.AddEntry(pPhi.get(), "#LT#alpha_{#varphi}#GT(z)", "l");
+  if (pEta) leg.AddEntry(pEta.get(), "#LT#alpha_{#eta}#GT(z)",    "l");
+  leg.Draw();
+
+  const std::string outDir = outBaseDir + "/incidenceQA";
+  gSystem->mkdir(outDir.c_str(), true);
+  c.SaveAs((outDir + "/incidence_alpha_overlay_simple.png").c_str());
+  std::cout << "[incidenceQA] Wrote: " << outDir << "/incidence_alpha_overlay_simple.png"
+            << "  y-range = [" << yMin << "," << yMax << "]\n";
 }
 
 
@@ -3465,8 +3650,8 @@ void PDCAnalysisPRIMEPRIME()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/PositionDep_sim_ALL.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_60/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_noPhiTilt.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/SimOutputPrime";
 
   EnsureDir(outBaseDir);
 
@@ -3482,7 +3667,7 @@ void PDCAnalysisPRIMEPRIME()
   const auto eEdges = MakeEnergySlices();
   const auto eCent  = MakeEnergyCenters();
 
-    
+  SaveIncidenceQA(fin.get(), outBaseDir);
   // Prepare global b-values text file
   const std::string bValFile = outBaseDir + "/bValues.txt";
   std::ofstream bOut(bValFile);
@@ -4209,9 +4394,8 @@ void PDCAnalysisPRIMEPRIME()
     // ----------------------- Global overlays across η-variants (base path) -----------------------
     SaveOverlayAcrossVariants(outBaseDir, eCent, phiByVariant, phiErrByVariant, /*isPhi*/true , ""  );
     SaveOverlayAcrossVariants(outBaseDir, eCent, etaByVariant, etaErrByVariant, /*isPhi*/false, ""  );
-
     
-  std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
+    std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
 }
 
 // Auto-run when invoked as a ROOT script:  root -b -q -l PDCAnalysisPrime.cpp

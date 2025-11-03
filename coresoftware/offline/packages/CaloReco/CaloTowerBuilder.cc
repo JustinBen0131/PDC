@@ -133,24 +133,24 @@ int CaloTowerBuilder::InitRun(PHCompositeNode *topNode)
     m_packet_low = 9001;
     m_packet_high = 9006;
     m_nchannels = 128;
+    WaveformProcessing->set_template_name("SEPD_TEMPLATE");
     if (_processingtype == CaloWaveformProcessing::NONE)
     {
-      WaveformProcessing->set_processing_type(CaloWaveformProcessing::FAST);  // default the EPD to fast processing
+      WaveformProcessing->set_processing_type(CaloWaveformProcessing::TEMPLATE);  // default the EPD to fast processing
     }
-      
+
     m_calibName = "SEPD_CHANNELMAP2";
     m_fieldname = "epd_channel_map2";
-        
+
     calibdir = CDBInterface::instance()->getUrl(m_calibName);
 
     if (calibdir.empty())
     {
-        std::cout << PHWHERE << "No sEPD mapping file for domain " << m_calibName << " found" << std::endl;
-         exit(1);
+      std::cout << PHWHERE << "No sEPD mapping file for domain " << m_calibName << " found" << std::endl;
+      exit(1);
     }
-        
-    cdbttree_sepd_map = new CDBTTree(calibdir);
 
+    cdbttree_sepd_map = new CDBTTree(calibdir);
   }
   else if (m_dettype == CaloTowerDefs::ZDC)
   {
@@ -220,7 +220,7 @@ int CaloTowerBuilder::process_sim()
     towerinfo->copy_tower(towerwaveform);
     towerinfo->set_time(processed_waveforms.at(i).at(1));
     towerinfo->set_energy(processed_waveforms.at(i).at(0));
-    towerinfo->set_time_float(processed_waveforms.at(i).at(1));
+    towerinfo->set_time(processed_waveforms.at(i).at(1));
     towerinfo->set_pedestal(processed_waveforms.at(i).at(2));
     towerinfo->set_chi2(processed_waveforms.at(i).at(3));
     bool SZS = isSZS(processed_waveforms.at(i).at(1), processed_waveforms.at(i).at(3));
@@ -312,6 +312,7 @@ int CaloTowerBuilder::process_data(PHCompositeNode *topNode, std::vector<std::ve
         return Fun4AllReturnCodes::ABORTEVENT;
       }
 
+      int n_pad_skip_mask = 0;
       for (int channel = 0; channel < nchannels; channel++)
       {
         if (skipChannel(channel, pid))
@@ -327,6 +328,7 @@ int CaloTowerBuilder::process_data(PHCompositeNode *topNode, std::vector<std::ve
             {
               for (int iskip = 0; iskip < 64; iskip++)
               {
+                n_pad_skip_mask++;
                 std::vector<float> waveform;
                 waveform.reserve(m_nsamples);
 
@@ -359,9 +361,14 @@ int CaloTowerBuilder::process_data(PHCompositeNode *topNode, std::vector<std::ve
         waveform.clear();
       }
 
-      if (nchannels < m_nchannels && !(m_dettype == CaloTowerDefs::CEMC && adc_skip_mask < 4))
+      int nch_padded = nchannels;
+      if (m_dettype == CaloTowerDefs::CEMC)
       {
-        for (int channel = 0; channel < m_nchannels - nchannels; channel++)
+        nch_padded += n_pad_skip_mask;
+      }
+      if (nch_padded < m_nchannels)
+      {
+        for (int channel = 0; channel < m_nchannels - nch_padded; channel++)
         {
           if (skipChannel(channel, pid))
           {
@@ -427,10 +434,7 @@ int CaloTowerBuilder::process_data(PHCompositeNode *topNode, std::vector<std::ve
     else
     {
       CaloPacket *calopacket = findNode::getClass<CaloPacket>(topNode, pid);
-      if (calopacket)
-      {
-        process_packet(calopacket, pid);
-      }
+      process_packet(calopacket, pid);
     }
   }
 
@@ -455,19 +459,20 @@ int CaloTowerBuilder::process_event(PHCompositeNode *topNode)
   // waveform vector is filled here, now fill our output. methods from the base class make sure
   // we only fill what the chosen container version supports
   std::vector<std::vector<float>> processed_waveforms = WaveformProcessing->process_waveform(waveforms);
+
   int n_channels = processed_waveforms.size();
   for (int i = 0; i < n_channels; i++)
   {
     int idx = i;
-    //Align sEPD ADC channels to TowerInfoContainer
+    // Align sEPD ADC channels to TowerInfoContainer
     if (m_dettype == CaloTowerDefs::SEPD)
     {
-        idx = cdbttree_sepd_map->GetIntValue(i, m_fieldname);
+      idx = cdbttree_sepd_map->GetIntValue(i, m_fieldname);
     }
     TowerInfo *towerinfo = m_CaloInfoContainer->get_tower_at_channel(i);
     towerinfo->set_time(processed_waveforms.at(idx).at(1));
     towerinfo->set_energy(processed_waveforms.at(idx).at(0));
-    towerinfo->set_time_float(processed_waveforms.at(idx).at(1));
+    towerinfo->set_time(processed_waveforms.at(idx).at(1));
     towerinfo->set_pedestal(processed_waveforms.at(idx).at(2));
     towerinfo->set_chi2(processed_waveforms.at(idx).at(3));
     bool SZS = isSZS(processed_waveforms.at(idx).at(1), processed_waveforms.at(idx).at(3));
