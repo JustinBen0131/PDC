@@ -98,7 +98,7 @@ PositionDependentCorrection::PositionDependentCorrection(const std::string &name
 {
   _eventcounter = 0;
   /* vertex‑Z limits                                                     */
-  m_vzTightCut  = 60.f;           // |z| ≤ 10 cm  → “physics” histograms
+  m_vzTightCut  = 10.f;           // |z| ≤ 10 cm  → “physics” histograms
   m_vzSliceMax  = vzEdge.back();
   m_nWinRAW = m_nWinCP = m_nWinBCorr = 0;
   s_verbosityLevel.store( Verbosity() );
@@ -349,25 +349,91 @@ void PositionDependentCorrection::bookCommonHistograms
     }
     
     // ------------------------------------------------------------------
-    // NEW: incidence angle vs vertex Z (global)
+    // Global QA: incidence angle vs vertex Z
     // ------------------------------------------------------------------
     if (!h2_alphaPhi_vsVz)
     {
-      h2_alphaPhi_vsVz = new TH2F("h2_alphaPhi_vsVz",
-                                  "Incidence #alpha_{#varphi} vs z_{vtx};z_{vtx} (cm);#alpha_{#varphi} [rad]",
-                                  200, -100, 100,   // z_vtx range and bins
-                                  180, 0.0, 0.30);  // α range 0 – 0.30 rad
+        h2_alphaPhi_vsVz = new TH2F("h2_alphaPhi_vsVz",
+                                    "Incidence #alpha_{#varphi} vs z_{vtx};z_{vtx} (cm);#alpha_{#varphi} [rad]",
+                                    200, -100, 100,
+                                    NAlphaBins, AlphaMin, AlphaMax);
       if (hm) hm->registerHisto(h2_alphaPhi_vsVz);
     }
     if (!h2_alphaEta_vsVz)
     {
-      h2_alphaEta_vsVz = new TH2F("h2_alphaEta_vsVz",
-                                  "Incidence #alpha_{#eta} vs z_{vtx};z_{vtx} (cm);#alpha_{#eta} [rad]",
-                                  200, -100, 100,
-                                  180, 0.0, 0.30);
+        h2_alphaEta_vsVz = new TH2F("h2_alphaEta_vsVz",
+                                    "Incidence #alpha_{#eta} vs z_{vtx};z_{vtx} (cm);#alpha_{#eta} [rad]",
+                                    200, -100, 100,
+                                    NAlphaBins, AlphaMin, AlphaMax);
       if (hm) hm->registerHisto(h2_alphaEta_vsVz);
     }
 
+    // ------------------------------------------------------------------
+    // Step (3): per-E incidence-aware maps  — X^{meas} vs α  (φ & η)
+    //           + matching ⟨sec α⟩ profiles with IDENTICAL α bins
+    // ------------------------------------------------------------------
+    {
+      // shared α and X^{meas} edges for all slices
+      Double_t aEdges[NAlphaBins+1];
+      Double_t xMeasEdges[NXmeasBins+1];  // <-- renamed to avoid shadowing outer xEdges[15]
+      const double da = (AlphaMax - AlphaMin) / NAlphaBins;
+      const double dx = (XmeasMax - XmeasMin) / NXmeasBins;
+      for (int i = 0; i <= NAlphaBins; ++i)   aEdges[i]     = AlphaMin + i*da;
+      for (int i = 0; i <= NXmeasBins; ++i)   xMeasEdges[i] = XmeasMin + i*dx;
+
+      for (int iE = 0; iE < N_Ebins; ++iE)
+      {
+        const std::string lab = makeLabel(iE);
+
+        // φ-view
+        if (!h2_XmeasPhi_vsAlpha_E[iE]) {
+          h2_XmeasPhi_vsAlpha_E[iE] = new TH2F(
+            Form("h2_XmeasPhi_vsAlpha_%s_%s", lab.c_str(), modeTag),
+            Form("Measured X^{meas}_{#varphi} vs #alpha_{#varphi} (%s);#alpha_{#varphi} [rad];X^{meas}_{#varphi}",
+                 (m_binningMode==EBinningMode::kRange ? "E_{slice}" : "E_{centre}")),
+            NAlphaBins, aEdges, NXmeasBins, xMeasEdges);
+          if (hm) hm->registerHisto(h2_XmeasPhi_vsAlpha_E[iE]);
+        }
+        if (!h_alphaPhi_E[iE]) {
+          h_alphaPhi_E[iE] = new TH1F(
+            Form("h_alphaPhi_%s_%s", lab.c_str(), modeTag),
+            "#alpha_{#varphi} distribution;#alpha_{#varphi} [rad];Counts",
+            NAlphaBins, aEdges);
+          if (hm) hm->registerHisto(h_alphaPhi_E[iE]);
+        }
+        if (!p_secAlpha_phi_E[iE]) {
+          p_secAlpha_phi_E[iE] = new TProfile(
+            Form("p_secAlpha_phi_%s_%s", lab.c_str(), modeTag),
+            "⟨sec #alpha_{#varphi}⟩ vs #alpha_{#varphi};#alpha_{#varphi} [rad];⟨sec #alpha_{#varphi}⟩",
+            NAlphaBins, aEdges);
+          if (hm) hm->registerHisto(p_secAlpha_phi_E[iE]);
+        }
+
+        // η-view
+        if (!h2_XmeasEta_vsAlpha_E[iE]) {
+          h2_XmeasEta_vsAlpha_E[iE] = new TH2F(
+            Form("h2_XmeasEta_vsAlpha_%s_%s", lab.c_str(), modeTag),
+            Form("Measured X^{meas}_{#eta} vs #alpha_{#eta} (%s);#alpha_{#eta} [rad];X^{meas}_{#eta}",
+                 (m_binningMode==EBinningMode::kRange ? "E_{slice}" : "E_{centre}")),
+            NAlphaBins, aEdges, NXmeasBins, xMeasEdges);
+          if (hm) hm->registerHisto(h2_XmeasEta_vsAlpha_E[iE]);
+        }
+        if (!h_alphaEta_E[iE]) {
+          h_alphaEta_E[iE] = new TH1F(
+            Form("h_alphaEta_%s_%s", lab.c_str(), modeTag),
+            "#alpha_{#eta} distribution;#alpha_{#eta} [rad];Counts",
+            NAlphaBins, aEdges);
+          if (hm) hm->registerHisto(h_alphaEta_E[iE]);
+        }
+        if (!p_secAlpha_eta_E[iE]) {
+          p_secAlpha_eta_E[iE] = new TProfile(
+            Form("p_secAlpha_eta_%s_%s", lab.c_str(), modeTag),
+            "⟨sec #alpha_{#eta}⟩ vs #alpha_{#eta};#alpha_{#eta} [rad];⟨sec #alpha_{#eta}⟩",
+            NAlphaBins, aEdges);
+          if (hm) hm->registerHisto(p_secAlpha_eta_E[iE]);
+        }
+      }
+  }
     
   // QA: Δ between property raw CoG and recomputed raw CoG vs E
   if (!h_dx_prop_vsE)
@@ -2640,10 +2706,52 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     float xEA_inc = xCG, yEA_inc = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
-    if (h2_alphaPhi_vsVz) {
+    {
       const float aPhi = m_bemcRec->lastAlphaPhi();
-      if (std::isfinite(aPhi)) h2_alphaPhi_vsVz->Fill(vtxZ, aPhi);
+      if (std::isfinite(aPhi))
+      {
+        // existing global QA
+        if (h2_alphaPhi_vsVz) h2_alphaPhi_vsVz->Fill(vtxZ, aPhi);
+
+        // Step (3): per-E incidence-aware fill (identical symmetrization as doPhiBlockCorr)
+        if (iE >= 0 && iE < N_Ebins)
+        {
+          float u_raw = blkCoord.second;                       // local φ (tower-pitch units), raw
+          float u_fold = u_raw;
+          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);  // fold once → (−0.5,1.5]
+          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);                // map → (−0.5,0.5]
+          const float secA  = 1.f / std::max(1e-6f, std::cos(aPhi));
+
+          if (vb > 3)
+          {
+            std::cout << "[αφ-fill] iE=" << iE
+                      << "  u_raw=" << u_raw
+                      << "  u_fold=" << u_fold
+                      << "  Xmeas=" << Xmeas
+                      << "  αφ(rad)=" << aPhi
+                      << "  secαφ=" << secA
+                      << "  (has h2=" << (h2_XmeasPhi_vsAlpha_E[iE] ? "Y":"N")
+                      << ", h1="       << (h_alphaPhi_E[iE]          ? "Y":"N")
+                      << ", prof="     << (p_secAlpha_phi_E[iE]      ? "Y":"N")
+                      << ")\n";
+          }
+
+          if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhi, Xmeas);
+          if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhi);
+          if (p_secAlpha_phi_E[iE])      p_secAlpha_phi_E[iE]->Fill(aPhi, secA);
+        }
+        else if (vb > 3)
+        {
+          std::cout << "[αφ-fill] skip: iE=" << iE << " out of range\n";
+        }
+      }
+      else if (vb > 3)
+      {
+        std::cout << "[αφ-fill] skip: lastAlphaPhi is non-finite\n";
+      }
     }
+
+
     const float phiEA_EandIncident   = cg2GlobalPhi(m_bemcRec, eReco, xEA_inc, yEA_inc);
     const float dphiEA_EandIncident  = foldToTowerPitch(phiEA_EandIncident - phiTruth);
     const float dphiEA_incident      = dphiEA_EandIncident;
@@ -3244,10 +3352,52 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     float xEA_inc = xCG, yEA_inc = yCG;
             m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                              xEA_inc, yEA_inc);
-    if (h2_alphaEta_vsVz) {
-        const float aEta = m_bemcRec->lastAlphaEta();
-        if (std::isfinite(aEta)) h2_alphaEta_vsVz->Fill(vtxZ, aEta);
+    {
+      const float aEta = m_bemcRec->lastAlphaEta();
+      if (std::isfinite(aEta))
+      {
+        // existing global QA
+        if (h2_alphaEta_vsVz) h2_alphaEta_vsVz->Fill(vtxZ, aEta);
+
+        // Step (3): per-E incidence-aware fill (identical symmetrization as doEtaBlockCorr)
+        if (iE >= 0 && iE < N_Ebins)
+        {
+          float u_raw = blkCoord.first;                        // local η (tower-pitch units), raw
+          float u_fold = u_raw;
+          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);  // fold once → (−0.5,1.5]
+          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);                // map → (−0.5,0.5]
+          const float secA  = 1.f / std::max(1e-6f, std::cos(aEta));
+
+          if (vb > 3)
+          {
+            std::cout << "[αη-fill] iE=" << iE
+                      << "  u_raw=" << u_raw
+                      << "  u_fold=" << u_fold
+                      << "  Xmeas=" << Xmeas
+                      << "  αη(rad)=" << aEta
+                      << "  secαη=" << secA
+                      << "  (has h2=" << (h2_XmeasEta_vsAlpha_E[iE] ? "Y":"N")
+                      << ", h1="       << (h_alphaEta_E[iE]          ? "Y":"N")
+                      << ", prof="     << (p_secAlpha_eta_E[iE]      ? "Y":"N")
+                      << ")\n";
+          }
+
+          if (h2_XmeasEta_vsAlpha_E[iE]) h2_XmeasEta_vsAlpha_E[iE]->Fill(aEta, Xmeas);
+          if (h_alphaEta_E[iE])          h_alphaEta_E[iE]->Fill(aEta);
+          if (p_secAlpha_eta_E[iE])      p_secAlpha_eta_E[iE]->Fill(aEta, secA);
+        }
+        else if (vb > 3)
+        {
+          std::cout << "[αη-fill] skip: iE=" << iE << " out of range\n";
+        }
+      }
+      else if (vb > 3)
+      {
+        std::cout << "[αη-fill] skip: lastAlphaEta is non-finite\n";
+      }
     }
+
+
     const float etaEA_EandIncident  = cg2ShowerEta(m_bemcRec, eReco, xEA_inc, yEA_inc, vtxZ);
     const float dEtaEA_EandIncident = etaEA_EandIncident - etaTruth;
     const float dEtaEA_incident     = dEtaEA_EandIncident;

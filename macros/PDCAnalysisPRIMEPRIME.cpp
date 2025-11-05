@@ -640,12 +640,12 @@ static BVecs MakeBvaluesVsEnergyPlot(TH3F* hUnc3D,
     {
       TLatex tl; tl.SetNDC(); tl.SetTextAlign(33); tl.SetTextSize(0.040);
       if (okPhi) { tl.SetTextColor(kRed+1);
-        tl.DrawLatex(0.88, 0.90, Form("#phi: b_{0}=%.3f #pm %.3f,  m=%.3f #pm %.3f",
-                                      b0_phi, db0_phi, m_phi, dm_phi));
+        tl.DrawLatex(0.88, 0.88, Form("#phi: b_{0}=%.3f,  m=%.3f",
+                                      b0_phi, m_phi));
       }
       if (okEta) { tl.SetTextColor(kBlue+1);
-        tl.DrawLatex(0.88, 0.85, Form("#eta: b_{0}=%.3f #pm %.3f,  m=%.3f #pm %.3f",
-                                      b0_eta, db0_eta, m_eta, dm_eta));
+        tl.DrawLatex(0.88, 0.82, Form("#eta: b_{0}=%.3f,  m=%.3f",
+                                      b0_eta, m_eta));
       }
       tl.SetTextColor(kBlack); // restore
     }
@@ -1461,11 +1461,11 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
 
   auto makeProfile = [&](TH2F* h, const char* nm)->std::unique_ptr<TProfile> {
     if (!h) return nullptr;
-    h->GetXaxis()->SetRangeUser(xMin, xMax); // consistent z-window
+    h->GetXaxis()->SetRangeUser(xMin, xMax);
     return std::unique_ptr<TProfile>(h->ProfileX(nm, 1, h->GetNbinsX())); // mean α vs z
   };
 
-  auto pPhi = makeProfile(hPhi.get(), "pAlphaPhi");
+  auto pPhi = makeProfile(hPhi.get(), "pAlphaPhi"); // may be null if hPhi==nullptr
   auto pEta = makeProfile(hEta.get(), "pAlphaEta");
   if (!pPhi && !pEta) { std::cerr << "[incidenceQA] empty profiles\n"; return; }
 
@@ -1474,18 +1474,18 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
   auto scanMinMax = [&](TProfile* p){
     if (!p) return;
     for (int i=1;i<=p->GetNbinsX();++i) {
-      if (p->GetBinEntries(i) <= 0) continue;           // skip empty bins
-      double y = p->GetBinContent(i);                   // mean α in this z-bin
+      if (p->GetBinEntries(i) <= 0) continue;
+      const double y = p->GetBinContent(i);
       if (y < yMin) yMin = y;
       if (y > yMax) yMax = y;
     }
   };
   scanMinMax(pPhi.get());
   scanMinMax(pEta.get());
-  if (!(yMin < yMax)) { yMin = 0.0; yMax = 0.30; }      // fallback
-  const double pad = 0.05 * (yMax - yMin);              // 5% breathing room
+  if (!(yMin < yMax)) { yMin = 0.0; yMax = 0.30; }
+  const double pad = 0.05 * (yMax - yMin);
   yMin = std::max(0.0, yMin - pad);
-  yMax = std::min(0.40, yMax + pad);                    // cap if you want
+  yMax = std::min(0.40, yMax + pad);
 
   // --- draw ---
   const int W=900, H=600;
@@ -1508,12 +1508,12 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
     p->SetLineColor(col);
     p->SetLineWidth(3);
     p->SetMarkerStyle(0);
-    p->Draw("hist same");    // clean line through bin centers
+    p->Draw("hist same");
   };
   drawProfile(pPhi.get(), kBlue+1);
   drawProfile(pEta.get(), kRed+1);
 
-  TLegend leg(0.7,0.60,0.88,0.90);
+  TLegend leg(0.70,0.60,0.88,0.90);
   leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.050);
   if (pPhi) leg.AddEntry(pPhi.get(), "#LT#alpha_{#varphi}#GT(z)", "l");
   if (pEta) leg.AddEntry(pEta.get(), "#LT#alpha_{#eta}#GT(z)",    "l");
@@ -1524,6 +1524,257 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
   c.SaveAs((outDir + "/incidence_alpha_overlay_simple.png").c_str());
   std::cout << "[incidenceQA] Wrote: " << outDir << "/incidence_alpha_overlay_simple.png"
             << "  y-range = [" << yMin << "," << yMax << "]\n";
+}
+
+// ======================== Step-4: build δ(E,α) and (c0,m) ========================
+// ---- kernel fit with fixed beff → returns delta ± edelta ----
+static bool FitDeltaFixedBeff(TH1D* hX, double beff, double& delta, double& edelta)
+{
+  if (!hX || hX->GetEntries() < 50) return false;
+  TF1 f("fShift",
+        "[0]*(2.*[2])/sqrt(1.+4.*(x-[1])*(x-[1])*sinh(1./(2.*[2]))*sinh(1./(2.*[2])))",
+        -0.5, 0.5);
+  f.SetParNames("Norm","delta","beff");
+  f.SetParameter(0, std::max(1.0, hX->GetMaximum()));
+  f.SetParLimits(1, -0.25, +0.25);
+  f.FixParameter(2, std::max(1e-6, beff));
+  auto r = hX->Fit(&f, "QNR");
+  if (!r || r->Status()!=0) return false;
+  delta  = f.GetParameter(1);
+  edelta = f.GetParError(1);
+  return std::isfinite(delta) && std::isfinite(edelta);
+}
+
+// ---- robust name finder for 2D hists: h2_Xmeas{Phi,Eta}_vsAlpha_* ----
+static TH2F* FindXmeasVsAlpha(TFile* fin, const char* base, double eLo, double eHi)
+{
+  // Try common explicit names first
+  {
+    TH2F* h=nullptr;
+    fin->GetObject(Form("%s_%.1f_%.1f", base, eLo, eHi), h); if (h) return h;
+    fin->GetObject(Form("%s_%g_%g",     base, eLo, eHi), h); if (h) return h;
+  }
+  // Fallback: scan keys and parse trailing "..._<lo>_<hi>"
+  TIter next(fin->GetListOfKeys());
+  std::regex re(Form("^%s_.*_([-0-9.]+)_([-0-9.]+)$", base));
+  while (TObject* obj = next()) {
+    auto* k = dynamic_cast<TKey*>(obj); if (!k) continue;
+    if (std::string(k->GetClassName()) != "TH2F") continue;
+    std::smatch m; std::string nm = k->GetName();
+    if (!std::regex_match(nm, m, re) || m.size()!=3) continue;
+    const double lo = atof(m[1].str().c_str());
+    const double hi = atof(m[2].str().c_str());
+    if (std::fabs(lo-eLo)<1e-3 && std::fabs(hi-eHi)<1e-3) {
+      TH2F* h=nullptr; fin->GetObject(nm.c_str(), h);
+      if (h) return h;
+    }
+  }
+  return nullptr;
+}
+
+// ---- load energy-only b(E) for originalEta × originalZRange out of your bValues.txt ----
+static bool Load_bE_fromTxt(const std::string& path,
+                            const char* etaSel, const char* zSel,
+                            std::vector<double>& eLo,
+                            std::vector<double>& eHi,
+                            std::vector<double>& bphi,
+                            std::vector<double>& beta)
+{
+  eLo.clear(); eHi.clear(); bphi.clear(); beta.clear();
+  std::ifstream fin(path);
+  if (!fin) { std::cerr << "[deltaFit] cannot open bValues file: " << path << "\n"; return false; }
+
+  // Columns: PHI/ETA  [eLo,eHi)  bval  (opt etaLabel) (opt zLabel)
+  std::regex rx(R"(^\s*(PHI|ETA)\s*\[\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\)\s*([0-9]*\.?[0-9]+)(?:\s+(\S+))?(?:\s+(\S+))?)",
+                std::regex::icase);
+  std::map<std::pair<double,double>, double> mapPhi, mapEta;
+  std::string line;
+  auto lower = [](std::string s){ for(char& c:s) c=std::tolower(c); return s; };
+
+  while (std::getline(fin, line)) {
+    std::smatch m; if (!std::regex_search(line, m, rx)) continue;
+    const std::string what = lower(m[1]);
+    const double lo = atof(m[2].str().c_str());
+    const double hi = atof(m[3].str().c_str());
+    const double bv = atof(m[4].str().c_str());
+    const std::string labA = m[5].matched ? lower(m[5]) : "originaleta";
+    const std::string labB = m[6].matched ? lower(m[6]) : "originalzrange";
+    // accept only our target view & z tags
+    const bool okEta = (labA==lower(etaSel) || labB==lower(etaSel));
+    const bool okZ   = (labA==lower(zSel)  || labB==lower(zSel));
+    if (!(okEta && okZ)) continue;
+
+    if (what=="phi") mapPhi[{lo,hi}] = bv;
+    else             mapEta[{lo,hi}] = bv;
+  }
+  if (mapPhi.empty() || mapEta.empty()) {
+    std::cerr << "[deltaFit] ERROR: did not find energy-only rows for "
+              << etaSel << " × " << zSel << " in " << path << "\n";
+    return false;
+  }
+  for (auto& kv : mapPhi) {
+    eLo.push_back(kv.first.first);
+    eHi.push_back(kv.first.second);
+    bphi.push_back(kv.second);
+    auto it = mapEta.find(kv.first);
+    beta.push_back( (it==mapEta.end() ? 0.15 : it->second) );
+  }
+  return true;
+}
+
+// ---- one-parameter fit δ vs sinα -> c1(E) with intercept constrained to 0 ----
+static bool FitSlopeThroughOrigin(const std::vector<double>& x,
+                                  const std::vector<double>& y,
+                                  const std::vector<double>& ey,
+                                  double& c1, double& ec1)
+{
+  if (x.size()<3) return false;
+  TGraphErrors g(x.size());
+  for (size_t i=0;i<x.size();++i) {
+    g.SetPoint(i,x[i],y[i]);
+    g.SetPointError(i,0.0,(ey[i]>0?ey[i]:1e-3));
+  }
+  TF1 f("f1","[0]*x",0,1);
+  auto r = g.Fit(&f,"QNR");
+  if (!r || r->Status()!=0) return false;
+  c1 = f.GetParameter(0);
+  ec1= f.GetParError(0);
+  return std::isfinite(c1);
+}
+
+// ---- the main step-4 routine ---------------------------------------------------
+static void BuildDeltaAndWriteFits(TFile* fin,
+                                   const std::string& outBaseDir,
+                                   const std::vector<std::pair<double,double>>& eEdges,
+                                   const std::string& bValuesTxt,
+                                   const char* etaSel   = "originalEta",
+                                   const char* zSel     = "originalZRange",
+                                   const double  E0     = 3.0)
+{
+  // 1) load b(E) from your already-written bValues.txt (energy-only rows)
+  std::vector<double> eLo, eHi, bphi, beta;
+  if (!Load_bE_fromTxt(bValuesTxt, etaSel, zSel, eLo, eHi, bphi, beta)) return;
+  if (eLo.size() != eEdges.size()) {
+    std::cerr << "[deltaFit] WARNING: energy-bin count mismatch; proceeding with common subset.\n";
+  }
+
+  // 2) Prepare outputs
+  const std::string outDir = outBaseDir + "/deltaFit";
+  gSystem->mkdir(outDir.c_str(), true);
+  std::ofstream fPhi(outDir + "/delta_table_phi.txt");
+  std::ofstream fEta(outDir + "/delta_table_eta.txt");
+
+  std::vector<double> eCtr, c1phi, c1phiErr, c1eta, c1etaErr;
+
+  // 3) loop energy slices
+  for (size_t i=0;i<eEdges.size();++i)
+  {
+    const double lo = eEdges[i].first;
+    const double hi = eEdges[i].second;
+    const double Ei = 0.5*(lo+hi);
+
+    // pull the 2D maps and the secα profiles (any modeTag)
+    TH2F* h2phi = FindXmeasVsAlpha(fin, "h2_XmeasPhi_vsAlpha", lo, hi);
+    TH2F* h2eta = FindXmeasVsAlpha(fin, "h2_XmeasEta_vsAlpha", lo, hi);
+    if (!h2phi && !h2eta) continue;
+
+    // For the ⟨secα⟩ we accept any matching profile name that ends with the same energy range
+    TProfile* pSecPhi=nullptr; fin->GetObject(Form("p_secAlpha_phi_%.1f_%.1f",lo,hi), pSecPhi);
+    TProfile* pSecEta=nullptr; fin->GetObject(Form("p_secAlpha_eta_%.1f_%.1f",lo,hi), pSecEta);
+    if (!pSecPhi) fin->GetObject(Form("p_secAlpha_phi_%g_%g",lo,hi), pSecPhi);
+    if (!pSecEta) fin->GetObject(Form("p_secAlpha_eta_%g_%g",lo,hi), pSecEta);
+
+    // prepare per-E accumulators → c1(E)
+    std::vector<double> xsin_phi, d_phi, ed_phi;
+    std::vector<double> xsin_eta, d_eta, ed_eta;
+
+    const int nA = (h2phi? h2phi->GetNbinsX() : h2eta->GetNbinsX());
+    for (int j=1;j<=nA;++j)
+    {
+      const double aCtr = (h2phi? h2phi->GetXaxis()->GetBinCenter(j)
+                                 : h2eta->GetXaxis()->GetBinCenter(j));
+      const double sinA = std::sin(aCtr);
+
+      // φ
+      if (h2phi) {
+        std::unique_ptr<TH1D> hX(h2phi->ProjectionY(Form("phi_e%02zu_a%03d",i,j), j, j, "e"));
+        if (hX && hX->GetEntries()>=50) {
+          const double bE   = (i<bphi.size()? bphi[i]:0.15);
+          const double secA = (pSecPhi && pSecPhi->GetBinEntries(j)>0) ? pSecPhi->GetBinContent(j)
+                               : 1.0/std::max(1e-6, std::cos(aCtr));
+          const double beff = std::max(1e-6, bE*secA);
+          double d=0, ed=0;
+          if (FitDeltaFixedBeff(hX.get(), beff, d, ed)) {
+            fPhi << Form("%7.3f %7.3f  %.6e  %.6e  %.6e  %.6e  %.6e\n",
+                         lo,hi, aCtr, secA, beff, d, ed);
+            xsin_phi.push_back(sinA); d_phi.push_back(d); ed_phi.push_back(ed>0?ed:1e-3);
+          }
+        }
+      }
+      // η
+      if (h2eta) {
+        std::unique_ptr<TH1D> hX(h2eta->ProjectionY(Form("eta_e%02zu_a%03d",i,j), j, j, "e"));
+        if (hX && hX->GetEntries()>=50) {
+          const double bE   = (i<beta.size()? beta[i]:0.15);
+          const double secA = (pSecEta && pSecEta->GetBinEntries(j)>0) ? pSecEta->GetBinContent(j)
+                               : 1.0/std::max(1e-6, std::cos(aCtr));
+          const double beff = std::max(1e-6, bE*secA);
+          double d=0, ed=0;
+          if (FitDeltaFixedBeff(hX.get(), beff, d, ed)) {
+            fEta << Form("%7.3f %7.3f  %.6e  %.6e  %.6e  %.6e  %.6e\n",
+                         lo,hi, aCtr, secA, beff, d, ed);
+            xsin_eta.push_back(sinA); d_eta.push_back(d); ed_eta.push_back(ed>0?ed:1e-3);
+          }
+        }
+      }
+    } // α bins
+
+    // regress δ vs sinα → c1(E)
+    double c1p=0, ec1p=0, c1e=0, ec1e=0;
+    const bool okP = FitSlopeThroughOrigin(xsin_phi, d_phi, ed_phi, c1p, ec1p);
+    const bool okE = FitSlopeThroughOrigin(xsin_eta , d_eta , ed_eta , c1e, ec1e);
+    if (okP || okE) {
+      eCtr.push_back(Ei);
+      c1phi.push_back(okP?c1p:0.0);  c1phiErr.push_back(okP?ec1p:0.0);
+      c1eta.push_back(okE?c1e:0.0);  c1etaErr.push_back(okE?ec1e:0.0);
+    }
+  } // E loop
+
+  fPhi.close(); fEta.close();
+
+  // fit c1(E) = c0 + m ln(E/E0)  (separately for φ and η), write master files
+  auto fitAndWrite = [&](const std::vector<double>& E,
+                         const std::vector<double>& c1,
+                         const std::vector<double>& ec1,
+                         const char* tag)
+  {
+    if (E.size()<3) return;
+    TGraphErrors g(E.size());
+    for (size_t i=0;i<E.size();++i) {
+      g.SetPoint(i, std::log(std::max(1e-6, E[i]/E0)), c1[i]);
+      g.SetPointError(i, 0.0, (ec1[i]>0?ec1[i]:1e-3));
+    }
+    TF1 f("fC1","[0]+[1]*x", -5, 5);
+    auto r = g.Fit(&f,"QNR");
+    const double c0 = f.GetParameter(0);
+    const double m  = f.GetParameter(1);
+    std::ofstream ff(outDir + Form("/deltaFit_master_%s.txt", tag));
+    ff << std::setprecision(12) << "deltaFit  " << tag << "  "
+       << c0 << "  " << m << "  E0 " << E0 << "\n";
+    ff.close();
+    // quick QA
+    TCanvas c("c","c1(E) fit",800,600);
+    g.SetTitle(Form("c_{1}^{%s}(E) vs ln(E/E_{0});ln(E/E_{0});c_{1}^{%s}", tag, tag));
+    g.Draw("AP"); f.SetLineColor(kRed+1); f.Draw("same");
+    c.SaveAs((outDir + Form("/c1_%s_vs_logE.png", tag)).c_str());
+  };
+
+  fitAndWrite(eCtr, c1phi, c1phiErr, "phi");
+  fitAndWrite(eCtr, c1eta, c1etaErr, "eta");
+
+  std::cout << "[deltaFit] wrote tables to " << outDir
+            << "\n         -> delta_table_phi.txt, delta_table_eta.txt"
+            << "\n         -> deltaFit_master_phi.txt, deltaFit_master_eta.txt\n";
 }
 
 
@@ -3650,8 +3901,8 @@ void PDCAnalysisPRIMEPRIME()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_noPhiTilt.root";
-  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/SimOutputPrime";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_bOnlyValues.root";
+  const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/SimOutputPrimeNoPhiTilt";
 
   EnsureDir(outBaseDir);
 
@@ -3668,6 +3919,7 @@ void PDCAnalysisPRIMEPRIME()
   const auto eCent  = MakeEnergyCenters();
 
   SaveIncidenceQA(fin.get(), outBaseDir);
+    
   // Prepare global b-values text file
   const std::string bValFile = outBaseDir + "/bValues.txt";
   std::ofstream bOut(bValFile);
@@ -4394,7 +4646,16 @@ void PDCAnalysisPRIMEPRIME()
     // ----------------------- Global overlays across η-variants (base path) -----------------------
     SaveOverlayAcrossVariants(outBaseDir, eCent, phiByVariant, phiErrByVariant, /*isPhi*/true , ""  );
     SaveOverlayAcrossVariants(outBaseDir, eCent, etaByVariant, etaErrByVariant, /*isPhi*/false, ""  );
-    
+
+    // ==================== NEW: Step-4 — build δ(E,α) & (c0,m) ====================
+    // Use the b(E) lines we just wrote in outBaseDir + "/bValues.txt"
+    BuildDeltaAndWriteFits(fin.get(),
+                           outBaseDir,
+                           eEdges,
+                           outBaseDir + "/bValues.txt",
+                           "originalEta", "originalZRange",
+                           /*E0=*/3.0);
+
     std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
 }
 

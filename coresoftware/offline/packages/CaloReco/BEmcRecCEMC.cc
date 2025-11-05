@@ -72,7 +72,7 @@ class BFitDB {
   void load() {
     VLOG() << "[BFitDB::load] begin\n";
     const char* env = std::getenv("BEMC_BFIT_MASTER");
-    std::string path = env ? std::string(env) : std::string("/sphenix/u/patsfan753/scratch/PDCrun24pp/src_BEMC_clusterizer/bFit_master.txt");
+    std::string path = env ? std::string(env) : std::string("/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/bFit_master.txt");
     VLOG() << "[BFitDB::load] env BEMC_BFIT_MASTER=" << (env ? env : "<unset>") << "\n";
     VLOG() << "[BFitDB::load] opening file: " << path << "\n";
 
@@ -181,6 +181,82 @@ inline std::string zLabelFromAbsZ(float z) {
     else               lab = "z45to60"; // clamp ≥60 to last bin
   VLOG() << "[zLabelFromAbsZ] |z_vtx|=" << z << " → " << lab << "\n";
   return lab;
+}
+
+// ======================= δ(E,α) (Delta) loader ======================
+struct DeltaFit {
+  double c0{std::numeric_limits<double>::quiet_NaN()};
+  double m {std::numeric_limits<double>::quiet_NaN()};
+  double E0{3.0};
+  bool    valid{false};
+};
+
+class DeltaDB {
+public:
+  static DeltaDB& instance() { static DeltaDB d; return d; }
+
+  // tag must be "phi" or "eta"; returns nullptr if not loaded
+  const DeltaFit* get(const char* tag) const {
+    if (std::string(tag)=="phi" && phi_.valid) return &phi_;
+    if (std::string(tag)=="eta" && eta_.valid) return &eta_;
+    return nullptr;
+  }
+
+private:
+  DeltaFit phi_{}, eta_{};
+
+  static bool LoadOne(const std::string& path, const char* expectTag, DeltaFit& out) {
+    std::ifstream fin(path);
+    if (!fin) return false;
+    std::string hdr, tag, keyE0;
+    double c0=std::numeric_limits<double>::quiet_NaN();
+    double m =std::numeric_limits<double>::quiet_NaN();
+    double E0=3.0;
+    // expected line format:
+    //   deltaFit  <tag>  <c0>  <m>  E0 <E0>
+    if (!(fin >> hdr >> tag >> c0 >> m >> keyE0 >> E0)) return false;
+    if (hdr != "deltaFit") return false;
+    if (std::string(expectTag)!=tag)   return false;
+    out.c0 = c0; out.m = m; out.E0 = E0; out.valid = (std::isfinite(c0) && std::isfinite(m) && std::isfinite(E0));
+    return out.valid;
+  }
+
+  // construct and load both files; look for env overrides first
+  DeltaDB() {
+    // Derive default directory from BFitDB env if present
+    std::string baseDir;
+    if (const char* bfit = std::getenv("BEMC_BFIT_MASTER")) {
+      std::string p(bfit);
+      auto pos = p.find_last_of("/\\");
+      baseDir = (pos==std::string::npos) ? std::string(".") : p.substr(0, pos);
+    } else {
+      // fall back to your existing default directory; adjust if needed
+      baseDir = "/sphenix/u/patsfan753/scratch/PDCru n24pp/coresoftware/offline/packages/CaloReco";
+    }
+
+    std::string phiPath = (std::getenv("BEMC_DELTA_PHI") ?
+                           std::string(std::getenv("BEMC_DELTA_PHI")) :
+                           (baseDir + "/deltaFit_master_phi.txt"));
+    std::string etaPath = (std::getenv("BEMC_DELTA_ETA") ?
+                           std::string(std::getenv("BEMC_DELTA_ETA")) :
+                           (baseDir + "/deltaFit_master_eta.txt"));
+
+    bool okP = LoadOne(phiPath, "phi", phi_);
+    bool okE = LoadOne(etaPath, "eta", eta_);
+
+    VLOG() << "[DeltaDB] load phi(" << (okP ? "OK " : "MISS ") << ") from " << phiPath << "\n";
+    VLOG() << "[DeltaDB] load  eta(" << (okE ? "OK " : "MISS ") << ") from " << etaPath << "\n";
+    if (!okP) VLOG() << "[DeltaDB] WARNING: φ delta fit missing, proceeding with δφ=0\n";
+    if (!okE) VLOG() << "[DeltaDB] WARNING: η delta fit missing, proceeding with δη=0\n";
+  }
+};
+
+// convenience: evaluate δ_a(E,α) = (c0 + m ln(E/E0)) * sin α
+inline double eval_delta(const DeltaFit* df, double E, double alpha) {
+  if (!df || !df->valid) return 0.0;
+  const double logR = std::log(std::max(1e-6, E / df->E0));
+  const double c1   = df->c0 + df->m * logR;
+  return c1 * std::sin(alpha);
 }
 
 } // namespace
@@ -455,38 +531,34 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
     logE = std::log(E);
   }
 
-    xC = xA;
-    yC = yA;
-    zC = zA;
-    
-//    /* -------------------------------------------------------------- *
-//       *  Azimuthal-tilt correction  (2025-06-25 calibration)
-//       *  Internal toggle: set doPhiTilt=false to skip rotation
-//       *
-//       *        φ(E) =  a  –  b · ln E      with  E in GeV
-//       *
-//    * -------------------------------------------------------------- */
-//    bool doPhiTilt = false; // <<< set to false internally to disable
-//    if (doPhiTilt)
-//    {
-//        /* variant–dependent tilt constants (set via SetPhiTiltVariant) */
-//        const double aTilt = m_abTiltCurrent.first;   // rad
-//        const double bTilt = m_abTiltCurrent.second;  // rad
-//
-//        const double phi = aTilt - bTilt * static_cast<double>(logE);  // use logE already defined
-//        const double  c  = std::cos(phi);
-//        const double  s  = std::sin(phi);
-//
-//        /* rotate the uncorrected impact point (xA, yA) */
-//        xC = xA * c - yA * s;
-//        yC = xA * s + yA * c;
-//    }
-//    else
-//    {
-//        // skip tilt correction entirely
-//        xC = xA;
-//        yC = yA;
-//    }
+    /* -------------------------------------------------------------- *
+       *  Azimuthal-tilt correction  (2025-06-25 calibration)
+       *  Internal toggle: set doPhiTilt=false to skip rotation
+       *
+       *        φ(E) =  a  –  b · ln E      with  E in GeV
+       *
+    * -------------------------------------------------------------- */
+    bool doPhiTilt = false; // <<< set to false internally to disable
+    if (doPhiTilt)
+    {
+        /* variant–dependent tilt constants (set via SetPhiTiltVariant) */
+        const double aTilt = m_abTiltCurrent.first;   // rad
+        const double bTilt = m_abTiltCurrent.second;  // rad
+
+        const double phi = aTilt - bTilt * static_cast<double>(logE);  // use logE already defined
+        const double  c  = std::cos(phi);
+        const double  s  = std::sin(phi);
+
+        /* rotate the uncorrected impact point (xA, yA) */
+        xC = xA * c - yA * s;
+        yC = xA * s + yA * c;
+    }
+    else
+    {
+        // skip tilt correction entirely
+        xC = xA;
+        yC = yA;
+    }
   /* -------------------------------------------------------------- */
 
   // Correction in z
@@ -717,39 +789,68 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(float Energy, fl
   const float bx = b_from(fitPhi, Energy, E0);
   const float by = b_from(fitEta, Energy, E0);
 
-  // ----- identical inverse-asinh + ripple/wrap as elsewhere -----
-  float x_corr = x;
-  {
-    if (std::fabs(x - ix0) <= 0.5f) {
-      const float Sx = std::sinh(0.5f / bx);
-      x_corr = ix0 + bx * std::asinh(2.f * (x - ix0) * Sx);
-    }
+    // ============================== φ (incidence-aware δ shift) =====================
+    float x_corr = x;
+    {
+      const int   ix0   = EmcCluster::lowint(x + 0.5f);
+      const float Xraw  = x - ix0;                 // measured half-cell (−0.5 … +0.5]
+      if (std::fabs(Xraw) <= 0.5f)
+      {
+        // beff already computed above as bx = bphi_E / cos(aφ); m_fLastAlphaPhi set earlier
+        const DeltaFit* df_phi = DeltaDB::instance().get("phi");
+        const double    dphi   = eval_delta(df_phi, static_cast<double>(Energy),
+                                            static_cast<double>(m_lastAlphaPhi));
 
-    // module-of-8 ripple
-    int   ix8 = int(x + 0.5f) / 8;                      // NOLINT(bugprone-incorrect-roundings)
-    float x8  = x + 0.5f - (ix8 * 8) - 4.f;             // −4 … +4
-    float dx  = 0.f;
-    if (m_UseDetailedGeometry) {
-      int local_ix8 = int(x + 0.5f) - ix8 * 8;          // NOLINT(bugprone-incorrect-roundings)
-      dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
-    } else {
-      dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
-    }
-    x_corr -= dx;
+        // subtract the odd δ(E,α) shift in the same variable (tower-pitch units)
+        double Xeff = static_cast<double>(Xraw) - dphi;
+        // optional gentle clamp to stay within half-cell
+        Xeff = std::max(-0.499, std::min(0.499, Xeff));
 
-    while (x_corr < -0.5f)              x_corr += float(fNx);
-    while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
-  }
-  xc = x_corr;
+        const double Sx = std::sinh(0.5 / static_cast<double>(bx));   // uses b_eff
+        x_corr = static_cast<float>( ix0 + static_cast<double>(bx) * std::asinh( 2.0 * Xeff * Sx ) );
+      }
 
-  float y_corr = y;
-  {
-    if (std::fabs(y - iy0) <= 0.5f) {
-      const float Sy = std::sinh(0.5f / by);
-      y_corr = iy0 + by * std::asinh(2.f * (y - iy0) * Sy);
+      // module-of-8 ripple (unchanged)
+      int   ix8 = int(x + 0.5f) / 8;
+      float x8  = x + 0.5f - (ix8 * 8) - 4.f;      // −4 … +4
+      float dx  = 0.f;
+      if ( m_UseDetailedGeometry )
+      {
+        int local_ix8 = int(x + 0.5f) - ix8 * 8;   // 0..7
+        dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
+      }
+      else
+      {
+        dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+      }
+      x_corr -= dx;
+
+      // wrap φ tower coordinate to [−0.5, Nx−0.5)
+      while (x_corr < -0.5f)              x_corr += float(fNx);
+      while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
     }
-  }
-  yc = y_corr;
+    xc = x_corr;
+
+
+    // ============================== η (incidence-aware δ shift) =====================
+    float y_corr = y;
+    {
+      const int   iy0   = EmcCluster::lowint(y + 0.5f);
+      const float Yraw  = y - iy0;                 // measured half-cell (−0.5 … +0.5]
+      if (std::fabs(Yraw) <= 0.5f)
+      {
+        const DeltaFit* df_eta = DeltaDB::instance().get("eta");
+        const double    deta   = eval_delta(df_eta, static_cast<double>(Energy),
+                                            static_cast<double>(m_lastAlphaEta));
+
+        double Yeff = static_cast<double>(Yraw) - deta;
+        Yeff = std::max(-0.499, std::min(0.499, Yeff));
+
+        const double Sy = std::sinh(0.5 / static_cast<double>(by));   // uses b_eff
+        y_corr = static_cast<float>( iy0 + static_cast<double>(by) * std::asinh( 2.0 * Yeff * Sy ) );
+      }
+    }
+    yc = y_corr;
 }
 
 
@@ -1030,23 +1131,40 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Ener
         if (nd.Dot(p) < 0.0) nd = -nd;
         // enforce right-handed orthonormal triad exactly
         ueta = (nd.Cross(uphi)).Unit();
-        // decompose ray in the orthonormal basis {nd, uphi, ueta} at depth
-        const double pn   = std::abs(p.Dot(nd));
-        const double pphi = std::abs(p.Dot(uphi));
-        const double peta = std::abs(p.Dot(ueta));
-        VLOG() << "        [depth⊥] unit-closure=" << (pn*pn + pphi*pphi + peta*peta)
-               << "  pn=" << pn << "  pphi=" << pphi << "  peta=" << peta << "\n";
-        // incidence angles: cos α_dir = |p·nd| / ||proj_{span{nd,dir}}(p)||  (at depth, orthonormal)
-        const double cos_a_phi = std::max(1e-6, pn / std::sqrt(pn*pn + pphi*pphi));
-        const double cos_a_eta = std::max(1e-6, pn / std::sqrt(pn*pn + peta*peta));
-        m_lastAlphaPhi = static_cast<float>(std::acos(std::min(1.0, cos_a_phi)));
-        m_lastAlphaEta = static_cast<float>(std::acos(std::min(1.0, cos_a_eta)));
-        VLOG() << "        [depth⊥] cos(a_phi)=" << cos_a_phi << "  cos(a_eta)=" << cos_a_eta
-               << "  → a_phi=" << m_lastAlphaPhi << " rad"
-               << "  a_eta=" << m_lastAlphaEta << " rad\n";
-        // Pure geometric foreshortening at depth (no tunables, no extra modeling)
-        bx = clamp_b( bphi_E / static_cast<float>(cos_a_phi) );
-        by = clamp_b(  beta_E / static_cast<float>(cos_a_eta) );
+          // decompose ray in the orthonormal basis {nd, uphi, ueta} at depth
+          const double pn   = std::abs(p.Dot(nd));
+          const double pphi = std::abs(p.Dot(uphi));
+          const double peta = std::abs(p.Dot(ueta));
+
+          const double den_phi = std::sqrt(pn*pn + pphi*pphi);
+          const double den_eta = std::sqrt(pn*pn + peta*peta);
+
+          // Prepare cosine values in outer scope so they are always available below
+          double cos_a_phi = 1.0;
+          double cos_a_eta = 1.0;
+
+          // Guard near-degenerate projections (ray almost tangent or basis nearly singular)
+          if (den_phi < 1e-12 || den_eta < 1e-12) {
+            // fallback: treat as normal incidence (α≈0 → cos≈1), keep baselines
+            m_lastAlphaPhi = 0.f;
+            m_lastAlphaEta = 0.f;
+            cos_a_phi = 1.0;
+            cos_a_eta = 1.0;
+          } else {
+            cos_a_phi = std::clamp(pn / den_phi, 1e-6, 1.0);   // clamp to (0,1]
+            cos_a_eta = std::clamp(pn / den_eta, 1e-6, 1.0);
+            m_lastAlphaPhi = static_cast<float>(std::acos(cos_a_phi));
+            m_lastAlphaEta = static_cast<float>(std::acos(cos_a_eta));
+          }
+
+          VLOG() << "        [depth⊥] cos(a_phi)=" << cos_a_phi << "  cos(a_eta)=" << cos_a_eta
+                 << "  → a_phi=" << m_lastAlphaPhi << " rad"
+                 << "  a_eta=" << m_lastAlphaEta << " rad\n";
+
+          // Pure geometric foreshortening at depth (no tunables, no extra modeling)
+          bx = clamp_b( bphi_E / static_cast<float>(cos_a_phi) );
+          by = clamp_b(  beta_E / static_cast<float>(cos_a_eta) );
+
         VLOG() << "        [depth⊥] b_eff: bx=" << bx << "  by=" << by << "\n";
         // ---------------- end NEW orthonormalization refinement ---------------------
       }

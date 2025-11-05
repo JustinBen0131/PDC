@@ -1,9 +1,9 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"Energy-only + incident-angle",0.003588,"Energy + |#eta|-dep b",0.003590,0.000002,"",nan,"",nan,nan
-4,6,"2x2 Block-Local With Corr",0.003220,"Energy + |#eta|-dep b",0.003223,0.000003,"",nan,"",nan,nan
-6,8,"Energy + |#eta|-dep b",0.003063,"2x2 Block-Local With Corr",0.003064,0.000000,"",nan,"",nan,nan
-8,10,"Energy + |#eta|-dep b",0.003172,"Energy + |z_{vtx}|+|#eta|-dep b",0.003172,0.000000,"",nan,"",nan,nan
-10,12,"Energy + |#eta|-dep b",0.003335,"Energy + |z_{vtx}|+|#eta|-dep b",0.003335,0.000001,"",nan,"",nan,nan
-12,15,"2x2 Block-Local With Corr",0.003484,"Energy + |#eta|-dep b",0.003493,0.000009,"",nan,"",nan,nan
-15,20,"2x2 Block-Local With Corr",0.003398,"Energy + |#eta|-dep b",0.003417,0.000019,"",nan,"",nan,nan
-20,30,"2x2 Block-Local With Corr",0.002920,"Energy + |#eta|-dep b",0.002927,0.000007,"",nan,"",nan,nan
+2,4,"2x2 Block-Local With Corr",0.003641,"2x2 block b-values applied to No Corr Prod",0.003737,0.000096,"",nan,"",nan,nan
+4,6,"2x2 Block-Local With Corr",0.003249,"Energy-only + incident-angle",0.003322,0.000073,"",nan,"",nan,nan
+6,8,"2x2 Block-Local With Corr",0.003076,"Energy-only + incident-angle",0.003126,0.000050,"",nan,"",nan,nan
+8,10,"2x2 Block-Local With Corr",0.003155,"Energy-only + incident-angle",0.003176,0.000021,"",nan,"",nan,nan
+10,12,"2x2 Block-Local With Corr",0.003320,"Energy-only + incident-angle",0.003321,0.000001,"",nan,"",nan,nan
+12,15,"2x2 Block-Local With Corr",0.003461,"Energy-only + incident-angle",0.003487,0.000027,"",nan,"",nan,nan
+15,20,"2x2 Block-Local With Corr",0.003420,"Energy-only + incident-angle",0.003451,0.000031,"",nan,"",nan,nan
+20,30,"2x2 Block-Local With Corr",0.002969,"Energy-only + incident-angle",0.002990,0.000021,"",nan,"",nan,nan

@@ -651,9 +651,29 @@ class PositionDependentCorrection : public SubsysReco
     std::array<std::array<bool, N_VzH3FineBins>, kNEtaViews> m_bPhiReady_eta_vz_fine{};
     std::array<std::array<bool, N_VzH3FineBins>, kNEtaViews> m_bEtaReady_eta_vz_fine{};
 
-    
+    // Global QA: incidence versus vertex z (already used by Step‑3)
     TH2F* h2_alphaPhi_vsVz {nullptr};
     TH2F* h2_alphaEta_vsVz {nullptr};
+
+    // ---------- Step (3): incidence‑aware per‑energy maps ----------
+    // α binning: 0 … 0.30 rad in 180 bins (≈1.667 mrad/bin)
+    // X^{meas} binning: −0.5 … +0.5 in 200 bins (0.005 tower/bin)
+    static constexpr int   NAlphaBins = 180;
+    static constexpr float AlphaMin   = 0.0f;
+    static constexpr float AlphaMax   = 0.30f;
+    static constexpr int   NXmeasBins = 200;
+    static constexpr float XmeasMin   = -0.5f;
+    static constexpr float XmeasMax   = +0.5f;
+
+    // Per‑E slice, φ‑view: Xφ(meas) vs αφ  and QA spectra/profiles
+    TH2F*     h2_XmeasPhi_vsAlpha_E[N_Ebins] {};
+    TH1F*     h_alphaPhi_E          [N_Ebins] {};
+    TProfile* p_secAlpha_phi_E      [N_Ebins] {};
+
+    // Per‑E slice, η‑view: Xη(meas) vs αη  and QA spectra/profiles
+    TH2F*     h2_XmeasEta_vsAlpha_E[N_Ebins] {};
+    TH1F*     h_alphaEta_E          [N_Ebins] {};
+    TProfile* p_secAlpha_eta_E      [N_Ebins] {};
     
   TH2F* h2_phi_diff_vsEta_RAW_E     [N_Ebins]{};
   TH2F* h2_phi_diff_vsEta_CP_E      [N_Ebins]{};
