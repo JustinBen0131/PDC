@@ -43,9 +43,9 @@ class BEmcRecCEMC : public BEmcRec
     void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
 
 
-    // --- incidence angles recorded by last correction call (radians) ---
-    float lastAlphaPhi() const { return m_lastAlphaPhi; }
-    float lastAlphaEta() const { return m_lastAlphaEta; }
+    // ---- PUBLIC (add near other getters) ----
+    float lastSignedAlphaPhi() const { return m_lastAlphaPhiSigned; }
+    float lastSignedAlphaEta()  const { return m_lastAlphaEtaSigned; }
 
 
   void LoadProfile(const std::string &fname) override;
@@ -75,13 +75,14 @@ class BEmcRecCEMC : public BEmcRec
   void SetPhiTiltVariant(ETiltVariant v);
 
  private:
-  //  BEmcProfile *_emcprof;
-  ETiltVariant                   m_tiltVariant {ETiltVariant::DEFAULT};
-  float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
-  float m_lastAlphaEta { std::numeric_limits<float>::quiet_NaN() };
-    
-  std::pair<double,double>       m_abTiltCurrent { 8.654924e-04, 8.490399e-04 };
+    ETiltVariant                   m_tiltVariant {ETiltVariant::DEFAULT};
+    float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
+    float m_lastAlphaEta { std::numeric_limits<float>::quiet_NaN() };
+    std::pair<double,double>       m_abTiltCurrent { 8.654924e-04, 8.490399e-04 };
 
+    // signed caches (keep only one definition of the magnitude caches above)
+    float m_lastAlphaPhiSigned { 0.f };
+    float m_lastAlphaEtaSigned { 0.f };
 
   // Average tower angle with respect to the transverse plane for each bin in eta
   // Only used when the detailed RawTowerGeom objects are not available

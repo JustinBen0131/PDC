@@ -1,9 +1,9 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"",nan,"",nan,nan,"",nan,"",nan,nan
-4,6,"",nan,"",nan,nan,"",nan,"",nan,nan
-6,8,"",nan,"",nan,nan,"",nan,"",nan,nan
-8,10,"",nan,"",nan,nan,"",nan,"",nan,nan
-10,12,"",nan,"",nan,nan,"",nan,"",nan,nan
-12,15,"",nan,"",nan,nan,"",nan,"",nan,nan
-15,20,"",nan,"",nan,nan,"",nan,"",nan,nan
-20,30,"",nan,"",nan,nan,"",nan,"",nan,nan
+2,4,"Energy-only + incident-angle",0.003621,"Energy + |#eta|-dep b",0.003623,0.000003,"",nan,"",nan,nan
+4,6,"2x2 Block-Local With Corr",0.003248,"Energy + |#eta|-dep b",0.003252,0.000004,"",nan,"",nan,nan
+6,8,"2x2 Block-Local With Corr",0.003076,"Energy + |#eta|-dep b",0.003079,0.000003,"",nan,"",nan,nan
+8,10,"Energy + |#eta|-dep b",0.003144,"Energy + |z_{vtx}|+|#eta|-dep b",0.003145,0.000001,"",nan,"",nan,nan
+10,12,"Energy + |#eta|-dep b",0.003296,"Energy + |z_{vtx}|+|#eta|-dep b",0.003297,0.000000,"",nan,"",nan,nan
+12,15,"2x2 Block-Local With Corr",0.003462,"Energy + |#eta|-dep b",0.003468,0.000007,"",nan,"",nan,nan
+15,20,"2x2 Block-Local With Corr",0.003422,"Energy + |#eta|-dep b",0.003445,0.000023,"",nan,"",nan,nan
+20,30,"2x2 Block-Local With Corr",0.002970,"Energy + |#eta|-dep b",0.002982,0.000012,"",nan,"",nan,nan

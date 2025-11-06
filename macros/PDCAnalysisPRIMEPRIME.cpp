@@ -1439,132 +1439,308 @@ static void SaveOverlayAcrossVariants(
 }
 
 // -----------------------------------------------------------------------------
-// SaveIncidenceQA_SimpleOverlay (tight Y axis):
-//   Two clean curves: <alpha_phi>(z) and <alpha_eta>(z) as TProfiles,
-//   auto-ranged in Y to the data with a small padding.
+// SaveIncidenceQA  (geometry + per-E α QA in one place; robust readers + prints)
+//   1) <alpha_phi>(z) & <alpha_eta>(z) overlay  → incidence_alpha_overlay_simple.png
+//   2) α spectra per energy (φ / η)             → incidence_alpha_spectra_phi|eta.png
+//   3) <sec α>(α) per energy + 1/cos overlay    → incidence_secAlpha_profiles_phi|eta.png
 // -----------------------------------------------------------------------------
 static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
 {
   if (!fin || fin->IsZombie()) { std::cerr << "[incidenceQA] bad TFile\n"; return; }
 
+  // ---------- utilities -------------------------------------------------------
+  auto outDir = outBaseDir + "/incidenceQA";
+  gSystem->mkdir(outDir.c_str(), true);
+
   auto getH2 = [&](const char* n)->TH2F* {
     TH2F* h=nullptr; fin->GetObject(n, h);
+    if (h) { h->SetDirectory(nullptr); std::cout << "[incidenceQA] found " << n << "\n"; }
+    else   { std::cout << "[incidenceQA] MISSING " << n << "\n"; }
+    return h;
+  };
+
+    // Scan helper: accept base_..._<lo>_<hi> with optional trailing _range/_disc.
+    // Handles float (2.0) and int (2) forms.
+    auto scanByEnergy = [&](const char* base, double eLo, double eHi,
+                            const char* klass)->TObject*
+    {
+      // 1) Fast explicit retries (with and without suffixes; float/int variants)
+      const char* suff[3] = {"", "_range", "_disc"};
+      for (int s=0; s<3; ++s) {
+        TObject* obj=nullptr;
+        obj = fin->Get(Form("%s_%.1f_%.1f%s", base, eLo, eHi, suff[s])); if (obj) return obj;
+        obj = fin->Get(Form("%s_%g_%g%s",     base, eLo, eHi, suff[s])); if (obj) return obj;
+        obj = fin->Get(Form("%s_%d_%d%s",     base, (int)std::lround(eLo), (int)std::lround(eHi), suff[s])); if (obj) return obj;
+      }
+
+      // 2) Full scan – allow extra tokens after base and optional suffix.
+      TIter it(fin->GetListOfKeys());
+      std::regex re_with_suff(Form("^%s(?:_.*)?_([-0-9.]+)_([-0-9.]+)_(?:range|disc)$", base));
+      std::regex re_no_suff  (Form("^%s(?:_.*)?_([-0-9.]+)_([-0-9.]+)$",                base));
+
+      while (auto* o = it()) {
+        auto* k = dynamic_cast<TKey*>(o); if (!k) continue;
+        if (klass && std::string(k->GetClassName()) != klass) continue;
+
+        const std::string nm = k->GetName();
+        std::smatch m;
+        bool ok = (std::regex_match(nm, m, re_with_suff) && m.size()==3)
+               || (std::regex_match(nm, m, re_no_suff)   && m.size()==3);
+        if (!ok) continue;
+
+        const double lo = atof(m[1].str().c_str());
+        const double hi = atof(m[2].str().c_str());
+        if (std::fabs(lo-eLo) < 1e-3 && std::fabs(hi-eHi) < 1e-3) {
+          TObject* obj = fin->Get(nm.c_str());
+          if (obj) return obj;
+        }
+      }
+
+      std::cout << Form("[incidenceQA] %s : no match for %.3f–%.3f\n", base, eLo, eHi) << "\n";
+      return nullptr;
+    };
+
+    
+  auto findH1 = [&](const char* base, double eLo, double eHi)->TH1F* {
+    auto* o = scanByEnergy(base, eLo, eHi, "TH1F");
+    if (!o) return nullptr;
+    auto* h = dynamic_cast<TH1F*>(o);
     if (h) h->SetDirectory(nullptr);
     return h;
   };
-  std::unique_ptr<TH2F> hPhi(getH2("h2_alphaPhi_vsVz"));
-  std::unique_ptr<TH2F> hEta(getH2("h2_alphaEta_vsVz"));
-  if (!hPhi && !hEta) { std::cerr << "[incidenceQA] no α vs z histos\n"; return; }
-
-  gStyle->SetOptStat(0);
-  const double xMin=-60, xMax=+60;
-
-  auto makeProfile = [&](TH2F* h, const char* nm)->std::unique_ptr<TProfile> {
-    if (!h) return nullptr;
-    h->GetXaxis()->SetRangeUser(xMin, xMax);
-    return std::unique_ptr<TProfile>(h->ProfileX(nm, 1, h->GetNbinsX())); // mean α vs z
+  auto findProf = [&](const char* base, double eLo, double eHi)->TProfile* {
+    auto* o = scanByEnergy(base, eLo, eHi, "TProfile");
+    if (!o) return nullptr;
+    auto* p = dynamic_cast<TProfile*>(o);
+    if (p) p->SetDirectory(nullptr);
+    return p;
   };
 
-  auto pPhi = makeProfile(hPhi.get(), "pAlphaPhi"); // may be null if hPhi==nullptr
-  auto pEta = makeProfile(hEta.get(), "pAlphaEta");
-  if (!pPhi && !pEta) { std::cerr << "[incidenceQA] empty profiles\n"; return; }
+  // ---------- (1) <α>(z) overlay --------------------------------------------
+  gStyle->SetOptStat(0);
+  std::unique_ptr<TH2F> hPhi(getH2("h2_alphaPhi_vsVz"));
+  std::unique_ptr<TH2F> hEta(getH2("h2_alphaEta_vsVz"));
+  if (!hPhi && !hEta) { std::cerr << "[incidenceQA] no α vs z histos → abort\n"; return; }
 
-  // --- compute tight y-range from the profile means ---
+  const double zMin=-60, zMax=+60;
+  auto profX = [&](TH2F* h, const char* nm)->std::unique_ptr<TProfile>{
+    if (!h) return nullptr;
+    h->GetXaxis()->SetRangeUser(zMin, zMax);
+    return std::unique_ptr<TProfile>( h->ProfileX(nm, 1, h->GetNbinsX()) );
+  };
+  auto pPhi = profX(hPhi.get(), "pAlphaPhi");
+  auto pEta = profX(hEta.get(), "pAlphaEta");
+  if (!pPhi && !pEta) { std::cerr << "[incidenceQA] empty α profiles → abort\n"; return; }
+
+  // Tight Y range from means (skip empty bins)
   double yMin = +1e9, yMax = -1e9;
-  auto scanMinMax = [&](TProfile* p){
+  auto upd = [&](TProfile* p){
     if (!p) return;
     for (int i=1;i<=p->GetNbinsX();++i) {
       if (p->GetBinEntries(i) <= 0) continue;
-      const double y = p->GetBinContent(i);
-      if (y < yMin) yMin = y;
-      if (y > yMax) yMax = y;
+      double y = p->GetBinContent(i);
+      yMin = std::min(yMin, y);
+      yMax = std::max(yMax, y);
     }
   };
-  scanMinMax(pPhi.get());
-  scanMinMax(pEta.get());
+  upd(pPhi.get()); upd(pEta.get());
   if (!(yMin < yMax)) { yMin = 0.0; yMax = 0.30; }
-  const double pad = 0.05 * (yMax - yMin);
-  yMin = std::max(0.0, yMin - pad);
-  yMax = std::min(0.40, yMax + pad);
+  const double pad = 0.05*(yMax-yMin);
+  yMin = std::max(0.0, yMin-pad);
+  yMax = std::min(0.40, yMax+pad);
 
-  // --- draw ---
-  const int W=900, H=600;
-  TCanvas c("c_inc_simple","Incidence vs z_{vtx}", W, H);
-  c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
-  c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
+  {
+    TCanvas c("c_inc_overlay","Incidence vs z_{vtx}", 900, 600);
+    c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
+    c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
 
-  TH2F frame("frame",";z_{vtx}  (cm);#alpha  [rad]", 100, xMin, xMax, 100, yMin, yMax);
-  frame.SetStats(0);
-  frame.Draw();
+    TH2F frame("frame",";z_{vtx}  (cm);#alpha  [rad]", 100, zMin, zMax, 100, yMin, yMax);
+    frame.SetStats(0); frame.Draw();
 
-  // optional shaded fiducial band |z| <= 10 cm
-  TBox band(-10, yMin, +10, yMax);
-  band.SetFillColorAlpha(kGray, 0.10);
-  band.SetLineColor(0);
-  band.Draw("same");
+    TBox band(-10, yMin, +10, yMax);
+    band.SetFillColorAlpha(kGray, 0.10);
+    band.SetLineColor(0);
+    band.Draw("same");
 
-  auto drawProfile = [&](TProfile* p, Color_t col) {
-    if (!p) return;
-    p->SetLineColor(col);
-    p->SetLineWidth(3);
-    p->SetMarkerStyle(0);
-    p->Draw("hist same");
-  };
-  drawProfile(pPhi.get(), kBlue+1);
-  drawProfile(pEta.get(), kRed+1);
+    auto drawP = [&](TProfile* p, Color_t col){
+      if (!p) return;
+      p->SetLineColor(col); p->SetLineWidth(3); p->SetMarkerStyle(0);
+      p->Draw("hist same");
+    };
+    drawP(pPhi.get(), kBlue+1);
+    drawP(pEta.get(), kRed+1);
 
-  TLegend leg(0.70,0.60,0.88,0.90);
-  leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.050);
-  if (pPhi) leg.AddEntry(pPhi.get(), "#LT#alpha_{#varphi}#GT(z)", "l");
-  if (pEta) leg.AddEntry(pEta.get(), "#LT#alpha_{#eta}#GT(z)",    "l");
-  leg.Draw();
+    TLegend lg(0.70,0.60,0.88,0.90);
+    lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.050);
+    if (pPhi) lg.AddEntry(pPhi.get(), "#LT#alpha_{#varphi}#GT(z)", "l");
+    if (pEta) lg.AddEntry(pEta.get(), "#LT#alpha_{#eta}#GT(z)",    "l");
+    lg.Draw();
 
-  const std::string outDir = outBaseDir + "/incidenceQA";
-  gSystem->mkdir(outDir.c_str(), true);
-  c.SaveAs((outDir + "/incidence_alpha_overlay_simple.png").c_str());
-  std::cout << "[incidenceQA] Wrote: " << outDir << "/incidence_alpha_overlay_simple.png"
-            << "  y-range = [" << yMin << "," << yMax << "]\n";
+    c.SaveAs( (outDir + "/incidence_alpha_overlay_simple.png").c_str() );
+    std::cout << "[incidenceQA] wrote " << outDir << "/incidence_alpha_overlay_simple.png"
+              << "  y-range=[" << yMin << "," << yMax << "]\n";
+  }
+
+  // ---------- (2) α spectra per energy  --------------------------------------
+  {
+    TCanvas cPhi("c_alpha_spec_phi","alpha phi spectra",1600,1200); cPhi.Divide(4,2);
+    TCanvas cEta("c_alpha_spec_eta","alpha eta spectra",1600,1200); cEta.Divide(4,2);
+
+    for (int i=0;i<N_E; ++i) {
+      const double eLo = E_edges[i], eHi = E_edges[i+1];
+      TH1F* h1 = findH1("h_alphaPhi", eLo, eHi);
+      std::cout << Form("[incidenceQA] αφ spectrum  E=[%.1f,%.1f): %s\n",
+                        eLo,eHi, h1?"FOUND":"missing");
+      if (h1) {
+        cPhi.cd(i+1)->SetGrid();
+        h1->SetLineColor(kBlue+1); h1->SetLineWidth(2);
+        h1->GetXaxis()->SetTitle("#alpha_{#varphi} [rad]");
+        h1->GetYaxis()->SetTitle("Counts");
+        h1->SetTitle(Form("%.0f–%.0f GeV", eLo, eHi));
+        h1->Draw("hist");
+      }
+      TH1F* h2 = findH1("h_alphaEta", eLo, eHi);
+      std::cout << Form("[incidenceQA] αη spectrum  E=[%.1f,%.1f): %s\n",
+                        eLo,eHi, h2?"FOUND":"missing");
+      if (h2) {
+        cEta.cd(i+1)->SetGrid();
+        h2->SetLineColor(kRed+1); h2->SetLineWidth(2);
+        h2->GetXaxis()->SetTitle("#alpha_{#eta} [rad]");
+        h2->GetYaxis()->SetTitle("Counts");
+        h2->SetTitle(Form("%.0f–%.0f GeV", eLo, eHi));
+        h2->Draw("hist");
+      }
+    }
+    cPhi.SaveAs( (outDir + "/incidence_alpha_spectra_phi.png").c_str() );
+    cEta.SaveAs( (outDir + "/incidence_alpha_spectra_eta.png").c_str() );
+    std::cout << "[incidenceQA] wrote α spectra PNGs in " << outDir << "\n";
+  }
+
+  // ---------- (3) <sec α>(α) per energy + 1/cos overlay ----------------------
+  {
+    const double aMin = 0.0, aMax = 0.30;
+    TCanvas cpPhi("c_sec_prof_phi","<sec alpha_phi> vs alpha",1600,1200); cpPhi.Divide(4,2);
+    TCanvas cpEta("c_sec_prof_eta","<sec alpha_eta> vs alpha",1600,1200); cpEta.Divide(4,2);
+
+    for (int i=0;i<N_E; ++i) {
+      const double eLo = E_edges[i], eHi = E_edges[i+1];
+
+      TProfile* p1 = findProf("p_secAlpha_phi", eLo, eHi);
+      std::cout << Form("[incidenceQA] <sec αφ> profile  E=[%.1f,%.1f): %s\n",
+                        eLo,eHi, p1?"FOUND":"missing");
+      if (p1) {
+        cpPhi.cd(i+1)->SetGrid();
+        p1->SetTitle(Form("%.0f–%.0f GeV", eLo, eHi));
+        p1->GetXaxis()->SetTitle("#alpha_{#varphi} [rad]");
+        p1->GetYaxis()->SetTitle("#LTsec #alpha_{#varphi}#GT");
+        p1->GetXaxis()->SetRangeUser(aMin, aMax);
+        p1->SetLineColor(kBlue+1); p1->SetMarkerStyle(20); p1->Draw("E1");
+        TF1 f(Form("f_cos_phi_%d",i),"1.0/cos(x)", aMin, aMax);
+        f.SetLineColor(kGray+2); f.SetLineStyle(2); f.Draw("same");
+      }
+
+      TProfile* p2 = findProf("p_secAlpha_eta", eLo, eHi);
+      std::cout << Form("[incidenceQA] <sec αη> profile  E=[%.1f,%.1f): %s\n",
+                        eLo,eHi, p2?"FOUND":"missing");
+      if (p2) {
+        cpEta.cd(i+1)->SetGrid();
+        p2->SetTitle(Form("%.0f–%.0f GeV", eLo, eHi));
+        p2->GetXaxis()->SetTitle("#alpha_{#eta} [rad]");
+        p2->GetYaxis()->SetTitle("#LTsec #alpha_{#eta}#GT");
+        p2->GetXaxis()->SetRangeUser(aMin, aMax);
+        p2->SetLineColor(kRed+1); p2->SetMarkerStyle(20); p2->Draw("E1");
+        TF1 f(Form("f_cos_eta_%d",i),"1.0/cos(x)", aMin, aMax);
+        f.SetLineColor(kGray+2); f.SetLineStyle(2); f.Draw("same");
+      }
+    }
+    cpPhi.SaveAs( (outDir + "/incidence_secAlpha_profiles_phi.png").c_str() );
+    cpEta.SaveAs( (outDir + "/incidence_secAlpha_profiles_eta.png").c_str() );
+    std::cout << "[incidenceQA] wrote <sec α> profile PNGs in " << outDir << "\n";
+  }
 }
+
+
 
 // ======================== Step-4: build δ(E,α) and (c0,m) ========================
 // ---- kernel fit with fixed beff → returns delta ± edelta ----
-static bool FitDeltaFixedBeff(TH1D* hX, double beff, double& delta, double& edelta)
+// Wrapped, shifted Jacobian kernel (beff fixed)
+static double shiftedWrapped(double *x, double *p) {
+  const double Norm = p[0], d = p[1], b = p[2];
+  if (b <= 0) return 0.0;
+  const double S = std::sinh(1.0/(2.0*b));
+  auto K = [&](double u)->double {
+    if (u < -0.5 || u > 0.5) return 0.0;
+    return (2.0*b)/std::sqrt(1.0 + 4.0*u*u*S*S);
+  };
+  const double X = x[0];
+  // measured X wraps by ±1 tower
+  return Norm * ( K(X - d) + K(X - d + 1.0) + K(X - d - 1.0) );
+}
+
+static bool FitDeltaFixedBeff(TH1D* hX, double beff, double& delta, double& edelta,
+                              double& chi2ndf, double& pval, int rebin=2)
 {
-  if (!hX || hX->GetEntries() < 50) return false;
-  TF1 f("fShift",
-        "[0]*(2.*[2])/sqrt(1.+4.*(x-[1])*(x-[1])*sinh(1./(2.*[2]))*sinh(1./(2.*[2])))",
-        -0.5, 0.5);
+  delta = edelta = chi2ndf = pval = std::numeric_limits<double>::quiet_NaN();
+  if (!hX || hX->GetEntries() < 50 || beff <= 0) return false;
+
+  // Gentle rebin for stable likelihood fits (QA-only knob)
+  if (rebin>1) hX->Rebin(rebin);
+
+  // Robust seed for delta: median of X (clamped)
+  double xq[3] = {0.25, 0.50, 0.75}, q[3];
+  hX->GetQuantiles(3, q, xq);
+  double d0 = std::clamp(q[1], -0.20, +0.20);
+
+  TF1 f("fShiftWrap", shiftedWrapped, -0.5, 0.5, 3);
   f.SetParNames("Norm","delta","beff");
-  f.SetParameter(0, std::max(1.0, hX->GetMaximum()));
+  f.SetParameters(std::max(1.0, hX->GetMaximum()), d0, beff);
+  f.SetParLimits(0, 1e-6, 1e12);
   f.SetParLimits(1, -0.25, +0.25);
-  f.FixParameter(2, std::max(1e-6, beff));
-  auto r = hX->Fit(&f, "QNR");
-  if (!r || r->Status()!=0) return false;
-  delta  = f.GetParameter(1);
-  edelta = f.GetParError(1);
+  f.FixParameter(2, beff);
+  f.SetNpx(1200);
+
+  // Use likelihood for sparse slices, quiet, store result
+  TFitResultPtr r = hX->Fit(&f, "QNRLS");  // Q=quiet, N=no draw, R=range, L=LLH, S=store
+  if (!r.Get()) return false;
+  const bool ok = r->IsValid() && r->Status()==0;
+  if (!ok) return false;
+
+  delta   = f.GetParameter(1);
+  edelta  = f.GetParError(1);
+  chi2ndf = (r->Ndf()>0 ? r->Chi2()/r->Ndf() : std::numeric_limits<double>::quiet_NaN());
+  pval    = r->Prob();
   return std::isfinite(delta) && std::isfinite(edelta);
 }
 
 // ---- robust name finder for 2D hists: h2_Xmeas{Phi,Eta}_vsAlpha_* ----
+// Accepts both "..._<lo>_<hi>_range" and "..._<lo>_<hi>_disc" (and integer/float forms)
 static TH2F* FindXmeasVsAlpha(TFile* fin, const char* base, double eLo, double eHi)
 {
-  // Try common explicit names first
+  // 1) Try explicit candidates first (fast path)
+  const char* suff[2] = {"range","disc"};
+  for (int s=0; s<2; ++s)
   {
     TH2F* h=nullptr;
-    fin->GetObject(Form("%s_%.1f_%.1f", base, eLo, eHi), h); if (h) return h;
-    fin->GetObject(Form("%s_%g_%g",     base, eLo, eHi), h); if (h) return h;
+    // float with one decimal
+    fin->GetObject(Form("%s_%.1f_%.1f_%s", base, eLo, eHi, suff[s]), h); if (h) return h;
+    // generic %g
+    fin->GetObject(Form("%s_%g_%g_%s",     base, eLo, eHi, suff[s]), h); if (h) return h;
+    // integer fallback (2_4 etc)
+    fin->GetObject(Form("%s_%d_%d_%s",     base, (int)std::lround(eLo), (int)std::lround(eHi), suff[s]), h); if (h) return h;
   }
-  // Fallback: scan keys and parse trailing "..._<lo>_<hi>"
+
+  // 2) Finally, scan the file: accept any suffix AFTER the hi bound
+  //    Pattern:  ^base(_anything)?_<lo>_<hi>_(range|disc)$
   TIter next(fin->GetListOfKeys());
-  std::regex re(Form("^%s_.*_([-0-9.]+)_([-0-9.]+)$", base));
+  std::regex re(Form("^%s.*_([-0-9.]+)_([-0-9.]+)_(range|disc)$", base));
   while (TObject* obj = next()) {
     auto* k = dynamic_cast<TKey*>(obj); if (!k) continue;
     if (std::string(k->GetClassName()) != "TH2F") continue;
     std::smatch m; std::string nm = k->GetName();
-    if (!std::regex_match(nm, m, re) || m.size()!=3) continue;
+    if (!std::regex_match(nm, m, re) || m.size() != 4) continue;
     const double lo = atof(m[1].str().c_str());
     const double hi = atof(m[2].str().c_str());
-    if (std::fabs(lo-eLo)<1e-3 && std::fabs(hi-eHi)<1e-3) {
+    if (std::fabs(lo - eLo) < 1e-3 && std::fabs(hi - eHi) < 1e-3) {
       TH2F* h=nullptr; fin->GetObject(nm.c_str(), h);
       if (h) return h;
     }
@@ -1628,21 +1804,26 @@ static bool FitSlopeThroughOrigin(const std::vector<double>& x,
                                   const std::vector<double>& ey,
                                   double& c1, double& ec1)
 {
-  if (x.size()<3) return false;
+  if (x.size() < 3) return false;
+
   TGraphErrors g(x.size());
-  for (size_t i=0;i<x.size();++i) {
-    g.SetPoint(i,x[i],y[i]);
-    g.SetPointError(i,0.0,(ey[i]>0?ey[i]:1e-3));
+  for (size_t i = 0; i < x.size(); ++i) {
+    g.SetPoint(i, x[i], y[i]);
+    g.SetPointError(i, 0.0, (ey[i] > 0 ? ey[i] : 1e-3));
   }
-  TF1 f("f1","[0]*x",0,1);
-  auto r = g.Fit(&f,"QNR");
-  if (!r || r->Status()!=0) return false;
-  c1 = f.GetParameter(0);
-  ec1= f.GetParError(0);
-  return std::isfinite(c1);
+
+  TF1 f("f1", "[0]*x", 0, 1);
+  // Return a TFitResult (needs 'S'); quiet & no drawing
+  TFitResultPtr r = g.Fit(&f, "QNR S");
+  if (int(r) != 0) return false;
+
+  c1  = f.GetParameter(0);
+  ec1 = f.GetParError(0);
+  return std::isfinite(c1) && std::isfinite(ec1);
 }
 
-// ---- the main step-4 routine ---------------------------------------------------
+
+
 static void BuildDeltaAndWriteFits(TFile* fin,
                                    const std::string& outBaseDir,
                                    const std::vector<std::pair<double,double>>& eEdges,
@@ -1651,130 +1832,219 @@ static void BuildDeltaAndWriteFits(TFile* fin,
                                    const char* zSel     = "originalZRange",
                                    const double  E0     = 3.0)
 {
-  // 1) load b(E) from your already-written bValues.txt (energy-only rows)
+  // 0) read b(E) for the requested view (legacy: originalEta × originalZRange)
   std::vector<double> eLo, eHi, bphi, beta;
   if (!Load_bE_fromTxt(bValuesTxt, etaSel, zSel, eLo, eHi, bphi, beta)) return;
-  if (eLo.size() != eEdges.size()) {
-    std::cerr << "[deltaFit] WARNING: energy-bin count mismatch; proceeding with common subset.\n";
-  }
 
-  // 2) Prepare outputs
+  // output directory for all Step-4 artifacts
   const std::string outDir = outBaseDir + "/deltaFit";
   gSystem->mkdir(outDir.c_str(), true);
+
+  // plain tables (no plots except per-α slice QA)
   std::ofstream fPhi(outDir + "/delta_table_phi.txt");
   std::ofstream fEta(outDir + "/delta_table_eta.txt");
 
+  // also build c1(E) numbers (no PNGs)
   std::vector<double> eCtr, c1phi, c1phiErr, c1eta, c1etaErr;
 
-  // 3) loop energy slices
-  for (size_t i=0;i<eEdges.size();++i)
+  gStyle->SetOptStat(0);
+
+  // helper: find secα profile with either ..._range or ..._disc endings
+  auto findSecProf = [&](const char* base, double lo, double hi)->TProfile*
   {
-    const double lo = eEdges[i].first;
-    const double hi = eEdges[i].second;
-    const double Ei = 0.5*(lo+hi);
-
-    // pull the 2D maps and the secα profiles (any modeTag)
-    TH2F* h2phi = FindXmeasVsAlpha(fin, "h2_XmeasPhi_vsAlpha", lo, hi);
-    TH2F* h2eta = FindXmeasVsAlpha(fin, "h2_XmeasEta_vsAlpha", lo, hi);
-    if (!h2phi && !h2eta) continue;
-
-    // For the ⟨secα⟩ we accept any matching profile name that ends with the same energy range
-    TProfile* pSecPhi=nullptr; fin->GetObject(Form("p_secAlpha_phi_%.1f_%.1f",lo,hi), pSecPhi);
-    TProfile* pSecEta=nullptr; fin->GetObject(Form("p_secAlpha_eta_%.1f_%.1f",lo,hi), pSecEta);
-    if (!pSecPhi) fin->GetObject(Form("p_secAlpha_phi_%g_%g",lo,hi), pSecPhi);
-    if (!pSecEta) fin->GetObject(Form("p_secAlpha_eta_%g_%g",lo,hi), pSecEta);
-
-    // prepare per-E accumulators → c1(E)
-    std::vector<double> xsin_phi, d_phi, ed_phi;
-    std::vector<double> xsin_eta, d_eta, ed_eta;
-
-    const int nA = (h2phi? h2phi->GetNbinsX() : h2eta->GetNbinsX());
-    for (int j=1;j<=nA;++j)
-    {
-      const double aCtr = (h2phi? h2phi->GetXaxis()->GetBinCenter(j)
-                                 : h2eta->GetXaxis()->GetBinCenter(j));
-      const double sinA = std::sin(aCtr);
-
-      // φ
-      if (h2phi) {
-        std::unique_ptr<TH1D> hX(h2phi->ProjectionY(Form("phi_e%02zu_a%03d",i,j), j, j, "e"));
-        if (hX && hX->GetEntries()>=50) {
-          const double bE   = (i<bphi.size()? bphi[i]:0.15);
-          const double secA = (pSecPhi && pSecPhi->GetBinEntries(j)>0) ? pSecPhi->GetBinContent(j)
-                               : 1.0/std::max(1e-6, std::cos(aCtr));
-          const double beff = std::max(1e-6, bE*secA);
-          double d=0, ed=0;
-          if (FitDeltaFixedBeff(hX.get(), beff, d, ed)) {
-            fPhi << Form("%7.3f %7.3f  %.6e  %.6e  %.6e  %.6e  %.6e\n",
-                         lo,hi, aCtr, secA, beff, d, ed);
-            xsin_phi.push_back(sinA); d_phi.push_back(d); ed_phi.push_back(ed>0?ed:1e-3);
-          }
-        }
-      }
-      // η
-      if (h2eta) {
-        std::unique_ptr<TH1D> hX(h2eta->ProjectionY(Form("eta_e%02zu_a%03d",i,j), j, j, "e"));
-        if (hX && hX->GetEntries()>=50) {
-          const double bE   = (i<beta.size()? beta[i]:0.15);
-          const double secA = (pSecEta && pSecEta->GetBinEntries(j)>0) ? pSecEta->GetBinContent(j)
-                               : 1.0/std::max(1e-6, std::cos(aCtr));
-          const double beff = std::max(1e-6, bE*secA);
-          double d=0, ed=0;
-          if (FitDeltaFixedBeff(hX.get(), beff, d, ed)) {
-            fEta << Form("%7.3f %7.3f  %.6e  %.6e  %.6e  %.6e  %.6e\n",
-                         lo,hi, aCtr, secA, beff, d, ed);
-            xsin_eta.push_back(sinA); d_eta.push_back(d); ed_eta.push_back(ed>0?ed:1e-3);
-          }
-        }
-      }
-    } // α bins
-
-    // regress δ vs sinα → c1(E)
-    double c1p=0, ec1p=0, c1e=0, ec1e=0;
-    const bool okP = FitSlopeThroughOrigin(xsin_phi, d_phi, ed_phi, c1p, ec1p);
-    const bool okE = FitSlopeThroughOrigin(xsin_eta , d_eta , ed_eta , c1e, ec1e);
-    if (okP || okE) {
-      eCtr.push_back(Ei);
-      c1phi.push_back(okP?c1p:0.0);  c1phiErr.push_back(okP?ec1p:0.0);
-      c1eta.push_back(okE?c1e:0.0);  c1etaErr.push_back(okE?ec1e:0.0);
+    const char* suff[2] = {"range","disc"};
+    for (int s=0; s<2; ++s) {
+      TProfile* p=nullptr;
+      fin->GetObject(Form("%s_%.1f_%.1f_%s", base, lo, hi, suff[s]), p); if (p) return p;
+      fin->GetObject(Form("%s_%g_%g_%s",     base, lo, hi, suff[s]), p); if (p) return p;
+      fin->GetObject(Form("%s_%d_%d_%s",     base, (int)std::lround(lo), (int)std::lround(hi), suff[s]), p); if (p) return p;
     }
-  } // E loop
-
-  fPhi.close(); fEta.close();
-
-  // fit c1(E) = c0 + m ln(E/E0)  (separately for φ and η), write master files
-  auto fitAndWrite = [&](const std::vector<double>& E,
-                         const std::vector<double>& c1,
-                         const std::vector<double>& ec1,
-                         const char* tag)
-  {
-    if (E.size()<3) return;
-    TGraphErrors g(E.size());
-    for (size_t i=0;i<E.size();++i) {
-      g.SetPoint(i, std::log(std::max(1e-6, E[i]/E0)), c1[i]);
-      g.SetPointError(i, 0.0, (ec1[i]>0?ec1[i]:1e-3));
+    // brute-force fallback
+    TIter it(fin->GetListOfKeys());
+    std::regex re(Form("^%s.*_([-0-9.]+)_([-0-9.]+)_(range|disc)$", base));
+    while (TObject* obj = it()) {
+      auto* k = dynamic_cast<TKey*>(obj); if (!k) continue;
+      if (std::string(k->GetClassName()) != "TProfile") continue;
+      std::smatch m; std::string nm = k->GetName();
+      if (!std::regex_match(nm, m, re) || m.size()!=4) continue;
+      const double L = atof(m[1].str().c_str());
+      const double H = atof(m[2].str().c_str());
+      if (std::fabs(L-lo)<1e-3 && std::fabs(H-hi)<1e-3) {
+        TProfile* p=nullptr; fin->GetObject(nm.c_str(), p);
+        if (p) return p;
+      }
     }
-    TF1 f("fC1","[0]+[1]*x", -5, 5);
-    auto r = g.Fit(&f,"QNR");
-    const double c0 = f.GetParameter(0);
-    const double m  = f.GetParameter(1);
-    std::ofstream ff(outDir + Form("/deltaFit_master_%s.txt", tag));
-    ff << std::setprecision(12) << "deltaFit  " << tag << "  "
-       << c0 << "  " << m << "  E0 " << E0 << "\n";
-    ff.close();
-    // quick QA
-    TCanvas c("c","c1(E) fit",800,600);
-    g.SetTitle(Form("c_{1}^{%s}(E) vs ln(E/E_{0});ln(E/E_{0});c_{1}^{%s}", tag, tag));
-    g.Draw("AP"); f.SetLineColor(kRed+1); f.Draw("same");
-    c.SaveAs((outDir + Form("/c1_%s_vs_logE.png", tag)).c_str());
+    return nullptr;
   };
 
-  fitAndWrite(eCtr, c1phi, c1phiErr, "phi");
-  fitAndWrite(eCtr, c1eta, c1etaErr, "eta");
+    // helper: accumulate δ points per (E, α) slice (no per-slice PNGs)
+    // xsOut/ysOut/eysOut: vectors indexed by energy slice; each holds that E’s {sinα, δ, σδ} arrays
+    auto accumulate_slices = [&](TH2F* h2, TProfile* pSec, size_t iE, bool isPhi,
+                                 double lo, double hi, const std::vector<double>& bEvec,
+                                 std::vector<std::vector<double>>& xsOut,
+                                 std::vector<std::vector<double>>& ysOut,
+                                 std::vector<std::vector<double>>& eysOut)
+    {
+      if (!h2) return;
 
-  std::cout << "[deltaFit] wrote tables to " << outDir
-            << "\n         -> delta_table_phi.txt, delta_table_eta.txt"
-            << "\n         -> deltaFit_master_phi.txt, deltaFit_master_eta.txt\n";
+      const int nA     = h2->GetNbinsX();
+      const double Ei  = 0.5*(lo+hi);
+      auto& xs  = xsOut[iE];
+      auto& ys  = ysOut[iE];
+      auto& eys = eysOut[iE];
+
+      for (int j = 1; j <= nA; ++j)
+      {
+        const double aCtr = h2->GetXaxis()->GetBinCenter(j);
+        std::unique_ptr<TH1D> hX( h2->ProjectionY(Form("%s_e%02zu_a%03d", isPhi?"py_phi":"py_eta", iE, j), j, j, "e") );
+        if (!hX || hX->GetEntries() < 50) continue;
+
+        // beff(E, α) = b(E) * <sec α>_bin (or analytic sec)
+        const double bE   = (iE < bEvec.size() ? bEvec[iE] : 0.15);
+        const double secA = (pSec && pSec->GetBinEntries(j)>0) ? pSec->GetBinContent(j)
+                           : 1.0/std::max(1e-6, std::cos(aCtr));
+        const double beff = std::max(1e-6, bE*secA);
+
+        // wrapped, shifted kernel (beff fixed) with robust seeding
+        double delta=std::numeric_limits<double>::quiet_NaN();
+        double edelta=delta, chi2ndf=delta, pval=delta;
+        if (!FitDeltaFixedBeff(hX.get(), beff, delta, edelta, chi2ndf, pval, /*rebin=*/2)) continue;
+
+        // write the table line (phi/eta share same format)
+        if (isPhi) fPhi << Form("%7.3f %7.3f  %.6e  %.6e  %.6e  %.6e  %.6e\n",
+                                lo, hi, aCtr, secA, beff, delta, edelta);
+        else       fEta << Form("%7.3f %7.3f  %.6e  %.6e  %.6e  %.6e  %.6e\n",
+                                lo, hi, aCtr, secA, beff, delta, edelta);
+
+        // accumulate point
+        const double s = std::sin(aCtr);
+        xs .push_back(s);
+        ys .push_back(delta);
+        eys.push_back(edelta > 0 ? edelta : 1e-3);
+      }
+
+      // also stash the energy center for later write_master
+      eCtr.push_back(Ei);
+    };
+
+    // compact page (4×2) of δ vs sinα for all energies, with through-origin fit per panel
+    auto plot_delta_vs_sinalpha_grid =
+      [&](const char* outPng,
+          const std::vector<std::pair<double,double>>& edges,
+          const std::vector<std::vector<double>>& xsByE,
+          const std::vector<std::vector<double>>& ysByE,
+          const std::vector<std::vector<double>>& eysByE,
+          bool isPhi,
+          std::vector<double>& c1Out,
+          std::vector<double>& c1ErrOut)
+    {
+      const int NE = static_cast<int>(edges.size());
+      TCanvas c("c_delta_grid", isPhi ? "#delta_{#varphi} vs sin#alpha" : "#delta_{#eta} vs sin#alpha", 1600, 1200);
+      c.Divide(4,2);
+      c.SetFillColor(0);
+
+      c1Out.clear(); c1ErrOut.clear(); c1Out.reserve(NE); c1ErrOut.reserve(NE);
+
+      for (int i=0; i<NE; ++i) {
+        c.cd(i+1)->SetGrid();
+        const auto& x  = xsByE[i];
+        const auto& y  = ysByE[i];
+        const auto& ey = eysByE[i];
+        if (x.size()<3) { TLatex t; t.SetNDC(); t.DrawLatex(0.2,0.5,"insufficient points"); continue; }
+
+          // Keep objects alive until after SaveAs
+          static std::vector<std::unique_ptr<TGraphErrors>> s_keepGraphs;
+          static std::vector<std::unique_ptr<TF1>>          s_keepFits;
+
+          auto gptr_up = std::make_unique<TGraphErrors>(static_cast<int>(x.size()));
+          TGraphErrors* gptr = gptr_up.get();
+          for (size_t k=0;k<x.size();++k) {
+            gptr->SetPoint(static_cast<int>(k), x[k], y[k]);
+            gptr->SetPointError(static_cast<int>(k), 0.0, (ey[k]>0?ey[k]:1e-3));
+          }
+          gptr->SetMarkerStyle(20);
+          gptr->SetMarkerSize(1.0);
+          gptr->SetMarkerColor(kBlack);
+          gptr->SetLineColor(kBlack);
+          gptr->SetTitle(Form("%.0f–%.0f GeV;sin#alpha;#delta",
+                              edges[i].first, edges[i].second));
+          gptr->Draw("AP");
+
+          auto f_up = std::make_unique<TF1>(Form("f_lin_%d", i), "[0]*x", 0, 1);
+          TF1* fptr = f_up.get();
+          TFitResultPtr r = gptr->Fit(fptr, "QNR S");
+          double c1  = fptr->GetParameter(0);
+          double ec1 = fptr->GetParError(0);
+
+          // retain until canvas is saved
+          s_keepGraphs.emplace_back(std::move(gptr_up));
+          s_keepFits.emplace_back(std::move(f_up));
+
+
+        // quick R^2 (unweighted)
+        double ybar=0; for (double yi: y) ybar+=yi; ybar/=y.size();
+        double ss_tot=0, ss_res=0;
+        for (size_t k=0;k<y.size();++k) {
+          const double yhat = c1*x[k];
+          ss_res += (y[k]-yhat)*(y[k]-yhat);
+          ss_tot += (y[k]-ybar)*(y[k]-ybar);
+        }
+        const double R2 = (ss_tot>0? 1.0-ss_res/ss_tot : 0.0);
+
+        TLatex tl; tl.SetNDC(); tl.SetTextSize(0.045);
+        tl.DrawLatex(0.15,0.85,Form("c_{1}=%.4f #pm %.4f", c1, ec1));
+        tl.DrawLatex(0.15,0.78,Form("R^{2}=%.3f", R2));
+
+        c1Out.push_back(c1);
+        c1ErrOut.push_back(ec1);
+      }
+        c.Modified();
+        c.Update();
+        c.SaveAs(outPng);
+
+        
+    };
+
+
+    // 1) loop energy slices — accumulate δ vs sinα points (no per-slice PNGs)
+    const size_t NE = eEdges.size();
+    std::vector<std::vector<double>> xs_phi(NE), ys_phi(NE), eys_phi(NE);
+    std::vector<std::vector<double>> xs_eta(NE), ys_eta(NE), eys_eta(NE);
+
+    for (size_t i = 0; i < NE; ++i)
+    {
+      const double lo = eEdges[i].first;
+      const double hi = eEdges[i].second;
+
+      // pull the 2D maps
+      TH2F* h2phi = FindXmeasVsAlpha(fin, "h2_XmeasPhi_vsAlpha", lo, hi);
+      TH2F* h2eta = FindXmeasVsAlpha(fin, "h2_XmeasEta_vsAlpha", lo, hi);
+      if (!h2phi && !h2eta) continue;
+
+      // matching <sec α> profiles (or analytic sec if missing)
+        TProfile* pSecPhi = findSecProf("p_secAlpha_phi", lo, hi);
+        TProfile* pSecEta = findSecProf("p_secAlpha_eta", lo, hi);
+
+      // accumulate δ points
+      if (h2phi) accumulate_slices(h2phi, pSecPhi, i, /*isPhi=*/true,  lo, hi, bphi, xs_phi, ys_phi, eys_phi);
+      if (h2eta) accumulate_slices(h2eta, pSecEta, i, /*isPhi=*/false, lo, hi, beta, xs_eta, ys_eta, eys_eta);
+    }
+
+    // close the per-slice tables
+    fPhi.close();
+    fEta.close();
+
+    // 2) compact δ vs sinα pages (one per axis) + fill c1(E) arrays
+    plot_delta_vs_sinalpha_grid( (outDir + "/delta_vs_sinAlpha_phi.png").c_str(),
+                                 eEdges, xs_phi, ys_phi, eys_phi, /*isPhi=*/true,
+                                 c1phi, c1phiErr);
+
+    plot_delta_vs_sinalpha_grid( (outDir + "/delta_vs_sinAlpha_eta.png").c_str(),
+                                 eEdges, xs_eta, ys_eta, eys_eta, /*isPhi=*/false,
+                                 c1eta, c1etaErr);
+
+    // eCtr already filled by accumulate_slices (Ei per energy)
+    std::cout << "[deltaFit] wrote δ vs sinα grids and δ tables to " << outDir << "\n";
 }
 
 
@@ -3901,7 +4171,7 @@ void PDCAnalysisPRIMEPRIME()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_bOnlyValues.root";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_noPhiTilt.root";
   const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/SimOutputPrimeNoPhiTilt";
 
   EnsureDir(outBaseDir);
@@ -3914,11 +4184,57 @@ void PDCAnalysisPRIMEPRIME()
     return;
   }
 
-  // Energy slices
-  const auto eEdges = MakeEnergySlices();
-  const auto eCent  = MakeEnergyCenters();
+    // Optional: dump all histograms in the input file
+    const bool dumpHistos = true;  // <-- set true to print the full histogram inventory
+    if (dumpHistos)
+    {
+      std::cout << "\n[HISTO DUMP] Listing histograms in: " << inFilePath << "\n";
+      Long64_t nHist = 0;
 
-  SaveIncidenceQA(fin.get(), outBaseDir);
+      // recursive directory walker
+      std::function<void(TDirectory*, const std::string&)> walk;
+      walk = [&](TDirectory* dir, const std::string& prefix)
+      {
+        if (!dir) return;
+        TIter it(dir->GetListOfKeys());
+        while (TObject* o = it())
+        {
+          auto* key = dynamic_cast<TKey*>(o);
+          if (!key) continue;
+
+          // Read object; we delete it after use to avoid leaks
+          std::unique_ptr<TObject> obj(key->ReadObj());
+          if (!obj) continue;
+
+          const char* kname = key->GetName();
+          const char* cname = obj->ClassName();
+
+          if (obj->InheritsFrom(TH1::Class()))
+          {
+            auto* h = static_cast<TH1*>(obj.get());
+            std::cout << "  - " << prefix << kname
+                      << "  [" << cname << "]  entries=" << static_cast<long long>(h->GetEntries())
+                      << "\n";
+            ++nHist;
+          }
+          else if (obj->InheritsFrom(TDirectory::Class()))
+          {
+            auto* sub = static_cast<TDirectory*>(obj.get());
+            walk(sub, prefix + std::string(kname) + "/");
+          }
+        }
+      };
+
+      walk(fin.get(), "/");
+      std::cout << "[HISTO DUMP] total histograms found: " << nHist << "\n\n";
+    }
+
+    // Energy slices
+    const auto eEdges = MakeEnergySlices();
+    const auto eCent  = MakeEnergyCenters();
+
+    SaveIncidenceQA(fin.get(), outBaseDir);
+
     
   // Prepare global b-values text file
   const std::string bValFile = outBaseDir + "/bValues.txt";

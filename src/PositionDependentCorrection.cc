@@ -2707,49 +2707,29 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
     {
-      const float aPhi = m_bemcRec->lastAlphaPhi();
-      if (std::isfinite(aPhi))
-      {
-        // existing global QA
-        if (h2_alphaPhi_vsVz) h2_alphaPhi_vsVz->Fill(vtxZ, aPhi);
+      const float aPhiSigned = m_bemcRec->lastSignedAlphaPhi();   // signed incidence from reco
+      const float aPhiMag    = m_bemcRec->lastAlphaPhi();         // magnitude for sec
 
-        // Step (3): per-E incidence-aware fill (identical symmetrization as doPhiBlockCorr)
+      if (std::isfinite(aPhiSigned))
+      {
+        if (h2_alphaPhi_vsVz && std::isfinite(aPhiMag)) h2_alphaPhi_vsVz->Fill(vtxZ, aPhiMag);
+
         if (iE >= 0 && iE < N_Ebins)
         {
-          float u_raw = blkCoord.second;                       // local φ (tower-pitch units), raw
+          float u_raw = blkCoord.second;
           float u_fold = u_raw;
-          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);  // fold once → (−0.5,1.5]
-          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);                // map → (−0.5,0.5]
-          const float secA  = 1.f / std::max(1e-6f, std::cos(aPhi));
+          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);
+          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
 
-          if (vb > 3)
-          {
-            std::cout << "[αφ-fill] iE=" << iE
-                      << "  u_raw=" << u_raw
-                      << "  u_fold=" << u_fold
-                      << "  Xmeas=" << Xmeas
-                      << "  αφ(rad)=" << aPhi
-                      << "  secαφ=" << secA
-                      << "  (has h2=" << (h2_XmeasPhi_vsAlpha_E[iE] ? "Y":"N")
-                      << ", h1="       << (h_alphaPhi_E[iE]          ? "Y":"N")
-                      << ", prof="     << (p_secAlpha_phi_E[iE]      ? "Y":"N")
-                      << ")\n";
-          }
+          const float secA = 1.f / std::max(1e-6f, std::cos(aPhiMag)); // sec is even
 
-          if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhi, Xmeas);
-          if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhi);
-          if (p_secAlpha_phi_E[iE])      p_secAlpha_phi_E[iE]->Fill(aPhi, secA);
+          if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
+          if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhiSigned);
+          if (p_secAlpha_phi_E[iE])      p_secAlpha_phi_E[iE]->Fill(aPhiSigned, secA);
         }
-        else if (vb > 3)
-        {
-          std::cout << "[αφ-fill] skip: iE=" << iE << " out of range\n";
-        }
-      }
-      else if (vb > 3)
-      {
-        std::cout << "[αφ-fill] skip: lastAlphaPhi is non-finite\n";
       }
     }
+
 
 
     const float phiEA_EandIncident   = cg2GlobalPhi(m_bemcRec, eReco, xEA_inc, yEA_inc);
@@ -3353,49 +3333,29 @@ void PositionDependentCorrection::fillDEtaAllVariants(
             m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                              xEA_inc, yEA_inc);
     {
-      const float aEta = m_bemcRec->lastAlphaEta();
-      if (std::isfinite(aEta))
-      {
-        // existing global QA
-        if (h2_alphaEta_vsVz) h2_alphaEta_vsVz->Fill(vtxZ, aEta);
+      const float aEtaSigned = m_bemcRec->lastSignedAlphaEta();   // signed incidence from reco
+      const float aEtaMag    = m_bemcRec->lastAlphaEta();         // magnitude for sec
 
-        // Step (3): per-E incidence-aware fill (identical symmetrization as doEtaBlockCorr)
+      if (std::isfinite(aEtaSigned))
+      {
+        if (h2_alphaEta_vsVz && std::isfinite(aEtaMag)) h2_alphaEta_vsVz->Fill(vtxZ, aEtaMag);
+
         if (iE >= 0 && iE < N_Ebins)
         {
-          float u_raw = blkCoord.first;                        // local η (tower-pitch units), raw
+          float u_raw = blkCoord.first;
           float u_fold = u_raw;
-          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);  // fold once → (−0.5,1.5]
-          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);                // map → (−0.5,0.5]
-          const float secA  = 1.f / std::max(1e-6f, std::cos(aEta));
+          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);
+          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
 
-          if (vb > 3)
-          {
-            std::cout << "[αη-fill] iE=" << iE
-                      << "  u_raw=" << u_raw
-                      << "  u_fold=" << u_fold
-                      << "  Xmeas=" << Xmeas
-                      << "  αη(rad)=" << aEta
-                      << "  secαη=" << secA
-                      << "  (has h2=" << (h2_XmeasEta_vsAlpha_E[iE] ? "Y":"N")
-                      << ", h1="       << (h_alphaEta_E[iE]          ? "Y":"N")
-                      << ", prof="     << (p_secAlpha_eta_E[iE]      ? "Y":"N")
-                      << ")\n";
-          }
+          const float secA = 1.f / std::max(1e-6f, std::cos(aEtaMag)); // sec is even
 
-          if (h2_XmeasEta_vsAlpha_E[iE]) h2_XmeasEta_vsAlpha_E[iE]->Fill(aEta, Xmeas);
-          if (h_alphaEta_E[iE])          h_alphaEta_E[iE]->Fill(aEta);
-          if (p_secAlpha_eta_E[iE])      p_secAlpha_eta_E[iE]->Fill(aEta, secA);
+          if (h2_XmeasEta_vsAlpha_E[iE]) h2_XmeasEta_vsAlpha_E[iE]->Fill(aEtaSigned, Xmeas);
+          if (h_alphaEta_E[iE])          h_alphaEta_E[iE]->Fill(aEtaSigned);
+          if (p_secAlpha_eta_E[iE])      p_secAlpha_eta_E[iE]->Fill(aEtaSigned, secA);
         }
-        else if (vb > 3)
-        {
-          std::cout << "[αη-fill] skip: iE=" << iE << " out of range\n";
-        }
-      }
-      else if (vb > 3)
-      {
-        std::cout << "[αη-fill] skip: lastAlphaEta is non-finite\n";
       }
     }
+
 
 
     const float etaEA_EandIncident  = cg2ShowerEta(m_bemcRec, eReco, xEA_inc, yEA_inc, vtxZ);

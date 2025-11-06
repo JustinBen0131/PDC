@@ -244,10 +244,11 @@ private:
     bool okP = LoadOne(phiPath, "phi", phi_);
     bool okE = LoadOne(etaPath, "eta", eta_);
 
-    VLOG() << "[DeltaDB] load phi(" << (okP ? "OK " : "MISS ") << ") from " << phiPath << "\n";
-    VLOG() << "[DeltaDB] load  eta(" << (okE ? "OK " : "MISS ") << ") from " << etaPath << "\n";
-    if (!okP) VLOG() << "[DeltaDB] WARNING: φ delta fit missing, proceeding with δφ=0\n";
-    if (!okE) VLOG() << "[DeltaDB] WARNING: η delta fit missing, proceeding with δη=0\n";
+      VLOG() << "[DeltaDB] load phi(" << (okP ? "OK " : "MISS ") << ") from " << phiPath << "\n";
+      VLOG() << "[DeltaDB] load  eta(" << (okE ? "OK " : "MISS ") << ") from " << etaPath << "\n";
+      if (!okP) { VLOG() << "[DeltaDB] WARNING: φ delta fit missing, proceeding with δφ=0\n"; }
+      if (!okE) { VLOG() << "[DeltaDB] WARNING: η delta fit missing, proceeding with δη=0\n"; }
+
   }
 };
 
@@ -789,68 +790,39 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(float Energy, fl
   const float bx = b_from(fitPhi, Energy, E0);
   const float by = b_from(fitEta, Energy, E0);
 
-    // ============================== φ (incidence-aware δ shift) =====================
-    float x_corr = x;
-    {
-      const int   ix0   = EmcCluster::lowint(x + 0.5f);
-      const float Xraw  = x - ix0;                 // measured half-cell (−0.5 … +0.5]
-      if (std::fabs(Xraw) <= 0.5f)
-      {
-        // beff already computed above as bx = bphi_E / cos(aφ); m_fLastAlphaPhi set earlier
-        const DeltaFit* df_phi = DeltaDB::instance().get("phi");
-        const double    dphi   = eval_delta(df_phi, static_cast<double>(Energy),
-                                            static_cast<double>(m_lastAlphaPhi));
-
-        // subtract the odd δ(E,α) shift in the same variable (tower-pitch units)
-        double Xeff = static_cast<double>(Xraw) - dphi;
-        // optional gentle clamp to stay within half-cell
-        Xeff = std::max(-0.499, std::min(0.499, Xeff));
-
-        const double Sx = std::sinh(0.5 / static_cast<double>(bx));   // uses b_eff
-        x_corr = static_cast<float>( ix0 + static_cast<double>(bx) * std::asinh( 2.0 * Xeff * Sx ) );
-      }
-
-      // module-of-8 ripple (unchanged)
-      int   ix8 = int(x + 0.5f) / 8;
-      float x8  = x + 0.5f - (ix8 * 8) - 4.f;      // −4 … +4
-      float dx  = 0.f;
-      if ( m_UseDetailedGeometry )
-      {
-        int local_ix8 = int(x + 0.5f) - ix8 * 8;   // 0..7
-        dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
-      }
-      else
-      {
-        dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
-      }
-      x_corr -= dx;
-
-      // wrap φ tower coordinate to [−0.5, Nx−0.5)
-      while (x_corr < -0.5f)              x_corr += float(fNx);
-      while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
+  // ----- identical inverse-asinh + ripple/wrap as elsewhere -----
+  float x_corr = x;
+  {
+    if (std::fabs(x - ix0) <= 0.5f) {
+      const float Sx = std::sinh(0.5f / bx);
+      x_corr = ix0 + bx * std::asinh(2.f * (x - ix0) * Sx);
     }
-    xc = x_corr;
 
-
-    // ============================== η (incidence-aware δ shift) =====================
-    float y_corr = y;
-    {
-      const int   iy0   = EmcCluster::lowint(y + 0.5f);
-      const float Yraw  = y - iy0;                 // measured half-cell (−0.5 … +0.5]
-      if (std::fabs(Yraw) <= 0.5f)
-      {
-        const DeltaFit* df_eta = DeltaDB::instance().get("eta");
-        const double    deta   = eval_delta(df_eta, static_cast<double>(Energy),
-                                            static_cast<double>(m_lastAlphaEta));
-
-        double Yeff = static_cast<double>(Yraw) - deta;
-        Yeff = std::max(-0.499, std::min(0.499, Yeff));
-
-        const double Sy = std::sinh(0.5 / static_cast<double>(by));   // uses b_eff
-        y_corr = static_cast<float>( iy0 + static_cast<double>(by) * std::asinh( 2.0 * Yeff * Sy ) );
-      }
+    // module-of-8 ripple
+    int   ix8 = int(x + 0.5f) / 8;                      // NOLINT(bugprone-incorrect-roundings)
+    float x8  = x + 0.5f - (ix8 * 8) - 4.f;             // −4 … +4
+    float dx  = 0.f;
+    if (m_UseDetailedGeometry) {
+      int local_ix8 = int(x + 0.5f) - ix8 * 8;          // NOLINT(bugprone-incorrect-roundings)
+      dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
+    } else {
+      dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
     }
-    yc = y_corr;
+    x_corr -= dx;
+
+    while (x_corr < -0.5f)              x_corr += float(fNx);
+    while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
+  }
+  xc = x_corr;
+
+  float y_corr = y;
+  {
+    if (std::fabs(y - iy0) <= 0.5f) {
+      const float Sy = std::sinh(0.5f / by);
+      y_corr = iy0 + by * std::asinh(2.f * (y - iy0) * Sy);
+    }
+  }
+  yc = y_corr;
 }
 
 
@@ -1020,34 +992,41 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 
 
 void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Energy, float x, float y,
-                                             float& xc, float& yc)
+                                                                      float& xc, float& yc)
 {
   // ---- legacy gating -------------------------------------------------
   if (!m_UseCorrectPosition) { xc = x; yc = y; return; }
   if (!std::isfinite(Energy) || !std::isfinite(x) || !std::isfinite(y) || Energy < 0.01f)
   { xc = x; yc = y; return; }
+
+  // Baseline b(E) at normal incidence (from master fits)
   constexpr float E0 = 3.0f;
-  // energyDepOnly, originalEta × originalZRange
   const auto* fitPhi = BFitDB::instance().get("energyDepOnly", "phi", "originalEta", "originalZRange");
   const auto* fitEta = BFitDB::instance().get("energyDepOnly", "eta", "originalEta", "originalZRange");
-  // base (angle–zero) scales from the master-file fits
-  const float bphi_E = b_from(fitPhi, Energy, E0);  // φ baseline
-  const float beta_E = b_from(fitEta,  Energy, E0); // η baseline
+  const float bphi_E = b_from(fitPhi, Energy, E0);
+  const float beta_E = b_from(fitEta, Energy, E0);
+
   VLOG() << "[EA+α] ENTER  E=" << Energy << "  (x,y)=(" << x << "," << y << ")"
          << "  bphi_E=" << bphi_E << "  beta_E=" << beta_E << "\n";
-  // --- geometry-only incidence from detailed tower geometry -----------------------
-  // use the same integer anchor as your local tower coordinates (no extra lookup later)
+
+  // Defaults (no geometry/incidence): keep baseline b(E), zero cached angles
+  float bx = bphi_E;
+  float by = beta_E;
+  m_lastAlphaPhi       = 0.f;
+  m_lastAlphaEta       = 0.f;
+  m_lastAlphaPhiSigned = 0.f;
+  m_lastAlphaEtaSigned = 0.f;
+
+  // ---- geometry-only incidence from detailed tower geometry ----------
   const int ix_geom = EmcCluster::lowint(x + 0.5f);
   const int iy_geom = EmcCluster::lowint(y + 0.5f);
-  // fetch per-tower geometry already filled by SetTowerGeometry(...)
   TowerGeom g{};
-  bool haveGeom = GetTowerGeometry(ix_geom, iy_geom, g);   // your existing helper
-  float bx = bphi_E;   // defaults (if geometry missing)
-  float by = beta_E;
+  const bool haveGeom = GetTowerGeometry(ix_geom, iy_geom, g);
+
   if (!haveGeom)
   {
     VLOG() << "[EA+α] geometry MISSING for (ix,iy)=(" << ix_geom << "," << iy_geom
-           << ")  → using bphi_E/beta_E baselines only\n";
+           << ")  → using baseline b(E) without angle scaling\n";
   }
   else
   {
@@ -1055,142 +1034,129 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Ener
            << "        C=(" << g.Xcenter << "," << g.Ycenter << "," << g.Zcenter << ")\n"
            << "        dPhi=(" << g.dX[0] << "," << g.dY[0] << "," << g.dZ[0] << ")"
            << "  dEta=("  << g.dX[1] << "," << g.dY[1] << "," << g.dZ[1] << ")\n";
-    // --- shower-depth point and ray from actual vertex (energy & local-offset aware) ---
+
+    // Shower-depth point and ray from actual vertex
     TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
-    TVector3 V(0., 0., fVz);
+    TVector3 Vtx(0., 0., fVz);
+
     float x_sd = 0.f, y_sd = 0.f, z_sd = 0.f;
-    Tower2Global(Energy, x, y, x_sd, y_sd, z_sd);   // maps (x,y,E) → shower-depth (cm)
+    Tower2Global(Energy, x, y, x_sd, y_sd, z_sd);       // SD hit (cm)
     TVector3 H(x_sd, y_sd, z_sd);
-    // Ray to shower depth; fall back to tower-center ray only if degenerate
-    TVector3 p = (H - V);
-    if (p.Mag2() <= 0.0) p = (C - V);
+
+    TVector3 p = (H - Vtx);                             // ray to SD
+    if (p.Mag2() <= 0.0) p = (C - Vtx);
     p = p.Unit();
-    // --- raw face-edge directions (provided by detailed geometry) ---
+
+    // Face-edge directions (raw)
     TVector3 ephi_raw(g.dX[0], g.dY[0], g.dZ[0]);
     TVector3 eeta_raw(g.dX[1], g.dY[1], g.dZ[1]);
     if (ephi_raw.Mag2() < 1e-24 || eeta_raw.Mag2() < 1e-24)
     {
-      VLOG() << "[EA+α] degenerate face tangents → skip angle scaling this event\n";
-      m_lastAlphaPhi = 0.f;
-      m_lastAlphaEta = 0.f;
+      VLOG() << "[EA+α] degenerate face tangents → keep baseline b(E), α=0\n";
+      // Cached angles already zeroed above
     }
     else
     {
-      // --- mechanical tower axis from face normals (right-handed) ---
-      TVector3 n = (ephi_raw.Cross(eeta_raw)).Unit();         // axis from faces (not -C)
-      if (n.Dot(-C) < 0.0) n = -n;                            // orient toward IP
-      VLOG() << "        n=(" << n.X() << "," << n.Y() << "," << n.Z() << ")"
-             << "  p=(" << p.X() << "," << p.Y() << "," << p.Z() << ")\n";
-      // --- BUILD φ/η TANGENTS AND NORMAL AT SHOWER DEPTH (projective, depth-aware) ---
+      // Mechanical tower axis and consistent orientation
+      TVector3 n = (ephi_raw.Cross(eeta_raw)).Unit();
+      if (n.Dot(-C) < 0.0) n = -n;
+
+      // Build depth tangents from ±0.5 tower steps
       float x_phip=0.f,y_phip=0.f,z_phip=0.f, x_phim=0.f,y_phim=0.f,z_phim=0.f;
       float x_etap=0.f,y_etap=0.f,z_etap=0.f, x_etam=0.f,y_etam=0.f,z_etam=0.f;
-      // step ±0.5 tower in φ at the SAME (x,y) anchor, map both to shower depth
       Tower2Global(Energy, x + 0.5f, y, x_phip, y_phip, z_phip);
       Tower2Global(Energy, x - 0.5f, y, x_phim, y_phim, z_phim);
       TVector3 ephi_d(x_phip - x_phim, y_phip - y_phim, z_phip - z_phim);
-      // step ±0.5 tower in η at the SAME (x,y) anchor, map both to shower depth
+
       Tower2Global(Energy, x, y + 0.5f, x_etap, y_etap, z_etap);
       Tower2Global(Energy, x, y - 0.5f, x_etam, y_etam, z_etam);
       TVector3 eeta_d(x_etap - x_etam, y_etap - y_etam, z_etap - z_etam);
+
       const double Lphi = ephi_d.Mag();
       const double Leta = eeta_d.Mag();
+
       if (Lphi < 1e-12 || Leta < 1e-12)
       {
-        VLOG() << "[EA+α] depth tangents too small → skip angle scaling\n";
-        m_lastAlphaPhi = 0.f;
-        m_lastAlphaEta = 0.f;
+        VLOG() << "[EA+α] depth tangents too small → keep baseline b(E), α=0\n";
+        // Cached angles already zeroed above
       }
       else
       {
-        // ------------------ NEW: orthonormalize the depth tangents ------------------
-        // unit φ tangent at depth
-        TVector3 uphi = ephi_d * (1.0 / Lphi);
-        // start from unit η tangent and remove any φ component (Gram–Schmidt in-plane)
-        TVector3 ueta_raw = eeta_d * (1.0 / Leta);
-        TVector3 ueta_t   = ueta_raw - (ueta_raw.Dot(uphi)) * uphi;
-        double   Leta_t   = ueta_t.Mag();
-        TVector3 nd;    // depth-surface normal (orthogonal to both uphi and ueta)
-        TVector3 ueta;  // final orthonormal η direction at depth
-        if (Leta_t < 1e-12)
-        {
-          // Rare near-collinearity: build a stable in-plane orthobasis using n as helper
+        // Orthonormalize at depth
+        TVector3 uphi = ephi_d * (1.0/Lphi);
+        TVector3 ueta_raw = eeta_d * (1.0/Leta);
+        TVector3 ueta_t = ueta_raw - (ueta_raw.Dot(uphi))*uphi;
+        double   leta_t = ueta_t.Mag();
+        TVector3 nd, ueta;
+
+        if (leta_t < 1e-12) {
           nd = (uphi.Cross(n)).Unit();
-          if (nd.Mag2() < 1e-24)
-          {
-            // pathological fallback: use a fixed axis to break degeneracy (won't be hit in practice)
-            nd = (uphi.Cross(TVector3(0.,0.,1.))).Unit();
-          }
+          if (nd.Mag2() < 1e-24) nd = (uphi.Cross(TVector3(0.,0.,1.))).Unit();
           ueta = (nd.Cross(uphi)).Unit();
-        }
-        else
-        {
-          ueta = ueta_t * (1.0 / Leta_t);
+        } else {
+          ueta = ueta_t * (1.0/leta_t);
           nd   = (uphi.Cross(ueta)).Unit();
         }
-        // orient normal toward the actual shower ray
         if (nd.Dot(p) < 0.0) nd = -nd;
-        // enforce right-handed orthonormal triad exactly
-        ueta = (nd.Cross(uphi)).Unit();
-          // decompose ray in the orthonormal basis {nd, uphi, ueta} at depth
-          const double pn   = std::abs(p.Dot(nd));
-          const double pphi = std::abs(p.Dot(uphi));
-          const double peta = std::abs(p.Dot(ueta));
+        ueta = (nd.Cross(uphi)).Unit(); // enforce right-handed triad
 
-          const double den_phi = std::sqrt(pn*pn + pphi*pphi);
-          const double den_eta = std::sqrt(pn*pn + peta*peta);
+        // Incidence magnitudes
+        const double pn   = std::abs(p.Dot(nd));
+        const double pphi = std::abs(p.Dot(uphi));
+        const double peta = std::abs(p.Dot(ueta));
+        const double den_phi = std::sqrt(pn*pn + pphi*pphi);
+        const double den_eta = std::sqrt(pn*pn + peta*peta);
 
-          // Prepare cosine values in outer scope so they are always available below
-          double cos_a_phi = 1.0;
-          double cos_a_eta = 1.0;
+        double cos_a_phi = 1.0, cos_a_eta = 1.0;
+        if (den_phi < 1e-12 || den_eta < 1e-12) {
+          // Leave cached angles at zero
+          cos_a_phi = 1.0; cos_a_eta = 1.0;
+        } else {
+          cos_a_phi = std::clamp(pn / den_phi, 1e-6, 1.0);
+          cos_a_eta = std::clamp(pn / den_eta, 1e-6, 1.0);
+          m_lastAlphaPhi = static_cast<float>(std::acos(cos_a_phi));
+          m_lastAlphaEta = static_cast<float>(std::acos(cos_a_eta));
 
-          // Guard near-degenerate projections (ray almost tangent or basis nearly singular)
-          if (den_phi < 1e-12 || den_eta < 1e-12) {
-            // fallback: treat as normal incidence (α≈0 → cos≈1), keep baselines
-            m_lastAlphaPhi = 0.f;
-            m_lastAlphaEta = 0.f;
-            cos_a_phi = 1.0;
-            cos_a_eta = 1.0;
-          } else {
-            cos_a_phi = std::clamp(pn / den_phi, 1e-6, 1.0);   // clamp to (0,1]
-            cos_a_eta = std::clamp(pn / den_eta, 1e-6, 1.0);
-            m_lastAlphaPhi = static_cast<float>(std::acos(cos_a_phi));
-            m_lastAlphaEta = static_cast<float>(std::acos(cos_a_eta));
-          }
+          // Signed angles from ray·tangent
+          const double sgn_phi = p.Dot(uphi);
+          const double sgn_eta = p.Dot(ueta);
+          m_lastAlphaPhiSigned = std::copysign(m_lastAlphaPhi, static_cast<float>(sgn_phi));
+          m_lastAlphaEtaSigned = std::copysign(m_lastAlphaEta,  static_cast<float>(sgn_eta));
+        }
 
-          VLOG() << "        [depth⊥] cos(a_phi)=" << cos_a_phi << "  cos(a_eta)=" << cos_a_eta
-                 << "  → a_phi=" << m_lastAlphaPhi << " rad"
-                 << "  a_eta=" << m_lastAlphaEta << " rad\n";
+        VLOG() << "        [depth⊥] cos(a_phi)=" << cos_a_phi << "  cos(a_eta)=" << cos_a_eta
+               << "  → a_phi=" << m_lastAlphaPhi << " rad"
+               << "  a_eta=" << m_lastAlphaEta << " rad\n";
 
-          // Pure geometric foreshortening at depth (no tunables, no extra modeling)
-          bx = clamp_b( bphi_E / static_cast<float>(cos_a_phi) );
-          by = clamp_b(  beta_E / static_cast<float>(cos_a_eta) );
-
+        // Geometry-only foreshortening (b_eff = b(E)/cos α)
+        bx = clamp_b( bphi_E / static_cast<float>(cos_a_phi) );
+        by = clamp_b(  beta_E / static_cast<float>(cos_a_eta) );
         VLOG() << "        [depth⊥] b_eff: bx=" << bx << "  by=" << by << "\n";
-        // ---------------- end NEW orthonormalization refinement ---------------------
       }
     }
   }
+
   VLOG() << "[EA+α] EXIT  bphi_E=" << bphi_E << "  beta_E=" << beta_E
          << "  → bx=" << bx << "  by=" << by << "\n";
+
   // ============================== φ ===================================
   float x_corr = x;
   {
-    const int ix0 = EmcCluster::lowint(x + 0.5f);
-    const float X = x - ix0;                       // in (−0.5, +0.5]
+    const int   ix0_local = EmcCluster::lowint(x + 0.5f);
+    const float X         = x - ix0_local;                 // in (−0.5, +0.5]
     if (std::fabs(X) <= 0.5f)
     {
       const float Sx = std::sinh(0.5f / bx);
-      x_corr = ix0 + bx * std::asinh(2.f * X * Sx);
+      x_corr = ix0_local + bx * std::asinh(2.f * X * Sx);
     }
-    // module-of-8 ripple (identical to legacy CorrectPosition)
-    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
-    int   ix8 = int(x + 0.5f) / 8;
-    float x8  = x + 0.5f - (ix8 * 8) - 4.f;        // −4 … +4
+
+    // module-of-8 ripple
+    int   ix8 = int(x + 0.5f) / 8;                         // NOLINT
+    float x8  = x + 0.5f - (ix8 * 8) - 4.f;                // −4 … +4
     float dx  = 0.f;
     if (m_UseDetailedGeometry)
     {
-      // NOLINTNEXTLINE(bugprone-incorrect-roundings)
-      int local_ix8 = int(x + 0.5f) - ix8 * 8;     // 0..7
+      int local_ix8 = int(x + 0.5f) - ix8 * 8;             // 0..7   // NOLINT
       dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
     }
     else
@@ -1198,20 +1164,22 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Ener
       dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
     }
     x_corr -= dx;
+
     // wrap φ tower coordinate to [−0.5, Nx−0.5)
     while (x_corr < -0.5f)              x_corr += float(fNx);
     while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
   }
   xc = x_corr;
+
   // ============================== η ===================================
   float y_corr = y;
   {
-    const int iy0 = EmcCluster::lowint(y + 0.5f);
-    const float Y = y - iy0;                      // in (−0.5, +0.5]
+    const int   iy0_local = EmcCluster::lowint(y + 0.5f);
+    const float Y         = y - iy0_local;                 // in (−0.5, +0.5]
     if (std::fabs(Y) <= 0.5f)
     {
       const float Sy = std::sinh(0.5f / by);
-      y_corr = iy0 + by * std::asinh(2.f * Y * Sy);
+      y_corr = iy0_local + by * std::asinh(2.f * Y * Sy);
     }
   }
   yc = y_corr;
