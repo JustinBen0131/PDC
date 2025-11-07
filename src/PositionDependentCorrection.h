@@ -651,10 +651,10 @@ class PositionDependentCorrection : public SubsysReco
     std::array<std::array<bool, N_VzH3FineBins>, kNEtaViews> m_bPhiReady_eta_vz_fine{};
     std::array<std::array<bool, N_VzH3FineBins>, kNEtaViews> m_bEtaReady_eta_vz_fine{};
 
-    // Global QA: incidence versus vertex z (already used by Step‑3)
-    TH2F* h2_alphaPhi_vsVz {nullptr};
-    TH2F* h2_alphaEta_vsVz {nullptr};
-
+    // Global QA (REPLACED): signed incidence vs z_vtx and η_SD
+    TH3F* h3_alphaPhi_vsVz_vsEta {nullptr};
+    TH3F* h3_alphaEta_vsVz_vsEta {nullptr};
+    
     // ---------- Step (3): incidence‑aware per‑energy maps ----------
     // α binning: 0 … 0.30 rad in 180 bins (≈1.667 mrad/bin)
     // X^{meas} binning: −0.5 … +0.5 in 200 bins (0.005 tower/bin)

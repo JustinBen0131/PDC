@@ -349,24 +349,28 @@ void PositionDependentCorrection::bookCommonHistograms
     }
     
     // ------------------------------------------------------------------
-    // Global QA: incidence angle vs vertex Z
+    // Global QA (REPLACED): signed incidence vs z_vtx AND η_SD  → TH3F
+    // axes: x = z_vtx (cm), y = η_SD (shower depth), z = α_signed (rad)
     // ------------------------------------------------------------------
-    if (!h2_alphaPhi_vsVz)
+    if (!h3_alphaPhi_vsVz_vsEta)
     {
-        h2_alphaPhi_vsVz = new TH2F("h2_alphaPhi_vsVz",
-                                    "Incidence #alpha_{#varphi} vs z_{vtx};z_{vtx} (cm);#alpha_{#varphi} [rad]",
-                                    200, -100, 100,
-                                    NAlphaBins, AlphaMin, AlphaMax);
-      if (hm) hm->registerHisto(h2_alphaPhi_vsVz);
+        h3_alphaPhi_vsVz_vsEta = new TH3F("h3_alphaPhi_vsVz_vsEta",
+            "#alpha_{#varphi}^{signed} vs z_{vtx} and #eta_{SD};z_{vtx} (cm);#eta_{SD};#alpha_{#varphi} [rad]",
+            200, -100, 100,     // z bins
+             96,  -1.2,  1.2,   // η bins (use your CEMC row coverage)
+            NAlphaBins, AlphaMin, AlphaMax);
+        if (hm) hm->registerHisto(h3_alphaPhi_vsVz_vsEta);
     }
-    if (!h2_alphaEta_vsVz)
+    if (!h3_alphaEta_vsVz_vsEta)
     {
-        h2_alphaEta_vsVz = new TH2F("h2_alphaEta_vsVz",
-                                    "Incidence #alpha_{#eta} vs z_{vtx};z_{vtx} (cm);#alpha_{#eta} [rad]",
-                                    200, -100, 100,
-                                    NAlphaBins, AlphaMin, AlphaMax);
-      if (hm) hm->registerHisto(h2_alphaEta_vsVz);
+        h3_alphaEta_vsVz_vsEta = new TH3F("h3_alphaEta_vsVz_vsEta",
+            "#alpha_{#eta}^{signed} vs z_{vtx} and #eta_{SD};z_{vtx} (cm);#eta_{SD};#alpha_{#eta} [rad]",
+            200, -100, 100,
+             96,  -1.2,  1.2,
+            NAlphaBins, AlphaMin, AlphaMax);
+        if (hm) hm->registerHisto(h3_alphaEta_vsVz_vsEta);
     }
+
 
     // ------------------------------------------------------------------
     // Step (3): per-E incidence-aware maps  — X^{meas} vs α  (φ & η)
@@ -2707,21 +2711,24 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
     {
-      const float aPhiSigned = m_bemcRec->lastSignedAlphaPhi();   // signed incidence from reco
-      const float aPhiMag    = m_bemcRec->lastAlphaPhi();         // magnitude for sec
+      const float aPhiSigned = m_bemcRec->lastSignedAlphaPhi();
+      const float aPhiMag    = std::fabs(m_bemcRec->lastSignedAlphaPhi());
 
-      if (std::isfinite(aPhiSigned))
+      // η at shower depth for QA (use CP anchor; xCP/yCP already set earlier)
+      const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
+
+      if (std::isfinite(aPhiSigned) && std::isfinite(etaSD_forQA))
       {
-        if (h2_alphaPhi_vsVz && std::isfinite(aPhiMag)) h2_alphaPhi_vsVz->Fill(vtxZ, aPhiMag);
+        // TH3: (z_vtx, η_SD, α_signed)
+        if (h3_alphaPhi_vsVz_vsEta) h3_alphaPhi_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aPhiSigned);
 
+        // Step-4 inputs unchanged
         if (iE >= 0 && iE < N_Ebins)
         {
-          float u_raw = blkCoord.second;
-          float u_fold = u_raw;
-          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);
+          float u_raw  = blkCoord.second;
+          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
-
-          const float secA = 1.f / std::max(1e-6f, std::cos(aPhiMag)); // sec is even
+          const float secA  = 1.f / std::max(1e-6f, std::cos(aPhiMag)); // sec is even
 
           if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
           if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhiSigned);
@@ -3047,8 +3054,8 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       }
 
       // incident angles captured by the E+incident-angle path in BEmcRecCEMC
-      const float aPhiRad = m_bemcRec->lastAlphaPhi();
-      const float aEtaRad = m_bemcRec->lastAlphaEta();
+      const float aPhiRad = m_bemcRec->lastSignedAlphaPhi();
+      const float aEtaRad = m_bemcRec->lastSignedAlphaEta();
       const float aPhiDeg = aPhiRad * 180.0f / static_cast<float>(M_PI);
       const float aEtaDeg = aEtaRad * 180.0f / static_cast<float>(M_PI);
 
@@ -3333,21 +3340,24 @@ void PositionDependentCorrection::fillDEtaAllVariants(
             m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                              xEA_inc, yEA_inc);
     {
-      const float aEtaSigned = m_bemcRec->lastSignedAlphaEta();   // signed incidence from reco
-      const float aEtaMag    = m_bemcRec->lastAlphaEta();         // magnitude for sec
+      const float aEtaSigned = m_bemcRec->lastSignedAlphaEta();
+      const float aEtaMag    = std::fabs(m_bemcRec->lastSignedAlphaEta());
 
-      if (std::isfinite(aEtaSigned))
+      // η at shower depth for QA (use CP anchor)
+      const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
+
+      if (std::isfinite(aEtaSigned) && std::isfinite(etaSD_forQA))
       {
-        if (h2_alphaEta_vsVz && std::isfinite(aEtaMag)) h2_alphaEta_vsVz->Fill(vtxZ, aEtaMag);
+        // TH3: (z_vtx, η_SD, α_signed)
+        if (h3_alphaEta_vsVz_vsEta) h3_alphaEta_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aEtaSigned);
 
+        // Step-4 inputs unchanged
         if (iE >= 0 && iE < N_Ebins)
         {
-          float u_raw = blkCoord.first;
-          float u_fold = u_raw;
-          if (u_fold <= -0.5f || u_fold > 1.5f) u_fold = std::fmod(u_fold + 2.f, 2.f);
+          float u_raw  = blkCoord.first;
+          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
-
-          const float secA = 1.f / std::max(1e-6f, std::cos(aEtaMag)); // sec is even
+          const float secA  = 1.f / std::max(1e-6f, std::cos(aEtaMag)); // sec is even
 
           if (h2_XmeasEta_vsAlpha_E[iE]) h2_XmeasEta_vsAlpha_E[iE]->Fill(aEtaSigned, Xmeas);
           if (h_alphaEta_E[iE])          h_alphaEta_E[iE]->Fill(aEtaSigned);
@@ -3698,8 +3708,8 @@ void PositionDependentCorrection::fillDEtaAllVariants(
       }
 
       // incident angles captured by the E+incident-angle path
-      const float aPhiRad = m_bemcRec->lastAlphaPhi();
-      const float aEtaRad = m_bemcRec->lastAlphaEta();
+      const float aPhiRad = m_bemcRec->lastSignedAlphaPhi();
+      const float aEtaRad = m_bemcRec->lastSignedAlphaEta();
       const float aPhiDeg = aPhiRad * 180.0f / static_cast<float>(M_PI);
       const float aEtaDeg = aEtaRad * 180.0f / static_cast<float>(M_PI);
 
