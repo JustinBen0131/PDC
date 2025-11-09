@@ -1885,7 +1885,49 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
     cpEta.SaveAs( (outDir + "/incidence_secAlpha_profiles_eta.png").c_str() );
     std::cout << "[incidenceQA] wrote <sec α> profile PNGs in " << outDir << "\n";
   }
+
+  // ================================
+  // (4) 〈αφ〉 vs E (points at bin center)
+  // ================================
+    {
+      std::vector<double> vx, vy;  // x = E bin center, y = mean of h_alphaPhi_sgn_mean
+      for (int i = 0; i < N_E; ++i)
+      {
+        const double eLo = E_edges[i];
+        const double eHi = E_edges[i+1];
+        TH1F* h = findH1("h_alphaPhi_sgn_mean", eLo, eHi);
+        if (!h || h->GetEntries() <= 0) {
+          std::cout << Form("[incidenceQA] mean αφ: missing/empty for %.1f–%.1f GeV\n", eLo, eHi) << "\n";
+          continue;
+        }
+        const double eCtr = 0.5*(eLo + eHi);  // x at bin center
+        vx.push_back(eCtr);
+        vy.push_back(h->GetMean());           // mean of signed αφ for this E-slice
+      }
+
+      if (!vx.empty())
+      {
+        TCanvas cMean("c_alphaPhi_mean_vs_E","<alpha_phi> vs E",900,600);
+        cMean.SetLeftMargin(0.12); cMean.SetRightMargin(0.06);
+        cMean.SetBottomMargin(0.12); cMean.SetTopMargin(0.08);
+
+        TGraph gr(static_cast<int>(vx.size()), vx.data(), vy.data());
+        gr.SetTitle("<#alpha_{#varphi}^{signed}> vs E;E_{#gamma} [GeV];<#alpha_{#varphi}^{signed}> [rad]");
+        gr.SetMarkerStyle(20);
+        gr.SetMarkerSize(1.1);
+        gr.SetLineColor(kBlue+1);
+        gr.Draw("AP"); // A: axes, P: points
+
+        const std::string outPng = outDir + "/alphaPhi_mean_vs_E.png";
+        cMean.SaveAs(outPng.c_str());
+        std::cout << "[incidenceQA] wrote " << outPng << "\n";
+      }
+      else {
+        std::cout << "[incidenceQA] mean αφ: no valid points → skipped\n";
+      }
+    }
 }
+
 
 
 

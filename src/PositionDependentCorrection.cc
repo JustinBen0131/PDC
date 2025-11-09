@@ -352,6 +352,8 @@ void PositionDependentCorrection::bookCommonHistograms
     // Global QA (REPLACED): signed incidence vs z_vtx AND η_SD  → TH3F
     // axes: x = z_vtx (cm), y = η_SD (shower depth), z = α_signed (rad)
     // ------------------------------------------------------------------
+    m_bemcRec->EnablePhiTilt(false);
+    
     if (!h3_alphaPhi_vsVz_vsEta)
     {
         h3_alphaPhi_vsVz_vsEta = new TH3F("h3_alphaPhi_vsVz_vsEta",
@@ -389,29 +391,38 @@ void PositionDependentCorrection::bookCommonHistograms
       {
         const std::string lab = makeLabel(iE);
 
-        // φ-view
-        if (!h2_XmeasPhi_vsAlpha_E[iE]) {
-          h2_XmeasPhi_vsAlpha_E[iE] = new TH2F(
-            Form("h2_XmeasPhi_vsAlpha_%s_%s", lab.c_str(), modeTag),
-            Form("Measured X^{meas}_{#varphi} vs #alpha_{#varphi} (%s);#alpha_{#varphi} [rad];X^{meas}_{#varphi}",
-                 (m_binningMode==EBinningMode::kRange ? "E_{slice}" : "E_{centre}")),
-            NAlphaBins, aEdges, NXmeasBins, xMeasEdges);
-          if (hm) hm->registerHisto(h2_XmeasPhi_vsAlpha_E[iE]);
-        }
-        if (!h_alphaPhi_E[iE]) {
-          h_alphaPhi_E[iE] = new TH1F(
-            Form("h_alphaPhi_%s_%s", lab.c_str(), modeTag),
-            "#alpha_{#varphi} distribution;#alpha_{#varphi} [rad];Counts",
-            NAlphaBins, aEdges);
-          if (hm) hm->registerHisto(h_alphaPhi_E[iE]);
-        }
-        if (!p_secAlpha_phi_E[iE]) {
-          p_secAlpha_phi_E[iE] = new TProfile(
-            Form("p_secAlpha_phi_%s_%s", lab.c_str(), modeTag),
-            "⟨sec #alpha_{#varphi}⟩ vs #alpha_{#varphi};#alpha_{#varphi} [rad];⟨sec #alpha_{#varphi}⟩",
-            NAlphaBins, aEdges);
-          if (hm) hm->registerHisto(p_secAlpha_phi_E[iE]);
-        }
+          // φ-view
+          if (!h2_XmeasPhi_vsAlpha_E[iE]) {
+            h2_XmeasPhi_vsAlpha_E[iE] = new TH2F(
+              Form("h2_XmeasPhi_vsAlpha_%s_%s", lab.c_str(), modeTag),
+              Form("Measured X^{meas}_{#varphi} vs #alpha_{#varphi} (%s);#alpha_{#varphi} [rad];X^{meas}_{#varphi}",
+                   (m_binningMode==EBinningMode::kRange ? "E_{slice}" : "E_{centre}")),
+              NAlphaBins, aEdges, NXmeasBins, xMeasEdges);
+            if (hm) hm->registerHisto(h2_XmeasPhi_vsAlpha_E[iE]);
+          }
+          if (!h_alphaPhi_E[iE]) {
+            h_alphaPhi_E[iE] = new TH1F(
+              Form("h_alphaPhi_%s_%s", lab.c_str(), modeTag),
+              "#alpha_{#varphi} distribution;#alpha_{#varphi} [rad];Counts",
+              NAlphaBins, aEdges);
+            if (hm) hm->registerHisto(h_alphaPhi_E[iE]);
+          }
+          // NEW: per-E signed αφ container; take the mean of this TH1F for ⟨αφ⟩ at this E
+          if (!h_alphaPhi_sgn_mean[iE]) {
+            h_alphaPhi_sgn_mean[iE] = new TH1F(
+              Form("h_alphaPhi_sgn_mean_%s_%s", lab.c_str(), modeTag),
+              "signed #alpha_{#varphi};#alpha_{#varphi}^{signed} [rad];Counts",
+              NAlphaBins, aEdges);
+            if (hm) hm->registerHisto(h_alphaPhi_sgn_mean[iE]);
+          }
+          if (!p_secAlpha_phi_E[iE]) {
+            p_secAlpha_phi_E[iE] = new TProfile(
+              Form("p_secAlpha_phi_%s_%s", lab.c_str(), modeTag),
+              "⟨sec #alpha_{#varphi}⟩ vs #alpha_{#varphi};#alpha_{#varphi} [rad];⟨sec #alpha_{#varphi}⟩",
+              NAlphaBins, aEdges);
+            if (hm) hm->registerHisto(p_secAlpha_phi_E[iE]);
+          }
+
 
         // η-view
         if (!h2_XmeasEta_vsAlpha_E[iE]) {
@@ -2602,9 +2613,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  |  iE=" << iE << '\n';
     }
     /* ----------------------------- (1) CLUS-RAW ----------------------------- */
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_RAW);
-    if (vb > 9) std::cout << "[CLUS-RAW] SetPhiTiltVariant → CLUS_RAW\n";
-
     rec[0] = {"CLUS-RAW", xCG,
               cg2GlobalPhi(m_bemcRec, eReco, xCG, yCG)};
     if (vb > 9)
@@ -2615,8 +2623,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     }
 
     /* ----------------------------- (2) CLUS-CP ------------------------------ */
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP);
-    if (vb > 9) std::cout << "[CLUS-CP] SetPhiTiltVariant → CLUS_CP\n";
 
     float xCP = xCG, yCP = yCG;
     if (vb > 9)
@@ -2682,8 +2688,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
 
     /* ------------------------ (2b) CLUS-CP(EA) — five variants ---------------- */
-    // Variant A: EA with |z|-dependent + energy-dependent fits (fitZvtx)
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_ZDEP);
     float xEA_fitZvtx = xCG, yEA_fitZvtx = yCG;
     m_bemcRec->CorrectPositionEnergyAwareZVTXAndEnergyDep(eReco, vtxZ, xCG, yCG,
                                                           xEA_fitZvtx, yEA_fitZvtx);
@@ -2694,8 +2698,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  φ_SD=" << phiEA_fitZvtx
                 << "  Δφ(folded)=" << dphiEA_fitZvtx << '\n';
 
-    // Variant B: EA with |η|-dependent + energy-dependent fits (fitEta)
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_ETADEP);
     float xEA_fitEta = xCG, yEA_fitEta = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEtaAndEnergyDep(eReco, xCG, yCG, xEA_fitEta, yEA_fitEta);
     const float phiEA_fitEta  = cg2GlobalPhi(m_bemcRec, eReco, xEA_fitEta, yEA_fitEta);
@@ -2705,8 +2707,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  φ_SD=" << phiEA_fitEta
                 << "  Δφ(folded)=" << dphiEA_fitEta << '\n';
 
-    // Variant C: EA with energy + incident-angle fits (E+incident)
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_EandIncident);
+
     float xEA_inc = xCG, yEA_inc = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
@@ -2730,9 +2731,11 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
           const float secA  = 1.f / std::max(1e-6f, std::cos(aPhiMag)); // sec is even
 
-          if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
-          if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhiSigned);
-          if (p_secAlpha_phi_E[iE])      p_secAlpha_phi_E[iE]->Fill(aPhiSigned, secA);
+            if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
+            if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhiSigned);
+            // NEW: per-E signed αφ (mean taken offline as h->GetMean())
+            if (h_alphaPhi_sgn_mean[iE])   h_alphaPhi_sgn_mean[iE]->Fill(aPhiSigned);
+            if (p_secAlpha_phi_E[iE])      p_secAlpha_phi_E[iE]->Fill(aPhiSigned, secA);
         }
       }
     }
@@ -2747,8 +2750,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  φ_SD=" << phiEA_EandIncident
                 << "  Δφ(folded)=" << dphiEA_incident << '\n';
 
-    // Variant D: EA with energy-only fits (E-only)
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_EONLY);
+
     float xEA_fitEonly = xCG, yEA_fitEonly = yCG;
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepOnly(eReco, xCG, yCG,
                                                        xEA_fitEonly, yEA_fitEonly);
@@ -2759,8 +2761,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                 << "  φ_SD=" << phiEA_fitEonly
                 << "  Δφ(folded)=" << dphiEA_fitEonly << '\n';
 
-    // Variant E: EA with |z|+|η|+E fits (ZVTX+Eta+E)
-    m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP);
+
     float xEA_fitZvtxEta = xCG, yEA_fitZvtxEta = yCG;
     m_bemcRec->CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(eReco, vtxZ, xCG, yCG,
                                                              xEA_fitZvtxEta, yEA_fitZvtxEta);
@@ -2809,8 +2810,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         std::cout << "[CLUS-BCORR] bPhi ≤ 0 → no corr, locB=xCG=" << locB << '\n';
       }
 
-      m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::CLUS_BCORR);
-      if (vb > 9) std::cout << "[CLUS-BCORR] SetPhiTiltVariant → CLUS_BCORR\n";
 
       rec[2] = {"CLUS-BCORR", locB,
                 cg2GlobalPhi(m_bemcRec, eReco, locB, yCG)};
@@ -2872,8 +2871,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           std::cout << "[PDC-RAW] geom: rFront=" << rFrontBlk
                     << "  zFront=" << zFrontBlk << '\n';
 
-        m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::PDC_RAW);
-        if (vb > 9) std::cout << "[PDC-RAW] SetPhiTiltVariant → PDC_RAW\n";
 
         const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
                                             rFrontBlk , zFrontBlk ,
@@ -2960,8 +2957,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
             std::cout << "[PDC-CORR] geom: rFront=" << rFrontBlk
                       << "  zFront=" << zFrontBlk << '\n';
 
-          m_bemcRec->SetPhiTiltVariant(BEmcRecCEMC::ETiltVariant::PDC_CORR);
-          if (vb > 9) std::cout << "[PDC-CORR] SetPhiTiltVariant → PDC_CORR\n";
 
           const float phiSD = front2ShowerPhi(m_bemcRec, eReco,
                                               rFrontBlk , zFrontBlk ,

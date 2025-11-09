@@ -16,36 +16,36 @@ class BEmcRecCEMC : public BEmcRec
   ~BEmcRecCEMC() override = default;
   void CorrectEnergy(float energy, float x, float y, float &ecorr) override;
   void CorrectECore(float ecore, float x, float y, float &ecorecorr) override;
-    void CorrectPosition(float energy, float x, float y, float &xcorr, float &ycorr) override;
+  void CorrectPosition(float energy, float x, float y, float &xcorr, float &ycorr) override;
 
-    // EA (baseline, already present)
-    void CorrectPositionEnergyAware(float Energy, float x, float y,
+  // EA (baseline, already present)
+  void CorrectPositionEnergyAware(float Energy, float x, float y,
                                     float& xc, float& yc,
                                     float* out_bphi = nullptr,
                                     float* out_beta = nullptr);
     
-    void CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(float Energy, float vtxZ_cm,
+  void CorrectPositionEnergyAwareZVTXEtaAndEnergyDep(float Energy, float vtxZ_cm,
                                                        float x, float y,
                                                        float& xc, float& yc);
 
-    void CorrectPositionEnergyAwareZVTXAndEnergyDep(float Energy, float vtxZ_cm, float x, float y,
+  void CorrectPositionEnergyAwareZVTXAndEnergyDep(float Energy, float vtxZ_cm, float x, float y,
                                                     float& xc, float& yc);
 
-    void CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float x, float y,
+  void CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float x, float y,
                                                    float& xc, float& yc);
 
-    void CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Energy, float x, float y,
+  void CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(float Energy, float x, float y,
                                                              float& xc, float& yc);
     
-    void CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x, float y,
+  void CorrectPositionEnergyAwareEnergyDepOnly(float Energy, float x, float y,
                                                  float& xc, float& yc);
 
-    void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
+  void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
 
 
-    // ---- PUBLIC (add near other getters) ----
-    float lastSignedAlphaPhi() const { return m_lastAlphaPhiSigned; }
-    float lastSignedAlphaEta()  const { return m_lastAlphaEtaSigned; }
+  // ---- PUBLIC (add near other getters) ----
+  float lastSignedAlphaPhi() const { return m_lastAlphaPhiSigned; }
+  float lastSignedAlphaEta()  const { return m_lastAlphaEtaSigned; }
 
 
   void LoadProfile(const std::string &fname) override;
@@ -53,37 +53,30 @@ class BEmcRecCEMC : public BEmcRec
     
   void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
     
-    // ───────── variant–specific φ-tilt handling ─────────
-    enum class ETiltVariant  {
-      CLUS_RAW,
-      CLUS_CP,
+  struct PhiTiltAB { double a{8.654924e-04}; double b{8.490399e-04}; };
 
-      // CLUS-CP(EA) flavours
-      CLUS_CP_EA,                 // backward-compat alias to CLUS_CP
-      CLUS_CP_EA_FIT_ZDEP_ETADEP,
-      CLUS_CP_EA_FIT_ZDEP,        // EA with |z|-dep + E-dep fits
-      CLUS_CP_EA_FIT_ETADEP,      // EA with |η|-dep + E-dep fits
-      CLUS_CP_EA_FIT_EandIncident,       // EA with E-only fits
-      CLUS_CP_EA_FIT_EONLY,             // EA φ(E-only), η(|η|+E)
-
-      CLUS_BCORR,
-      PDC_RAW,
-      PDC_CORR,
-      DEFAULT
-    };
-  /// call once before any Tower2Global / CorrectShowerDepth
-  void SetPhiTiltVariant(ETiltVariant v);
+  // Unified φ(E) API — used by CorrectShowerDepth and ComputeIncidenceSD
+  inline void SetPhiTiltCoeffs(double a, double b) { m_phiTiltAB = {a,b}; }
+  inline void EnablePhiTilt(bool on)               { m_enablePhiTilt = on; }
 
  private:
-    ETiltVariant                   m_tiltVariant {ETiltVariant::DEFAULT};
-    float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
-    float m_lastAlphaEta { std::numeric_limits<float>::quiet_NaN() };
-    std::pair<double,double>       m_abTiltCurrent { 8.654924e-04, 8.490399e-04 };
+  // Single source of truth for φ(E) = a − b ln E  [radians]
+  PhiTiltAB m_phiTiltAB{8.654924e-04, 8.490399e-04}; //
+    
+    
+  bool      m_enablePhiTilt{true};
+  inline double phi_tilt(double E) const {
+      const double e = (E > 0.1) ? static_cast<double>(E) : 0.1;  // same floor as reco
+      return m_enablePhiTilt ? (m_phiTiltAB.a - m_phiTiltAB.b * std::log(e)) : 0.0;
+  }
 
-    // signed caches (keep only one definition of the magnitude caches above)
-    float m_lastAlphaPhiSigned { 0.f };
-    float m_lastAlphaEtaSigned { 0.f };
+  // keep angle caches (unchanged)
+  float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
+  float m_lastAlphaEta { std::numeric_limits<float>::quiet_NaN() };
 
+  // signed caches (unchanged)
+  float m_lastAlphaPhiSigned { 0.f };
+  float m_lastAlphaEtaSigned { 0.f };
   // Average tower angle with respect to the transverse plane for each bin in eta
   // Only used when the detailed RawTowerGeom objects are not available
   double angles[96] = {2.382132067280038,2.3708136440088796,2.355383841518272,2.3434466029558525,2.32455480538339,2.3135158793606005,
@@ -107,6 +100,9 @@ class BEmcRecCEMC : public BEmcRec
 
   double factor_[8] = {-0.07, 0.03, -0.07, 0.20, 0.15, -0.05, 0.00, -0.07}; // Correction factors for the phi bias within a sector of 8 towers (phi direction)
 
+  bool ComputeIncidenceSD(float E, float x, float y,
+                            float& cos_a_phi, float& cos_a_eta,
+                            float& a_phi_sgn, float& a_eta_sgn);
 };
 
 

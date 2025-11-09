@@ -668,6 +668,7 @@ class PositionDependentCorrection : public SubsysReco
     // Per‑E slice, φ‑view: Xφ(meas) vs αφ  and QA spectra/profiles
     TH2F*     h2_XmeasPhi_vsAlpha_E[N_Ebins] {};
     TH1F*     h_alphaPhi_E          [N_Ebins] {};
+    TH1F*    h_alphaPhi_sgn_mean[N_Ebins]{};
     TProfile* p_secAlpha_phi_E      [N_Ebins] {};
 
     // Per‑E slice, η‑view: Xη(meas) vs αη  and QA spectra/profiles
