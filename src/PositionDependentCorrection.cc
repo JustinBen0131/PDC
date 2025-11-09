@@ -407,14 +407,21 @@ void PositionDependentCorrection::bookCommonHistograms
               NAlphaBins, aEdges);
             if (hm) hm->registerHisto(h_alphaPhi_E[iE]);
           }
-          // NEW: per-E signed αφ container; take the mean of this TH1F for ⟨αφ⟩ at this E
-          if (!h_alphaPhi_sgn_mean[iE]) {
-            h_alphaPhi_sgn_mean[iE] = new TH1F(
-              Form("h_alphaPhi_sgn_mean_%s_%s", lab.c_str(), modeTag),
-              "signed #alpha_{#varphi};#alpha_{#varphi}^{signed} [rad];Counts",
+
+          // Δz-folded, |η|-segmented signed αφ per-E  (used for φ(E) calibration)
+          auto mkFold = [&](const char* tag)->TH1F*{
+            auto* h = new TH1F(
+              Form("h_alphaPhi_sgn_mean_fold_%s_%s_%s", tag, lab.c_str(), modeTag),
+              "folded signed #alpha_{#varphi};#alpha_{#varphi}^{fold} [rad];Counts",
               NAlphaBins, aEdges);
-            if (hm) hm->registerHisto(h_alphaPhi_sgn_mean[iE]);
-          }
+            if (hm) hm->registerHisto(h);
+            return h;
+          };
+
+          if (!h_alphaPhi_sgn_mean_fold_core_E[iE]) h_alphaPhi_sgn_mean_fold_core_E[iE] = mkFold("core");
+          if (!h_alphaPhi_sgn_mean_fold_mid_E [iE]) h_alphaPhi_sgn_mean_fold_mid_E [iE] = mkFold("mid");
+          if (!h_alphaPhi_sgn_mean_fold_edge_E[iE]) h_alphaPhi_sgn_mean_fold_edge_E[iE] = mkFold("edge");
+          if (!h_alphaPhi_sgn_mean_fold_full_E[iE]) h_alphaPhi_sgn_mean_fold_full_E[iE] = mkFold("full");
           if (!p_secAlpha_phi_E[iE]) {
             p_secAlpha_phi_E[iE] = new TProfile(
               Form("p_secAlpha_phi_%s_%s", lab.c_str(), modeTag),
@@ -2726,16 +2733,37 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         // Step-4 inputs unchanged
         if (iE >= 0 && iE < N_Ebins)
         {
-          float u_raw  = blkCoord.second;
-          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
-          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
-          const float secA  = 1.f / std::max(1e-6f, std::cos(aPhiMag)); // sec is even
+            float u_raw  = blkCoord.second;
+            float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
+            const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
+            const float secA  = 1.f / std::max(1e-6f, std::cos(aPhiMag)); // sec is even
 
+            // keep existing QA fills unchanged
             if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
             if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhiSigned);
-            // NEW: per-E signed αφ (mean taken offline as h->GetMean())
-            if (h_alphaPhi_sgn_mean[iE])   h_alphaPhi_sgn_mean[iE]->Fill(aPhiSigned);
             if (p_secAlpha_phi_E[iE])      p_secAlpha_phi_E[iE]->Fill(aPhiSigned, secA);
+
+
+            // -------------- φ(E) calibration inputs: wide-|z|, Δz-folded, |η|-segmented --------------
+            const float vzCalibMax = 60.0f;       // use full statistics up to 60 cm
+            if (std::fabs(vtxZ) <= vzCalibMax)
+            {
+              // ring-axis z from the lead tower is adequate for the ring
+              const double z_ring = static_cast<double>(zFront);
+              const double dz     = static_cast<double>(vtxZ) - z_ring;
+              const float  aPhiFold = (dz >= 0.0 ? +1.f : -1.f) * aPhiSigned;
+
+              // fixed |η| strips at shower depth: core (≤0.20), mid (0.20–0.70], edge (0.70–1.10], else full
+              const float absEta = std::fabs(etaSD_forQA);
+              TH1F* hBand = nullptr;
+              if      (absEta <= 0.20f) hBand = h_alphaPhi_sgn_mean_fold_core_E[iE];
+              else if (absEta <= 0.70f) hBand = h_alphaPhi_sgn_mean_fold_mid_E [iE];
+              else if (absEta <= 1.10f) hBand = h_alphaPhi_sgn_mean_fold_edge_E[iE];
+              else                      hBand = h_alphaPhi_sgn_mean_fold_full_E[iE];
+
+              if (hBand) hBand->Fill(aPhiFold);
+            }
+
         }
       }
     }

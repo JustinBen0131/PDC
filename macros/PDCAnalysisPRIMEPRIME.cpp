@@ -1886,44 +1886,103 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
     std::cout << "[incidenceQA] wrote <sec α> profile PNGs in " << outDir << "\n";
   }
 
-  // ================================
-  // (4) 〈αφ〉 vs E (points at bin center)
-  // ================================
+    // ================================
+    // (4) 〈αφ^fold〉 vs E per |η| band  with  φ(E)=a−b·lnE fit
+    // ================================
     {
-      std::vector<double> vx, vy;  // x = E bin center, y = mean of h_alphaPhi_sgn_mean
-      for (int i = 0; i < N_E; ++i)
+      struct Band { const char* base; const char* tag; Color_t col; };
+      // base prefixes must match your booking names:
+      //   h_alphaPhi_sgn_mean_fold_core_%s_%s, _mid_, _edge_
+      std::vector<Band> bands = {
+        {"h_alphaPhi_sgn_mean_fold_core", "core (|#eta|#leq0.20)",  kGreen+2},
+        {"h_alphaPhi_sgn_mean_fold_mid" , "mid  (0.20<|#eta|#leq0.70)", kBlue+1},
+        {"h_alphaPhi_sgn_mean_fold_edge", "edge (0.70<|#eta|#leq1.10)", kRed+1}
+      };
+
+      const double Emin = E_edges[0];
+      const double Emax = E_edges[N_E];
+
+      for (const auto& B : bands)
       {
-        const double eLo = E_edges[i];
-        const double eHi = E_edges[i+1];
-        TH1F* h = findH1("h_alphaPhi_sgn_mean", eLo, eHi);
-        if (!h || h->GetEntries() <= 0) {
-          std::cout << Form("[incidenceQA] mean αφ: missing/empty for %.1f–%.1f GeV\n", eLo, eHi) << "\n";
-          continue;
+        // Gather points (E_center , <alpha_phi^fold>) and mean errors
+        std::vector<double> vx, vy, vey;
+        vx.reserve(N_E); vy.reserve(N_E); vey.reserve(N_E);
+
+        for (int i = 0; i < N_E; ++i)
+        {
+          const double eLo = E_edges[i], eHi = E_edges[i+1];
+          TH1F* h = findH1(B.base, eLo, eHi);            // folded, banded
+          if (!h || h->GetEntries() <= 0) {
+            std::cout << Form("[incidenceQA] %s: missing/empty for %.1f–%.1f GeV\n",
+                              B.base, eLo, eHi) << "\n";
+            continue;
+          }
+          const double eCtr = 0.5*(eLo + eHi);
+          vx.push_back(eCtr);
+          vy.push_back(h->GetMean());                    // 〈αφ^fold〉
+          vey.push_back(h->GetMeanError());              // weight by mean error if available
         }
-        const double eCtr = 0.5*(eLo + eHi);  // x at bin center
-        vx.push_back(eCtr);
-        vy.push_back(h->GetMean());           // mean of signed αφ for this E-slice
-      }
 
-      if (!vx.empty())
-      {
-        TCanvas cMean("c_alphaPhi_mean_vs_E","<alpha_phi> vs E",900,600);
-        cMean.SetLeftMargin(0.12); cMean.SetRightMargin(0.06);
-        cMean.SetBottomMargin(0.12); cMean.SetTopMargin(0.08);
+        if (vx.empty()) continue;
 
-        TGraph gr(static_cast<int>(vx.size()), vx.data(), vy.data());
-        gr.SetTitle("<#alpha_{#varphi}^{signed}> vs E;E_{#gamma} [GeV];<#alpha_{#varphi}^{signed}> [rad]");
-        gr.SetMarkerStyle(20);
-        gr.SetMarkerSize(1.1);
-        gr.SetLineColor(kBlue+1);
-        gr.Draw("AP"); // A: axes, P: points
+        // Canvas & graph (use errors if present)
+        TCanvas c(Form("c_alphaPhi_mean_vs_E_%s", B.tag),
+                  Form("<alpha_phi^{fold}> vs E — %s", B.tag), 900, 600);
+        c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
+        c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
+        c.SetGrid();
 
-        const std::string outPng = outDir + "/alphaPhi_mean_vs_E.png";
-        cMean.SaveAs(outPng.c_str());
+        // choose weighted or unweighted graph depending on non-zero errors
+        bool useErrors = false;
+        for (auto ey : vey) { if (ey > 0) { useErrors = true; break; } }
+
+        std::unique_ptr<TGraph> gr;
+        if (useErrors) {
+          auto* ge = new TGraphErrors((int)vx.size());
+          for (int i=0;i<(int)vx.size();++i) {
+            ge->SetPoint(i, vx[i], vy[i]);
+            ge->SetPointError(i, 0.0, vey[i]);          // x errors = 0
+          }
+          gr.reset(ge);
+        } else {
+          gr.reset(new TGraph((int)vx.size(), vx.data(), vy.data()));
+        }
+
+        gr->SetTitle(Form("<#alpha_{#varphi}^{fold}> vs E — %s;E_{#gamma} [GeV];<#alpha_{#varphi}^{fold}> [rad]", B.tag));
+        gr->SetMarkerStyle(20);
+        gr->SetMarkerSize(1.2);
+        gr->SetLineColor(B.col);
+        gr->SetMarkerColor(B.col);
+        gr->Draw("AP");  // A: axes, P: points  (ROOT drawing basics)  // see manual
+        // (ROOT graphics manual)  // citation in text
+
+        // Fit model: a - b*log(E); fit over [Emin,Emax]
+        TF1 fFit("f_alpha_fold", "[0] - [1]*log(x)", Emin, Emax);   // TF1 expression
+        fFit.SetParameters(0.0, 0.0);                                // initial guesses are fine
+        fFit.SetLineColor(kGray+2); fFit.SetLineStyle(2); fFit.SetLineWidth(3);
+
+        // use quiet fit; for TGraphErrors, y-errors act as weights if present
+        if (useErrors) gr->Fit(&fFit, "Q"); else gr->Fit(&fFit, "Q");
+
+        const double a = fFit.GetParameter(0);
+        const double b = fFit.GetParameter(1);
+        const double ea = fFit.GetParError(0);
+        const double eb = fFit.GetParError(1);
+
+        fFit.Draw("same");
+
+        // Annotate a,b on the plot  (TLatex usage; math text)
+        TLatex tx;
+        tx.SetNDC(true); tx.SetTextSize(0.040);
+        tx.DrawLatex(0.15, 0.88, Form("#font[62]{Fit: } #alpha_{#varphi}^{fold}(E)=a-b\\,\\ln E"));
+        tx.DrawLatex(0.15, 0.82, Form("a = %.4g #pm %.2g", a, ea));
+        tx.DrawLatex(0.15, 0.76, Form("b = %.4g #pm %.2g", b, eb));
+
+        const std::string outPng = outDir + "/" + std::string("alphaPhi_mean_vs_E_")
+                                 + std::string(B.base).substr(std::string("h_alphaPhi_sgn_mean_fold_").size())
+                                 + ".png";
+        c.SaveAs(outPng.c_str());
         std::cout << "[incidenceQA] wrote " << outPng << "\n";
-      }
-      else {
-        std::cout << "[incidenceQA] mean αφ: no valid points → skipped\n";
       }
     }
 }
