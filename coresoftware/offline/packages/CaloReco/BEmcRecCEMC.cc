@@ -493,6 +493,33 @@ float BEmcRecCEMC::GetProb(vector<EmcModule> HitList, float et, float xg, float 
 */
 
 
+void BEmcRecCEMC::SetPhiTiltVariant(ETiltVariant v)
+{
+  // (a,b) in radians for φ(E) = a − b·lnE.  If you later calibrate EA flavours,
+  // update the four CLUS_CP_EA_* entries below.
+  static const std::unordered_map<ETiltVariant,std::pair<double,double>> lut = {
+      {ETiltVariant::CLUS_RAW, { 2.450797e-03, 8.010320e-04 }},  // no corr, cluster
+      {ETiltVariant::CLUS_CP, { 1.738836e-03, 7.853763e-04 }},  // CorrectPosition, cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP, { 1.886333e-03, 8.111119e-04 }},  // CorrectPosition(EA |z|+|#eta|+E), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 1.880064e-03, 8.097306e-04 }},  // CorrectPosition(EA |z|+E), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 1.886620e-03, 8.119962e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_EandIncident, { 1.956265e-03, 8.082764e-04 }},  // CorrectPosition(EA E-only + incident-angle), cluster
+      {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 1.879850e-03, 8.095643e-04 }},  // CorrectPosition(EA E-only), cluster
+      {ETiltVariant::CLUS_BCORR, { 1.924901e-03, 8.042676e-04 }},  // b(E) corr, cluster
+      {ETiltVariant::PDC_RAW, { 2.542701e-03, 8.062445e-04 }},  // no corr, scratch
+      {ETiltVariant::PDC_CORR, { 2.085638e-03, 8.286254e-04 }},  // b(E) corr, scratch
+
+      {ETiltVariant::DEFAULT,               { 8.654924e-04, 8.490399e-04}}   // legacy numbers
+  };
+
+  auto it = lut.find(v);
+  m_abTiltCurrent = (it != lut.end()) ? it->second : lut.at(ETiltVariant::DEFAULT);
+  m_tiltVariant   = v;
+}
+
+
+
+
 
 void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA, float zA, float& xC, float& yC, float& zC)
 {
@@ -500,15 +527,41 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
   yC = yA;
   zC = zA;
 
-  // unified azimuthal tilt: φ(E) = a − b ln E   (same function used by incidence)
-  const double phi = phi_tilt(E);
-  const double  c  = std::cos(phi);
-  const double  s  = std::sin(phi);
-  xC = xA * c - yA * s;
-  yC = xA * s + yA * c;
+  float logE = log(0.1);
+  if (E > 0.1)
+  {
+    logE = std::log(E);
+  }
 
-  // keep logE for L(E) below
-  const float logE = (E > 0.1f) ? std::log(E) : std::log(0.1f);
+  /* -------------------------------------------------------------- *
+    *  Azimuthal-tilt correction  (2025-06-25 calibration)
+    *  Internal toggle: set doPhiTilt=false to skip rotation
+    *
+    *        φ(E) =  a  –  b · ln E      with  E in GeV
+    *
+    * -------------------------------------------------------------- */
+    bool doPhiTilt = false; // <<< set to false internally to disable
+    if (doPhiTilt)
+    {
+        /* variant–dependent tilt constants (set via SetPhiTiltVariant) */
+        const double aTilt = m_abTiltCurrent.first;   // rad
+        const double bTilt = m_abTiltCurrent.second;  // rad
+
+        const double phi = aTilt - bTilt * static_cast<double>(logE);  // use logE already defined
+        const double  c  = std::cos(phi);
+        const double  s  = std::sin(phi);
+
+        /* rotate the uncorrected impact point (xA, yA) */
+        xC = xA * c - yA * s;
+        yC = xA * s + yA * c;
+    }
+    else
+    {
+        // skip tilt correction entirely
+        xC = xA;
+        yC = yA;
+  }
+  /* -------------------------------------------------------------- */
 
   // Correction in z
   float rA = std::sqrt((xA * xA) + (yA * yA));
@@ -539,7 +592,8 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
   {
     L = -1.79968 + 0.837322 * logE;
   }
-  float dz = L * std::sin(theta_tr - theta_twr) / std::cos(theta_twr);
+    float dz = L * std::sin(theta_tr - theta_twr) / std::cos(theta_twr);
+
 
   if (!m_UseDetailedGeometry)
   {
@@ -550,7 +604,11 @@ void BEmcRecCEMC::CorrectShowerDepth(int ix, int iy, float E, float xA, float yA
   }
 
   zC = zA - dz;
-
+//    std::cout << "[CSD] depth shift: zA=" << zA << "  ->  zC=" << zC << "\n";
+//    if (!std::isfinite(phi) || !std::isfinite(xC) || !std::isfinite(yC) || !std::isfinite(zC)) {
+//      std::cout << "[CSD][WARN] non-finite output (phi/xC/yC/zC)\n";
+//    }
+    
   // zvtx-dependent pseudorapidity-correction
   // At large zvtx (> 20 cm), the sawtooth shape of the EMCal is no longer projective wrt collision point,
   // it introduces a bias which can be approximately corrected with the linear formula below
@@ -954,68 +1012,132 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 
 
 
+
+
+
+// -----------------------------------------------------------------------------
+// Incidence at the FRONT FACE (energy–independent by construction)
+//
+// Computes the signed azimuthal and polar(η) incidence angles using ONLY the
+// detailed front–face geometry of the owning tower. No shower–depth transport
+// is involved, so ⟨αφ⟩ is flat vs E and αη is governed only by viewing geometry.
+// -----------------------------------------------------------------------------
+// Returns: true  → all outputs are finite
+//          false → geometry missing or a numerical failure
 bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
                                      float& cos_a_phi, float& cos_a_eta,
                                      float& a_phi_sgn, float& a_eta_sgn)
 {
+  (void)E;  // Front-face incidence does not depend on energy
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 1) Locate the owner tower (indices in "tower units")
+  // ────────────────────────────────────────────────────────────────────────────
   const int ix = EmcCluster::lowint(x + 0.5f);
   const int iy = EmcCluster::lowint(y + 0.5f);
 
   TowerGeom g{};
-  if (!GetTowerGeometry(ix, iy, g)) return false;  // detailed per-tower geom
+  if (!GetTowerGeometry(ix, iy, g)) return false; // need detailed geometry
 
-  // ---- Front face point F from detailed face basis (no seam) ----
-  const float dx = x - ix, dy = y - iy;
-  TVector3 F(g.Xcenter + dx*g.dX[0] + dy*g.dX[1],
-             g.Ycenter + dx*g.dY[0] + dy*g.dY[1],
-             g.Zcenter + dx*g.dZ[0] + dy*g.dZ[1]);
+  // Sub-cell fractional offsets in the local tower cell, δ ∈ (−0.5, +0.5]
+  const float dx = x - ix;
+  const float dy = y - iy;
 
-  // SD hit & ray (use SAME SD mapping as reco)
-  float Hx=0,Hy=0,Hz=0;
-  CorrectShowerDepth(ix, iy, E, F.X(), F.Y(), F.Z(), Hx, Hy, Hz);      // mirrors reco path
-  TVector3 H(Hx,Hy,Hz), V(0.,0.,fVz), p = (H - V).Unit();
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 2) FRONT-FACE point F in cm:
+  //         F = C + δx * eφ(face) + δy * eη(face)
+  //         (dX[], dY[], dZ[] are one-pitch tangents from detailed geometry)
+  // ────────────────────────────────────────────────────────────────────────────
+  const TVector3 ephi_face(g.dX[0], g.dY[0], g.dZ[0]);
+  const TVector3 eeta_face(g.dX[1], g.dY[1], g.dZ[1]);
+  if (ephi_face.Mag() < 1e-9 || eeta_face.Mag() < 1e-9) return false;
 
-  // ---- SD Jacobian J: rotation by φ(E) and z-shift (L(E), θ_tr, θ_twr) ----
-  const double phi = phi_tilt(E);  const double c = std::cos(phi), s = std::sin(phi);
-  const double r = std::hypot(F.X(), F.Y()), u = F.Z() - fVz, D = std::max(1e-12, r*r + u*u);
+  const TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
+  const TVector3 F = C + dx * ephi_face + dy * eeta_face;
 
-  double theta_twr = m_UseDetailedGeometry ? (M_PI/2 + g.rotX) : (M_PI/2 - angles[iy]); // tower tilt
-  const double theta_tr = std::atan2(u, std::max(1e-12, r));
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 3) Unit ray from the vertex to the FRONT FACE (energy-independent)
+  //         p̂_F = (F − V) / ||F − V||
+  // ────────────────────────────────────────────────────────────────────────────
+  const TVector3 V(0., 0., fVz);
+  TVector3 pF = F - V;
+  const double pFmag = pF.Mag();
+  if (!(pFmag > 0.0)) return false;
+  pF *= (1.0 / pFmag);
 
-  const double logE = std::log(std::max(0.1f, E));
-  const double L = m_UseDetailedGeometry ? (-2.67787 + 0.924138*logE)
-                                         : (-1.79968 + 0.837322*logE);
-  const double K = (L * std::cos(theta_tr - theta_twr)) / std::cos(theta_twr);
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 4) Orthonormal face frame { uφ , uη , un }, seam-safe:
+  //   • un: outward normal from the true face (no event-by-event flips)
+  //   • uφ: global cylinder φ̂ at *F* (zhat × rhat(F)), then match sign to eφ(face)
+  //   • uη: un × uφ, then match sign to eη(face)  (no "+z" pin)
+  // ────────────────────────────────────────────────────────────────────────────
+  TVector3 n_face = ephi_face.Cross(eeta_face);
+  const double nmag = n_face.Mag();
+  if (!(nmag > 0.0)) return false;
+  n_face *= (1.0 / nmag);
 
-  const double dzdx = (r>1e-12) ? K * (u*F.X())/(r*D) : 0.0;
-  const double dzdy = (r>1e-12) ? K * (u*F.Y())/(r*D) : 0.0;
-  const double dzdz = 1.0 - K * (r/D);
+  // Outward normal (away from IP): choose sign by n · C
+  if (n_face.Dot(C) < 0.0) n_face = -n_face;
+  const TVector3 un = n_face;
 
-    auto push_to_SD = [&](const TVector3& ef)->TVector3 {
-      const double ex = ef.X(), ey = ef.Y(), ez = ef.Z();
-      return TVector3(c*ex - s*ey, s*ex + c*ey, dzdx*ex + dzdy*ey + dzdz*ez);
-    };
-    
-  TVector3 ephi  = push_to_SD(TVector3(g.dX[0], g.dY[0], g.dZ[0]));
-  TVector3 eeta  = push_to_SD(TVector3(g.dX[1], g.dY[1], g.dZ[1]));
+    // Build the face frame *from local tangents*, orthonormalized to n̂.
+    // φ̂ follows the detailed face φ‑pitch; η̂ follows the detailed face η‑pitch.
+    const TVector3 zhat(0., 0., 1.);  // keep for completeness
 
-  // ---- SD orthonormal frame ----
-  TVector3 uphi = ephi.Unit();
-  TVector3 nd   = (uphi.Cross(eeta)).Unit();    // SD normal
-  if (nd.Dot(p) < 0) nd = -nd;                  // face the ray
-  TVector3 ueta = (nd.Cross(uphi)).Unit();
+    // Start from local φ tangent and strictly remove any tiny normal component
+    TVector3 uphi = ephi_face;
+    uphi -= un * uphi.Dot(un);
+    double uphim = uphi.Mag();
+    if (!(uphim > 0.0)) return false;
+    uphi *= (1.0 / uphim);
 
-  // ---- Signed incidence (single-line definition) ----
-  a_phi_sgn = std::atan2(p.Dot(uphi), p.Dot(nd));
-  a_eta_sgn = std::atan2(p.Dot(ueta), p.Dot(nd));
+    // Start from local η tangent; orthogonalize to {n̂, φ̂} and normalize
+    TVector3 ueta = eeta_face;
+    ueta -= un   * ueta.Dot(un);
+    ueta -= uphi * ueta.Dot(uphi);
+    double uetam = ueta.Mag();
+    if (!(uetam > 0.0)) return false;
+    ueta *= (1.0 / uetam);
 
-  const double pn   = std::abs(p.Dot(nd));
-  const double pph  = std::abs(p.Dot(uphi));
-  const double pet  = std::abs(p.Dot(ueta));
-  cos_a_phi = std::clamp(pn / std::sqrt(pn*pn + pph*pph), 1e-6, 1.0);
-  cos_a_eta = std::clamp(pn / std::sqrt(pn*pn + pet*pet), 1e-6, 1.0);
-  return std::isfinite(cos_a_phi) && std::isfinite(cos_a_eta);
+    // Ensure a right‑handed triad (n̂ × φ̂ → +η̂)
+    if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
+
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 5) Signed incidence angles and foreshortening cosines
+  //         Projections on the frame and atan2 with the normal component.
+  //         • α^sgn_φ = sgn(pph) * atan2(|pph|, |pn|)
+  //         • α^sgn_η = sgn(pet) * atan2(|pet|, |pn|)
+  //         • cosα_φ  = |pn| / sqrt( pn^2 + pph^2 )
+  //         • cosα_η  = |pn| / sqrt( pn^2 + pet^2 )
+  // ────────────────────────────────────────────────────────────────────────────
+  const double pn   = pF.Dot(un);    // can be ±
+  const double pph  = pF.Dot(uphi);
+  const double pet  = pF.Dot(ueta);
+
+  const double apn      = std::max(1e-12, std::fabs(pn));
+  const double aphi_mag = std::atan2(std::fabs(pph), apn);
+  const double aeta_mag = std::atan2(std::fabs(pet), apn);
+
+  const double sgn_phi = (pph >= 0.0) ? +1.0 : -1.0;
+  const double sgn_eta = (pet >= 0.0) ? +1.0 : -1.0;
+
+  a_phi_sgn = static_cast<float>(sgn_phi * aphi_mag);
+  a_eta_sgn = static_cast<float>(sgn_eta * aeta_mag);
+
+  // Foreshortening cosines (use |pn| so they are always (0,1])
+  cos_a_phi = static_cast<float>(std::clamp(apn / std::sqrt(apn*apn + pph*pph), 1.0e-6, 1.0));
+  cos_a_eta = static_cast<float>(std::clamp(apn / std::sqrt(apn*apn + pet*pet), 1.0e-6, 1.0));
+
+  // Cache for QA accessors (consistent with class API)
+  m_lastAlphaPhiSigned = a_phi_sgn;
+  m_lastAlphaEtaSigned = a_eta_sgn;
+
+  const bool ok = (std::isfinite(cos_a_phi) && std::isfinite(cos_a_eta) &&
+                   std::isfinite(a_phi_sgn) && std::isfinite(a_eta_sgn));
+  return ok;
 }
+
 
 
 void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(

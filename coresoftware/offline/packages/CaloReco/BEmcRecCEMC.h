@@ -53,30 +53,88 @@ class BEmcRecCEMC : public BEmcRec
     
   void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
     
-  struct PhiTiltAB { double a{8.654924e-04}; double b{8.490399e-04}; };
+    struct PhiTiltAB { double a{8.654924e-04}; double b{8.490399e-04}; };
 
-  // Unified φ(E) API — used by CorrectShowerDepth and ComputeIncidenceSD
-  inline void SetPhiTiltCoeffs(double a, double b) { m_phiTiltAB = {a,b}; }
-  inline void EnablePhiTilt(bool on)               { m_enablePhiTilt = on; }
+    // Unified φ(E) API — used by CorrectShowerDepth and ComputeIncidenceSD
+    inline void SetPhiTiltCoeffs(double a, double b) {  // backward-compat: set all three to same
+      m_phiTiltAB_core = {a,b}; m_phiTiltAB_mid = {a,b}; m_phiTiltAB_edge = {a,b};
+    }
+    inline void SetPhiTiltCoeffsByEta(double a_core,double b_core,
+                                      double a_mid ,double b_mid ,
+                                      double a_edge,double b_edge) {
+      m_phiTiltAB_core = {a_core,b_core};
+      m_phiTiltAB_mid  = {a_mid ,b_mid };
+      m_phiTiltAB_edge = {a_edge,b_edge};
+    }
+    inline void EnablePhiTilt(bool on) { m_enablePhiTilt = on; }
 
- private:
-  // Single source of truth for φ(E) = a − b ln E  [radians]
-  PhiTiltAB m_phiTiltAB{8.654924e-04, 8.490399e-04}; //
-    
-    
-  bool      m_enablePhiTilt{true};
-  inline double phi_tilt(double E) const {
-      const double e = (E > 0.1) ? static_cast<double>(E) : 0.1;  // same floor as reco
-      return m_enablePhiTilt ? (m_phiTiltAB.a - m_phiTiltAB.b * std::log(e)) : 0.0;
-  }
+    // ---------- NEW: constant φ offsets (rad) per |η| band ----------
+    inline void SetPhiTiltOffsets(double phi0_all) {
+      m_phi0_core = m_phi0_mid = m_phi0_edge = phi0_all;
+    }
+    inline void SetPhiTiltOffsetsByEta(double phi0_core, double phi0_mid, double phi0_edge) {
+      m_phi0_core = phi0_core; m_phi0_mid = phi0_mid; m_phi0_edge = phi0_edge;
+    }
 
-  // keep angle caches (unchanged)
-  float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
-  float m_lastAlphaEta { std::numeric_limits<float>::quiet_NaN() };
+   private:
+    // Per-|η| band coefficients for 〈αφ^fold〉(E) = a − b ln E  [radians]
+    // |η| ≤ 0.20       → core
+    // 0.20 < |η| ≤ 0.70 → mid
+    // 0.70 < |η| ≤ 1.10 → edge
+    PhiTiltAB m_phiTiltAB_core{ 0.14940,  -0.000238 };
+    PhiTiltAB m_phiTiltAB_mid { 0.15177,  -0.000401 };
+    PhiTiltAB m_phiTiltAB_edge{ 0.15244,  -0.000877 };
 
-  // signed caches (unchanged)
-  float m_lastAlphaPhiSigned { 0.f };
-  float m_lastAlphaEtaSigned { 0.f };
+    bool m_enablePhiTilt{true};
+
+    // NEW: constant φ-offsets (rad) per |η| band (defaults = 0)
+    double m_phi0_core{0.0};
+    double m_phi0_mid {0.0};
+    double m_phi0_edge{0.0};
+
+    // Band selector:  core (|η|≤0.20), mid (0.20<|η|≤0.70), edge (0.70<|η|≤1.10)
+    inline const PhiTiltAB& phi_ab_for_absEta(double absEta) const {
+      if (!std::isfinite(absEta)) return m_phiTiltAB_mid;      // conservative default
+      if (absEta <= 0.20) return m_phiTiltAB_core;
+      if (absEta <= 0.70) return m_phiTiltAB_mid;
+      return m_phiTiltAB_edge;
+    }
+    inline double phi0_for_absEta(double absEta) const {
+      if (!std::isfinite(absEta)) return m_phi0_mid;      // conservative default
+      if (absEta <= 0.20) return m_phi0_core;
+      if (absEta <= 0.70) return m_phi0_mid;
+      return m_phi0_edge;
+    }
+
+    // φ(E) pre-rotation built directly from the measured drift.
+    // Fit convention on the canvas: ⟨αφ^fold⟩(E) = a − b ln E  [rad],
+    // with b < 0 in all three |η| bands. To cancel that drift we rotate by
+    // φ(E) = φ0(|η|) + b ln(E/E0), where φ0 removes the constant offset.
+    // Note: we intentionally do *not* derive the slope from (B_depth/R)*tan(a) here.
+    // φ(E) pre-rotation from your *measured* drift:
+    //  <αφ^fold>(E) = a - b ln E  ⇒  pre-rotate by  φ(E) = φ0(|η|) + b ln(E/E0).
+    inline double phi_tilt(double E, double absEta, double /*Rcm*/) const {
+      if (!m_enablePhiTilt) return 0.0;
+
+      const auto& ab    = phi_ab_for_absEta(absEta);   // {a, b} from your fit (rad, rad/lnGeV)
+      const double phi0 = phi0_for_absEta(absEta);     // constant offset (rad), one per |η| band
+      const double e    = (E > 0.1) ? static_cast<double>(E) : 0.1;
+      constexpr double E0_ref = 3.0;                   // pivot used on your plots
+
+      double phi = phi0 + ab.b * std::log(e / E0_ref); // small (mrad) rotation
+      if (phi >  0.01) phi =  0.01;
+      if (phi < -0.01) phi = -0.01;
+      return phi;
+    }
+
+    // keep angle caches
+    float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
+    float m_lastAlphaEta { std::numeric_limits<float>::quiet_NaN() };
+
+    // signed caches: initialize to NaN so missing incidence does not masquerade as α=0
+    float m_lastAlphaPhiSigned { std::numeric_limits<float>::quiet_NaN() };
+    float m_lastAlphaEtaSigned { std::numeric_limits<float>::quiet_NaN() };
+
   // Average tower angle with respect to the transverse plane for each bin in eta
   // Only used when the detailed RawTowerGeom objects are not available
   double angles[96] = {2.382132067280038,2.3708136440088796,2.355383841518272,2.3434466029558525,2.32455480538339,2.3135158793606005,

@@ -1572,17 +1572,25 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
     prof->GetXaxis()->SetTitle("z_{vtx}  (cm)");
     prof->GetYaxis()->SetTitle("#LT#alpha^{signed}#GT  [rad]");
 
-    auto accum_eta = [&](int ix, int ylo, int yhi, double& sw, double& sm)
-    {
-      for (int iy = ylo; iy <= yhi; ++iy)
-        for (int ia = 1; ia <= axA->GetNbins(); ++ia)
+      auto accum_eta = [&](int ix, int ylo, int yhi, double& sw, double& sm)
+      {
+        for (int iy = ylo; iy <= yhi; ++iy)
         {
-          const double w = h3->GetBinContent(ix, iy, ia);
-          if (w <= 0) continue;
-          const double a = axA->GetBinCenter(ia); // signed
-          sw += w; sm += w * a;
+          for (int ia = 0; ia <= axA->GetNbins() + 1; ++ia)  // include UF(0) and OF(N+1)
+          {
+            const double w = h3->GetBinContent(ix, iy, ia);
+            if (w <= 0) continue;
+
+            int ia_use = ia;
+            if (ia_use == 0) ia_use = 1;
+            if (ia_use == axA->GetNbins() + 1) ia_use = axA->GetNbins();
+
+            const double a = axA->GetBinCenter(ia_use); // signed proxy for UF/OF
+            sw += w; sm += w * a;
+          }
         }
-    };
+      };
+
 
     // indices for η ranges
     const int yPosLo = std::max(1, axEta->FindFixBin(+etaLoAbs));
@@ -1657,37 +1665,34 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       c.SaveAs(pngPath.c_str());
     };
 
-  // produce per-folder / per-zcap overlays
-  for (const auto& f : folders)
-  {
-    const std::string folderPath = outDir + "/" + f.name;
-    gSystem->mkdir(folderPath.c_str(), true);
-
-    for (int cap : zCaps)
+    // produce per-folder / per-zcap overlays (unchanged behavior)
+    for (const auto& f : folders)
     {
-      const std::string capDir = folderPath + Form("/z_0_%d", cap);
-      gSystem->mkdir(capDir.c_str(), true);
+      const std::string folderPath = outDir + "/" + f.name;
+      gSystem->mkdir(folderPath.c_str(), true);
 
-      std::unique_ptr<TProfile> pPhi, pEta;
-      if (h3Phi) pPhi = makeProfileVsZ(h3Phi.get(),
-                                       Form("pPhi_%s_cap%d", f.name.c_str(), cap),
-                                       f.band->lo, f.band->hi, f.sign, cap);
-      if (h3Eta) pEta = makeProfileVsZ(h3Eta.get(),
-                                       Form("pEta_%s_cap%d", f.name.c_str(), cap),
-                                       f.band->lo, f.band->hi, f.sign, cap);
+      for (int cap : zCaps)
+      {
+        const std::string capDir = folderPath + Form("/z_0_%d", cap);
+        gSystem->mkdir(capDir.c_str(), true);
+
+        std::unique_ptr<TProfile> pPhi, pEta;
+        if (h3Phi) pPhi = makeProfileVsZ(h3Phi.get(),
+                                         Form("pPhi_%s_cap%d", f.name.c_str(), cap),
+                                         f.band->lo, f.band->hi, f.sign, cap);
+        if (h3Eta) pEta = makeProfileVsZ(h3Eta.get(),
+                                         Form("pEta_%s_cap%d", f.name.c_str(), cap),
+                                         f.band->lo, f.band->hi, f.sign, cap);
 
         // Build the η-title fragment exactly as requested: +η, −η, or |η|, and include the |z| cap
         std::string etaTitle;
         if (f.sign == FolderRecipe::Sign::Pos) {
-          // positive η:  η ∈ [lo, hi]
           etaTitle = Form("+#eta#in[%.2f, %.2f],  |z_{vtx}|<%d cm",
                           f.band->lo, f.band->hi, cap);
         } else if (f.sign == FolderRecipe::Sign::Neg) {
-          // negative η:  η ∈ [−hi, −lo]
           etaTitle = Form("-#eta#in[%.2f, %.2f],  |z_{vtx}|<%d cm",
                           -f.band->hi, -f.band->lo, cap);
         } else {
-          // absolute:  |η| ∈ [lo, hi]
           etaTitle = Form("|#eta|#in[%.2f, %.2f],  |z_{vtx}|<%d cm",
                           f.band->lo, f.band->hi, cap);
         }
@@ -1695,8 +1700,112 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
         const std::string outPng = capDir + "/alphaPhiEtaOverlay.png";
         drawOverlay(pPhi.get(), pEta.get(), outPng, cap, etaTitle.c_str());
         std::cout << "[incidenceQA] wrote " << outPng << "\n";
+      }
     }
-  }
+
+    // ---------------------------------------------------------------------------
+    // NEW: for each band, create a 1×2 canvas (left: −η, right: +η) overlaying
+    //      <alpha_phi>(z) and <alpha_eta>(z) for the same |η| band and |z| cap.
+    //      Output path:  <outDir>/eta<BAND>Absolute/z_0_<cap>/alphaPhiEtaOverlay_posneg.png
+    // ---------------------------------------------------------------------------
+
+    // helper: 1×2 drawer (shared y-range across both pads)
+    auto drawOverlayPosNeg = [&](TProfile* pPhiPos, TProfile* pEtaPos,
+                                 TProfile* pPhiNeg, TProfile* pEtaNeg,
+                                 const std::string& pngPath, int zCap,
+                                 const BandSpec* band)
+    {
+      if (!pPhiPos && !pEtaPos && !pPhiNeg && !pEtaNeg) return;
+
+      // y-range across all provided profiles
+      double yMin = +1e9, yMax = -1e9;
+      auto upd = [&](TProfile* p){
+        if (!p) return;
+        for (int i=1;i<=p->GetNbinsX();++i) {
+          if (p->GetBinEntries(i) <= 0) continue;
+          const double y = p->GetBinContent(i);
+          yMin = std::min(yMin, y);
+          yMax = std::max(yMax, y);
+        }
+      };
+      upd(pPhiPos); upd(pEtaPos); upd(pPhiNeg); upd(pEtaNeg);
+      if (!(yMin < yMax)) { yMin = -0.02; yMax = +0.02; }
+      const double span = (yMax - yMin);
+      yMin -= 0.06 * span;
+      yMax += 0.22 * span;
+
+      TCanvas c("c_alpha_posneg", "alpha overlays: -eta vs +eta", 1600, 630);
+      c.Divide(2,1);
+      for (int ipad=1; ipad<=2; ++ipad) {
+        c.cd(ipad);
+        gPad->SetLeftMargin(0.12); gPad->SetRightMargin(0.06);
+        gPad->SetBottomMargin(0.12); gPad->SetTopMargin(0.08);
+
+        const bool isPos = (ipad==2);
+        const char* signTit = isPos
+          ? Form("+#eta#in[%.2f, %.2f],  |z_{vtx}|<%d cm", band->lo, band->hi, zCap)
+          : Form("-#eta#in[%.2f, %.2f],  |z_{vtx}|<%d cm", -band->hi, -band->lo, zCap);
+
+        TH2F frame(isPos ? "fr_pos":"fr_neg",
+                   Form("%s;z_{vtx} (cm) (|z|<%d);#LT#alpha^{signed}#GT [rad]", signTit, zCap),
+                   100, -zCap, +zCap, 100, yMin, yMax);
+        frame.SetStats(0); frame.Draw();
+
+        TLegend lg(0.66,0.80,0.90,0.89);
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.038);
+
+        TProfile* pPhi = isPos ? pPhiPos : pPhiNeg;
+        TProfile* pEta = isPos ? pEtaPos : pEtaNeg;
+
+        if (pPhi) { pPhi->SetLineColor(kBlue+1); pPhi->SetLineWidth(3); pPhi->SetMarkerStyle(0); pPhi->Draw("hist same"); lg.AddEntry(pPhi, "#LT#alpha_{#varphi}#GT(z)","l"); }
+        if (pEta) { pEta->SetLineColor(kRed +1); pEta->SetLineWidth(3); pEta->SetMarkerStyle(0); pEta->Draw("hist same"); lg.AddEntry(pEta, "#LT#alpha_{#eta}#GT(z)","l"); }
+        lg.Draw();
+      }
+      c.SaveAs(pngPath.c_str());
+    };
+
+    // bands to produce the 1×2 outputs for (Core/Mid/Edge/Full)
+    struct AbsOut { const char* absFolder; const BandSpec* band; };
+    std::vector<AbsOut> absTargets = {
+      {"etaCoreAbsolute", &bandCore},
+      {"etaMidAbsolute",  &bandMid },
+      {"etaEdgeAbsolute", &bandEdge},
+      {"etaFullAbsolute", &bandFull}
+    };
+
+    for (const auto& tgt : absTargets)
+    {
+      for (int cap : zCaps)
+      {
+        const std::string capDir = outDir + "/" + tgt.absFolder + Form("/z_0_%d", cap);
+        gSystem->mkdir(capDir.c_str(), true);
+
+        std::unique_ptr<TProfile> pPhiPos, pEtaPos, pPhiNeg, pEtaNeg;
+
+        if (h3Phi) {
+          pPhiPos = makeProfileVsZ(h3Phi.get(),
+                                   Form("pPhi_%s_pos_cap%d", tgt.absFolder, cap),
+                                   tgt.band->lo, tgt.band->hi, FolderRecipe::Sign::Pos, cap);
+          pPhiNeg = makeProfileVsZ(h3Phi.get(),
+                                   Form("pPhi_%s_neg_cap%d", tgt.absFolder, cap),
+                                   tgt.band->lo, tgt.band->hi, FolderRecipe::Sign::Neg, cap);
+        }
+        if (h3Eta) {
+          pEtaPos = makeProfileVsZ(h3Eta.get(),
+                                   Form("pEta_%s_pos_cap%d", tgt.absFolder, cap),
+                                   tgt.band->lo, tgt.band->hi, FolderRecipe::Sign::Pos, cap);
+          pEtaNeg = makeProfileVsZ(h3Eta.get(),
+                                   Form("pEta_%s_neg_cap%d", tgt.absFolder, cap),
+                                   tgt.band->lo, tgt.band->hi, FolderRecipe::Sign::Neg, cap);
+        }
+
+        const std::string outPng2 = capDir + "/alphaPhiEtaOverlay_posneg.png";
+        drawOverlayPosNeg(pPhiPos.get(), pEtaPos.get(),
+                          pPhiNeg.get(), pEtaNeg.get(),
+                          outPng2, cap, tgt.band);
+        std::cout << "[incidenceQA] wrote " << outPng2 << "\n";
+      }
+    }
 
     // base overlays: ABSOLUTE-|η| bands (Core/Mid/Edge) for each view; match eta*Absolute/
     auto makeAbsBandProfile = [&](TH3F* h3, const BandSpec& bs)->std::unique_ptr<TProfile>
@@ -1759,6 +1868,185 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       std::cout << "[incidenceQA] wrote " << outPng << "\n";
     }
     
+    // alphaPhi_EtaOverlay.png — absolute-|η| bands to match eta*Absolute/
+    // Cumulative labels and extra top headroom
+    {
+      std::unique_ptr<TProfile> pCore, pMid, pEdge;
+      if (h3Phi) {
+        pCore = makeAbsBandProfile(h3Phi.get(), bandCore);
+        pMid  = makeAbsBandProfile(h3Phi.get(), bandMid );
+        pEdge = makeAbsBandProfile(h3Phi.get(), bandEdge);
+      }
+
+      // y autoscale with bigger top padding
+      double yMin=+1e9, yMax=-1e9;
+      auto upd = [&](TProfile* p){
+        if (!p) return;
+        for (int i=1;i<=p->GetNbinsX();++i) {
+          if (p->GetBinEntries(i)>0) {
+            const double y=p->GetBinContent(i);
+            yMin=std::min(yMin,y); yMax=std::max(yMax,y);
+          }
+        }
+      };
+      upd(pCore.get()); upd(pMid.get()); upd(pEdge.get());
+      if (!(yMin<yMax)) { yMin=-0.02; yMax=+0.02; }
+      const double span = (yMax-yMin>0? yMax-yMin : 0.20);
+      const double padLow  = 0.04*span;
+      const double padHigh = 0.30*span;
+      yMin -= padLow;
+      yMax += padHigh;
+
+      TCanvas c("c_phiBands_abs","alphaPhi |eta|-bands",900,600);
+      c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
+      c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
+
+      TH2F frame("framePhi","|#eta| bands;z_{vtx} (cm)  (|z|<60);#LT#alpha_{#varphi}^{signed}#GT [rad]",
+                 100, zRangeMin, zRangeMax, 100, yMin, yMax);
+      frame.SetStats(0); frame.Draw();
+
+      if (pCore) { pCore->SetLineColor(bandCore.col); pCore->SetLineWidth(3); pCore->Draw("hist same"); }
+      if (pMid ) { pMid ->SetLineColor(bandMid .col); pMid ->SetLineWidth(3); pMid ->Draw("hist same"); }
+      if (pEdge) { pEdge->SetLineColor(bandEdge.col); pEdge->SetLineWidth(3); pEdge->Draw("hist same"); }
+
+      TLegend lg(0.60,0.70,0.92,0.90);
+      lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.038);
+      if (pCore) lg.AddEntry(pCore.get(), "|#eta| #leq 0.20", "l");
+      if (pMid ) lg.AddEntry(pMid .get(), "|#eta| #leq 0.70", "l");
+      if (pEdge) lg.AddEntry(pEdge.get(), "|#eta| #leq 1.10", "l");
+      lg.Draw();
+
+      const std::string outPng = outDir + "/alphaPhi_EtaOverlay.png";
+      c.SaveAs(outPng.c_str());
+      std::cout << "[incidenceQA] wrote " << outPng << "\n";
+    }
+
+    // ===== NEW: <alpha>(η) with three |z| caps overlaid (η on x-axis) =====
+    // Build profile ⟨α⟩(η) integrating over |z|<cap; signed α carried on Z.
+    auto makeProfileVsEta = [&](TH3F* h3, const char* name, int zCap)->std::unique_ptr<TProfile>
+    {
+      if (!h3) return nullptr;
+
+      auto* axZ   = h3->GetXaxis();  // z
+      auto* axEta = h3->GetYaxis();  // η
+      auto* axA   = h3->GetZaxis();  // α^{signed}
+
+      const int xlo = std::max(1, axZ->FindFixBin(-zCap));
+      const int xhi = std::min(axZ->GetNbins(), axZ->FindFixBin(+zCap));
+
+      auto prof = std::make_unique<TProfile>(name, "",
+                                             axEta->GetNbins(),
+                                             axEta->GetXmin(), axEta->GetXmax());
+      prof->GetXaxis()->SetTitle("#eta_{SD}");
+      prof->GetYaxis()->SetTitle("#LT#alpha^{signed}#GT  [rad]");
+
+      for (int iy = 1; iy <= axEta->GetNbins(); ++iy)
+      {
+        double sumw = 0.0, sum = 0.0;
+        for (int ix = xlo; ix <= xhi; ++ix)
+        {
+          // include α under/overflow defensively
+          for (int ia = 0; ia <= axA->GetNbins() + 1; ++ia)
+          {
+            const double w = h3->GetBinContent(ix, iy, ia);
+            if (w <= 0.0) continue;
+
+            int ia_use = ia;
+            if (ia_use == 0) ia_use = 1;
+            if (ia_use == axA->GetNbins() + 1) ia_use = axA->GetNbins();
+
+            const double a = axA->GetBinCenter(ia_use);
+            sumw += w; sum += w * a;
+          }
+        }
+        if (sumw > 0.0) prof->Fill(axEta->GetBinCenter(iy), sum / sumw, sumw);
+      }
+      return prof;
+    };
+
+    // Draw helper for three-cap overlays on η-axis
+    auto drawEtaXOverlay = [&](TProfile* p10, TProfile* p30, TProfile* p60,
+                               const std::string& pngPath,
+                               const char* title)
+    {
+      if (!p10 && !p30 && !p60) return;
+
+      // y autoscale
+      double yMin = +1e9, yMax = -1e9;
+      auto upd = [&](TProfile* p){
+        if (!p) return;
+        for (int i=1;i<=p->GetNbinsX();++i) {
+          if (p->GetBinEntries(i) <= 0) continue;
+          const double y = p->GetBinContent(i);
+          yMin = std::min(yMin, y);
+          yMax = std::max(yMax, y);
+        }
+      };
+      upd(p10); upd(p30); upd(p60);
+      if (!(yMin < yMax)) { yMin = -0.02; yMax = +0.02; }
+      const double span = (yMax - yMin);
+      const double padLow  = 0.06 * span;
+      const double padHigh = 0.22 * span;
+      yMin -= padLow; yMax += padHigh;
+
+      // pick x-range from any available profile
+      double xMin = -1.2, xMax = +1.2;
+      if      (p10) { xMin = p10->GetXaxis()->GetXmin(); xMax = p10->GetXaxis()->GetXmax(); }
+      else if (p30) { xMin = p30->GetXaxis()->GetXmin(); xMax = p30->GetXaxis()->GetXmax(); }
+      else if (p60) { xMin = p60->GetXaxis()->GetXmin(); xMax = p60->GetXaxis()->GetXmax(); }
+
+      TCanvas c("c_etaX_overlay", "alpha vs eta — z caps", 900, 600);
+      c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
+      c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
+
+      TH2F frame("frame_etaX",
+                 Form("%s;#eta_{SD};#LT#alpha^{signed}#GT [rad]", title),
+                 100, xMin, xMax, 100, yMin, yMax);
+      frame.SetStats(0); frame.Draw();
+
+      if (p10) { p10->SetLineColor(kGreen+2); p10->SetLineWidth(3); p10->SetMarkerStyle(0); p10->Draw("hist same"); }
+      if (p30) { p30->SetLineColor(kBlue +1); p30->SetLineWidth(3); p30->SetMarkerStyle(0); p30->Draw("hist same"); }
+      if (p60) { p60->SetLineColor(kRed  +1); p60->SetLineWidth(3); p60->SetMarkerStyle(0); p60->Draw("hist same"); }
+
+      TLegend lg(0.60,0.75,0.92,0.90);
+      lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.038);
+      if (p10) lg.AddEntry(p10, "|z_{vtx}| #leq 10", "l");
+      if (p30) lg.AddEntry(p30, "|z_{vtx}| #leq 30", "l");
+      if (p60) lg.AddEntry(p60, "|z_{vtx}| #leq 60", "l");
+      lg.Draw();
+
+      c.SaveAs(pngPath.c_str());
+    };
+
+    // Produce the η-on-x overlays for both views
+    {
+      const std::string outPngEta = outDir + "/alphaEta_vsEta_zCaps.png";
+      const std::string outPngPhi = outDir + "/alphaPhi_vsEta_zCaps.png";
+
+      std::unique_ptr<TProfile> pEta10, pEta30, pEta60;
+      std::unique_ptr<TProfile> pPhi10, pPhi30, pPhi60;
+
+      if (h3Eta) {
+        pEta10 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_cap10", 10);
+        pEta30 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_cap30", 30);
+        pEta60 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_cap60", 60);
+        drawEtaXOverlay(pEta10.get(), pEta30.get(), pEta60.get(),
+                        outPngEta.c_str(),
+                        "#LT#alpha_{#eta}^{signed}#GT vs #eta_{SD}");
+        std::cout << "[incidenceQA] wrote " << outPngEta << "\n";
+      }
+
+      if (h3Phi) {
+        pPhi10 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_cap10", 10);
+        pPhi30 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_cap30", 30);
+        pPhi60 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_cap60", 60);
+        drawEtaXOverlay(pPhi10.get(), pPhi30.get(), pPhi60.get(),
+                        outPngPhi.c_str(),
+                        "#LT#alpha_{#varphi}^{signed}#GT vs #eta_{SD}");
+        std::cout << "[incidenceQA] wrote " << outPngPhi << "\n";
+      }
+    }
+
     // alphaPhi_EtaOverlay.png — absolute-|η| bands to match eta*Absolute/
     // Cumulative labels and extra top headroom
     {
@@ -1887,20 +2175,27 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
   }
 
     // ================================
-    // (4) 〈αφ^fold〉 vs E per |η| band  with  φ(E)=a−b·lnE fit
+    // (4) 〈αφ^fold〉 vs E per |η| band with φ(E)=a−b·lnE fit
+    //     + an overlay PNG of the three bands
     // ================================
     {
-      struct Band { const char* base; const char* tag; Color_t col; };
+      struct Band { const char* base; const char* tag; const char* key; Color_t col; };
       // base prefixes must match your booking names:
       //   h_alphaPhi_sgn_mean_fold_core_%s_%s, _mid_, _edge_
       std::vector<Band> bands = {
-        {"h_alphaPhi_sgn_mean_fold_core", "core (|#eta|#leq0.20)",  kGreen+2},
-        {"h_alphaPhi_sgn_mean_fold_mid" , "mid  (0.20<|#eta|#leq0.70)", kBlue+1},
-        {"h_alphaPhi_sgn_mean_fold_edge", "edge (0.70<|#eta|#leq1.10)", kRed+1}
+        {"h_alphaPhi_sgn_mean_fold_core", "core (|#eta|#leq0.20)",    "core", kGreen+2},
+        {"h_alphaPhi_sgn_mean_fold_mid" , "mid  (0.20<|#eta|#leq0.70)","mid" , kBlue+1 },
+        {"h_alphaPhi_sgn_mean_fold_edge", "edge (0.70<|#eta|#leq1.10)","edge", kRed+1 }
       };
 
       const double Emin = E_edges[0];
       const double Emax = E_edges[N_E];
+
+      // For the final overlay
+      std::vector<std::unique_ptr<TGraph> > graphs_all;
+      std::vector<std::pair<double,double>> ab_all; // (a,b)
+      std::vector<Color_t>                  col_all;
+      double yMinAll = +1e9, yMaxAll = -1e9;
 
       for (const auto& B : bands)
       {
@@ -1911,7 +2206,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
         for (int i = 0; i < N_E; ++i)
         {
           const double eLo = E_edges[i], eHi = E_edges[i+1];
-          TH1F* h = findH1(B.base, eLo, eHi);            // folded, banded
+          TH1F* h = findH1(B.base, eLo, eHi);  // folded, banded
           if (!h || h->GetEntries() <= 0) {
             std::cout << Form("[incidenceQA] %s: missing/empty for %.1f–%.1f GeV\n",
                               B.base, eLo, eHi) << "\n";
@@ -1919,29 +2214,31 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
           }
           const double eCtr = 0.5*(eLo + eHi);
           vx.push_back(eCtr);
-          vy.push_back(h->GetMean());                    // 〈αφ^fold〉
-          vey.push_back(h->GetMeanError());              // weight by mean error if available
+          const double m  = h->GetMean();
+          const double me = h->GetMeanError();
+          vy.push_back(m);
+          vey.push_back(me);
+          yMinAll = std::min(yMinAll, m);
+          yMaxAll = std::max(yMaxAll, m);
         }
 
         if (vx.empty()) continue;
 
-        // Canvas & graph (use errors if present)
-        TCanvas c(Form("c_alphaPhi_mean_vs_E_%s", B.tag),
-                  Form("<alpha_phi^{fold}> vs E — %s", B.tag), 900, 600);
+        // Canvas & graph (no grid lines)
+        TCanvas c(Form("c_alphaPhi_mean_vs_E_%s", B.key),
+                  Form("<#alpha_{#varphi}^{fold}> vs E — %s", B.tag), 900, 600);
         c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
         c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
-        c.SetGrid();
 
-        // choose weighted or unweighted graph depending on non-zero errors
-        bool useErrors = false;
-        for (auto ey : vey) { if (ey > 0) { useErrors = true; break; } }
+        // Use errors if nonzero
+        bool useErrors = false; for (auto ey : vey) if (ey>0) { useErrors = true; break; }
 
         std::unique_ptr<TGraph> gr;
         if (useErrors) {
           auto* ge = new TGraphErrors((int)vx.size());
           for (int i=0;i<(int)vx.size();++i) {
             ge->SetPoint(i, vx[i], vy[i]);
-            ge->SetPointError(i, 0.0, vey[i]);          // x errors = 0
+            ge->SetPointError(i, 0.0, vey[i]);      // x errors = 0
           }
           gr.reset(ge);
         } else {
@@ -1953,38 +2250,89 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
         gr->SetMarkerSize(1.2);
         gr->SetLineColor(B.col);
         gr->SetMarkerColor(B.col);
-        gr->Draw("AP");  // A: axes, P: points  (ROOT drawing basics)  // see manual
-        // (ROOT graphics manual)  // citation in text
+        gr->Draw("AP");  // A: axes, P: points
 
         // Fit model: a - b*log(E); fit over [Emin,Emax]
-        TF1 fFit("f_alpha_fold", "[0] - [1]*log(x)", Emin, Emax);   // TF1 expression
-        fFit.SetParameters(0.0, 0.0);                                // initial guesses are fine
+        TF1 fFit("f_alpha_fold", "[0] - [1]*log(x)", Emin, Emax);
+        fFit.SetParameters(0.0, 0.0);
         fFit.SetLineColor(kGray+2); fFit.SetLineStyle(2); fFit.SetLineWidth(3);
-
-        // use quiet fit; for TGraphErrors, y-errors act as weights if present
         if (useErrors) gr->Fit(&fFit, "Q"); else gr->Fit(&fFit, "Q");
 
-        const double a = fFit.GetParameter(0);
-        const double b = fFit.GetParameter(1);
+        const double a  = fFit.GetParameter(0);
+        const double b  = fFit.GetParameter(1);
         const double ea = fFit.GetParError(0);
         const double eb = fFit.GetParError(1);
-
         fFit.Draw("same");
 
-        // Annotate a,b on the plot  (TLatex usage; math text)
+        // Annotate a,b (smaller text) in upper-left to avoid clutter
         TLatex tx;
-        tx.SetNDC(true); tx.SetTextSize(0.040);
-        tx.DrawLatex(0.15, 0.88, Form("#font[62]{Fit: } #alpha_{#varphi}^{fold}(E)=a-b\\,\\ln E"));
-        tx.DrawLatex(0.15, 0.82, Form("a = %.4g #pm %.2g", a, ea));
-        tx.DrawLatex(0.15, 0.76, Form("b = %.4g #pm %.2g", b, eb));
+        tx.SetNDC(true); tx.SetTextSize(0.038);
+        tx.DrawLatex(0.14, 0.88, "#font[62]{Fit: } #alpha_{#varphi}^{fold}(E)=a-b\\,\\ln E");
+        tx.DrawLatex(0.14, 0.82, Form("a = %.5f #pm %.2g", a, ea));
+        tx.DrawLatex(0.14, 0.77, Form("b = %.6f #pm %.2g", b, eb));
 
-        const std::string outPng = outDir + "/" + std::string("alphaPhi_mean_vs_E_")
-                                 + std::string(B.base).substr(std::string("h_alphaPhi_sgn_mean_fold_").size())
-                                 + ".png";
+        const std::string outPng = outDir + "/alphaPhi_mean_vs_E_" + std::string(B.key) + ".png";
         c.SaveAs(outPng.c_str());
         std::cout << "[incidenceQA] wrote " << outPng << "\n";
+
+        // Store for overlay
+        graphs_all.emplace_back(std::move(gr));
+        ab_all.emplace_back(a,b);
+        col_all.emplace_back(B.col);
       }
-    }
+
+      // -------- Overlay of the three bands --------
+      if (!graphs_all.empty())
+      {
+        // Compute y range with some padding
+        if (!(yMinAll < yMaxAll)) { yMinAll = -0.02; yMaxAll = +0.02; }
+        const double span = (yMaxAll - yMinAll);
+        const double padL = 0.08*span, padU = 0.18*span;
+        yMinAll -= padL; yMaxAll += padU;
+
+        TCanvas cAll("c_alphaPhi_mean_vs_E_overlay",
+                     "<#alpha_{#varphi}^{fold}> vs E — core/mid/edge", 950, 650);
+        cAll.SetLeftMargin(0.12); cAll.SetRightMargin(0.06);
+        cAll.SetBottomMargin(0.12); cAll.SetTopMargin(0.08);
+
+        // Draw an empty frame (no grid) and then all points + fits
+        TH2F frame("frame_overlay",
+                   ";E_{#gamma} [GeV];<#alpha_{#varphi}^{fold}> [rad]",
+                   100, Emin, Emax, 100, yMinAll, yMaxAll);
+        frame.SetStats(0);
+        frame.Draw();
+
+        // Draw each graph and a matching TF1 with the fitted a,b
+        for (size_t i=0;i<graphs_all.size();++i) {
+          auto& g = graphs_all[i];
+          g->SetMarkerStyle(20);
+          g->SetMarkerSize(1.2);
+          g->SetLineColor(col_all[i]);
+          g->SetMarkerColor(col_all[i]);
+          g->Draw("P same");
+
+          TF1 fBand(Form("fBand_%zu", i), "[0]-[1]*log(x)", Emin, Emax);
+          fBand.SetParameters(ab_all[i].first, ab_all[i].second);
+          fBand.SetLineColor(col_all[i]); fBand.SetLineStyle(2); fBand.SetLineWidth(3);
+          fBand.Draw("same");
+        }
+
+        // Print a,b for each band in lower-right, colored by band
+        const double x0 = 0.45, y0 = 0.28, dy = 0.06;  // NDC positions
+        TLatex t; t.SetNDC(true); t.SetTextSize(0.034);
+        const char* lab[3] = {"|#eta| #leq 0.20", "0.20 < |#eta| #leq 0.70", "0.70 < |#eta| #leq 1.10"};
+        for (size_t i=0;i<ab_all.size() && i<3; ++i) {
+          t.SetTextColor(col_all[i]);
+          t.DrawLatex(x0, y0 + (double)i*dy,
+                      Form("%s:  a = %.5f,  b = %.6f",
+                           lab[i], ab_all[i].first, ab_all[i].second));
+        }
+
+        const std::string outPngAll = outDir + "/alphaPhi_mean_vs_E_overlay.png";
+        cAll.SaveAs(outPngAll.c_str());
+        std::cout << "[incidenceQA] wrote " << outPngAll << "\n";
+      }
+   }
 }
 
 
@@ -4500,7 +4848,7 @@ void PDCAnalysisPRIMEPRIME()
   gStyle->SetOptStat(0);
 
   // --- paths
-  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL_noPhiTilt.root";
+  const std::string inFilePath = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/PositionDep_sim_ALL.root";
   const std::string outBaseDir = "/Users/patsfan753/Desktop/PositionDependentCorrection/SINGLE_PHOTON_MC/z_lessThen_10/SimOutputPrimeNoPhiTilt";
 
   EnsureDir(outBaseDir);

@@ -348,19 +348,14 @@ void PositionDependentCorrection::bookCommonHistograms
       }
     }
     
-    // ------------------------------------------------------------------
-    // Global QA (REPLACED): signed incidence vs z_vtx AND η_SD  → TH3F
-    // axes: x = z_vtx (cm), y = η_SD (shower depth), z = α_signed (rad)
-    // ------------------------------------------------------------------
-    m_bemcRec->EnablePhiTilt(false);
-    
+
     if (!h3_alphaPhi_vsVz_vsEta)
     {
         h3_alphaPhi_vsVz_vsEta = new TH3F("h3_alphaPhi_vsVz_vsEta",
             "#alpha_{#varphi}^{signed} vs z_{vtx} and #eta_{SD};z_{vtx} (cm);#eta_{SD};#alpha_{#varphi} [rad]",
             200, -100, 100,     // z bins
-             96,  -1.2,  1.2,   // η bins (use your CEMC row coverage)
-            NAlphaBins, AlphaMin, AlphaMax);
+             96,  -1.2,  1.2,   // η bins
+            2*NAlphaBins, -AlphaMax, +AlphaMax);
         if (hm) hm->registerHisto(h3_alphaPhi_vsVz_vsEta);
     }
     if (!h3_alphaEta_vsVz_vsEta)
@@ -369,7 +364,7 @@ void PositionDependentCorrection::bookCommonHistograms
             "#alpha_{#eta}^{signed} vs z_{vtx} and #eta_{SD};z_{vtx} (cm);#eta_{SD};#alpha_{#eta} [rad]",
             200, -100, 100,
              96,  -1.2,  1.2,
-            NAlphaBins, AlphaMin, AlphaMax);
+            2*NAlphaBins, -AlphaMax, +AlphaMax);
         if (hm) hm->registerHisto(h3_alphaEta_vsVz_vsEta);
     }
 
@@ -2720,53 +2715,100 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                                                                    xEA_inc, yEA_inc);
     {
       const float aPhiSigned = m_bemcRec->lastSignedAlphaPhi();
-      const float aPhiMag    = std::fabs(m_bemcRec->lastSignedAlphaPhi());
+      const float aPhiAbs    = std::fabs(aPhiSigned);
 
       // η at shower depth for QA (use CP anchor; xCP/yCP already set earlier)
       const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
 
       if (std::isfinite(aPhiSigned) && std::isfinite(etaSD_forQA))
       {
-        // TH3: (z_vtx, η_SD, α_signed)
-        if (h3_alphaPhi_vsVz_vsEta) h3_alphaPhi_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aPhiSigned);
+        // TH3 (signed α stays signed here)
+        if (h3_alphaPhi_vsVz_vsEta)
+          h3_alphaPhi_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aPhiSigned);
+        if (vb > 0)
+          std::cout << "[INC-FILL φ] TH3  z=" << vtxZ
+                    << "  etaSD=" << etaSD_forQA
+                    << "  a_phi=" << aPhiSigned << "\n";
 
-        // Step-4 inputs unchanged
+        // Per-E fills use |α| on X (avoid underflow on [0,0.30] axis)
         if (iE >= 0 && iE < N_Ebins)
         {
-            float u_raw  = blkCoord.second;
-            float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
-            const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
-            const float secA  = 1.f / std::max(1e-6f, std::cos(aPhiMag)); // sec is even
+          // compute X^{meas} in the same way you already do
+          float u_raw  = blkCoord.second;
+          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
+          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
 
-            // keep existing QA fills unchanged
-            if (h2_XmeasPhi_vsAlpha_E[iE]) h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
-            if (h_alphaPhi_E[iE])          h_alphaPhi_E[iE]->Fill(aPhiSigned);
-            if (p_secAlpha_phi_E[iE])      p_secAlpha_phi_E[iE]->Fill(aPhiSigned, secA);
+          // sec is even in α, so sec(|α|) = sec(α)
+          const float secA = 1.f / std::max(1e-6f, std::cos(aPhiAbs));
 
+          // verbose “before/after” bin prints
+          if (h2_XmeasPhi_vsAlpha_E[iE]) {
+            auto* ax = h2_XmeasPhi_vsAlpha_E[iE]->GetXaxis();
+            auto* ay = h2_XmeasPhi_vsAlpha_E[iE]->GetYaxis();
+            const int ibx = ax->FindFixBin(aPhiAbs);
+            const int iby = ay->FindFixBin(Xmeas);
+            const double before = h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiAbs, Xmeas);
+            const double after  = h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            if (vb > 0)
+              std::cout << "[INC-FILL φ] h2_XmeasPhi_vsAlpha_E["<<iE<<"]  a="<<aPhiAbs
+                        << "  Xmeas="<<Xmeas<<"  bin=("<<ibx<<","<<iby<<")"
+                        << "  before="<<before<<"  after="<<after<<"\n";
+          }
 
-            // -------------- φ(E) calibration inputs: wide-|z|, Δz-folded, |η|-segmented --------------
-            const float vzCalibMax = 60.0f;       // use full statistics up to 60 cm
-            if (std::fabs(vtxZ) <= vzCalibMax)
-            {
-              // ring-axis z from the lead tower is adequate for the ring
-              const double z_ring = static_cast<double>(zFront);
-              const double dz     = static_cast<double>(vtxZ) - z_ring;
-              const float  aPhiFold = (dz >= 0.0 ? +1.f : -1.f) * aPhiSigned;
+          if (h_alphaPhi_E[iE]) {
+            auto* ax = h_alphaPhi_E[iE]->GetXaxis();
+            const int ibx = ax->FindFixBin(aPhiAbs);
+            const double before = h_alphaPhi_E[iE]->GetBinContent(ibx);
+            h_alphaPhi_E[iE]->Fill(aPhiAbs);
+            const double after  = h_alphaPhi_E[iE]->GetBinContent(ibx);
+            if (vb > 0)
+              std::cout << "[INC-FILL φ] h_alphaPhi_E["<<iE<<"]  a="<<aPhiAbs
+                        << "  bin="<<ibx<<"  before="<<before<<"  after="<<after<<"\n";
+          }
 
-              // fixed |η| strips at shower depth: core (≤0.20), mid (0.20–0.70], edge (0.70–1.10], else full
-              const float absEta = std::fabs(etaSD_forQA);
-              TH1F* hBand = nullptr;
-              if      (absEta <= 0.20f) hBand = h_alphaPhi_sgn_mean_fold_core_E[iE];
-              else if (absEta <= 0.70f) hBand = h_alphaPhi_sgn_mean_fold_mid_E [iE];
-              else if (absEta <= 1.10f) hBand = h_alphaPhi_sgn_mean_fold_edge_E[iE];
-              else                      hBand = h_alphaPhi_sgn_mean_fold_full_E[iE];
+          if (p_secAlpha_phi_E[iE]) {
+            auto* ax = p_secAlpha_phi_E[iE]->GetXaxis();
+            const int ibx = ax->FindFixBin(aPhiAbs);
+            const double before = p_secAlpha_phi_E[iE]->GetBinContent(ibx);
+            p_secAlpha_phi_E[iE]->Fill(aPhiAbs, secA);
+            const double after  = p_secAlpha_phi_E[iE]->GetBinContent(ibx);
+            if (vb > 0)
+              std::cout << "[INC-FILL φ] p_secAlpha_phi_E["<<iE<<"]  a="<<aPhiAbs
+                        << "  sec(a)="<<secA<<"  bin="<<ibx
+                        << "  mean(before)="<<before<<"  mean(after)="<<after<<"\n";
+          }
 
-              if (hBand) hBand->Fill(aPhiFold);
+          // -------------- φ(E) “folded” input --------------
+          // Axis is [0,0.30] → use magnitude
+          const float aPhiFold = aPhiAbs;
+
+          if (std::fabs(vtxZ) <= 60.f)
+          {
+            const float absEta = std::fabs(etaSD_forQA);
+            TH1F* hBand = nullptr;
+            if      (absEta <= 0.20f) hBand = h_alphaPhi_sgn_mean_fold_core_E[iE];
+            else if (absEta <= 0.70f) hBand = h_alphaPhi_sgn_mean_fold_mid_E [iE];
+            else if (absEta <= 1.10f) hBand = h_alphaPhi_sgn_mean_fold_edge_E[iE];
+            else                      hBand = h_alphaPhi_sgn_mean_fold_full_E[iE];
+
+            if (hBand) {
+              auto* ax = hBand->GetXaxis();
+              const int ibx = ax->FindFixBin(aPhiFold);
+              const double before = hBand->GetBinContent(ibx);
+              hBand->Fill(aPhiFold);
+              const double after  = hBand->GetBinContent(ibx);
+              if (vb > 0)
+                std::cout << "[INC-FILL φ] h_alphaPhi_fold("
+                          << (absEta<=0.20f?"core":(absEta<=0.70f?"mid":(absEta<=1.10f?"edge":"full")))
+                          << ")["<<iE<<"]  a_fold="<<aPhiFold
+                          << "  bin="<<ibx<<"  before="<<before<<"  after="<<after<<"\n";
             }
-
+          }
         }
       }
     }
+
 
 
 
@@ -3358,37 +3400,74 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                           << "  η_SD=" << etaEA_fitEta
                           << "  Δη=" << dEtaEA_fitEta << '\n';
 
-    // Variant C: EA with energy + incident-angle fits (E+incident)
     float xEA_inc = xCG, yEA_inc = yCG;
-            m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
-                                                                             xEA_inc, yEA_inc);
+    m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
+                                                                   xEA_inc, yEA_inc);
     {
       const float aEtaSigned = m_bemcRec->lastSignedAlphaEta();
-      const float aEtaMag    = std::fabs(m_bemcRec->lastSignedAlphaEta());
+      const float aEtaAbs    = std::fabs(aEtaSigned);
 
       // η at shower depth for QA (use CP anchor)
       const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
 
       if (std::isfinite(aEtaSigned) && std::isfinite(etaSD_forQA))
       {
-        // TH3: (z_vtx, η_SD, α_signed)
-        if (h3_alphaEta_vsVz_vsEta) h3_alphaEta_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aEtaSigned);
+        // TH3 (signed α stays signed here)
+        if (h3_alphaEta_vsVz_vsEta)
+          h3_alphaEta_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aEtaSigned);
+        if (vb > 0)
+          std::cout << "[INC-FILL η] TH3  z=" << vtxZ
+                    << "  etaSD=" << etaSD_forQA
+                    << "  a_eta=" << aEtaSigned << "\n";
 
-        // Step-4 inputs unchanged
+        // Per-E fills use |α| on X
         if (iE >= 0 && iE < N_Ebins)
         {
           float u_raw  = blkCoord.first;
           float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
-          const float secA  = 1.f / std::max(1e-6f, std::cos(aEtaMag)); // sec is even
 
-          if (h2_XmeasEta_vsAlpha_E[iE]) h2_XmeasEta_vsAlpha_E[iE]->Fill(aEtaSigned, Xmeas);
-          if (h_alphaEta_E[iE])          h_alphaEta_E[iE]->Fill(aEtaSigned);
-          if (p_secAlpha_eta_E[iE])      p_secAlpha_eta_E[iE]->Fill(aEtaSigned, secA);
+          const float secA  = 1.f / std::max(1e-6f, std::cos(aEtaAbs));
+
+          if (h2_XmeasEta_vsAlpha_E[iE]) {
+            auto* ax = h2_XmeasEta_vsAlpha_E[iE]->GetXaxis();
+            auto* ay = h2_XmeasEta_vsAlpha_E[iE]->GetYaxis();
+            const int ibx = ax->FindFixBin(aEtaAbs);
+            const int iby = ay->FindFixBin(Xmeas);
+            const double before = h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            h2_XmeasEta_vsAlpha_E[iE]->Fill(aEtaAbs, Xmeas);
+            const double after  = h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            if (vb > 0)
+              std::cout << "[INC-FILL η] h2_XmeasEta_vsAlpha_E["<<iE<<"]  a="<<aEtaAbs
+                        << "  Xmeas="<<Xmeas<<"  bin=("<<ibx<<","<<iby<<")"
+                        << "  before="<<before<<"  after="<<after<<"\n";
+          }
+
+          if (h_alphaEta_E[iE]) {
+            auto* ax = h_alphaEta_E[iE]->GetXaxis();
+            const int ibx = ax->FindFixBin(aEtaAbs);
+            const double before = h_alphaEta_E[iE]->GetBinContent(ibx);
+            h_alphaEta_E[iE]->Fill(aEtaAbs);
+            const double after  = h_alphaEta_E[iE]->GetBinContent(ibx);
+            if (vb > 0)
+              std::cout << "[INC-FILL η] h_alphaEta_E["<<iE<<"]  a="<<aEtaAbs
+                        << "  bin="<<ibx<<"  before="<<before<<"  after="<<after<<"\n";
+          }
+
+          if (p_secAlpha_eta_E[iE]) {
+            auto* ax = p_secAlpha_eta_E[iE]->GetXaxis();
+            const int ibx = ax->FindFixBin(aEtaAbs);
+            const double before = p_secAlpha_eta_E[iE]->GetBinContent(ibx);
+            p_secAlpha_eta_E[iE]->Fill(aEtaAbs, secA);
+            const double after  = p_secAlpha_eta_E[iE]->GetBinContent(ibx);
+            if (vb > 0)
+              std::cout << "[INC-FILL η] p_secAlpha_eta_E["<<iE<<"]  a="<<aEtaAbs
+                        << "  sec(a)="<<secA<<"  bin="<<ibx
+                        << "  mean(before)="<<before<<"  mean(after)="<<after<<"\n";
+          }
         }
       }
     }
-
 
 
     const float etaEA_EandIncident  = cg2ShowerEta(m_bemcRec, eReco, xEA_inc, yEA_inc, vtxZ);
@@ -4522,79 +4601,79 @@ void PositionDependentCorrection::finalClusterLoop(
 
     /* 4) find energy slice ........................................... */
     const int iEbin = getEnergySlice( clusE );
-      
-      {
-            const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
-            float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-            float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-            float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-            float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-            float t_mean_v2 = std::numeric_limits<float>::quiet_NaN();
-            if (c2) {
-                x_raw_v2 = c2->x_tower_raw();
-                y_raw_v2 = c2->y_tower_raw();
-                x_cor_v2 = c2->x_tower_corr();
-                y_cor_v2 = c2->y_tower_corr();
-                t_mean_v2 = c2->mean_time(); // NEW: energy-weighted mean time
-            }
-            
-            // recompute CoG (raw) for a sanity check
-            float x_cog = std::numeric_limits<float>::quiet_NaN();
-            float y_cog = std::numeric_limits<float>::quiet_NaN();
-            bool  got_cog = false;
-            if (m_bemcRec && m_geometry)
-            {
-                std::vector<EmcModule> hitlist;
-                hitlist.reserve(std::distance(clus1->get_towers().first, clus1->get_towers().second));
-                const int Nx = m_bemcRec->GetNx();
-                
-                auto range = clus1->get_towers();
-                for (auto it = range.first; it != range.second; ++it)
-                {
-                    const auto tg = m_geometry->get_tower_geometry(it->first);
-                    if (!tg) continue;
-                    EmcModule m;
-                    m.ich = tg->get_bineta() * Nx + tg->get_binphi();
-                    m.amp = static_cast<float>(it->second);
-                    m.tof = 0.0f;
-                    hitlist.push_back(m);
-                }
-                if (!hitlist.empty())
-                {
-                    float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
-                    m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
-                    if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
-                }
-            }
-            
-            // reuse your existing histos to track v2 − recalc
-            if (c2 && got_cog)
-            {
-                if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_v2 - x_cog);
-                if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_v2 - y_cog);
-            }
-            
-            if (m_print_first_N_clusters-- > 0)
-            {
-                std::cout << ANSI_BOLD << ANSI_GREEN
-                << "[V2] clusID=" << clus1->get_id()
-                << "  E=" << clusE << " GeV"
-                << ANSI_RESET << "\n";
-                std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
-                << (c2 ? "[OK]" : "[MISSING]") << "\n";
-                if (got_cog)
-                    std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
-                if (c2 && got_cog)
-                    std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
-                    << (y_raw_v2 - y_cog) << ")\n";
-                std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
-                << (c2 ? "[OK]" : "[MISSING]") << "\n";
-                
-                // NEW: print EW-mean time; mark NaN clearly so you know if timing existed
-                std::cout << "  t_mean(v2): " << t_mean_v2 << "  "
-                          << ((c2 && !(std::isnan(t_mean_v2))) ? "[OK]" : "[MISSING/NaN]") << "\n";
-            }
-        }
+//      
+//      {
+//            const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
+//            float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+//            float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
+//            float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+//            float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
+//            float t_mean_v2 = std::numeric_limits<float>::quiet_NaN();
+//            if (c2) {
+//                x_raw_v2 = c2->x_tower_raw();
+//                y_raw_v2 = c2->y_tower_raw();
+//                x_cor_v2 = c2->x_tower_corr();
+//                y_cor_v2 = c2->y_tower_corr();
+//                t_mean_v2 = c2->mean_time(); // NEW: energy-weighted mean time
+//            }
+//            
+//            // recompute CoG (raw) for a sanity check
+//            float x_cog = std::numeric_limits<float>::quiet_NaN();
+//            float y_cog = std::numeric_limits<float>::quiet_NaN();
+//            bool  got_cog = false;
+//            if (m_bemcRec && m_geometry)
+//            {
+//                std::vector<EmcModule> hitlist;
+//                hitlist.reserve(std::distance(clus1->get_towers().first, clus1->get_towers().second));
+//                const int Nx = m_bemcRec->GetNx();
+//                
+//                auto range = clus1->get_towers();
+//                for (auto it = range.first; it != range.second; ++it)
+//                {
+//                    const auto tg = m_geometry->get_tower_geometry(it->first);
+//                    if (!tg) continue;
+//                    EmcModule m;
+//                    m.ich = tg->get_bineta() * Nx + tg->get_binphi();
+//                    m.amp = static_cast<float>(it->second);
+//                    m.tof = 0.0f;
+//                    hitlist.push_back(m);
+//                }
+//                if (!hitlist.empty())
+//                {
+//                    float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
+//                    m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
+//                    if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
+//                }
+//            }
+//            
+//            // reuse your existing histos to track v2 − recalc
+//            if (c2 && got_cog)
+//            {
+//                if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_v2 - x_cog);
+//                if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_v2 - y_cog);
+//            }
+//            
+//            if (m_print_first_N_clusters-- > 0)
+//            {
+//                std::cout << ANSI_BOLD << ANSI_GREEN
+//                << "[V2] clusID=" << clus1->get_id()
+//                << "  E=" << clusE << " GeV"
+//                << ANSI_RESET << "\n";
+//                std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
+//                << (c2 ? "[OK]" : "[MISSING]") << "\n";
+//                if (got_cog)
+//                    std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
+//                if (c2 && got_cog)
+//                    std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
+//                    << (y_raw_v2 - y_cog) << ")\n";
+//                std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
+//                << (c2 ? "[OK]" : "[MISSING]") << "\n";
+//                
+//                // NEW: print EW-mean time; mark NaN clearly so you know if timing existed
+//                std::cout << "  t_mean(v2): " << t_mean_v2 << "  "
+//                          << ((c2 && !(std::isnan(t_mean_v2))) ? "[OK]" : "[MISSING/NaN]") << "\n";
+//            }
+//        }
 
 
 
