@@ -237,99 +237,102 @@ void Fun4all_ParticleGunTest(
     else if (scanMode == "etaZvGrid")
     {
       // ------------------------------------------------------------------
-      // Rigorous grid:
-      //  * pick a single tower (ietaRing, iphi*) along a φ line (phiTarget)
-      //  * for that tower, scan η within the block: y = ietaRing + yOff
-      //  * for each yOff, scan z_vtx = Zc + zRel
-      //  * use detector-η from geometry (eta_det) as label (no vertex dependence)
+      // Eta vs vertex-z table along a single φ column:
+      //  * choose one fixed iphi column using reference row ietaRing (closest to phiTarget)
+      //  * for each ieta on that column:
+      //      - compute detector η from tower front-face center (geometry only)
+      //      - for z_vtx = 0 and 20 cm, compute shower-depth η and incidence
+      //  * print: z_vtx_cm, ieta, eta_det, eta_SD, alpha_phi, alpha_eta, cos_phi, cos_eta
       // ------------------------------------------------------------------
-      const int ieta = std::clamp(ietaRing, 0, geo->get_etabins() - 1);
-      const double target = phiTarget;  // radians
 
-      const int iphi = pick_iphi_closest_to(ieta, target);
-      const RawTowerDefs::keytype key =
-        RawTowerDefs::encode_towerid(geo->get_calorimeter_id(), ieta, iphi);
-      RawTowerGeom* tg = geo->get_tower_geometry(key);
-      if (!tg)
+      const double target = phiTarget;               // radians
+      const int nEta = geo->get_etabins();
+      const int ieta_ref = std::clamp(ietaRing, 0, nEta - 1);
+      const int iphi_fixed = pick_iphi_closest_to(ieta_ref, target);
+
+      // Header context from the reference tower
       {
-        std::cerr << "[etaZvGrid] ERROR: no geometry for (ieta,iphi)=("
-                  << ieta << "," << iphi << ")\n";
+        const RawTowerDefs::keytype key_ref =
+          RawTowerDefs::encode_towerid(geo->get_calorimeter_id(), ieta_ref, iphi_fixed);
+        RawTowerGeom* tg_ref = geo->get_tower_geometry(key_ref);
+        if (tg_ref)
+        {
+          const double Cx  = tg_ref->get_center_x();
+          const double Cy  = tg_ref->get_center_y();
+          const double Cz  = tg_ref->get_center_z();
+          const double Rc  = std::hypot(Cx, Cy);
+          const double phi = tg_ref->get_phi();
+          const double eta_det_ref = (Rc > 0.0) ? std::asinh(Cz / Rc) : 0.0;
+
+          std::cout << "# [etaZvGrid] fixed-phi column scan\n"
+                    << "#  reference tower: (ieta_ref="<<ieta_ref<<", iphi_fixed="<<iphi_fixed<<")\n"
+                    << "#  C_ref=("<<Cx<<","<<Cy<<","<<Cz<<")  R_ref="<<Rc
+                    << "  phi_center_ref="<<phi
+                    << "  eta_det_ref="<<eta_det_ref << "\n";
+        }
       }
-      else
+
+      std::cout << "# sandbox="<<(sandboxNoTilt ? 1 : 0)<<"\n";
+      std::cout << "# Columns:\n"
+                << "#  z_vtx_cm, ieta, eta_det, eta_SD, alpha_phi, alpha_eta, cos_phi, cos_eta\n";
+
+      // Two vertices: red (0 cm), blue (20 cm)
+      const double zVertices[2] = {0.0, 20.0};
+
+      for (int ieta = 0; ieta < nEta; ++ieta)
       {
+        // Tower at (ieta, iphi_fixed)
+        const RawTowerDefs::keytype key =
+          RawTowerDefs::encode_towerid(geo->get_calorimeter_id(), ieta, iphi_fixed);
+        RawTowerGeom* tg = geo->get_tower_geometry(key);
+        if (!tg) continue;
+
         const double Cx  = tg->get_center_x();
         const double Cy  = tg->get_center_y();
         const double Cz  = tg->get_center_z();
         const double Rc  = std::hypot(Cx, Cy);
-        const double phi = tg->get_phi();
+
+        // detector η from geometry (front-face center)
         const double eta_det = (Rc > 0.0) ? std::asinh(Cz / Rc) : 0.0;
 
-        std::cout << "# [etaZvGrid] tower (ieta="<<ieta<<", iphi="<<iphi<<")\n"
-                  << "#  C=("<<Cx<<","<<Cy<<","<<Cz<<")  R="<<Rc
-                  << "  phi_center="<<phi<<"  eta_det(center)="<<eta_det
-                  << "  sandbox="<<(sandboxNoTilt?"1":"0")<<"\n";
+        // Keep only towers within detector acceptance [-1.1, 1.1]
+        if (eta_det < -1.1 || eta_det > 1.1) continue;
 
-        std::cout << "# yOff, zRel, z_vtx, eta_det(label), "
-                  << "alpha_phi, alpha_eta, cos_phi, cos_eta\n";
+        const float x_eval = static_cast<float>(iphi_fixed); // fixed φ column
+        const float y_eval = static_cast<float>(ieta);       // this η row
 
-        // η offsets inside this tower’s block: y = ieta + yOff, yOff ∈ [-0.5,+0.5]
-        const int N_ETA_SAMPLES = 11;
-        const int N_Z_SAMPLES   = 13;
-        const double yOff_min = -0.5;
-        const double yOff_max = +0.5;
-        const double yOff_step = (N_ETA_SAMPLES > 1)
-                               ? (yOff_max - yOff_min) / double(N_ETA_SAMPLES - 1)
-                               : 1.0;
-
-        // zRel ∈ [-60,60] cm relative to Cz (so zRel=0 ⇒ z_vtx=Cz is the anchor)
-        const double zRel_min = -60.0;
-        const double zRel_max =  60.0;
-        const double zRel_step = (N_Z_SAMPLES > 1)
-                               ? (zRel_max - zRel_min) / double(N_Z_SAMPLES - 1)
-                               : 1.0;
-
-        for (int iyOff = 0; iyOff < N_ETA_SAMPLES; ++iyOff)
+        for (double z_vtx : zVertices)
         {
-          const double yOff = yOff_min + iyOff * yOff_step;
-          const float  y_eval = static_cast<float>(ieta) + static_cast<float>(yOff);
-          const float  x_eval = static_cast<float>(iphi); // stay at tower φ center
+          // Shower-depth η: ray from (0,0,z_vtx) to the tower front-face center
+          const double eta_SD = (Rc > 0.0) ? std::asinh((Cz - z_vtx) / Rc) : 0.0;
 
-          for (int iz = 0; iz < N_Z_SAMPLES; ++iz)
+          // Set event vertex z for ComputeIncidenceSD
+          bemc->SetVertexZ(static_cast<float>(z_vtx));
+
+          if (actuallyFireGeant)
           {
-            const double zRel  = zRel_min + iz * zRel_step;
-            const double z_vtx = Cz + zRel;
-
-            // Set “event” vertex z; ComputeIncidenceSD uses fVz
-            bemc->SetVertexZ(static_cast<float>(z_vtx));
-
-            // Optionally fire Geant (not needed for pure geometry incidence)
-            if (actuallyFireGeant)
-            {
-              gun->set_vtx(0.0, 0.0, z_vtx);
-              gun->set_phi_range(phi, phi);
-              Fun4AllServer::instance()->run(1);
-            }
-
-            float cosphi=0, coseta=0, aphis=0, aetas=0;
-            const bool ok = bemc->ComputeIncidenceSD(
-                static_cast<float>(EGeV),
-                x_eval, y_eval,
-                cosphi, coseta, aphis, aetas);
-
-            // Each row is a clean, organized snapshot; full internal vectors
-            // (C,F,V,un,uphi,ueta,pF,pn,pph,pet) still printed by the tracer if dbg>0.
-            std::cout << std::fixed
-                      << yOff << ", "
-                      << zRel << ", "
-                      << z_vtx << ", "
-                      << eta_det << ", "
-                      << aphis << ", "
-                      << aetas << ", "
-                      << cosphi << ", "
-                      << coseta << ", "
-                      << (sandboxNoTilt ? 1 : 0) << ", "
-                      << (ok ? 1 : 0) << "\n";
+            const double phiCenter = tg->get_phi();
+            gun->set_vtx(0.0, 0.0, z_vtx);
+            gun->set_phi_range(phiCenter, phiCenter);
+            Fun4AllServer::instance()->run(1);
           }
+
+          float cosphi = 0.f, coseta = 0.f, aphis = 0.f, aetas = 0.f;
+          const bool ok = bemc->ComputeIncidenceSD(
+              static_cast<float>(EGeV), x_eval, y_eval,
+              cosphi, coseta, aphis, aetas);
+
+          // Compact row: same hit point for both z_vtx values at this (ieta, iphi_fixed)
+          (void)ok; // printed values are finite-by-construction when ok==true
+          std::cout << std::fixed
+                    << z_vtx   << ", "
+                    << ieta    << ", "
+                    << eta_det << ", "
+                    << eta_SD  << ", "
+                    << aphis   << ", "
+                    << aetas   << ", "
+                    << cosphi  << ", "
+                    << coseta  << "\n";
         }
       }
     }

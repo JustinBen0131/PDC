@@ -160,38 +160,44 @@ bool BEmcRec::SetTowerGeometry(int ix, int iy, const RawTowerGeom& raw_geom0)
     return false;
   }
 
-  TowerGeom geom; // (intermediate geometry used for S-corrections)
-  geom.Xcenter = raw_geom0.get_center_x();
-  geom.Ycenter = raw_geom0.get_center_y();
-  geom.Zcenter = raw_geom0.get_center_z();
+    TowerGeom geom; // (intermediate geometry used for S-corrections)
 
-  if (m_UseDetailedGeometry)
-  {
-    geom.rotX = raw_geom0.get_rotx();
-    geom.rotY = raw_geom0.get_roty();
-    geom.rotZ = raw_geom0.get_rotz();
+    if (m_UseDetailedGeometry)
+    {
+      // Use FRONT–FACE center so that face tangents and anchor are consistent
+      geom.Xcenter = raw_geom0.get_center_int_x();
+      geom.Ycenter = raw_geom0.get_center_int_y();
+      geom.Zcenter = raw_geom0.get_center_int_z();
 
-    // Describe the eta and phi direction within the tower
-    geom.dX[0] = raw_geom0.get_center_high_phi_x() - raw_geom0.get_center_low_phi_x();
-    geom.dY[0] = raw_geom0.get_center_high_phi_y() - raw_geom0.get_center_low_phi_y();
-    geom.dZ[0] = raw_geom0.get_center_high_phi_z() - raw_geom0.get_center_low_phi_z();
-    geom.dX[1] = raw_geom0.get_center_high_eta_x() - raw_geom0.get_center_low_eta_x();
-    geom.dY[1] = raw_geom0.get_center_high_eta_y() - raw_geom0.get_center_low_eta_y();
-    geom.dZ[1] = raw_geom0.get_center_high_eta_z() - raw_geom0.get_center_low_eta_z();
-  }
-  else
-  {
-    // By default, an approximate value for the tower rotation will be given
-    geom.rotX = 0;
-    geom.rotY = 0;
-    geom.rotZ = 0;
+      geom.rotX = raw_geom0.get_rotx();
+      geom.rotY = raw_geom0.get_roty();
+      geom.rotZ = raw_geom0.get_rotz();
 
-    // The tower eta and phi directions should be computed
-    // in the CompleteTowerGeometry method afterwards
-    geom.dX[0] = geom.dX[1] = 0;
-    geom.dY[0] = geom.dY[1] = 0;
-    geom.dZ[0] = geom.dZ[1] = 0;
-  }
+      // Front-face tangents (one pitch along φ and η)
+      geom.dX[0] = raw_geom0.get_center_high_phi_x() - raw_geom0.get_center_low_phi_x();
+      geom.dY[0] = raw_geom0.get_center_high_phi_y() - raw_geom0.get_center_low_phi_y();
+      geom.dZ[0] = raw_geom0.get_center_high_phi_z() - raw_geom0.get_center_low_phi_z();
+      geom.dX[1] = raw_geom0.get_center_high_eta_x() - raw_geom0.get_center_low_eta_x();
+      geom.dY[1] = raw_geom0.get_center_high_eta_y() - raw_geom0.get_center_low_eta_y();
+      geom.dZ[1] = raw_geom0.get_center_high_eta_z() - raw_geom0.get_center_low_eta_z();
+    }
+    else
+    {
+      // Approximate geometry: keep volume center and fill tangents later
+      geom.Xcenter = raw_geom0.get_center_x();
+      geom.Ycenter = raw_geom0.get_center_y();
+      geom.Zcenter = raw_geom0.get_center_z();
+
+      geom.rotX = 0;
+      geom.rotY = 0;
+      geom.rotZ = 0;
+
+      // The tower eta and phi directions should be computed
+      // in CompleteTowerGeometry() afterwards
+      geom.dX[0] = geom.dX[1] = 0;
+      geom.dY[0] = geom.dY[1] = 0;
+      geom.dZ[0] = geom.dZ[1] = 0;
+    }
 
   int ich = (iy * fNx) + ix;
   fTowerGeom[ich] = geom;
