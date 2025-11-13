@@ -4,7 +4,7 @@
   {ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP, { 2.113341e-03, 8.218542e-04 }},  // CorrectPosition(EA |z|+|#eta|+E), cluster
   {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 2.105304e-03, 8.205039e-04 }},  // CorrectPosition(EA |z|+E), cluster
   {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.112709e-03, 8.217300e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
-  {ETiltVariant::CLUS_CP_EA_FIT_EandIncident, { 2.095133e-03, 8.207341e-04 }},  // CorrectPosition(EA E-only + incident-angle), cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_EandIncident, { 2.104982e-03, 8.212906e-04 }},  // CorrectPosition(EA E-only + incident-angle), cluster
   {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.106452e-03, 8.208353e-04 }},  // CorrectPosition(EA E-only), cluster
   {ETiltVariant::CLUS_BCORR, { 2.142225e-03, 8.152682e-04 }},  // b(E) corr, cluster
   {ETiltVariant::PDC_RAW, { 2.764287e-03, 8.226173e-04 }},  // no corr, scratch

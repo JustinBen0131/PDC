@@ -367,6 +367,25 @@ void PositionDependentCorrection::bookCommonHistograms
             2*NAlphaBins, -AlphaMax, +AlphaMax);
         if (hm) hm->registerHisto(h3_alphaEta_vsVz_vsEta);
     }
+    
+    if (!h3_alphaPhi_vsVz_vsEtaDet)
+    {
+        h3_alphaPhi_vsVz_vsEtaDet = new TH3F("h3_alphaPhi_vsVz_vsEtaDet",
+            "#alpha_{#varphi}^{signed} vs z_{vtx} and #eta_{det};z_{vtx} (cm);#eta_{det};#alpha_{#varphi} [rad]",
+            200, -100, 100,     // z bins
+             96,  -1.2,  1.2,   // η_det bins (front-face tower-row η)
+            2*NAlphaBins, -AlphaMax, +AlphaMax);
+        if (hm) hm->registerHisto(h3_alphaPhi_vsVz_vsEtaDet);
+    }
+    if (!h3_alphaEta_vsVz_vsEtaDet)
+    {
+        h3_alphaEta_vsVz_vsEtaDet = new TH3F("h3_alphaEta_vsVz_vsEtaDet",
+            "#alpha_{#eta}^{signed} vs z_{vtx} and #eta_{det};z_{vtx} (cm);#eta_{det};#alpha_{#eta} [rad]",
+            200, -100, 100,
+             96,  -1.2,  1.2,
+            2*NAlphaBins, -AlphaMax, +AlphaMax);
+        if (hm) hm->registerHisto(h3_alphaEta_vsVz_vsEtaDet);
+    }
 
 
     // ------------------------------------------------------------------
@@ -2574,7 +2593,6 @@ void PositionDependentCorrection::fillDPhiAllVariants(
   if (!tgLead) return;
 
   const double rFront = tgLead->get_center_radius();
-  (void) rFront;          //  add the cast on its own line
   const double zFront = tgLead->get_center_z();
   const int    ixFine = tgLead->get_binphi();
   const int    iyFine = tgLead->get_bineta();
@@ -2717,41 +2735,54 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       const float aPhiSigned = m_bemcRec->lastSignedAlphaPhi();
       const float aPhiAbs    = std::fabs(aPhiSigned);
 
-      // η at shower depth for QA (use CP anchor; xCP/yCP already set earlier)
+      // η at shower depth (cluster direction from this vertex)
       const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
 
-      if (std::isfinite(aPhiSigned) && std::isfinite(etaSD_forQA))
+      // Detector η at the front face (tower-row orientation, independent of vtx)
+      double etaDet = std::numeric_limits<double>::quiet_NaN();
+      if (rFront > 0.0) {
+        etaDet = std::asinh(zFront / rFront);
+      }
+
+      // Fill only if angles and both η’s are well-defined
+      if (std::isfinite(aPhiSigned) && std::isfinite(etaSD_forQA) && std::isfinite(etaDet))
       {
-        // TH3 (signed α stays signed here)
+        // (1) Cluster front-face η *with* vtx_z dependence → "SD" TH3
         if (h3_alphaPhi_vsVz_vsEta)
           h3_alphaPhi_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aPhiSigned);
+
+        // (2) Pure detector η (tower row, no vtx) → "Det" TH3
+        if (h3_alphaPhi_vsVz_vsEtaDet)
+          h3_alphaPhi_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aPhiSigned);
+
         if (vb > 0)
           std::cout << "[INC-FILL φ] TH3  z=" << vtxZ
                     << "  etaSD=" << etaSD_forQA
+                    << "  etaDet=" << etaDet
                     << "  a_phi=" << aPhiSigned << "\n";
 
-        // Per-E fills use |α| on X (avoid underflow on [0,0.30] axis)
+        // Per-E incidence maps: signed α on X, Xmeas on Y
         if (iE >= 0 && iE < N_Ebins)
         {
-          // compute X^{meas} in the same way you already do
           float u_raw  = blkCoord.second;
-          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
+          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f)
+                       ? std::fmod(u_raw + 2.f, 2.f)
+                       : u_raw;
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
 
           // sec is even in α, so sec(|α|) = sec(α)
           const float secA = 1.f / std::max(1e-6f, std::cos(aPhiAbs));
 
-          // verbose “before/after” bin prints
           if (h2_XmeasPhi_vsAlpha_E[iE]) {
             auto* ax = h2_XmeasPhi_vsAlpha_E[iE]->GetXaxis();
             auto* ay = h2_XmeasPhi_vsAlpha_E[iE]->GetYaxis();
-            const int ibx = ax->FindFixBin(aPhiAbs);
+            const int ibx = ax->FindFixBin(aPhiSigned);
             const int iby = ay->FindFixBin(Xmeas);
             const double before = h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx,iby);
-            h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiAbs, Xmeas);
+            h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
             const double after  = h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx,iby);
             if (vb > 0)
-              std::cout << "[INC-FILL φ] h2_XmeasPhi_vsAlpha_E["<<iE<<"]  a="<<aPhiAbs
+              std::cout << "[INC-FILL φ] h2_XmeasPhi_vsAlpha_E["<<iE<<"]  a="<<aPhiSigned
                         << "  Xmeas="<<Xmeas<<"  bin=("<<ibx<<","<<iby<<")"
                         << "  before="<<before<<"  after="<<after<<"\n";
           }
@@ -2779,8 +2810,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                         << "  mean(before)="<<before<<"  mean(after)="<<after<<"\n";
           }
 
-          // -------------- φ(E) “folded” input --------------
-          // Axis is [0,0.30] → use magnitude
+          // φ(E) folded inputs: |α| in bins of |η_SD| (unchanged semantics)
           const float aPhiFold = aPhiAbs;
 
           if (std::fabs(vtxZ) <= 60.f)
@@ -3303,19 +3333,20 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     }
 
 
-  /* ────────────────────────────────── lead‑tower geom ────────────── */
-  const auto lead =
-        std::max_element(clus->get_towers().first, clus->get_towers().second,
-                         [](auto&a,auto&b){return a.second<b.second;});
-  if (lead == clus->get_towers().second) return;
-  const auto* tgLead = m_geometry->get_tower_geometry(lead->first);
-  if (!tgLead) return;
+    /* ────────────────────────────────── lead-tower geom ────────────── */
+    const auto lead =
+          std::max_element(clus->get_towers().first, clus->get_towers().second,
+                           [](auto&a,auto&b){return a.second<b.second;});
+    if (lead == clus->get_towers().second) return;
+    const auto* tgLead = m_geometry->get_tower_geometry(lead->first);
+    if (!tgLead) return;
 
-  const double rFront = tgLead->get_center_radius();
-  (void) rFront;          //  add the cast on its own line
+    const double rFront = tgLead->get_center_radius();
+    const double zFront = tgLead->get_center_z();   // <-- needed for etaDet
 
-  const float phiFrontRaw =
-        convertBlockToGlobalPhi(blkPhiCoarse, blkCoord.second);
+    const float phiFrontRaw =
+          convertBlockToGlobalPhi(blkPhiCoarse, blkCoord.second);
+
 
   /* ─────────────────────────────── build the five variants ──────── */
   EtaRec rec[5];
@@ -3407,24 +3438,37 @@ void PositionDependentCorrection::fillDEtaAllVariants(
       const float aEtaSigned = m_bemcRec->lastSignedAlphaEta();
       const float aEtaAbs    = std::fabs(aEtaSigned);
 
-      // η at shower depth for QA (use CP anchor)
+      // η at shower depth (cluster direction, vtx-dependent)
       const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
 
-      if (std::isfinite(aEtaSigned) && std::isfinite(etaSD_forQA))
+      // Detector η at front face (tower row, independent of vtx)
+      double etaDet = std::numeric_limits<double>::quiet_NaN();
+      if (rFront > 0.0) {
+        etaDet = std::asinh(zFront / rFront);
+      }
+
+      if (std::isfinite(aEtaSigned) && std::isfinite(etaSD_forQA) && std::isfinite(etaDet))
       {
-        // TH3 (signed α stays signed here)
+        // (1) Cluster front-face / depth η (vtx-dependent) → "SD" TH3
         if (h3_alphaEta_vsVz_vsEta)
           h3_alphaEta_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aEtaSigned);
+
+        // (2) Pure detector η (tower-row orientation) → "Det" TH3
+        if (h3_alphaEta_vsVz_vsEtaDet)
+          h3_alphaEta_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aEtaSigned);
+
         if (vb > 0)
           std::cout << "[INC-FILL η] TH3  z=" << vtxZ
                     << "  etaSD=" << etaSD_forQA
+                    << "  etaDet=" << etaDet
                     << "  a_eta=" << aEtaSigned << "\n";
 
-        // Per-E fills use |α| on X
         if (iE >= 0 && iE < N_Ebins)
         {
           float u_raw  = blkCoord.first;
-          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f) ? std::fmod(u_raw + 2.f, 2.f) : u_raw;
+          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f)
+                       ? std::fmod(u_raw + 2.f, 2.f)
+                       : u_raw;
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
 
           const float secA  = 1.f / std::max(1e-6f, std::cos(aEtaAbs));
@@ -3432,13 +3476,13 @@ void PositionDependentCorrection::fillDEtaAllVariants(
           if (h2_XmeasEta_vsAlpha_E[iE]) {
             auto* ax = h2_XmeasEta_vsAlpha_E[iE]->GetXaxis();
             auto* ay = h2_XmeasEta_vsAlpha_E[iE]->GetYaxis();
-            const int ibx = ax->FindFixBin(aEtaAbs);
+            const int ibx = ax->FindFixBin(aEtaSigned);
             const int iby = ay->FindFixBin(Xmeas);
             const double before = h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
-            h2_XmeasEta_vsAlpha_E[iE]->Fill(aEtaAbs, Xmeas);
+            h2_XmeasEta_vsAlpha_E[iE]->Fill(aEtaSigned, Xmeas);
             const double after  = h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
             if (vb > 0)
-              std::cout << "[INC-FILL η] h2_XmeasEta_vsAlpha_E["<<iE<<"]  a="<<aEtaAbs
+              std::cout << "[INC-FILL η] h2_XmeasEta_vsAlpha_E["<<iE<<"]  a="<<aEtaSigned
                         << "  Xmeas="<<Xmeas<<"  bin=("<<ibx<<","<<iby<<")"
                         << "  before="<<before<<"  after="<<after<<"\n";
           }

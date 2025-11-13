@@ -655,6 +655,8 @@ class PositionDependentCorrection : public SubsysReco
     TH3F* h3_alphaPhi_vsVz_vsEta {nullptr};
     TH3F* h3_alphaEta_vsVz_vsEta {nullptr};
     
+    TH3F* h3_alphaPhi_vsVz_vsEtaDet {nullptr};
+    TH3F* h3_alphaEta_vsVz_vsEtaDet {nullptr};
     // ---------- Step (3): incidence‑aware per‑energy maps ----------
     // α binning: 0 … 0.30 rad in 180 bins (≈1.667 mrad/bin)
     // X^{meas} binning: −0.5 … +0.5 in 200 bins (0.005 tower/bin)

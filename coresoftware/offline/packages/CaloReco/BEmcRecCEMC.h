@@ -53,79 +53,50 @@ class BEmcRecCEMC : public BEmcRec
     
   void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
     
-    struct PhiTiltAB { double a{8.654924e-04}; double b{8.490399e-04}; };
+    // ───────── variant–specific φ-tilt handling ─────────
+    enum class ETiltVariant  {
+      CLUS_RAW,
+      CLUS_CP,
 
-    // Unified φ(E) API — used by CorrectShowerDepth and ComputeIncidenceSD
-    inline void SetPhiTiltCoeffs(double a, double b) {  // backward-compat: set all three to same
-      m_phiTiltAB_core = {a,b}; m_phiTiltAB_mid = {a,b}; m_phiTiltAB_edge = {a,b};
-    }
-    inline void SetPhiTiltCoeffsByEta(double a_core,double b_core,
-                                      double a_mid ,double b_mid ,
-                                      double a_edge,double b_edge) {
-      m_phiTiltAB_core = {a_core,b_core};
-      m_phiTiltAB_mid  = {a_mid ,b_mid };
-      m_phiTiltAB_edge = {a_edge,b_edge};
-    }
-    inline void EnablePhiTilt(bool on) { m_enablePhiTilt = on; }
+      // CLUS-CP(EA) flavours
+      CLUS_CP_EA,                 // backward-compat alias to CLUS_CP
+      CLUS_CP_EA_FIT_ZDEP_ETADEP,
+      CLUS_CP_EA_FIT_ZDEP,        // EA with |z|-dep + E-dep fits
+      CLUS_CP_EA_FIT_ETADEP,      // EA with |η|-dep + E-dep fits
+      CLUS_CP_EA_FIT_EandIncident,       // EA with E-only fits
+      CLUS_CP_EA_FIT_EONLY,             // EA φ(E-only), η(|η|+E)
 
-    // ---------- NEW: constant φ offsets (rad) per |η| band ----------
-    inline void SetPhiTiltOffsets(double phi0_all) {
-      m_phi0_core = m_phi0_mid = m_phi0_edge = phi0_all;
-    }
-    inline void SetPhiTiltOffsetsByEta(double phi0_core, double phi0_mid, double phi0_edge) {
-      m_phi0_core = phi0_core; m_phi0_mid = phi0_mid; m_phi0_edge = phi0_edge;
-    }
+      CLUS_BCORR,
+      PDC_RAW,
+      PDC_CORR,
+      DEFAULT
+    };
+   /// call once before any Tower2Global / CorrectShowerDepth
+   void SetPhiTiltVariant(ETiltVariant v);
+    
+   // ---- Incidence debug toggles (local to incidence only) ----
+   inline void SetIncidenceNoTiltSandbox(bool on) { m_incNoTiltSandbox = on; } // default false
+   inline void SetIncidenceDebugLevel(int lvl)    { m_incDbgLevel = lvl; }     // 0 = silent
+   inline void SetIncidenceHardStopLevel(int lvl) { m_incHardStop = lvl; }     // >=0 enables stop
+
+   // Set event vertex z used by incidence calculations (front-face frame)
+   void SetVertexZ(float vz) { fVz = vz; }
+
+   // Front-face incidence: returns cosines and signed φ/η angles
+   bool ComputeIncidenceSD(float E, float x, float y,
+                            float& cos_a_phi, float& cos_a_eta,
+                            float& a_phi_sgn, float& a_eta_sgn);
 
    private:
     // Per-|η| band coefficients for 〈αφ^fold〉(E) = a − b ln E  [radians]
     // |η| ≤ 0.20       → core
     // 0.20 < |η| ≤ 0.70 → mid
     // 0.70 < |η| ≤ 1.10 → edge
-    PhiTiltAB m_phiTiltAB_core{ 0.14940,  -0.000238 };
-    PhiTiltAB m_phiTiltAB_mid { 0.15177,  -0.000401 };
-    PhiTiltAB m_phiTiltAB_edge{ 0.15244,  -0.000877 };
-
-    bool m_enablePhiTilt{true};
-
-    // NEW: constant φ-offsets (rad) per |η| band (defaults = 0)
-    double m_phi0_core{0.0};
-    double m_phi0_mid {0.0};
-    double m_phi0_edge{0.0};
-
-    // Band selector:  core (|η|≤0.20), mid (0.20<|η|≤0.70), edge (0.70<|η|≤1.10)
-    inline const PhiTiltAB& phi_ab_for_absEta(double absEta) const {
-      if (!std::isfinite(absEta)) return m_phiTiltAB_mid;      // conservative default
-      if (absEta <= 0.20) return m_phiTiltAB_core;
-      if (absEta <= 0.70) return m_phiTiltAB_mid;
-      return m_phiTiltAB_edge;
-    }
-    inline double phi0_for_absEta(double absEta) const {
-      if (!std::isfinite(absEta)) return m_phi0_mid;      // conservative default
-      if (absEta <= 0.20) return m_phi0_core;
-      if (absEta <= 0.70) return m_phi0_mid;
-      return m_phi0_edge;
-    }
-
-    // φ(E) pre-rotation built directly from the measured drift.
-    // Fit convention on the canvas: ⟨αφ^fold⟩(E) = a − b ln E  [rad],
-    // with b < 0 in all three |η| bands. To cancel that drift we rotate by
-    // φ(E) = φ0(|η|) + b ln(E/E0), where φ0 removes the constant offset.
-    // Note: we intentionally do *not* derive the slope from (B_depth/R)*tan(a) here.
-    // φ(E) pre-rotation from your *measured* drift:
-    //  <αφ^fold>(E) = a - b ln E  ⇒  pre-rotate by  φ(E) = φ0(|η|) + b ln(E/E0).
-    inline double phi_tilt(double E, double absEta, double /*Rcm*/) const {
-      if (!m_enablePhiTilt) return 0.0;
-
-      const auto& ab    = phi_ab_for_absEta(absEta);   // {a, b} from your fit (rad, rad/lnGeV)
-      const double phi0 = phi0_for_absEta(absEta);     // constant offset (rad), one per |η| band
-      const double e    = (E > 0.1) ? static_cast<double>(E) : 0.1;
-      constexpr double E0_ref = 3.0;                   // pivot used on your plots
-
-      double phi = phi0 + ab.b * std::log(e / E0_ref); // small (mrad) rotation
-      if (phi >  0.01) phi =  0.01;
-      if (phi < -0.01) phi = -0.01;
-      return phi;
-    }
+    ETiltVariant                   m_tiltVariant {ETiltVariant::DEFAULT};
+    // Local-only incidence tracer switches (do not leak verbosity class-wide)
+    bool m_incNoTiltSandbox {false};   // force cylinder-aligned face frame (no shingling/tilt)
+    int  m_incDbgLevel      {0};       // 0=silent; >0 prints trace
+    int  m_incHardStop      {20};      // if >=0 and incDbgLevel >= m_incHardStop → stop after dump
 
     // keep angle caches
     float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
@@ -155,12 +126,10 @@ class BEmcRecCEMC : public BEmcRec
                        0.8280767742291925,0.817037848206403,0.798146050633941,0.7862088120715213,0.7707790095809137,0.7594605863097555};
 
   double slopes_[96] = {0, 0.00023905, 4.90448e-05, 0.00027207, 4.62457e-05, 0.000252483, 4.07806e-05, 0.000248309, 3.76606e-05, 0.000257749, 3.96662e-05, 0.000268067, 3.79489e-05, 0.000258554, 4.64794e-05, 0.000252937, 4.00813e-05, 0.000256408, 5.76557e-05, 0.000254708, 6.78359e-05, 0.00025745, 9.10421e-05, 0.000249737, 9.98244e-05, 0.000248255, 0.000129006, 0.000248438, 0.000137128, 0.000252377, 0.000162495, 0.000255381, 0.000178851, 0.000255713, 0.000196615, 0.000257513, 0.000218168, 0.000260783, 0.00023512, 0.000266362, 0.000253771, 0.000258489, 0.000261129, 0.000237658, 0.000229224, 0.000219019, 0.0002103555, 0.000194438, 0.000191487, 0.000169857, 0.000163719, 0.000145249, 0.000140684, 0.00011482, 0.000114154, 0.000100124, 0.00011904, 7.79723e-05, 0.000107485, 5.65278e-05, 9.40123e-05, 3.13618e-05, 8.63381e-05, 6.76016e-06, 7.83596e-05, -1.41566e-05, 7.57772e-05, -3.53334e-05, 6.71255e-05, -5.46557e-05, 6.50159e-05, -7.18416e-05, 6.88217e-05, -8.98952e-05, 6.77945e-05, -0.000104923, 6.87795e-05, -0.000117168, 7.67749e-05, -0.000130278, 8.43921e-05, -0.000137269, 8.63373e-05, -0.000142283, 8.78225e-05, -0.000145142, 9.22318e-05, -0.000121506, 0.000104699, -0.000114551, 0.00010633, -0.0001077, 9.84409e-05, -0.000109789, 8.14774e-05, -8.70686e-05};
-
-  double factor_[8] = {-0.07, 0.03, -0.07, 0.20, 0.15, -0.05, 0.00, -0.07}; // Correction factors for the phi bias within a sector of 8 towers (phi direction)
-
-  bool ComputeIncidenceSD(float E, float x, float y,
-                            float& cos_a_phi, float& cos_a_eta,
-                            float& a_phi_sgn, float& a_eta_sgn);
+    
+    
+    std::pair<double,double>       m_abTiltCurrent { 8.654924e-04, 8.490399e-04 };
+    double factor_[8] = {-0.07, 0.03, -0.07, 0.20, 0.15, -0.05, 0.00, -0.07}; // Correction factors for the phi bias within a sector of 8 towers (phi direction)
 };
 
 

@@ -1012,13 +1012,10 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 
 
 
-
-
-
 // -----------------------------------------------------------------------------
 // Incidence at the FRONT FACE (energy–independent by construction)
 //
-// Computes the signed azimuthal and polar(η) incidence angles using ONLY the
+// Computes the signed azimuthal (φ) and polar(η) incidence angles using ONLY the
 // detailed front–face geometry of the owning tower. No shower–depth transport
 // is involved, so ⟨αφ⟩ is flat vs E and αη is governed only by viewing geometry.
 // -----------------------------------------------------------------------------
@@ -1030,8 +1027,38 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
 {
   (void)E;  // Front-face incidence does not depend on energy
 
+  // ---- local tracer / kill-switch helper ----
+  const bool dbg = (m_incDbgLevel > 0);
+  auto dump_and_maybe_stop = [&](const char* tag,
+                                 const TVector3& C, const TVector3& F,
+                                 const TVector3& V, const TVector3& un,
+                                 const TVector3& uphi, const TVector3& ueta,
+                                 const TVector3& pF,
+                                 double pn, double pph, double pet,
+                                 double aphi, double aeta,
+                                 double cphi, double ceta)
+  {
+    if (!dbg) return;
+    std::cout << "\n=== Incidence Trace ("<< tag <<") ===\n"
+              << "C=("<<C.X()<<","<<C.Y()<<","<<C.Z()<<")  "
+              << "F=("<<F.X()<<","<<F.Y()<<","<<F.Z()<<")  "
+              << "V=("<<V.X()<<","<<V.Y()<<","<<V.Z()<<")\n"
+              << "un =("<<un.X()<<","<<un.Y()<<","<<un.Z()<<")\n"
+              << "uphi=("<<uphi.X()<<","<<uphi.Y()<<","<<uphi.Z()<<")  "
+              << "ueta=("<<ueta.X()<<","<<ueta.Y()<<","<<ueta.Z()<<")\n"
+              << "pF =("<<pF.X()<<","<<pF.Y()<<","<<pF.Z()<<")  |pF|="<<pF.Mag()<<"\n"
+              << "pn="<<pn<<"  pφ="<<pph<<"  pη="<<pet<<"\n"
+              << "αφ="<<aphi<<"  αη="<<aeta
+              << "  cosφ="<<cphi<<"  cosη="<<ceta<<"\n"
+              << "noTiltSandbox="<<(m_incNoTiltSandbox?"true":"false")<<"\n"
+              << "======================================\n";
+    if (m_incHardStop >= 0 && m_incDbgLevel >= m_incHardStop) {
+      throw std::runtime_error("Incidence debug hard-stop");
+    }
+  };
+
   // ────────────────────────────────────────────────────────────────────────────
-  // Step 1) Locate the owner tower (indices in "tower units")
+  // Step 1) Owner tower in "tower units"
   // ────────────────────────────────────────────────────────────────────────────
   const int ix = EmcCluster::lowint(x + 0.5f);
   const int iy = EmcCluster::lowint(y + 0.5f);
@@ -1039,25 +1066,37 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   TowerGeom g{};
   if (!GetTowerGeometry(ix, iy, g)) return false; // need detailed geometry
 
-  // Sub-cell fractional offsets in the local tower cell, δ ∈ (−0.5, +0.5]
+  // Sub-cell offsets δ ∈ (−0.5, +0.5]
   const float dx = x - ix;
   const float dy = y - iy;
 
   // ────────────────────────────────────────────────────────────────────────────
   // Step 2) FRONT-FACE point F in cm:
-  //         F = C + δx * eφ(face) + δy * eη(face)
-  //         (dX[], dY[], dZ[] are one-pitch tangents from detailed geometry)
+  //         F = C + δx * eφ + δy * eη
+  //         (dX[], dY[], dZ[] are one‑pitch tangents from detailed geometry)
   // ────────────────────────────────────────────────────────────────────────────
+  const TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
   const TVector3 ephi_face(g.dX[0], g.dY[0], g.dZ[0]);
   const TVector3 eeta_face(g.dX[1], g.dY[1], g.dZ[1]);
   if (ephi_face.Mag() < 1e-9 || eeta_face.Mag() < 1e-9) return false;
 
-  const TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
-  const TVector3 F = C + dx * ephi_face + dy * eeta_face;
+  // Optional no‑tilt sandbox: use cylinder-aligned face tangents,
+  // but keep the real pitch magnitudes from detailed geometry.
+  TVector3 ephi = ephi_face;
+  TVector3 eeta = eeta_face;
+  if (m_incNoTiltSandbox) {
+    const TVector3 rhat = TVector3(C.X(), C.Y(), 0.0).Unit();
+    const TVector3 zhat(0., 0., 1.);
+    const TVector3 uphi_cyl = (zhat.Cross(rhat)).Unit(); // φ̂ on a cylinder
+    const TVector3 ueta_cyl = (rhat.Cross(uphi_cyl)).Unit(); // η̂ = n̂×φ̂
+    ephi = uphi_cyl * ephi_face.Mag();
+    eeta = ueta_cyl * eeta_face.Mag();
+  }
+
+  const TVector3 F = C + dx * ephi + dy * eeta;
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Step 3) Unit ray from the vertex to the FRONT FACE (energy-independent)
-  //         p̂_F = (F − V) / ||F − V||
+  // Step 3) Unit ray from vertex to the FRONT FACE
   // ────────────────────────────────────────────────────────────────────────────
   const TVector3 V(0., 0., fVz);
   TVector3 pF = F - V;
@@ -1066,12 +1105,9 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   pF *= (1.0 / pFmag);
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Step 4) Orthonormal face frame { uφ , uη , un }, seam-safe:
-  //   • un: outward normal from the true face (no event-by-event flips)
-  //   • uφ: global cylinder φ̂ at *F* (zhat × rhat(F)), then match sign to eφ(face)
-  //   • uη: un × uφ, then match sign to eη(face)  (no "+z" pin)
+  // Step 4) Orthonormal face frame { uφ , uη , un } (built from eφ,eη in use)
   // ────────────────────────────────────────────────────────────────────────────
-  TVector3 n_face = ephi_face.Cross(eeta_face);
+  TVector3 n_face = ephi.Cross(eeta);
   const double nmag = n_face.Mag();
   if (!(nmag > 0.0)) return false;
   n_face *= (1.0 / nmag);
@@ -1080,40 +1116,27 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   if (n_face.Dot(C) < 0.0) n_face = -n_face;
   const TVector3 un = n_face;
 
-    // Build the face frame *from local tangents*, orthonormalized to n̂.
-    // φ̂ follows the detailed face φ‑pitch; η̂ follows the detailed face η‑pitch.
-    const TVector3 zhat(0., 0., 1.);  // keep for completeness
+  // φ̂: start from eφ and remove any normal component; normalize
+  TVector3 uphi = ephi - un * ephi.Dot(un);
+  const double uphim = uphi.Mag();
+  if (!(uphim > 0.0)) return false;
+  uphi *= (1.0 / uphim);
 
-    // Start from local φ tangent and strictly remove any tiny normal component
-    TVector3 uphi = ephi_face;
-    uphi -= un * uphi.Dot(un);
-    double uphim = uphi.Mag();
-    if (!(uphim > 0.0)) return false;
-    uphi *= (1.0 / uphim);
+  // η̂: start from eη, orthogonalize to {un,uphi}; normalize
+  TVector3 ueta = eeta - un * eeta.Dot(un) - uphi * eeta.Dot(uphi);
+  const double uetam = ueta.Mag();
+  if (!(uetam > 0.0)) return false;
+  ueta *= (1.0 / uetam);
 
-    // Start from local η tangent; orthogonalize to {n̂, φ̂} and normalize
-    TVector3 ueta = eeta_face;
-    ueta -= un   * ueta.Dot(un);
-    ueta -= uphi * ueta.Dot(uphi);
-    double uetam = ueta.Mag();
-    if (!(uetam > 0.0)) return false;
-    ueta *= (1.0 / uetam);
-
-    // Ensure a right‑handed triad (n̂ × φ̂ → +η̂)
-    if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
-
+  // Ensure right‑handed triad (n̂ × φ̂ → +η̂)
+  if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
 
   // ────────────────────────────────────────────────────────────────────────────
   // Step 5) Signed incidence angles and foreshortening cosines
-  //         Projections on the frame and atan2 with the normal component.
-  //         • α^sgn_φ = sgn(pph) * atan2(|pph|, |pn|)
-  //         • α^sgn_η = sgn(pet) * atan2(|pet|, |pn|)
-  //         • cosα_φ  = |pn| / sqrt( pn^2 + pph^2 )
-  //         • cosα_η  = |pn| / sqrt( pn^2 + pet^2 )
   // ────────────────────────────────────────────────────────────────────────────
-  const double pn   = pF.Dot(un);    // can be ±
-  const double pph  = pF.Dot(uphi);
-  const double pet  = pF.Dot(ueta);
+  const double pn  = pF.Dot(un);    // can be ±
+  const double pph = pF.Dot(uphi);
+  const double pet = pF.Dot(ueta);
 
   const double apn      = std::max(1e-12, std::fabs(pn));
   const double aphi_mag = std::atan2(std::fabs(pph), apn);
@@ -1126,15 +1149,22 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   a_eta_sgn = static_cast<float>(sgn_eta * aeta_mag);
 
   // Foreshortening cosines (use |pn| so they are always (0,1])
-  cos_a_phi = static_cast<float>(std::clamp(apn / std::sqrt(apn*apn + pph*pph), 1.0e-6, 1.0));
-  cos_a_eta = static_cast<float>(std::clamp(apn / std::sqrt(apn*apn + pet*pet), 1.0e-6, 1.0));
+  cos_a_phi = static_cast<float>(
+      std::clamp(apn / std::sqrt(apn*apn + pph*pph), 1.0e-6, 1.0));
+  cos_a_eta = static_cast<float>(
+      std::clamp(apn / std::sqrt(apn*apn + pet*pet), 1.0e-6, 1.0));
 
-  // Cache for QA accessors (consistent with class API)
+  // Cache for QA
   m_lastAlphaPhiSigned = a_phi_sgn;
   m_lastAlphaEtaSigned = a_eta_sgn;
 
   const bool ok = (std::isfinite(cos_a_phi) && std::isfinite(cos_a_eta) &&
                    std::isfinite(a_phi_sgn) && std::isfinite(a_eta_sgn));
+
+  if (dbg) {
+    dump_and_maybe_stop("post-compute", C, F, V, un, uphi, ueta, pF,
+                        pn, pph, pet, a_phi_sgn, a_eta_sgn, cos_a_phi, cos_a_eta);
+  }
   return ok;
 }
 
@@ -1195,45 +1225,69 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(
   VLOG() << "[EA+α] EXIT  bphi_E=" << bphi_E << "  beta_E=" << beta_E
          << "  → bx=" << bx << "  by=" << by << "\n";
 
-  // ============================== φ ===================================
-  float x_corr = x;
-  {
-    const int   ix0_local = EmcCluster::lowint(x + 0.5f);
-    const float X         = x - ix0_local;            // in (−0.5, +0.5]
-    if (std::fabs(X) <= 0.5f) {
-      const float Sx = std::sinh(0.5f / bx);
-      x_corr = ix0_local + bx * std::asinh(2.f * X * Sx);
+    // ============================== φ ===================================
+    // Apply signed δ_φ(E,αϕ) BEFORE the inverse mapping (guarded by a tiny DeltaDB)
+    float x_pre = x;
+  #ifdef PDC_USE_DELTA_RUNTIME
+    if (DeltaDB::instance().available()) {
+      const float c1_phi   = DeltaDB::instance().c1_phi(Energy);    // c0_phi + m_phi*ln(E/E0)
+      const float delta_phi= c1_phi * std::sin(m_lastAlphaPhiSigned);
+      x_pre = x - delta_phi;
+      VLOG() << "        [EA+α] δφ(E,α)=" << delta_phi << "  → x_pre=" << x_pre << "\n";
     }
+  #endif
 
-    // module-of-8 ripple (unchanged)
-    int   ix8 = int(x + 0.5f) / 8;                     // NOLINT
-    float x8  = x + 0.5f - (ix8 * 8) - 4.f;            // −4 … +4
-    float dx  = 0.f;
-    if (m_UseDetailedGeometry) {
-      int local_ix8 = int(x + 0.5f) - ix8 * 8;         // 0..7   // NOLINT
-      dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
-    } else {
-      dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+    float x_corr = x_pre;
+    {
+      const int   ix0_local = EmcCluster::lowint(x_pre + 0.5f);
+      const float X         = x_pre - ix0_local;            // in (−0.5, +0.5]
+      if (std::fabs(X) <= 0.5f) {
+        const float Sx = std::sinh(0.5f / bx);
+        x_corr = ix0_local + bx * std::asinh(2.f * X * Sx);
+      }
+
+      // module-of-8 ripple (unchanged), evaluated at x_pre
+      int   ix8 = int(x_pre + 0.5f) / 8;                     // NOLINT
+      float x8  = x_pre + 0.5f - (ix8 * 8) - 4.f;            // −4 … +4
+      float dx  = 0.f;
+      if (m_UseDetailedGeometry) {
+        int local_ix8 = int(x_pre + 0.5f) - ix8 * 8;         // 0..7   // NOLINT
+        dx = static_cast<float>(factor_[local_ix8]) * (x8 / 4.f);
+      } else {
+        dx = (std::fabs(x8) > 3.3f) ? 0.f : 0.10f * (x8 / 4.f);
+      }
+      x_corr -= dx;
+
+      // wrap φ tower coordinate to [−0.5, Nx−0.5)
+      while (x_corr < -0.5f)              x_corr += float(fNx);
+      while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
     }
-    x_corr -= dx;
+    xc = x_corr;
 
-    // wrap φ tower coordinate to [−0.5, Nx−0.5)
-    while (x_corr < -0.5f)              x_corr += float(fNx);
-    while (x_corr >= float(fNx) - 0.5f) x_corr -= float(fNx);
-  }
-  xc = x_corr;
 
-  // ============================== η ===================================
-  float y_corr = y;
-  {
-    const int   iy0_local = EmcCluster::lowint(y + 0.5f);
-    const float Y         = y - iy0_local;            // in (−0.5, +0.5]
-    if (std::fabs(Y) <= 0.5f) {
-      const float Sy = std::sinh(0.5f / by);
-      y_corr = iy0_local + by * std::asinh(2.f * Y * Sy);
+    // ============================== η ===================================
+    // Apply signed δ_η(E,αη) BEFORE the inverse mapping
+    float y_pre = y;
+  #ifdef PDC_USE_DELTA_RUNTIME
+    if (DeltaDB::instance().available()) {
+      const float c1_eta   = DeltaDB::instance().c1_eta(Energy);     // c0_eta + m_eta*ln(E/E0)
+      const float delta_eta= c1_eta * std::sin(m_lastAlphaEtaSigned);
+      y_pre = y - delta_eta;
+      VLOG() << "        [EA+α] δη(E,α)=" << delta_eta << "  → y_pre=" << y_pre << "\n";
     }
-  }
-  yc = y_corr;
+  #endif
+
+    float y_corr = y_pre;
+    {
+      const int   iy0_local = EmcCluster::lowint(y_pre + 0.5f);
+      const float Y         = y_pre - iy0_local;            // in (−0.5, +0.5]
+      if (std::fabs(Y) <= 0.5f) {
+        const float Sy = std::sinh(0.5f / by);
+        y_corr = iy0_local + by * std::asinh(2.f * Y * Sy);
+      }
+    }
+    yc = y_corr;
+
 }
 
 

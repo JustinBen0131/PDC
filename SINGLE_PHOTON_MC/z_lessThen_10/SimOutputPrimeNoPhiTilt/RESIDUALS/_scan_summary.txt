@@ -8,7 +8,7 @@ phi,CLUSCP,,0,2,4,46408,-0.00112354,0.00376862,NAME,h_phi_diff_cpCorr_2_4
 phi,CLUSCP_EA_vzDep,,0,2,4,46408,-0.0012583,0.00362892,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_2_4
 phi,CLUSCP_EA_etaDep,,0,2,4,46408,-0.00126456,0.00362348,NAME,h_phi_diff_cpCorrEA_fitEtaDep_2_4
 phi,CLUSCP_EA,,0,2,4,46408,-0.00126005,0.00362739,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_2_4
-phi,CLUSCP_EA_EandIncident,,0,2,4,46408,-0.00125112,0.00362104,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_2_4
+phi,CLUSCP_EA_EandIncident,,0,2,4,46408,-0.0012576,0.00361809,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_2_4
 phi,CLUSCP_EA_vzEtaDep,,0,2,4,46408,-0.00126447,0.00362422,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_2_4
 phi,CLUScpDirectBvals,,0,2,4,46408,-0.00131166,0.00373466,NAME,h_phi_diff_cpBcorr_2_4
 eta,CLUSRAW,,0,2,4,46408,5.27972e-06,0.00428894,NAME,h_eta_diff_cpRaw_2_4
@@ -16,7 +16,7 @@ eta,CLUSCP,,0,2,4,46408,-4.1675e-05,0.00414806,NAME,h_eta_diff_cpCorr_2_4
 eta,CLUSCP_EA_vzDep,,0,2,4,46408,-2.98507e-05,0.00392968,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_2_4
 eta,CLUSCP_EA_etaDep,,0,2,4,46408,-2.85155e-05,0.00391775,NAME,h_eta_diff_cpCorrEA_fitEtaDep_2_4
 eta,CLUSCP_EA,,0,2,4,46408,-2.96852e-05,0.00392943,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_2_4
-eta,CLUSCP_EA_EandIncident,,0,2,4,46408,-4.77823e-05,0.003984,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_2_4
+eta,CLUSCP_EA_EandIncident,,0,2,4,46408,-4.80662e-05,0.00398223,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_2_4
 eta,CLUSCP_EA_vzEtaDep,,0,2,4,46408,-2.90164e-05,0.00392024,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_2_4
 eta,CLUScpDirectBvals,,0,2,4,46408,-2.78929e-05,0.0038954,NAME,h_eta_diff_cpBcorr_2_4
 phi,PDCraw,,1,4,6,48562,-0.00143117,0.00403358,XAXIS,h_phi_diff_raw_4_6
@@ -28,7 +28,7 @@ phi,CLUSCP,,1,4,6,48562,-0.000661391,0.00334796,NAME,h_phi_diff_cpCorr_4_6
 phi,CLUSCP_EA_vzDep,,1,4,6,48562,-0.000767478,0.00325813,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_4_6
 phi,CLUSCP_EA_etaDep,,1,4,6,48562,-0.000773791,0.00325417,NAME,h_phi_diff_cpCorrEA_fitEtaDep_4_6
 phi,CLUSCP_EA,,1,4,6,48562,-0.000767906,0.00325789,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_4_6
-phi,CLUSCP_EA_EandIncident,,1,4,6,48562,-0.000756911,0.00325206,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_4_6
+phi,CLUSCP_EA_EandIncident,,1,4,6,48562,-0.000767807,0.00325091,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_4_6
 phi,CLUSCP_EA_vzEtaDep,,1,4,6,48562,-0.000773656,0.00325483,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_4_6
 phi,CLUScpDirectBvals,,1,4,6,48562,-0.000814286,0.00338872,NAME,h_phi_diff_cpBcorr_4_6
 eta,CLUSRAW,,1,4,6,48562,2.03167e-05,0.00411646,NAME,h_eta_diff_cpRaw_4_6
@@ -36,7 +36,7 @@ eta,CLUSCP,,1,4,6,48562,-1.59585e-05,0.00374239,NAME,h_eta_diff_cpCorr_4_6
 eta,CLUSCP_EA_vzDep,,1,4,6,48562,-5.67655e-06,0.00357076,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_4_6
 eta,CLUSCP_EA_etaDep,,1,4,6,48562,-4.94491e-06,0.00355857,NAME,h_eta_diff_cpCorrEA_fitEtaDep_4_6
 eta,CLUSCP_EA,,1,4,6,48562,-5.62503e-06,0.00357039,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_4_6
-eta,CLUSCP_EA_EandIncident,,1,4,6,48562,-2.14517e-05,0.00364991,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_4_6
+eta,CLUSCP_EA_EandIncident,,1,4,6,48562,-2.13436e-05,0.0036483,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_4_6
 eta,CLUSCP_EA_vzEtaDep,,1,4,6,48562,-5.19563e-06,0.00356268,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_4_6
 eta,CLUScpDirectBvals,,1,4,6,48562,-6.85174e-06,0.00353409,NAME,h_eta_diff_cpBcorr_4_6
 phi,PDCraw,,2,6,8,52876,-0.00118358,0.00396193,XAXIS,h_phi_diff_raw_6_8
@@ -48,7 +48,7 @@ phi,CLUSCP,,2,6,8,52876,-0.000390838,0.00315449,NAME,h_phi_diff_cpCorr_6_8
 phi,CLUSCP_EA_vzDep,,2,6,8,52876,-0.000497779,0.00308814,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_6_8
 phi,CLUSCP_EA_etaDep,,2,6,8,52876,-0.000503721,0.00308418,NAME,h_phi_diff_cpCorrEA_fitEtaDep_6_8
 phi,CLUSCP_EA,,2,6,8,52876,-0.000497655,0.00308825,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_6_8
-phi,CLUSCP_EA_EandIncident,,2,6,8,52876,-0.000485541,0.0030824,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_6_8
+phi,CLUSCP_EA_EandIncident,,2,6,8,52876,-0.000495014,0.0030826,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_6_8
 phi,CLUSCP_EA_vzEtaDep,,2,6,8,52876,-0.000504419,0.00308469,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_6_8
 phi,CLUScpDirectBvals,,2,6,8,52876,-0.000544242,0.003228,NAME,h_phi_diff_cpBcorr_6_8
 eta,CLUSRAW,,2,6,8,52876,-1.38205e-05,0.00402378,NAME,h_eta_diff_cpRaw_6_8
@@ -56,7 +56,7 @@ eta,CLUSCP,,2,6,8,52876,-3.92748e-05,0.00351937,NAME,h_eta_diff_cpCorr_6_8
 eta,CLUSCP_EA_vzDep,,2,6,8,52876,-3.41275e-05,0.00337669,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_6_8
 eta,CLUSCP_EA_etaDep,,2,6,8,52876,-3.24997e-05,0.00336316,NAME,h_eta_diff_cpCorrEA_fitEtaDep_6_8
 eta,CLUSCP_EA,,2,6,8,52876,-3.41572e-05,0.00337648,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_6_8
-eta,CLUSCP_EA_EandIncident,,2,6,8,52876,-4.45464e-05,0.00347098,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_6_8
+eta,CLUSCP_EA_EandIncident,,2,6,8,52876,-4.43793e-05,0.00346912,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_6_8
 eta,CLUSCP_EA_vzEtaDep,,2,6,8,52876,-3.2421e-05,0.00336819,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_6_8
 eta,CLUScpDirectBvals,,2,6,8,52876,-3.19731e-05,0.00334384,NAME,h_eta_diff_cpBcorr_6_8
 phi,PDCraw,,3,8,10,55432,-0.000974682,0.00402857,XAXIS,h_phi_diff_raw_8_10
@@ -68,7 +68,7 @@ phi,CLUSCP,,3,8,10,55432,-0.000214256,0.00319756,NAME,h_phi_diff_cpCorr_8_10
 phi,CLUSCP_EA_vzDep,,3,8,10,55432,-0.000315185,0.00314867,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_8_10
 phi,CLUSCP_EA_etaDep,,3,8,10,55432,-0.000319334,0.00314474,NAME,h_phi_diff_cpCorrEA_fitEtaDep_8_10
 phi,CLUSCP_EA,,3,8,10,55432,-0.000315631,0.00314875,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_8_10
-phi,CLUSCP_EA_EandIncident,,3,8,10,55432,-0.000303125,0.00314274,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_8_10
+phi,CLUSCP_EA_EandIncident,,3,8,10,55432,-0.000313183,0.00314355,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_8_10
 phi,CLUSCP_EA_vzEtaDep,,3,8,10,55432,-0.000319366,0.0031454,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_8_10
 phi,CLUScpDirectBvals,,3,8,10,55432,-0.000364158,0.0032763,NAME,h_phi_diff_cpBcorr_8_10
 eta,CLUSRAW,,3,8,10,55432,-2.6802e-05,0.00401682,NAME,h_eta_diff_cpRaw_8_10
@@ -76,7 +76,7 @@ eta,CLUSCP,,3,8,10,55432,-5.10062e-05,0.00343675,NAME,h_eta_diff_cpCorr_8_10
 eta,CLUSCP_EA_vzDep,,3,8,10,55432,-4.4961e-05,0.00331308,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_8_10
 eta,CLUSCP_EA_etaDep,,3,8,10,55432,-4.26984e-05,0.00330031,NAME,h_eta_diff_cpCorrEA_fitEtaDep_8_10
 eta,CLUSCP_EA,,3,8,10,55432,-4.49038e-05,0.00331318,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_8_10
-eta,CLUSCP_EA_EandIncident,,3,8,10,55432,-5.68286e-05,0.00342513,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_8_10
+eta,CLUSCP_EA_EandIncident,,3,8,10,55432,-5.68287e-05,0.003423,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_8_10
 eta,CLUSCP_EA_vzEtaDep,,3,8,10,55432,-4.26646e-05,0.00330606,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_8_10
 eta,CLUScpDirectBvals,,3,8,10,55432,-4.41511e-05,0.00327676,NAME,h_eta_diff_cpBcorr_8_10
 phi,PDCraw,,4,10,12,56610,-0.000807757,0.00414082,XAXIS,h_phi_diff_raw_10_12
@@ -88,7 +88,7 @@ phi,CLUSCP,,4,10,12,56610,-7.96411e-05,0.00333809,NAME,h_phi_diff_cpCorr_10_12
 phi,CLUSCP_EA_vzDep,,4,10,12,56610,-0.000173575,0.00329865,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_10_12
 phi,CLUSCP_EA_etaDep,,4,10,12,56610,-0.000177856,0.0032955,NAME,h_phi_diff_cpCorrEA_fitEtaDep_10_12
 phi,CLUSCP_EA,,4,10,12,56610,-0.00017317,0.00329873,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_10_12
-phi,CLUSCP_EA_EandIncident,,4,10,12,56610,-0.000160893,0.00329274,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_10_12
+phi,CLUSCP_EA_EandIncident,,4,10,12,56610,-0.000170525,0.00329451,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_10_12
 phi,CLUSCP_EA_vzEtaDep,,4,10,12,56610,-0.00017927,0.00329572,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_10_12
 phi,CLUScpDirectBvals,,4,10,12,56610,-0.000212246,0.00343304,NAME,h_phi_diff_cpBcorr_10_12
 eta,CLUSRAW,,4,10,12,56610,-4.13382e-05,0.00396347,NAME,h_eta_diff_cpRaw_10_12
@@ -96,7 +96,7 @@ eta,CLUSCP,,4,10,12,56610,-4.80521e-05,0.00334412,NAME,h_eta_diff_cpCorr_10_12
 eta,CLUSCP_EA_vzDep,,4,10,12,56610,-4.55238e-05,0.00322814,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_10_12
 eta,CLUSCP_EA_etaDep,,4,10,12,56610,-4.55832e-05,0.00321459,NAME,h_eta_diff_cpCorrEA_fitEtaDep_10_12
 eta,CLUSCP_EA,,4,10,12,56610,-4.53956e-05,0.00322801,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_10_12
-eta,CLUSCP_EA_EandIncident,,4,10,12,56610,-6.41738e-05,0.00334593,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_10_12
+eta,CLUSCP_EA_EandIncident,,4,10,12,56610,-6.45059e-05,0.00334385,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_10_12
 eta,CLUSCP_EA_vzEtaDep,,4,10,12,56610,-4.59757e-05,0.00322089,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_10_12
 eta,CLUScpDirectBvals,,4,10,12,56610,-4.5877e-05,0.00319359,NAME,h_eta_diff_cpBcorr_10_12
 phi,PDCraw,,5,12,15,85057,-0.000589073,0.00422428,XAXIS,h_phi_diff_raw_12_15
@@ -108,7 +108,7 @@ phi,CLUSCP,,5,12,15,85057,0.000146374,0.00350287,NAME,h_phi_diff_cpCorr_12_15
 phi,CLUSCP_EA_vzDep,,5,12,15,85057,6.34209e-05,0.00347155,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_12_15
 phi,CLUSCP_EA_etaDep,,5,12,15,85057,6.03462e-05,0.00346821,NAME,h_phi_diff_cpCorrEA_fitEtaDep_12_15
 phi,CLUSCP_EA,,5,12,15,85057,6.23445e-05,0.00347143,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_12_15
-phi,CLUSCP_EA_EandIncident,,5,12,15,85057,7.44521e-05,0.00346607,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_12_15
+phi,CLUSCP_EA_EandIncident,,5,12,15,85057,6.83804e-05,0.00346719,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_12_15
 phi,CLUSCP_EA_vzEtaDep,,5,12,15,85057,6.03948e-05,0.00346873,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_12_15
 phi,CLUScpDirectBvals,,5,12,15,85057,1.72481e-05,0.00358621,NAME,h_phi_diff_cpBcorr_12_15
 eta,CLUSRAW,,5,12,15,85057,-7.86884e-06,0.00393391,NAME,h_eta_diff_cpRaw_12_15
@@ -116,7 +116,7 @@ eta,CLUSCP,,5,12,15,85057,-3.31068e-05,0.00328084,NAME,h_eta_diff_cpCorr_12_15
 eta,CLUSCP_EA_vzDep,,5,12,15,85057,-2.58595e-05,0.00317249,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_12_15
 eta,CLUSCP_EA_etaDep,,5,12,15,85057,-2.42902e-05,0.00315546,NAME,h_eta_diff_cpCorrEA_fitEtaDep_12_15
 eta,CLUSCP_EA,,5,12,15,85057,-2.58565e-05,0.00317223,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_12_15
-eta,CLUSCP_EA_EandIncident,,5,12,15,85057,-3.93739e-05,0.00329154,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_12_15
+eta,CLUSCP_EA_EandIncident,,5,12,15,85057,-3.91411e-05,0.00328933,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_12_15
 eta,CLUSCP_EA_vzEtaDep,,5,12,15,85057,-2.46636e-05,0.00316248,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_12_15
 eta,CLUScpDirectBvals,,5,12,15,85057,-2.54773e-05,0.00313407,NAME,h_eta_diff_cpBcorr_12_15
 phi,PDCraw,,6,15,20,142116,-0.000332468,0.00422871,XAXIS,h_phi_diff_raw_15_20
@@ -128,7 +128,7 @@ phi,CLUSCP,,6,15,20,142116,0.000385096,0.0034632,NAME,h_phi_diff_cpCorr_15_20
 phi,CLUSCP_EA_vzDep,,6,15,20,142116,0.00030961,0.00344819,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_15_20
 phi,CLUSCP_EA_etaDep,,6,15,20,142116,0.000307107,0.00344473,NAME,h_phi_diff_cpCorrEA_fitEtaDep_15_20
 phi,CLUSCP_EA,,6,15,20,142116,0.000309893,0.00344811,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_15_20
-phi,CLUSCP_EA_EandIncident,,6,15,20,142116,0.000319479,0.003444,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_15_20
+phi,CLUSCP_EA_EandIncident,,6,15,20,142116,0.000311782,0.00344622,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_15_20
 phi,CLUSCP_EA_vzEtaDep,,6,15,20,142116,0.000305603,0.00344544,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_15_20
 phi,CLUScpDirectBvals,,6,15,20,142116,0.000264876,0.00357409,NAME,h_phi_diff_cpBcorr_15_20
 eta,CLUSRAW,,6,15,20,142116,-1.14486e-05,0.00388106,NAME,h_eta_diff_cpRaw_15_20
@@ -136,7 +136,7 @@ eta,CLUSCP,,6,15,20,142116,-1.48357e-05,0.00321209,NAME,h_eta_diff_cpCorr_15_20
 eta,CLUSCP_EA_vzDep,,6,15,20,142116,-1.39973e-05,0.00310529,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_15_20
 eta,CLUSCP_EA_etaDep,,6,15,20,142116,-1.30596e-05,0.00308748,NAME,h_eta_diff_cpCorrEA_fitEtaDep_15_20
 eta,CLUSCP_EA,,6,15,20,142116,-1.39265e-05,0.0031052,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_15_20
-eta,CLUSCP_EA_EandIncident,,6,15,20,142116,-3.00447e-05,0.00322548,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_15_20
+eta,CLUSCP_EA_EandIncident,,6,15,20,142116,-3.00875e-05,0.00322346,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_15_20
 eta,CLUSCP_EA_vzEtaDep,,6,15,20,142116,-1.31868e-05,0.003096,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_15_20
 eta,CLUScpDirectBvals,,6,15,20,142116,-1.26598e-05,0.00306858,NAME,h_eta_diff_cpBcorr_15_20
 phi,PDCraw,,7,20,30,287494,-0.000145876,0.00395383,XAXIS,h_phi_diff_raw_20_30
@@ -148,7 +148,7 @@ phi,CLUSCP,,7,20,30,287494,0.000579414,0.00300498,NAME,h_phi_diff_cpCorr_20_30
 phi,CLUSCP_EA_vzDep,,7,20,30,287494,0.000513469,0.002987,NAME,h_phi_diff_cpCorrEA_fitZVTXDep_20_30
 phi,CLUSCP_EA_etaDep,,7,20,30,287494,0.00050946,0.00298202,NAME,h_phi_diff_cpCorrEA_fitEtaDep_20_30
 phi,CLUSCP_EA,,7,20,30,287494,0.000513238,0.002987,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_20_30
-phi,CLUSCP_EA_EandIncident,,7,20,30,287494,0.000524217,0.00298259,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_20_30
+phi,CLUSCP_EA_EandIncident,,7,20,30,287494,0.000515966,0.00298521,NAME,h_phi_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_20_30
 phi,CLUSCP_EA_vzEtaDep,,7,20,30,287494,0.000509632,0.00298243,NAME,h_phi_diff_cpCorrEA_fitZVTXEtaDep_20_30
 phi,CLUScpDirectBvals,,7,20,30,287494,0.000455231,0.00312572,NAME,h_phi_diff_cpBcorr_20_30
 eta,CLUSRAW,,7,20,30,287494,-2.7868e-05,0.00376027,NAME,h_eta_diff_cpRaw_20_30
@@ -156,6 +156,6 @@ eta,CLUSCP,,7,20,30,287494,-3.34677e-05,0.00302885,NAME,h_eta_diff_cpCorr_20_30
 eta,CLUSCP_EA_vzDep,,7,20,30,287494,-3.12781e-05,0.00292942,NAME,h_eta_diff_cpCorrEA_fitZVTXDep_20_30
 eta,CLUSCP_EA_etaDep,,7,20,30,287494,-3.13173e-05,0.00290841,NAME,h_eta_diff_cpCorrEA_fitEtaDep_20_30
 eta,CLUSCP_EA,,7,20,30,287494,-3.13023e-05,0.00292937,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_20_30
-eta,CLUSCP_EA_EandIncident,,7,20,30,287494,-4.89421e-05,0.00306262,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_20_30
+eta,CLUSCP_EA_EandIncident,,7,20,30,287494,-4.89372e-05,0.00306027,NAME,h_eta_diff_cpCorrEA_fitEnergyOnly_AndIncidentAngle_20_30
 eta,CLUSCP_EA_vzEtaDep,,7,20,30,287494,-3.228e-05,0.00291788,NAME,h_eta_diff_cpCorrEA_fitZVTXEtaDep_20_30
 eta,CLUScpDirectBvals,,7,20,30,287494,-3.12299e-05,0.00288938,NAME,h_eta_diff_cpBcorr_20_30

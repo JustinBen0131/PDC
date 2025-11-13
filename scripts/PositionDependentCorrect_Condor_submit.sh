@@ -1073,7 +1073,7 @@ executable = PositionDependentCorrect_Condor.sh
 log        = ${LOG_DIR_LOG}/job.\$(Cluster).\$(Process).log
 output     = ${LOG_DIR_OUT}/job.\$(Cluster).\$(Process).out
 error      = ${LOG_DIR_ERR}/job.\$(Cluster).\$(Process).err
-request_memory = 1500MB
+request_memory = 2500MB
 EOL
 
       # Global environment for all queued procs in this submit file:
