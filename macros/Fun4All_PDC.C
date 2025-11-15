@@ -247,10 +247,6 @@ void Fun4All_PDC(int nevents = 0,
   bemcPtr->SetCylindricalGeometry();        // CEMC is a cylinder
   bemcPtr->set_UseDetailedGeometry(true);   // match builder ripple/geometry
   bemcPtr->SetTowerThreshold(0.030f);       // match builder Momenta threshold
-  // >>> disable φ(E) pre-rotation everywhere <<<
-  bemcPtr->EnablePhiTilt(false);
-  // (optional, but explicit)
-  bemcPtr->SetPhiTiltOffsetsByEta(0.0, 0.0, 0.0);
 
   /* 4a) Let CaloGeomMapping put "TOWERGEOM_CEMC_DETAILED" on the node-tree */
   CaloGeomMapping* geomMap = new CaloGeomMapping("CEMC_GeomFiller");

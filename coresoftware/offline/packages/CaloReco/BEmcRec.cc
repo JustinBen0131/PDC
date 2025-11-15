@@ -211,17 +211,22 @@ bool BEmcRec::SetTowerGeometry(int ix, int iy, const RawTowerGeom& raw_geom0)
 
   return true;
 }
-
 bool BEmcRec::CompleteTowerGeometry()
 // Calculates tower front size from coordinates of tower center coordinates
 {
+  // If detailed geometry was provided, dX/dY/dZ already describe the
+  // front-face tangents from precise per-tower info. Do not overwrite them.
+  if (m_UseDetailedGeometry)
+  {
+    return true;
+  }
+
   if (fTowerGeom.empty() || fNx <= 0)
   {
     std::cout << "Error in BEmcRec::CalculateTowerSize(): Tower geometry not well setup (NX = "
               << fNx << ")" << std::endl;
     return false;
   }
-
   const int nb = 8;
   int idx[nb] = {0, 1, 0, -1, -1, 1, 1, -1};
   int idy[nb] = {-1, 0, 1, 0, -1, -1, 1, 1};

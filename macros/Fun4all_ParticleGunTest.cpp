@@ -163,8 +163,9 @@ void Fun4all_ParticleGunTest(
       RawTowerGeom* tg = geo->get_tower_geometry(key);
       if (!tg) return;
 
-      const double zc   = tg->get_center_z();   // face-center z
-      const double phic = tg->get_phi();        // tower-center φ
+        const double zc   = tg->get_center_int_z();                 // front-face center z
+        const double phic = std::atan2(tg->get_center_int_y(),      // φ from front-face center
+                                       tg->get_center_int_x());
 
       // Set "event" vertex (beamline) at this tower's face z for the incidence calc
       bemc->SetVertexZ(static_cast<float>(zc));
@@ -205,7 +206,8 @@ void Fun4all_ParticleGunTest(
           RawTowerDefs::encode_towerid(geo->get_calorimeter_id(), ieta, iphi);
         RawTowerGeom* tg = geo->get_tower_geometry(key);
         if (!tg) continue;
-        const double d = std::fabs(TVector2::Phi_mpi_pi(tg->get_phi() - targetPhi));
+        const double phiC = std::atan2(tg->get_center_int_y(), tg->get_center_int_x()); // front-face φ
+        const double d = std::fabs(TVector2::Phi_mpi_pi(phiC - targetPhi));
         if (d < best_d)
         {
           best_d   = d;
@@ -257,12 +259,12 @@ void Fun4all_ParticleGunTest(
         RawTowerGeom* tg_ref = geo->get_tower_geometry(key_ref);
         if (tg_ref)
         {
-          const double Cx  = tg_ref->get_center_x();
-          const double Cy  = tg_ref->get_center_y();
-          const double Cz  = tg_ref->get_center_z();
-          const double Rc  = std::hypot(Cx, Cy);
-          const double phi = tg_ref->get_phi();
-          const double eta_det_ref = (Rc > 0.0) ? std::asinh(Cz / Rc) : 0.0;
+            const double Cx  = tg_ref->get_center_int_x();   // front-face center
+            const double Cy  = tg_ref->get_center_int_y();
+            const double Cz  = tg_ref->get_center_int_z();
+            const double Rc  = std::hypot(Cx, Cy);
+            const double phi = std::atan2(Cy, Cx);           // front-face φ
+            const double eta_det_ref = (Rc > 0.0) ? std::asinh(Cz / Rc) : 0.0;
 
           std::cout << "# [etaZvGrid] fixed-phi column scan\n"
                     << "#  reference tower: (ieta_ref="<<ieta_ref<<", iphi_fixed="<<iphi_fixed<<")\n"
@@ -287,13 +289,13 @@ void Fun4all_ParticleGunTest(
         RawTowerGeom* tg = geo->get_tower_geometry(key);
         if (!tg) continue;
 
-        const double Cx  = tg->get_center_x();
-        const double Cy  = tg->get_center_y();
-        const double Cz  = tg->get_center_z();
-        const double Rc  = std::hypot(Cx, Cy);
+          const double Cx  = tg->get_center_int_x();   // front-face center
+          const double Cy  = tg->get_center_int_y();
+          const double Cz  = tg->get_center_int_z();
+          const double Rc  = std::hypot(Cx, Cy);
 
-        // detector η from geometry (front-face center)
-        const double eta_det = (Rc > 0.0) ? std::asinh(Cz / Rc) : 0.0;
+          // detector η from front-face geometry (vertex-independent)
+          const double eta_det = (Rc > 0.0) ? std::asinh(Cz / Rc) : 0.0;
 
         // Keep only towers within detector acceptance [-1.1, 1.1]
         if (eta_det < -1.1 || eta_det > 1.1) continue;

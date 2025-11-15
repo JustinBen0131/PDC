@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#!/usr/bin/env bash
 ###############################################################################
 # PositionDependentCorrect_Condor_submit.sh
 #
@@ -1389,9 +1390,9 @@ executable = PositionDependentCorrect_Condor.sh
 log        = ${LOG_DIR_LOG}/job.\$(Cluster).\$(Process).log
 output     = ${LOG_DIR_OUT}/job.\$(Cluster).\$(Process).out
 error      = ${LOG_DIR_ERR}/job.\$(Cluster).\$(Process).err
-request_memory = 1500MB
+request_memory = 2000MB
 ${ENV_LINE}
-# Args: <runNum=9999> <listFileData> <sim> <Cluster> <nEvents=0> <processID> [<listFileHits>]
+# Args: <runNum=9999> <listFileData> <sim> <Cluster> v<nEvents=0> <processID> [<listFileHits>]
 EOL
   # How many (DST,G4) pairs per Condor job:
   local GROUP_SIZE_SIM=4

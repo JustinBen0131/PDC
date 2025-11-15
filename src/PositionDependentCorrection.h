@@ -250,11 +250,11 @@ class PositionDependentCorrection : public SubsysReco
                       const std::vector<float>& tower_energies);
 
   void fillDPhiAllVariants(RawCluster*,const TLorentzVector&,
-                             const TLorentzVector&,const std::pair<float,float>&,
-                             int blkPhiCoarse,float vtxZ,      /* ← named now */
-                             TH1F* hRAW[N_Ebins],TH1F* hCP[N_Ebins],
-                             bool fillGlobal);
-
+                               const TLorentzVector&,const std::pair<float,float>&,
+                               int blkPhiCoarse,float vtxZ,      /* ← named now */
+                               TH1F* hRAW[N_Ebins],TH1F* hCP[N_Ebins],
+                               bool fillGlobal);
+    
   void fillDEtaAllVariants(RawCluster*,const TLorentzVector&,
                            const TLorentzVector&,const std::pair<float,float>&,
                            int blkEtaCoarse,int blkPhiCoarse,float vtx_z,
@@ -324,18 +324,14 @@ class PositionDependentCorrection : public SubsysReco
     
     struct Pi0CutCounters {
         // Event accounting
-        std::uint64_t ev_total         = 0;  // all events entering process_towers
-        std::uint64_t ev_processed     = 0;  // events that pass |vz| acceptance
-        std::uint64_t ev_vz_skipped    = 0;  // events rejected by |vz| > m_vzSliceMax
-        std::uint64_t ev_trig_skipped  = 0;  // events skipped because required data trigger not fired
-        std::uint64_t ev_nClusTooLarge = 0;  // events rejected by nClusCount > max_nClusCount
+      std::uint64_t ev_total         = 0;  // all events entering process_towers
+      std::uint64_t ev_processed     = 0;  // events that pass |vz| acceptance
+      std::uint64_t ev_vz_skipped    = 0;  // events rejected by |vz| > m_vzSliceMax
+      std::uint64_t ev_trig_skipped  = 0;  // events skipped because required data trigger not fired
+      std::uint64_t ev_nClusTooLarge = 0;  // events rejected by nClusCount > max_nClusCount
 
-        
-        // NEW: explicit, separate counters
-        std::uint64_t c1_prob         = 0; // anchor rejected by probability
-        std::uint64_t pairs_prob2     = 0; // partner rejected by probability
-
-
+      std::uint64_t c1_prob         = 0; // anchor rejected by probability
+      std::uint64_t pairs_prob2     = 0; // partner rejected by probability
       // Cluster‑1 (anchor) screening
       std::uint64_t c1_seen         = 0;   // clusters iterated in OUTER loop
       std::uint64_t c1_E_nan        = 0;   // E_vec_1.mag() NaN
@@ -347,16 +343,16 @@ class PositionDependentCorrection : public SubsysReco
       std::uint64_t c1_pass         = 0;   // clusters that reached pair loop
 
         // Pair‑level screening (after a cluster1 passed)
-        std::uint64_t pairs_seen        = 0; // all pair trials (including self/null)
-        std::uint64_t pairs_self_or_null= 0; // self pairing or null c2
-        std::uint64_t pairs_pt2         = 0; // pt2 outside [pt2ClusCut, ptMaxCut]
-        std::uint64_t pairs_chi2        = 0; // χ²(c2) pathological guard
-        std::uint64_t pairs_chi2_gate   = 0; // χ²(c2) failed configured partner-χ² gate
-        std::uint64_t pairs_alpha       = 0; // asymmetry > maxAlpha
-        std::uint64_t pairs_mass_nan    = 0; // π0 mass NaN
-        std::uint64_t pairs_pi0pt       = 0; // π0 pt cut (simulation mode only)
-        std::uint64_t pairs_outOfSlice  = 0; // eLead outside energy slice table (info)
-        std::uint64_t pairs_final       = 0; // pairs that reached “legacy” mass fills
+      std::uint64_t pairs_seen        = 0; // all pair trials (including self/null)
+      std::uint64_t pairs_self_or_null= 0; // self pairing or null c2
+      std::uint64_t pairs_pt2         = 0; // pt2 outside [pt2ClusCut, ptMaxCut]
+      std::uint64_t pairs_chi2        = 0; // χ²(c2) pathological guard
+      std::uint64_t pairs_chi2_gate   = 0; // χ²(c2) failed configured partner-χ² gate
+      std::uint64_t pairs_alpha       = 0; // asymmetry > maxAlpha
+      std::uint64_t pairs_mass_nan    = 0; // π0 mass NaN
+      std::uint64_t pairs_pi0pt       = 0; // π0 pt cut (simulation mode only)
+      std::uint64_t pairs_outOfSlice  = 0; // eLead outside energy slice table (info)
+      std::uint64_t pairs_final       = 0; // pairs that reached “legacy” mass fills
 
       // Side fills (diagnostics)
       std::uint64_t pass1_fills       = 0; // h_mE_raw/h_mE_corr fills
@@ -470,20 +466,20 @@ class PositionDependentCorrection : public SubsysReco
 
   /* --------------------  HISTOGRAM DECLARATIONS ------------------- */
     
-    // Nine reconstruction variants for π0 studies
-    enum class VarPi0 {
+  // Nine reconstruction variants for π0 studies
+  enum class VarPi0 {
       CLUS_RAW=0, CLUS_CP=1,
       EA_FIT_zDEP=2, EA_FIT_ETADEP=3, EA_FIT_EONLY=4, EA_FIT_EONLY_INCIDENT=5,
       EA_FIT_ZVTXETADEP=6, PDC_RAW=7, PDC_CORR=8,
       NVAR=9
-    };
+  };
 
-    // Truth π0 photons with their mother info (filled in fillTruthInfo)
-    struct TruthPhoton { TLorentzVector p4; int mother_id{0}; int mother_pid{0}; };
-    std::vector<TruthPhoton> m_truth_pi0_photons;
+  // Truth π0 photons with their mother info (filled in fillTruthInfo)
+  struct TruthPhoton { TLorentzVector p4; int mother_id{0}; int mother_pid{0}; };
+  std::vector<TruthPhoton> m_truth_pi0_photons;
 
-    // Per-variant, per-slice π0 mass histograms (8 variants × N_Ebins)
-    TH1F* h_m_pi0_var[static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
+  // Per-variant, per-slice π0 mass histograms (8 variants × N_Ebins)
+  TH1F* h_m_pi0_var[static_cast<int>(VarPi0::NVAR)][N_Ebins]{};
 
   // NEW: Per-η-view, per-variant, per-slice π0 mass histograms
   // view index: 0=fullEta (|η|≤1.10), 1=etaCore (|η|≤0.20),
@@ -515,34 +511,34 @@ class PositionDependentCorrection : public SubsysReco
   TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
   TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
 
-    // --- EA residuals (η) – four uniquely-named variants
-    TH1F* h_eta_diff_cpCorrEA_fitZVTXDep_E                          [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
+  // --- EA residuals (η) – four uniquely-named variants
+  TH1F* h_eta_diff_cpCorrEA_fitZVTXDep_E                          [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E                     [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E                 [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E        [N_Ebins]{};
 
-    // ---------- NEW: |z| ≤ 60 cm gated duplicates (suffix: _0_60vz) ----------
-    // Δφ (cluster family + scratch)
-    TH1F* h_phi_diff_cpRaw_E_0_60vz                           [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorr_E_0_60vz                          [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorrEA_fitEtaDep_E_0_60vz              [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [N_Ebins]{};
-    TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [N_Ebins]{};
-    TH1F* h_phi_diff_cpBcorr_E_0_60vz                         [N_Ebins]{};
-    TH1F* h_phi_diff_raw_E_0_60vz                             [N_Ebins]{};
-    TH1F* h_phi_diff_corrected_E_0_60vz                       [N_Ebins]{};
+  // ---------- NEW: |z| ≤ 60 cm gated duplicates (suffix: _0_60vz) ----------
+  // Δφ (cluster family + scratch)
+  TH1F* h_phi_diff_cpRaw_E_0_60vz                           [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorr_E_0_60vz                          [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitEtaDep_E_0_60vz              [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [N_Ebins]{};
+  TH1F* h_phi_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [N_Ebins]{};
+  TH1F* h_phi_diff_cpBcorr_E_0_60vz                         [N_Ebins]{};
+  TH1F* h_phi_diff_raw_E_0_60vz                             [N_Ebins]{};
+  TH1F* h_phi_diff_corrected_E_0_60vz                       [N_Ebins]{};
 
-    // Δη (cluster family + scratch)
-    TH1F* h_eta_diff_cpRaw_E_0_60vz                           [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorr_E_0_60vz                          [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E_0_60vz              [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [N_Ebins]{};
-    TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [N_Ebins]{};
-    TH1F* h_eta_diff_cpBcorr_E_0_60vz                         [N_Ebins]{};
-    TH1F* h_eta_diff_raw_E_0_60vz                             [N_Ebins]{};
-    TH1F* h_eta_diff_corrected_E_0_60vz                       [N_Ebins]{};
+  // Δη (cluster family + scratch)
+  TH1F* h_eta_diff_cpRaw_E_0_60vz                           [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorr_E_0_60vz                          [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitZVTXDep_E_0_60vz                   [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitEtaDep_E_0_60vz              [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitEnergyOnly_E_0_60vz          [N_Ebins]{};
+  TH1F* h_eta_diff_cpCorrEA_fitPhiEnergy_etaEtaDep_E_0_60vz [N_Ebins]{};
+  TH1F* h_eta_diff_cpBcorr_E_0_60vz                         [N_Ebins]{};
+  TH1F* h_eta_diff_raw_E_0_60vz                             [N_Ebins]{};
+  TH1F* h_eta_diff_corrected_E_0_60vz                       [N_Ebins]{};
     
 
   // --- Ash scan profiles: <(Δφ)^2> / <(Δη)^2> vs b (tower-space driven)

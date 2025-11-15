@@ -1000,18 +1000,6 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 // -----------------------------------------------------------------------------
 // Incidence at the FRONT FACE (energy–independent by construction)
 //
@@ -1287,7 +1275,6 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(
       }
     }
     yc = y_corr;
-
 }
 
 
