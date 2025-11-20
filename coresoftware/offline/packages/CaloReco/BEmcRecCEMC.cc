@@ -1003,28 +1003,36 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 // -----------------------------------------------------------------------------
 // Incidence at the FRONT FACE (energy–independent by construction)
 //
-// Computes the signed azimuthal (φ) and polar(η) incidence angles using ONLY the
-// detailed front–face geometry of the owning tower. No shower–depth transport
-// is involved, so ⟨αφ⟩ is flat vs E and αη is governed only by viewing geometry.
+// Two possible frames:
+//
+//   1) Face frame  (default, m_incUseRotAxis == false)
+//      { uφ, uη, un } built from the detailed front-face tangents (current code).
+//
+//   2) "Mechanical" frame (m_incUseRotAxis == true)
+//      { uφ, uη, un } built from the tower rotation angles, with un aligned
+//      with the bar axis (local ẑ rotated into global). This is the naive
+//      axis-based incidence and will show the full ~5° φ tilt, ~9° η tilt.
+//
+// No shower–depth transport is involved, so ⟨αφ⟩ is flat vs E and αη is
+// governed only by viewing geometry.
 // -----------------------------------------------------------------------------
-// Returns: true  → all outputs are finite
-//          false → geometry missing or a numerical failure
 bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
                                      float& cos_a_phi, float& cos_a_eta,
                                      float& a_phi_sgn, float& a_eta_sgn)
 {
   (void)E;  // Front-face incidence does not depend on energy
 
-  // ---- local tracer / kill-switch helper ----
   const bool dbg = (m_incDbgLevel > 0);
-  auto dump_and_maybe_stop = [&](const char* tag,
-                                 const TVector3& C, const TVector3& F,
-                                 const TVector3& V, const TVector3& un,
-                                 const TVector3& uphi, const TVector3& ueta,
-                                 const TVector3& pF,
-                                 double pn, double pph, double pet,
-                                 double aphi, double aeta,
-                                 double cphi, double ceta)
+
+  auto dump_and_maybe_stop =
+    [&](const char* tag,
+        const TVector3& C, const TVector3& F,
+        const TVector3& V, const TVector3& un,
+        const TVector3& uphi, const TVector3& ueta,
+        const TVector3& pF,
+        double pn, double pph, double pet,
+        double aphi, double aeta,
+        double cphi, double ceta)
   {
     if (!dbg) return;
     std::cout << "\n=== Incidence Trace ("<< tag <<") ===\n"
@@ -1038,9 +1046,11 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
               << "pn="<<pn<<"  pφ="<<pph<<"  pη="<<pet<<"\n"
               << "αφ="<<aphi<<"  αη="<<aeta
               << "  cosφ="<<cphi<<"  cosη="<<ceta<<"\n"
-              << "noTiltSandbox="<<(m_incNoTiltSandbox?"true":"false")<<"\n"
+              << "noTiltSandbox="<<(m_incNoTiltSandbox?"true":"false")
+              << "  useRotAxis="<<(m_incUseRotAxis?"true":"false")<<"\n"
               << "======================================\n";
-    if (m_incHardStop >= 0 && m_incDbgLevel >= m_incHardStop) {
+    if (m_incHardStop >= 0 && m_incDbgLevel >= m_incHardStop)
+    {
       throw std::runtime_error("Incidence debug hard-stop");
     }
   };
@@ -1052,7 +1062,7 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   const int iy = EmcCluster::lowint(y + 0.5f);
 
   TowerGeom g{};
-  if (!GetTowerGeometry(ix, iy, g)) return false; // need detailed geometry
+  if (!GetTowerGeometry(ix, iy, g)) return false;
 
   // Sub-cell offsets δ ∈ (−0.5, +0.5]
   const float dx = x - ix;
@@ -1061,22 +1071,24 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   // ────────────────────────────────────────────────────────────────────────────
   // Step 2) FRONT-FACE point F in cm:
   //         F = C + δx * eφ + δy * eη
-  //         (dX[], dY[], dZ[] are one‑pitch tangents from detailed geometry)
+  //         (dX[], dY[], dZ[] are one-pitch tangents from detailed geometry)
   // ────────────────────────────────────────────────────────────────────────────
   const TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
   const TVector3 ephi_face(g.dX[0], g.dY[0], g.dZ[0]);
   const TVector3 eeta_face(g.dX[1], g.dY[1], g.dZ[1]);
   if (ephi_face.Mag() < 1e-9 || eeta_face.Mag() < 1e-9) return false;
 
-  // Optional no‑tilt sandbox: use cylinder-aligned face tangents,
-  // but keep the real pitch magnitudes from detailed geometry.
   TVector3 ephi = ephi_face;
   TVector3 eeta = eeta_face;
-  if (m_incNoTiltSandbox) {
+
+  // Optional no-tilt sandbox: use cylinder-aligned face tangents,
+  // but keep the pitch magnitudes from detailed geometry.
+  if (m_incNoTiltSandbox)
+  {
     const TVector3 rhat = TVector3(C.X(), C.Y(), 0.0).Unit();
     const TVector3 zhat(0., 0., 1.);
-    const TVector3 uphi_cyl = (zhat.Cross(rhat)).Unit(); // φ̂ on a cylinder
-    const TVector3 ueta_cyl = (rhat.Cross(uphi_cyl)).Unit(); // η̂ = n̂×φ̂
+    const TVector3 uphi_cyl = (zhat.Cross(rhat)).Unit();      // φ̂
+    const TVector3 ueta_cyl = (rhat.Cross(uphi_cyl)).Unit();  // η̂ = r̂×φ̂
     ephi = uphi_cyl * ephi_face.Mag();
     eeta = ueta_cyl * eeta_face.Mag();
   }
@@ -1093,36 +1105,124 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   pF *= (1.0 / pFmag);
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Step 4) Orthonormal face frame { uφ , uη , un } (built from eφ,eη in use)
+  // Step 4) Orthonormal basis { uφ , uη , un }
+  //
+  //  • If m_incUseRotAxis == false:
+  //      *EXACTLY* the existing face-frame behaviour.
+  //  • If m_incUseRotAxis == true:
+  //      Build the basis from the tower rotation angles: un = bar axis, and
+  //      uφ/uη are the rotated local x/y directions, orthonormalized.
   // ────────────────────────────────────────────────────────────────────────────
-  TVector3 n_face = ephi.Cross(eeta);
-  const double nmag = n_face.Mag();
-  if (!(nmag > 0.0)) return false;
-  n_face *= (1.0 / nmag);
+  TVector3 un;    // "normal": face normal (default) or mechanical axis (rot mode)
+  TVector3 uphi;  // φ-like tangent
+  TVector3 ueta;  // η-like tangent
 
-  // Outward normal (away from IP): choose sign by n · C
-  if (n_face.Dot(C) < 0.0) n_face = -n_face;
-  const TVector3 un = n_face;
+  if (!m_incUseRotAxis)
+  {
+    // ---------- FACE FRAME (unchanged) ----------
+    TVector3 n_face = ephi.Cross(eeta);
+    const double nmag = n_face.Mag();
+    if (!(nmag > 0.0)) return false;
+    n_face *= (1.0 / nmag);
 
-  // φ̂: start from eφ and remove any normal component; normalize
-  TVector3 uphi = ephi - un * ephi.Dot(un);
-  const double uphim = uphi.Mag();
-  if (!(uphim > 0.0)) return false;
-  uphi *= (1.0 / uphim);
+    // Outward normal (away from IP): choose sign by n · C
+    if (n_face.Dot(C) < 0.0) n_face = -n_face;
+    un = n_face;
 
-  // η̂: start from eη, orthogonalize to {un,uphi}; normalize
-  TVector3 ueta = eeta - un * eeta.Dot(un) - uphi * eeta.Dot(uphi);
-  const double uetam = ueta.Mag();
-  if (!(uetam > 0.0)) return false;
-  ueta *= (1.0 / uetam);
+    // φ̂: start from eφ and remove any normal component; normalize
+    uphi = ephi - un * ephi.Dot(un);
+    const double uphim = uphi.Mag();
+    if (!(uphim > 0.0)) return false;
+    uphi *= (1.0 / uphim);
 
-  // Ensure right‑handed triad (n̂ × φ̂ → +η̂)
-  if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
+    // η̂: start from eη, orthogonalize to {un,uphi}; normalize
+    ueta = eeta - un * eeta.Dot(un) - uphi * eeta.Dot(uphi);
+    const double uetam = ueta.Mag();
+    if (!(uetam > 0.0)) return false;
+    ueta *= (1.0 / uetam);
+
+    // Ensure right-handed triad (n̂ × φ̂ → +η̂)
+    if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
+  }
+  else
+  {
+    // ---------- MECHANICAL / ROTATION FRAME ----------
+    //
+    // We interpret the RawTowerGeomv5 rotation angles as the Euler angles that
+    // rotate local axes into global.  We take:
+    //   local ẑ = bar axis
+    //   local x̂, ŷ = φ/η directions in the tower frame
+    //
+    // Then:
+    //   u_axis  = R * (0,0,1)
+    //   uφ_raw  = R * (1,0,0)
+    //   uη_raw  = R * (0,1,0)
+    //
+    // and finally we orthonormalize {u_axis, uφ_raw, uη_raw}.
+    //
+    const double rx = g.RotX;  // assume these exist in TowerGeom (v5)
+    const double ry = g.RotY;
+    const double rz = g.RotZ;
+
+    const double cx = std::cos(rx), sx = std::sin(rx);
+    const double cy = std::cos(ry), sy = std::sin(ry);
+    const double cz = std::cos(rz), sz = std::sin(rz);
+
+    auto applyRot = [&](const TVector3& v) -> TVector3
+    {
+      // Apply Rz * Ry * Rx to local vector v (column vector convention).
+      double vx = v.X(), vy = v.Y(), vz = v.Z();
+
+      // Rx
+      double vx1 = vx;
+      double vy1 =  cx*vy - sx*vz;
+      double vz1 =  sx*vy + cx*vz;
+
+      // Ry
+      double vx2 =  cy*vx1 + sy*vz1;
+      double vy2 =  vy1;
+      double vz2 = -sy*vx1 + cy*vz1;
+
+      // Rz
+      double vx3 =  cz*vx2 - sz*vy2;
+      double vy3 =  sz*vx2 + cz*vy2;
+      double vz3 =  vz2;
+
+      return TVector3(vx3, vy3, vz3);
+    };
+
+    TVector3 u_axis = applyRot(TVector3(0.,0.,1.)); // tower "z" axis
+    TVector3 u_x    = applyRot(TVector3(1.,0.,0.)); // tower "x" axis
+    TVector3 u_y    = applyRot(TVector3(0.,1.,0.)); // tower "y" axis
+
+    // Normalize axis and enforce outward direction
+    const double amag = u_axis.Mag();
+    if (!(amag > 0.0)) return false;
+    u_axis *= (1.0 / amag);
+    if (u_axis.Dot(C) < 0.0) u_axis = -u_axis;
+
+    un = u_axis;
+
+    // Make φ̂ from rotated local x, projected orthogonal to axis
+    uphi = u_x - un * u_x.Dot(un);
+    const double uphim = uphi.Mag();
+    if (!(uphim > 0.0)) return false;
+    uphi *= (1.0 / uphim);
+
+    // Make η̂ from rotated local y, orthogonalize to {un,uphi}
+    ueta = u_y - un * u_y.Dot(un) - uphi * u_y.Dot(uphi);
+    const double uetam = ueta.Mag();
+    if (!(uetam > 0.0)) return false;
+    ueta *= (1.0 / uetam);
+
+    // Ensure right-handed triad
+    if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
+  }
 
   // ────────────────────────────────────────────────────────────────────────────
   // Step 5) Signed incidence angles and foreshortening cosines
   // ────────────────────────────────────────────────────────────────────────────
-  const double pn  = pF.Dot(un);    // can be ±
+  const double pn  = pF.Dot(un);   // can be ±
   const double pph = pF.Dot(uphi);
   const double pet = pF.Dot(ueta);
 
@@ -1149,13 +1249,14 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   const bool ok = (std::isfinite(cos_a_phi) && std::isfinite(cos_a_eta) &&
                    std::isfinite(a_phi_sgn) && std::isfinite(a_eta_sgn));
 
-  if (dbg) {
+  if (dbg)
+  {
     dump_and_maybe_stop("post-compute", C, F, V, un, uphi, ueta, pF,
                         pn, pph, pet, a_phi_sgn, a_eta_sgn, cos_a_phi, cos_a_eta);
   }
+
   return ok;
 }
-
 
 
 void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(

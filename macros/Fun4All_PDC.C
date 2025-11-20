@@ -65,8 +65,6 @@
   #pragma GCC diagnostic pop
 #endif
 
-R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_io.so)    // <— CaloBase (your local)
-R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_reco.so)  // <— CaloReco (your local)
 R__LOAD_LIBRARY(libcdbobjects)
 R__LOAD_LIBRARY(libfun4all.so)
 R__LOAD_LIBRARY(libfun4allraw.so)
@@ -78,6 +76,8 @@ R__LOAD_LIBRARY(libg4detectors.so)
 R__LOAD_LIBRARY(libCaloWaveformSim.so)
 R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 R__LOAD_LIBRARY(libcalibCaloEmc_pi0.so)
+R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_io.so)    // <— CaloBase (your local)
+R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libcalo_reco.so)  // <— CaloReco (your local)
 R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libPDC.so)
 
 
@@ -403,7 +403,7 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
 
-  pdc->Verbosity(0);                 // 0 = silent → raise for debugging
+  pdc->Verbosity(10);                 // 0 = silent → raise for debugging
 
   // Finally register the module with Fun4All
   se->registerSubsystem(pdc);

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/usr/bin/env bash
 ###############################################################################
 # PositionDependentCorrect_Condor_submit.sh
 #

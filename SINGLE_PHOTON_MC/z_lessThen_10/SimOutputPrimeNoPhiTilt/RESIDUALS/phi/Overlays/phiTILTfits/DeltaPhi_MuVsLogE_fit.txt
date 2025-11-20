@@ -1,11 +1,11 @@
 # ---- Δφ: μ vs ln(E) linear fits (intercept first, slope second) ----
-  {ETiltVariant::CLUS_RAW, { 4.720063e-03, -4.154203e-04 }},  // no corr, cluster
-  {ETiltVariant::CLUS_CP, { 4.986931e-03, -8.640779e-05 }},  // CorrectPosition, cluster
-  {ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP, { 5.161635e-03, -4.307400e-05 }},  // CorrectPosition(EA |z|+|#eta|+E), cluster
-  {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 5.170569e-03, -5.776951e-05 }},  // CorrectPosition(EA |z|+E), cluster
-  {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 5.165364e-03, -4.322180e-05 }},  // CorrectPosition(EA |#eta|+E), cluster
-  {ETiltVariant::CLUS_CP_EA_FIT_EandIncident, { 5.172228e-03, -5.030929e-05 }},  // CorrectPosition(EA E-only + incident-angle), cluster
-  {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 5.181084e-03, -6.091133e-05 }},  // CorrectPosition(EA E-only), cluster
-  {ETiltVariant::CLUS_BCORR, { 5.006388e-03, -6.256955e-05 }},  // b(E) corr, cluster
-  {ETiltVariant::PDC_RAW, { 2.839188e-03, 8.466311e-04 }},  // no corr, scratch
-  {ETiltVariant::PDC_CORR, { 2.410390e-03, 8.721686e-04 }},  // b(E) corr, scratch
+  {ETiltVariant::CLUS_RAW, { 2.691015e-03, 8.252791e-04 }},  // no corr, cluster
+  {ETiltVariant::CLUS_CP, { 1.940071e-03, 7.922050e-04 }},  // CorrectPosition, cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_ZDEP_ETADEP, { 2.109788e-03, 8.230749e-04 }},  // CorrectPosition(EA |z|+|#eta|+E), cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_ZDEP, { 2.102293e-03, 8.219307e-04 }},  // CorrectPosition(EA |z|+E), cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_ETADEP, { 2.109817e-03, 8.233377e-04 }},  // CorrectPosition(EA |#eta|+E), cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_EandIncident, { 2.101802e-03, 8.227368e-04 }},  // CorrectPosition(EA E-only + incident-angle), cluster
+  {ETiltVariant::CLUS_CP_EA_FIT_EONLY, { 2.103800e-03, 8.224145e-04 }},  // CorrectPosition(EA E-only), cluster
+  {ETiltVariant::CLUS_BCORR, { 2.143578e-03, 8.174577e-04 }},  // b(E) corr, cluster
+  {ETiltVariant::PDC_RAW, { 2.784107e-03, 8.315578e-04 }},  // no corr, scratch
+  {ETiltVariant::PDC_CORR, { 2.266733e-03, 8.284692e-04 }},  // b(E) corr, scratch

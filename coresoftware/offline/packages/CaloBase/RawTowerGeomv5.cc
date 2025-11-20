@@ -64,7 +64,7 @@ void RawTowerGeomv5::set_vertices(const std::vector<double>& vertices)
          /                    |3|_____|_|2
         /                     | /     | /
      -x                      4|/______|/1
-  */
+  */W
 
   if ((int) vertices.size() != _nVtx * 3)
   {
