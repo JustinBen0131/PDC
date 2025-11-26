@@ -1546,7 +1546,6 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(
   // ---- baseline b(E) at normal incidence (from master fits) ----------
   constexpr float E0 = 3.0f;
   const auto* fitPhi = BFitDB::instance().get("energyDepOnly","phi","originalEta","originalZRange");
-  const auto* fitPhi = BFitDB::instance().get("energyDepOnly","phi","originalEta","originalZRange");
   const auto* fitEta = BFitDB::instance().get("energyDepOnly","eta","originalEta","originalZRange");
   const float bphi_E = b_from(fitPhi, Energy, E0);
   const float beta_E = b_from(fitEta, Energy, E0);
