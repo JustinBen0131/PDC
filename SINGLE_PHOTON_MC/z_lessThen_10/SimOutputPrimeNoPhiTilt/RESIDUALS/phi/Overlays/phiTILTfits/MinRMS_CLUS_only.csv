@@ -1,9 +1,9 @@
 E_lo,E_hi,phi_best_label,phi_best_rms,phi_second_label,phi_second_rms,phi_gap,eta_best_label,eta_best_rms,eta_second_label,eta_second_rms,eta_gap
-2,4,"Energy-only + incident-angle",0.003621,"Energy + |#eta|-dep b",0.003625,0.000005,"",nan,"",nan,nan
-4,6,"Energy-only + incident-angle",0.003235,"Energy + |#eta|-dep b",0.003237,0.000003,"",nan,"",nan,nan
-6,8,"Energy-only + incident-angle",0.003075,"Energy + |#eta|-dep b",0.003077,0.000002,"",nan,"",nan,nan
-8,10,"Energy-only + incident-angle",0.003139,"Energy + |#eta|-dep b",0.003140,0.000002,"",nan,"",nan,nan
-10,12,"Energy-only + incident-angle",0.003289,"Energy + |#eta|-dep b",0.003290,0.000001,"",nan,"",nan,nan
-12,15,"Energy-only + incident-angle",0.003450,"Energy + |#eta|-dep b",0.003451,0.000001,"",nan,"",nan,nan
-15,20,"Energy + |#eta|-dep b",0.003443,"Energy + |z_{vtx}|+|#eta|-dep b",0.003443,0.000001,"",nan,"",nan,nan
-20,30,"Energy + |#eta|-dep b",0.002982,"Energy + |z_{vtx}|+|#eta|-dep b",0.002983,0.000001,"",nan,"",nan,nan
+2,4,"Energy + |#eta|-dep b",0.003626,"Energy-only + incident-angle",0.003626,0.000000,"",nan,"",nan,nan
+4,6,"Energy + |#eta|-dep b",0.003248,"Energy + |z_{vtx}|+|#eta|-dep b",0.003248,0.000000,"",nan,"",nan,nan
+6,8,"Energy + |#eta|-dep b",0.003066,"Energy + |z_{vtx}|+|#eta|-dep b",0.003067,0.000000,"",nan,"",nan,nan
+8,10,"Energy + |#eta|-dep b",0.003144,"Energy + |z_{vtx}|+|#eta|-dep b",0.003145,0.000001,"",nan,"",nan,nan
+10,12,"Energy + |#eta|-dep b",0.003299,"Energy + |z_{vtx}|+|#eta|-dep b",0.003299,0.000000,"",nan,"",nan,nan
+12,15,"Energy + |#eta|-dep b",0.003459,"Energy + |z_{vtx}|+|#eta|-dep b",0.003460,0.000001,"",nan,"",nan,nan
+15,20,"Energy + |#eta|-dep b",0.003434,"Energy + |z_{vtx}|+|#eta|-dep b",0.003435,0.000001,"",nan,"",nan,nan
+20,30,"Energy + |#eta|-dep b",0.002981,"Energy + |z_{vtx}|+|#eta|-dep b",0.002981,0.000000,"",nan,"",nan,nan

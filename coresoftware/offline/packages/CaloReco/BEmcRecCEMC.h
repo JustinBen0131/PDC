@@ -51,8 +51,8 @@ class BEmcRecCEMC : public BEmcRec
   void LoadProfile(const std::string &fname) override;
   //  float GetProb(std::vector<EmcModule> HitList, float e, float xg, float yg, float zg, float &chi2, int &ndf) override;
     
-  void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
-    
+    void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
+      
     // ───────── variant–specific φ-tilt handling ─────────
     enum class ETiltVariant  {
       CLUS_RAW,
@@ -63,40 +63,66 @@ class BEmcRecCEMC : public BEmcRec
       CLUS_CP_EA_FIT_ZDEP_ETADEP,
       CLUS_CP_EA_FIT_ZDEP,        // EA with |z|-dep + E-dep fits
       CLUS_CP_EA_FIT_ETADEP,      // EA with |η|-dep + E-dep fits
-      CLUS_CP_EA_FIT_EandIncident,       // EA with E-only fits
-      CLUS_CP_EA_FIT_EONLY,             // EA φ(E-only), η(|η|+E)
+      CLUS_CP_EA_FIT_EandIncident,// EA with E-only fits
+      CLUS_CP_EA_FIT_EONLY,       // EA φ(E-only), η(|η|+E)
 
       CLUS_BCORR,
       PDC_RAW,
       PDC_CORR,
       DEFAULT
     };
-   /// call once before any Tower2Global / CorrectShowerDepth
-   void SetPhiTiltVariant(ETiltVariant v);
-    
-   // ---- Incidence debug toggles (local to incidence only) ----
-   inline void SetIncidenceNoTiltSandbox(bool on) { m_incNoTiltSandbox = on; } // default false
-   inline void SetIncidenceDebugLevel(int lvl)    { m_incDbgLevel = lvl; }     // 0 = silent
-   inline void SetIncidenceHardStopLevel(int lvl) { m_incHardStop = lvl; }     // >=0 enables stop
 
-   // Set event vertex z used by incidence calculations (front-face frame)
-   void SetVertexZ(float vz) { fVz = vz; }
+    /// call once before any Tower2Global / CorrectShowerDepth
+    void SetPhiTiltVariant(ETiltVariant v);
 
-   // Front-face incidence: returns cosines and signed φ/η angles
-   bool ComputeIncidenceSD(float E, float x, float y,
+    // ───────── incidence mode (FACE vs MECH vs BOTH) ─────────
+    enum class EIncidenceMode {
+      FACE = 0,   // detailed front-face tangents only (legacy)
+      MECH = 1,   // mechanical rotations rotX/Y/Z only
+      BOTH = 2    // run BOTH; return MECH if available, also tabulate FACE+MECH
+    };
+
+    inline void SetIncidenceMode(EIncidenceMode m) { m_incMode = m; }
+
+    // ---- Incidence debug toggles (local to incidence only) ----
+    inline void SetIncidenceNoTiltSandbox(bool on) { m_incNoTiltSandbox = on; } // default false
+    inline void SetIncidenceDebugLevel(int lvl)    { m_incDbgLevel = lvl; }     // 0 = silent
+    inline void SetIncidenceHardStopLevel(int lvl) { m_incHardStop = lvl; }     // >=0 enables stop
+
+    // Set event vertex z used by incidence calculations (front-face frame)
+    void SetVertexZ(float vz) { fVz = vz; }
+
+    // Front-face incidence: returns cosines and signed φ/η angles
+    bool ComputeIncidenceSD(float E, float x, float y,
                             float& cos_a_phi, float& cos_a_eta,
                             float& a_phi_sgn, float& a_eta_sgn);
+
+    // Step-1 sandbox QA summary (FACE + no-tilt test)
+    // Prints a short PASS/FAIL block based on the accumulated m_qas_* counters.
+    void PrintIncidenceSandboxQASummary(double tolDphi  = 1.0e-3,
+                                        double tolAlpha = 1.0e-3) const;
 
    private:
     // Per-|η| band coefficients for 〈αφ^fold〉(E) = a − b ln E  [radians]
     // |η| ≤ 0.20       → core
     // 0.20 < |η| ≤ 0.70 → mid
     // 0.70 < |η| ≤ 1.10 → edge
-    ETiltVariant                   m_tiltVariant {ETiltVariant::DEFAULT};
+    ETiltVariant   m_tiltVariant { ETiltVariant::DEFAULT };
+
+    // Incidence mode (FACE / MECH / BOTH); default is legacy FACE.
+    EIncidenceMode m_incMode     { EIncidenceMode::FACE };
+
     // Local-only incidence tracer switches (do not leak verbosity class-wide)
-    bool m_incNoTiltSandbox {false};   // force cylinder-aligned face frame (no shingling/tilt)
-    int  m_incDbgLevel      {0};       // 0=silent; >0 prints trace
-    int  m_incHardStop      {20};      // if >=0 and incDbgLevel >= m_incHardStop → stop after dump
+    bool m_incNoTiltSandbox { false };  // force cylinder-aligned face frame (no shingling/tilt)
+    int  m_incDbgLevel      { 0 };      // 0 = silent; >0 prints trace
+    int  m_incHardStop      { 20 };     // if >=0 and incDbgLevel >= m_incHardStop → stop after dump
+
+    // --- Incidence QA (Step-1 sandbox) ---
+    int    m_qas_nCalls        = 0;
+    int    m_qas_nFaceZero     = 0;
+    double m_qas_maxAbsDphi    = 0.0;
+    double m_qas_maxAbsAlphaPh = 0.0;
+    double m_qas_maxAbsAlphaEt = 0.0;
 
     // keep angle caches
     float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };

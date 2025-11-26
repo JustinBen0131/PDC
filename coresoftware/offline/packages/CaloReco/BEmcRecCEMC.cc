@@ -1000,22 +1000,13 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 
 
 
-// -----------------------------------------------------------------------------
-// Incidence at the FRONT FACE (energy–independent by construction)
-//
-// Two possible frames:
-//
-//   1) Face frame  (default, m_incUseRotAxis == false)
-//      { uφ, uη, un } built from the detailed front-face tangents (current code).
-//
-//   2) "Mechanical" frame (m_incUseRotAxis == true)
-//      { uφ, uη, un } built from the tower rotation angles, with un aligned
-//      with the bar axis (local ẑ rotated into global). This is the naive
-//      axis-based incidence and will show the full ~5° φ tilt, ~9° η tilt.
-//
-// No shower–depth transport is involved, so ⟨αφ⟩ is flat vs E and αη is
-// governed only by viewing geometry.
-// -----------------------------------------------------------------------------
+
+
+
+
+
+
+
 bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
                                      float& cos_a_phi, float& cos_a_eta,
                                      float& a_phi_sgn, float& a_eta_sgn)
@@ -1023,6 +1014,23 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   (void)E;  // Front-face incidence does not depend on energy
 
   const bool dbg = (m_incDbgLevel > 0);
+
+  // ------------------------------------------------------------------
+  // Incidence mode (runtime-selectable):
+  //
+  //   FACE : use detailed front-face tangents only  (legacy behaviour)
+  //   MECH : use mechanical rotations rotX/Y/Z only
+  //   BOTH : return MECH result (if available) but ALSO compute and
+  //          print both FACE and MECH in a compact tabulated line.
+  //
+  // Mode is set via SetIncidenceMode(...) on this BEmcRecCEMC object.
+  // ------------------------------------------------------------------
+  const EIncidenceMode kIncidenceMode = m_incMode;
+
+  // "Primary" frame is what defines the returned values.
+  const bool primaryIsMech =
+      (kIncidenceMode == EIncidenceMode::MECH ||
+       kIncidenceMode == EIncidenceMode::BOTH);
 
   auto dump_and_maybe_stop =
     [&](const char* tag,
@@ -1047,7 +1055,7 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
               << "αφ="<<aphi<<"  αη="<<aeta
               << "  cosφ="<<cphi<<"  cosη="<<ceta<<"\n"
               << "noTiltSandbox="<<(m_incNoTiltSandbox?"true":"false")
-              << "  useRotAxis="<<(m_incUseRotAxis?"true":"false")<<"\n"
+              << "  primaryIsMech="<<(primaryIsMech?"true":"false")<<"\n"
               << "======================================\n";
     if (m_incHardStop >= 0 && m_incDbgLevel >= m_incHardStop)
     {
@@ -1062,7 +1070,7 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   const int iy = EmcCluster::lowint(y + 0.5f);
 
   TowerGeom g{};
-  if (!GetTowerGeometry(ix, iy, g)) return false;
+  if (!GetTowerGeometry(ix, iy, g)) return false; // need detailed geometry
 
   // Sub-cell offsets δ ∈ (−0.5, +0.5]
   const float dx = x - ix;
@@ -1081,8 +1089,7 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   TVector3 ephi = ephi_face;
   TVector3 eeta = eeta_face;
 
-  // Optional no-tilt sandbox: use cylinder-aligned face tangents,
-  // but keep the pitch magnitudes from detailed geometry.
+  // Optional no-tilt sandbox: cylinder-aligned φ/η but keep pitch magnitudes
   if (m_incNoTiltSandbox)
   {
     const TVector3 rhat = TVector3(C.X(), C.Y(), 0.0).Unit();
@@ -1104,65 +1111,88 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   if (!(pFmag > 0.0)) return false;
   pF *= (1.0 / pFmag);
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Step 4) Orthonormal basis { uφ , uη , un }
-  //
-  //  • If m_incUseRotAxis == false:
-  //      *EXACTLY* the existing face-frame behaviour.
-  //  • If m_incUseRotAxis == true:
-  //      Build the basis from the tower rotation angles: un = bar axis, and
-  //      uφ/uη are the rotated local x/y directions, orthonormalized.
-  // ────────────────────────────────────────────────────────────────────────────
-  TVector3 un;    // "normal": face normal (default) or mechanical axis (rot mode)
-  TVector3 uphi;  // φ-like tangent
-  TVector3 ueta;  // η-like tangent
-
-  if (!m_incUseRotAxis)
+  // Helper: from a basis {un,uphi,ueta} and ray pF, compute projections,
+  // signed incidence angles, and foreshortening cosines.
+  auto basis_to_incidence =
+    [&](const TVector3& un_b, const TVector3& uphi_b, const TVector3& ueta_b,
+        double& pn_b, double& pph_b, double& pet_b,
+        double& aphi_b, double& aeta_b,
+        double& cosphi_b, double& coseta_b) -> bool
   {
-    // ---------- FACE FRAME (unchanged) ----------
+    pn_b  = pF.Dot(un_b);
+    pph_b = pF.Dot(uphi_b);
+    pet_b = pF.Dot(ueta_b);
+
+    const double apn_b      = std::max(1e-12, std::fabs(pn_b));
+    const double aphi_mag_b = std::atan2(std::fabs(pph_b), apn_b);
+    const double aeta_mag_b = std::atan2(std::fabs(pet_b), apn_b);
+
+    const double sgn_phi_b = (pph_b >= 0.0) ? +1.0 : -1.0;
+    const double sgn_eta_b = (pet_b >= 0.0) ? +1.0 : -1.0;
+
+    aphi_b = sgn_phi_b * aphi_mag_b;
+    aeta_b = sgn_eta_b * aeta_mag_b;
+
+    cosphi_b = std::clamp(apn_b / std::sqrt(apn_b*apn_b + pph_b*pph_b),
+                          1.0e-6, 1.0);
+    coseta_b = std::clamp(apn_b / std::sqrt(apn_b*apn_b + pet_b*pet_b),
+                          1.0e-6, 1.0);
+
+    return (std::isfinite(aphi_b)  && std::isfinite(aeta_b) &&
+            std::isfinite(cosphi_b) && std::isfinite(coseta_b));
+  };
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 4a) FACE frame from (possibly sandboxed) front-face tangents
+  // ────────────────────────────────────────────────────────────────────────────
+  TVector3 un_face, uphi_face, ueta_face;
+  bool have_face = false;
+  {
     TVector3 n_face = ephi.Cross(eeta);
     const double nmag = n_face.Mag();
-    if (!(nmag > 0.0)) return false;
-    n_face *= (1.0 / nmag);
+    if (nmag > 0.0)
+    {
+      n_face *= (1.0 / nmag);
 
-    // Outward normal (away from IP): choose sign by n · C
-    if (n_face.Dot(C) < 0.0) n_face = -n_face;
-    un = n_face;
+      // Outward normal (away from IP): choose sign by n · C
+      if (n_face.Dot(C) < 0.0) n_face = -n_face;
+      un_face = n_face;
 
-    // φ̂: start from eφ and remove any normal component; normalize
-    uphi = ephi - un * ephi.Dot(un);
-    const double uphim = uphi.Mag();
-    if (!(uphim > 0.0)) return false;
-    uphi *= (1.0 / uphim);
+      // φ̂: start from eφ and remove any normal component; normalize
+      uphi_face = ephi - un_face * ephi.Dot(un_face);
+      const double uphim = uphi_face.Mag();
+      if (uphim > 0.0)
+      {
+        uphi_face *= (1.0 / uphim);
 
-    // η̂: start from eη, orthogonalize to {un,uphi}; normalize
-    ueta = eeta - un * eeta.Dot(un) - uphi * eeta.Dot(uphi);
-    const double uetam = ueta.Mag();
-    if (!(uetam > 0.0)) return false;
-    ueta *= (1.0 / uetam);
+        // η̂: start from eη, orthogonalize to {un,uphi}; normalize
+        ueta_face = eeta
+                  - un_face   * eeta.Dot(un_face)
+                  - uphi_face * eeta.Dot(uphi_face);
+        const double uetam = ueta_face.Mag();
+        if (uetam > 0.0)
+        {
+          ueta_face *= (1.0 / uetam);
 
-    // Ensure right-handed triad (n̂ × φ̂ → +η̂)
-    if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
+          // Ensure right-handed triad (n̂ × φ̂ → +η̂)
+          if (un_face.Cross(uphi_face).Dot(ueta_face) < 0.0)
+            ueta_face = -ueta_face;
+
+          have_face = true;
+        }
+      }
+    }
   }
-  else
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 4b) MECHANICAL frame from RawTowerGeomv5 rotations
+  // ────────────────────────────────────────────────────────────────────────────
+  TVector3 un_mech, uphi_mech, ueta_mech;
+  bool have_mech = false;
   {
-    // ---------- MECHANICAL / ROTATION FRAME ----------
-    //
-    // We interpret the RawTowerGeomv5 rotation angles as the Euler angles that
-    // rotate local axes into global.  We take:
-    //   local ẑ = bar axis
-    //   local x̂, ŷ = φ/η directions in the tower frame
-    //
-    // Then:
-    //   u_axis  = R * (0,0,1)
-    //   uφ_raw  = R * (1,0,0)
-    //   uη_raw  = R * (0,1,0)
-    //
-    // and finally we orthonormalize {u_axis, uφ_raw, uη_raw}.
-    //
-    const double rx = g.RotX;  // assume these exist in TowerGeom (v5)
-    const double ry = g.RotY;
-    const double rz = g.RotZ;
+    const double rx = g.rotX;
+    const double ry = g.rotY;
+    const double rz = g.rotZ;
 
     const double cx = std::cos(rx), sx = std::sin(rx);
     const double cy = std::cos(ry), sy = std::sin(ry);
@@ -1170,77 +1200,132 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
 
     auto applyRot = [&](const TVector3& v) -> TVector3
     {
-      // Apply Rz * Ry * Rx to local vector v (column vector convention).
+      // Apply Rz * Ry * Rx to local vector v (column-vector convention).
       double vx = v.X(), vy = v.Y(), vz = v.Z();
 
       // Rx
-      double vx1 = vx;
-      double vy1 =  cx*vy - sx*vz;
-      double vz1 =  sx*vy + cx*vz;
+      const double vx1 = vx;
+      const double vy1 =  cx*vy - sx*vz;
+      const double vz1 =  sx*vy + cx*vz;
 
       // Ry
-      double vx2 =  cy*vx1 + sy*vz1;
-      double vy2 =  vy1;
-      double vz2 = -sy*vx1 + cy*vz1;
+      const double vx2 =  cy*vx1 + sy*vz1;
+      const double vy2 =  vy1;
+      const double vz2 = -sy*vx1 + cy*vz1;
 
       // Rz
-      double vx3 =  cz*vx2 - sz*vy2;
-      double vy3 =  sz*vx2 + cz*vy2;
-      double vz3 =  vz2;
+      const double vx3 =  cz*vx2 - sz*vy2;
+      const double vy3 =  sz*vx2 + cz*vy2;
+      const double vz3 =  vz2;
 
       return TVector3(vx3, vy3, vz3);
     };
 
+    // Local axes: ẑ = bar axis, x̂/ŷ = transverse directions
     TVector3 u_axis = applyRot(TVector3(0.,0.,1.)); // tower "z" axis
     TVector3 u_x    = applyRot(TVector3(1.,0.,0.)); // tower "x" axis
     TVector3 u_y    = applyRot(TVector3(0.,1.,0.)); // tower "y" axis
 
     // Normalize axis and enforce outward direction
     const double amag = u_axis.Mag();
-    if (!(amag > 0.0)) return false;
-    u_axis *= (1.0 / amag);
-    if (u_axis.Dot(C) < 0.0) u_axis = -u_axis;
+    if (amag > 0.0)
+    {
+      u_axis *= (1.0 / amag);
+      if (u_axis.Dot(C) < 0.0) u_axis = -u_axis;
 
-    un = u_axis;
+      un_mech = u_axis;
 
-    // Make φ̂ from rotated local x, projected orthogonal to axis
-    uphi = u_x - un * u_x.Dot(un);
-    const double uphim = uphi.Mag();
-    if (!(uphim > 0.0)) return false;
-    uphi *= (1.0 / uphim);
+      // φ̂: project rotated local x̂ into plane ⟂ axis; normalize
+      uphi_mech = u_x - un_mech * u_x.Dot(un_mech);
+      const double uphim = uphi_mech.Mag();
+      if (uphim > 0.0)
+      {
+        uphi_mech *= (1.0 / uphim);
 
-    // Make η̂ from rotated local y, orthogonalize to {un,uphi}
-    ueta = u_y - un * u_y.Dot(un) - uphi * u_y.Dot(uphi);
-    const double uetam = ueta.Mag();
-    if (!(uetam > 0.0)) return false;
-    ueta *= (1.0 / uetam);
+        // η̂: start from rotated local ŷ, orthogonalize to {un,uphi}; normalize
+        ueta_mech = u_y
+                  - un_mech   * u_y.Dot(un_mech)
+                  - uphi_mech * u_y.Dot(uphi_mech);
+        const double uetam = ueta_mech.Mag();
+        if (uetam > 0.0)
+        {
+          ueta_mech *= (1.0 / uetam);
 
-    // Ensure right-handed triad
-    if (un.Cross(uphi).Dot(ueta) < 0.0) ueta = -ueta;
+          // Ensure right-handed triad
+          if (un_mech.Cross(uphi_mech).Dot(ueta_mech) < 0.0)
+            ueta_mech = -ueta_mech;
+
+          // Align mechanical φ-axis with measured face φ tangent
+          TVector3 uphi_ref = ephi_face;
+          const double refMag = uphi_ref.Mag();
+          if (refMag > 0.0)
+          {
+            uphi_ref *= (1.0 / refMag);
+            if (uphi_mech.Dot(uphi_ref) < 0.0)
+            {
+              uphi_mech = -uphi_mech;
+              ueta_mech = -ueta_mech;
+            }
+          }
+
+          have_mech = true;
+        }
+      }
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Step 5) Signed incidence angles and foreshortening cosines
+  // Step 5) Choose primary frame and compute incidence
   // ────────────────────────────────────────────────────────────────────────────
-  const double pn  = pF.Dot(un);   // can be ±
-  const double pph = pF.Dot(uphi);
-  const double pet = pF.Dot(ueta);
+  TVector3 un, uphi, ueta;
+  bool have_primary = false;
 
-  const double apn      = std::max(1e-12, std::fabs(pn));
-  const double aphi_mag = std::atan2(std::fabs(pph), apn);
-  const double aeta_mag = std::atan2(std::fabs(pet), apn);
+  switch (kIncidenceMode)
+  {
+    case EIncidenceMode::FACE:
+      if (!have_face) return false;
+      un = un_face; uphi = uphi_face; ueta = ueta_face;
+      have_primary = true;
+      break;
 
-  const double sgn_phi = (pph >= 0.0) ? +1.0 : -1.0;
-  const double sgn_eta = (pet >= 0.0) ? +1.0 : -1.0;
+    case EIncidenceMode::MECH:
+      if (!have_mech) return false;
+      un = un_mech; uphi = uphi_mech; ueta = ueta_mech;
+      have_primary = true;
+      break;
 
-  a_phi_sgn = static_cast<float>(sgn_phi * aphi_mag);
-  a_eta_sgn = static_cast<float>(sgn_eta * aeta_mag);
+    case EIncidenceMode::BOTH:
+      // Prefer mechanical as the "physics" frame; fall back to FACE if needed.
+      if (have_mech)
+      {
+        un = un_mech; uphi = uphi_mech; ueta = ueta_mech;
+        have_primary = true;
+      }
+      else if (have_face)
+      {
+        un = un_face; uphi = uphi_face; ueta = ueta_face;
+        have_primary = true;
+      }
+      break;
+  }
 
-  // Foreshortening cosines (use |pn| so they are always (0,1])
-  cos_a_phi = static_cast<float>(
-      std::clamp(apn / std::sqrt(apn*apn + pph*pph), 1.0e-6, 1.0));
-  cos_a_eta = static_cast<float>(
-      std::clamp(apn / std::sqrt(apn*apn + pet*pet), 1.0e-6, 1.0));
+  if (!have_primary) return false;
+
+  double pn  = 0.0, pph  = 0.0, pet  = 0.0;
+  double aphi = 0.0, aeta = 0.0;
+  double cphi = 1.0, ceta = 1.0;
+
+  if (!basis_to_incidence(un, uphi, ueta,
+                          pn, pph, pet,
+                          aphi, aeta, cphi, ceta))
+  {
+    return false;
+  }
+
+  a_phi_sgn = static_cast<float>(aphi);
+  a_eta_sgn = static_cast<float>(aeta);
+  cos_a_phi = static_cast<float>(cphi);
+  cos_a_eta = static_cast<float>(ceta);
 
   // Cache for QA
   m_lastAlphaPhiSigned = a_phi_sgn;
@@ -1249,14 +1334,204 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   const bool ok = (std::isfinite(cos_a_phi) && std::isfinite(cos_a_eta) &&
                    std::isfinite(a_phi_sgn) && std::isfinite(a_eta_sgn));
 
-  if (dbg)
+    // ────────────────────────────────────────────────────────────────────────────
+    // Step 6) Debug: tabulated FACE vs MECH (or FACE only) + sandbox QA
+    //
+    //  • QA bookkeeping (m_qas_*) runs regardless of m_incDbgLevel
+    //    so PrintIncidenceSandboxQASummary() works even with debug off.
+    //  • Per-call CSV ([INC] lines) are only printed when dbg==true.
+    // ────────────────────────────────────────────────────────────────────────────
+    {
+      // Incidence in FACE and MECH frames (if available)
+      double pn_face   = 0.0, pph_face   = 0.0, pet_face   = 0.0;
+      double aphi_face = 0.0, aeta_face  = 0.0;
+      double cphi_face = 1.0, ceta_face  = 1.0;
+
+      double pn_mech   = 0.0, pph_mech   = 0.0, pet_mech   = 0.0;
+      double aphi_mech = 0.0, aeta_mech  = 0.0;
+      double cphi_mech = 1.0, ceta_mech  = 1.0;
+
+      if (have_face)
+      {
+        bool ok_face_dbg = basis_to_incidence(
+            un_face, uphi_face, ueta_face,
+            pn_face, pph_face, pet_face,
+            aphi_face, aeta_face, cphi_face, ceta_face);
+        (void) ok_face_dbg;
+      }
+
+      if (have_mech)
+      {
+        bool ok_mech_dbg = basis_to_incidence(
+            un_mech, uphi_mech, ueta_mech,
+            pn_mech, pph_mech, pet_mech,
+            aphi_mech, aeta_mech, cphi_mech, ceta_mech);
+        (void) ok_mech_dbg;
+      }
+
+      // Geometry helpers for digestible output
+      const double Rc = std::hypot(C.X(), C.Y());
+
+      // eta_det : tower-center η as seen from IP (z=0)
+      const double eta_det = (Rc > 0.0) ? std::asinh(C.Z() / Rc)         : 0.0;
+      // eta_SD  : tower-center η as seen from the chosen vertex z = fVz
+      const double eta_SD  = (Rc > 0.0) ? std::asinh((C.Z() - fVz) / Rc) : 0.0;
+
+      const double phi_det = std::atan2(C.Y(), C.X());    // tower center φ (detector)
+      const double phi_ray = std::atan2(pF.Y(), pF.X());  // ray direction φ from vertex
+
+      // Differences (ray–detector). In the Step-1 sandbox we only require dphi≈0.
+      const double dphi = phi_ray - phi_det;
+      const double deta = eta_SD  - eta_det;  // kept for information; not a Step-1 QA cut
+
+        // Magnitudes of the FACE / MECH incidence vectors in (φ,η) plane
+        const double amag_face = std::sqrt(aphi_face*aphi_face + aeta_face*aeta_face);
+        const double amag_mech = std::sqrt(aphi_mech*aphi_mech + aeta_mech*aeta_mech);
+
+        // FACE–MECH incidence differences in (φ,η) plane.
+        // These are only physically meaningful when both frames are available
+        // (have_face && have_mech), but we define them for all calls for simplicity.
+        double dalpha_phi = 0.0;
+        double dalpha_eta = 0.0;
+        double dalpha_mag = 0.0;
+        if (have_face && have_mech)
+        {
+          dalpha_phi = aphi_mech - aphi_face;
+          dalpha_eta = aeta_mech - aeta_face;
+          dalpha_mag = std::sqrt(dalpha_phi*dalpha_phi + dalpha_eta*dalpha_eta);
+        }
+
+        // Simple tagging / "color coding" via textual labels:
+        //  - FACE≈0     : FACE angles essentially zero (perfect cylinder sandbox)
+        //  - FACE≈MECH  : FACE and MECH magnitudes agree within ~0.3°
+        //  - TILT       : genuinely tilted (mechanical incidence differs from FACE)
+        std::string tag = "TILT";
+        const double tolZero  = 1.0e-3;  // ~0.057° in radians
+        const double tolMatch = 5.0e-3;  // ~0.29° in radians
+
+      if (std::fabs(aphi_face) < tolZero && std::fabs(aeta_face) < tolZero)
+      {
+        tag = "FACE≈0";
+      }
+      else if (std::fabs(amag_face - amag_mech) < tolMatch)
+      {
+        tag = "FACE≈MECH";
+      }
+
+      // --- Step-1 sandbox QA bookkeeping: FACE-only, no-tilt sandbox ---
+      // Runs irrespective of debug level; PASS/FAIL is decided later.
+      if (m_incNoTiltSandbox &&
+          kIncidenceMode == EIncidenceMode::FACE)
+      {
+        ++m_qas_nCalls;
+        m_qas_maxAbsDphi    = std::max(m_qas_maxAbsDphi,    std::fabs(dphi));
+        m_qas_maxAbsAlphaPh = std::max(m_qas_maxAbsAlphaPh, std::fabs(aphi_face));
+        m_qas_maxAbsAlphaEt = std::max(m_qas_maxAbsAlphaEt, std::fabs(aeta_face));
+
+        if (tag == "FACE≈0")
+        {
+          ++m_qas_nFaceZero;
+        }
+      }
+
+      // Only print the CSV-style [INC] lines when debug is enabled
+      if (dbg)
+      {
+        // Print header once (CSV-style; easy to grep / load in Python/ROOT)
+        static bool s_headerPrinted = false;
+          if (!s_headerPrinted)
+          {
+            std::cout << "# Columns ([INC] lines)\n"
+                      << "#  vtxZ_cm, ix, iy, "
+                      << "eta_det_IP, phi_det, eta_SD_vtx, phi_ray, "
+                      << "dphi, deta, "
+                      << "rotX_mrad, rotY_mrad, rotZ_mrad, "
+                      << "a_phi_face, a_eta_face, |a_face|, cos_phi_face, cos_eta_face, "
+                      << "a_phi_mech, a_eta_mech, |a_mech|, cos_phi_mech, cos_eta_mech, "
+                      << "dalpha_phi, dalpha_eta, |dalpha|, "
+                      << "tag\n";
+            s_headerPrinted = true;
+          }
+
+
+          std::cout << "[INC] "
+                    << fVz             << ", "
+                    << ix              << ", "
+                    << iy              << ", "
+                    << eta_det         << ", "
+                    << phi_det         << ", "
+                    << eta_SD          << ", "
+                    << phi_ray         << ", "
+                    << dphi            << ", "
+                    << deta            << ", "
+                    << g.rotX * 1.0e3  << ", "
+                    << g.rotY * 1.0e3  << ", "
+                    << g.rotZ * 1.0e3  << ", "
+                    << aphi_face       << ", "
+                    << aeta_face       << ", "
+                    << amag_face       << ", "
+                    << cphi_face       << ", "
+                    << ceta_face       << ", "
+                    << aphi_mech       << ", "
+                    << aeta_mech       << ", "
+                    << amag_mech       << ", "
+                    << cphi_mech       << ", "
+                    << ceta_mech       << ", "
+                    << dalpha_phi      << ", "
+                    << dalpha_eta      << ", "
+                    << dalpha_mag      << ", "
+                    << tag             << "\n";
+      }
+    }
+
+    // Keep the very detailed vector dump only for high debug levels
+    if (dbg && m_incDbgLevel >= 10)
+    {
+      dump_and_maybe_stop("post-compute", C, F, V, un, uphi, ueta, pF,
+                          pn, pph, pet, a_phi_sgn, a_eta_sgn, cos_a_phi, cos_a_eta);
+    }
+
+    return ok;
+}
+
+// ----------------------------------------------------------------------
+// Step-1 sandbox QA summary: FACE + no-tilt test
+//   • On PASS: print a single compact line.
+//   • On FAIL: print full multi-line details (as before).
+// ----------------------------------------------------------------------
+void BEmcRecCEMC::PrintIncidenceSandboxQASummary(double tolDphi,
+                                                 double tolAlpha) const
+{
+  const bool pass =
+      (m_qas_nCalls > 0 &&
+       m_qas_nFaceZero == m_qas_nCalls &&
+       m_qas_maxAbsDphi    < tolDphi &&
+       m_qas_maxAbsAlphaPh < tolAlpha &&
+       m_qas_maxAbsAlphaEt < tolAlpha);
+
+  if (pass)
   {
-    dump_and_maybe_stop("post-compute", C, F, V, un, uphi, ueta, pF,
-                        pn, pph, pet, a_phi_sgn, a_eta_sgn, cos_a_phi, cos_a_eta);
+    std::cout << "\n[QA_STEP1] STATUS=PASS (FACE,noTilt)"
+              << "  nCalls="       << m_qas_nCalls
+              << "  max|dphi|="    << m_qas_maxAbsDphi    << " rad"
+              << "  max|αφ_FACE|=" << m_qas_maxAbsAlphaPh << " rad"
+              << "  max|αη_FACE|=" << m_qas_maxAbsAlphaEt << " rad"
+              << "\n\n";
+    return;
   }
 
-  return ok;
+  std::string status = "FAIL";
+
+  std::cout << "\n[QA_STEP1] incidence sandbox (FACE,noTilt) summary\n"
+            << "  nCalls       = " << m_qas_nCalls        << "\n"
+            << "  nFACE≈0      = " << m_qas_nFaceZero     << "\n"
+            << "  max|dphi|    = " << m_qas_maxAbsDphi    << " rad\n"
+            << "  max|αφ_FACE| = " << m_qas_maxAbsAlphaPh << " rad\n"
+            << "  max|αη_FACE| = " << m_qas_maxAbsAlphaEt << " rad\n"
+            << "  STATUS       = " << status << "\n\n";
 }
+
+
 
 
 void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(
@@ -1270,6 +1545,7 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(
 
   // ---- baseline b(E) at normal incidence (from master fits) ----------
   constexpr float E0 = 3.0f;
+  const auto* fitPhi = BFitDB::instance().get("energyDepOnly","phi","originalEta","originalZRange");
   const auto* fitPhi = BFitDB::instance().get("energyDepOnly","phi","originalEta","originalZRange");
   const auto* fitEta = BFitDB::instance().get("energyDepOnly","eta","originalEta","originalZRange");
   const float bphi_E = b_from(fitPhi, Energy, E0);

@@ -1176,8 +1176,8 @@ EOL
 
   # Preview the number of Condor jobs: ceil(nPairs / groupSizePreview).
   # Keep this preview in sync with the grouping used later (GROUP_SIZE_SIM).
-  # If you use a larger grouping in doAll, reflect it here.
-  local groupSizePreview=5
+  # Here we want ~10,000 jobs for doAll on ~60k pairs, so use 6 pairs/job.
+  local groupSizePreview=6
   local plannedJobs=$(( (nJobs + groupSizePreview - 1) / groupSizePreview ))
 
   echo "=================================================================="
@@ -1394,7 +1394,8 @@ ${ENV_LINE}
 # Args: <runNum=9999> <listFileData> <sim> <Cluster> v<nEvents=0> <processID> [<listFileHits>]
 EOL
   # How many (DST,G4) pairs per Condor job:
-  local GROUP_SIZE_SIM=4
+  # Use 6 here so that doAll over ~60k pairs produces ~10k Condor jobs.
+  local GROUP_SIZE_SIM=6
 
   # Verbose grouping plan
   echo "[PLAN] Building grouped lists for submission:"
