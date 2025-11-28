@@ -1007,6 +1007,19 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEtaAndEnergyDep(float Energy, float 
 
 
 
+// ----------------------------------------------------------------------
+// Internal QA accumulators for STEP 2 (FACE vs MECH, real tilted geometry)
+// These are per-process statics: reset once at the start of the macro,
+// accumulate over all ComputeIncidenceSD calls in that scan, then summarised.
+// ----------------------------------------------------------------------
+static int    s_q2_nCalls         = 0;
+static int    s_q2_nFaceMech      = 0;
+static int    s_q2_nTilt          = 0;
+static double s_q2_maxAbsDalphaPh = 0.0;
+static double s_q2_maxAbsDalphaEt = 0.0;
+static double s_q2_maxAbsDalpha   = 0.0;
+
+// ----------------------------------------------------------------------
 bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
                                      float& cos_a_phi, float& cos_a_eta,
                                      float& a_phi_sgn, float& a_eta_sgn)
@@ -1043,19 +1056,19 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
         double cphi, double ceta)
   {
     if (!dbg) return;
-    std::cout << "\n=== Incidence Trace ("<< tag <<") ===\n"
-              << "C=("<<C.X()<<","<<C.Y()<<","<<C.Z()<<")  "
-              << "F=("<<F.X()<<","<<F.Y()<<","<<F.Z()<<")  "
-              << "V=("<<V.X()<<","<<V.Y()<<","<<V.Z()<<")\n"
-              << "un =("<<un.X()<<","<<un.Y()<<","<<un.Z()<<")\n"
-              << "uphi=("<<uphi.X()<<","<<uphi.Y()<<","<<uphi.Z()<<")  "
-              << "ueta=("<<ueta.X()<<","<<ueta.Y()<<","<<ueta.Z()<<")\n"
-              << "pF =("<<pF.X()<<","<<pF.Y()<<","<<pF.Z()<<")  |pF|="<<pF.Mag()<<"\n"
-              << "pn="<<pn<<"  pφ="<<pph<<"  pη="<<pet<<"\n"
-              << "αφ="<<aphi<<"  αη="<<aeta
-              << "  cosφ="<<cphi<<"  cosη="<<ceta<<"\n"
-              << "noTiltSandbox="<<(m_incNoTiltSandbox?"true":"false")
-              << "  primaryIsMech="<<(primaryIsMech?"true":"false")<<"\n"
+    std::cout << "\n=== Incidence Trace (" << tag << ") ===\n"
+              << "C=(" << C.X() << "," << C.Y() << "," << C.Z() << ")  "
+              << "F=(" << F.X() << "," << F.Y() << "," << F.Z() << ")  "
+              << "V=(" << V.X() << "," << V.Y() << "," << V.Z() << ")\n"
+              << "un =(" << un.X()   << "," << un.Y()   << "," << un.Z()   << ")\n"
+              << "uphi=(" << uphi.X() << "," << uphi.Y() << "," << uphi.Z() << ")  "
+              << "ueta=(" << ueta.X() << "," << ueta.Y() << "," << ueta.Z() << ")\n"
+              << "pF =(" << pF.X()   << "," << pF.Y()   << "," << pF.Z()   << ")  |pF|=" << pF.Mag() << "\n"
+              << "pn=" << pn << "  pφ=" << pph << "  pη=" << pet << "\n"
+              << "αφ=" << aphi << "  αη=" << aeta
+              << "  cosφ=" << cphi << "  cosη=" << ceta << "\n"
+              << "noTiltSandbox=" << (m_incNoTiltSandbox ? "true" : "false")
+              << "  primaryIsMech=" << (primaryIsMech ? "true" : "false") << "\n"
               << "======================================\n";
     if (m_incHardStop >= 0 && m_incDbgLevel >= m_incHardStop)
     {
@@ -1334,168 +1347,185 @@ bool BEmcRecCEMC::ComputeIncidenceSD(float E, float x, float y,
   const bool ok = (std::isfinite(cos_a_phi) && std::isfinite(cos_a_eta) &&
                    std::isfinite(a_phi_sgn) && std::isfinite(a_eta_sgn));
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // Step 6) Debug: tabulated FACE vs MECH (or FACE only) + sandbox QA
-    //
-    //  • QA bookkeeping (m_qas_*) runs regardless of m_incDbgLevel
-    //    so PrintIncidenceSandboxQASummary() works even with debug off.
-    //  • Per-call CSV ([INC] lines) are only printed when dbg==true.
-    // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 6) Debug + QA: FACE vs MECH bookkeeping and tabulated CSV output
+  // ────────────────────────────────────────────────────────────────────────────
+  {
+    // Incidence in FACE and MECH frames (if available)
+    double pn_face   = 0.0, pph_face   = 0.0, pet_face   = 0.0;
+    double aphi_face = 0.0, aeta_face  = 0.0;
+    double cphi_face = 1.0, ceta_face  = 1.0;
+
+    double pn_mech   = 0.0, pph_mech   = 0.0, pet_mech   = 0.0;
+    double aphi_mech = 0.0, aeta_mech  = 0.0;
+    double cphi_mech = 1.0, ceta_mech  = 1.0;
+
+    if (have_face)
     {
-      // Incidence in FACE and MECH frames (if available)
-      double pn_face   = 0.0, pph_face   = 0.0, pet_face   = 0.0;
-      double aphi_face = 0.0, aeta_face  = 0.0;
-      double cphi_face = 1.0, ceta_face  = 1.0;
+      bool ok_face_dbg = basis_to_incidence(
+          un_face, uphi_face, ueta_face,
+          pn_face, pph_face, pet_face,
+          aphi_face, aeta_face, cphi_face, ceta_face);
+      (void) ok_face_dbg;
+    }
 
-      double pn_mech   = 0.0, pph_mech   = 0.0, pet_mech   = 0.0;
-      double aphi_mech = 0.0, aeta_mech  = 0.0;
-      double cphi_mech = 1.0, ceta_mech  = 1.0;
+    if (have_mech)
+    {
+      bool ok_mech_dbg = basis_to_incidence(
+          un_mech, uphi_mech, ueta_mech,
+          pn_mech, pph_mech, pet_mech,
+          aphi_mech, aeta_mech, cphi_mech, ceta_mech);
+      (void) ok_mech_dbg;
+    }
 
-      if (have_face)
+    // Geometry helpers for digestible output
+    const double Rc = std::hypot(C.X(), C.Y());
+
+    // eta_det : tower-center η as seen from IP (z=0)
+    const double eta_det = (Rc > 0.0) ? std::asinh(C.Z() / Rc)         : 0.0;
+    // eta_SD  : tower-center η as seen from the chosen vertex z = fVz
+    const double eta_SD  = (Rc > 0.0) ? std::asinh((C.Z() - fVz) / Rc) : 0.0;
+
+    const double phi_det = std::atan2(C.Y(), C.X());    // tower center φ (detector)
+    const double phi_ray = std::atan2(pF.Y(), pF.X());  // ray direction φ from vertex
+
+    // Differences (ray–detector). In the Step-1 sandbox we only require dphi≈0.
+    const double dphi = phi_ray - phi_det;
+    const double deta = eta_SD  - eta_det;  // kept for information; not a Step-1 QA cut
+
+    // Magnitudes of the FACE / MECH incidence vectors in (φ,η) plane
+    const double amag_face = std::sqrt(aphi_face*aphi_face + aeta_face*aeta_face);
+    const double amag_mech = std::sqrt(aphi_mech*aphi_mech + aeta_mech*aeta_mech);
+
+    // FACE–MECH incidence differences in (φ,η) plane.
+    double dalpha_phi = 0.0;
+    double dalpha_eta = 0.0;
+    double dalpha_mag = 0.0;
+    if (have_face && have_mech)
+    {
+      dalpha_phi = aphi_mech - aphi_face;
+      dalpha_eta = aeta_mech - aeta_face;
+      dalpha_mag = std::sqrt(dalpha_phi*dalpha_phi + dalpha_eta*dalpha_eta);
+    }
+
+    // Simple tagging / "color coding" via textual labels:
+    //  - FACE≈0     : FACE angles essentially zero (perfect cylinder sandbox)
+    //  - FACE≈MECH  : FACE and MECH magnitudes agree within ~0.3°
+    //  - TILT       : genuinely tilted (mechanical incidence differs from FACE)
+    std::string tag = "TILT";
+    const double tolZero  = 1.0e-3;  // ~0.057° in radians
+    const double tolMatch = 5.0e-3;  // ~0.29° in radians
+
+    if (std::fabs(aphi_face) < tolZero && std::fabs(aeta_face) < tolZero)
+    {
+      tag = "FACE≈0";
+    }
+    else if (std::fabs(amag_face - amag_mech) < tolMatch)
+    {
+      tag = "FACE≈MECH";
+    }
+
+    // --- STEP 1 sandbox QA bookkeeping: FACE-only, no-tilt sandbox ---
+    if (m_incNoTiltSandbox &&
+        kIncidenceMode == EIncidenceMode::FACE)
+    {
+      ++m_qas_nCalls;
+      m_qas_maxAbsDphi    = std::max(m_qas_maxAbsDphi,    std::fabs(dphi));
+      m_qas_maxAbsAlphaPh = std::max(m_qas_maxAbsAlphaPh, std::fabs(aphi_face));
+      m_qas_maxAbsAlphaEt = std::max(m_qas_maxAbsAlphaEt, std::fabs(aeta_face));
+
+      if (tag == "FACE≈0")
       {
-        bool ok_face_dbg = basis_to_incidence(
-            un_face, uphi_face, ueta_face,
-            pn_face, pph_face, pet_face,
-            aphi_face, aeta_face, cphi_face, ceta_face);
-        (void) ok_face_dbg;
-      }
-
-      if (have_mech)
-      {
-        bool ok_mech_dbg = basis_to_incidence(
-            un_mech, uphi_mech, ueta_mech,
-            pn_mech, pph_mech, pet_mech,
-            aphi_mech, aeta_mech, cphi_mech, ceta_mech);
-        (void) ok_mech_dbg;
-      }
-
-      // Geometry helpers for digestible output
-      const double Rc = std::hypot(C.X(), C.Y());
-
-      // eta_det : tower-center η as seen from IP (z=0)
-      const double eta_det = (Rc > 0.0) ? std::asinh(C.Z() / Rc)         : 0.0;
-      // eta_SD  : tower-center η as seen from the chosen vertex z = fVz
-      const double eta_SD  = (Rc > 0.0) ? std::asinh((C.Z() - fVz) / Rc) : 0.0;
-
-      const double phi_det = std::atan2(C.Y(), C.X());    // tower center φ (detector)
-      const double phi_ray = std::atan2(pF.Y(), pF.X());  // ray direction φ from vertex
-
-      // Differences (ray–detector). In the Step-1 sandbox we only require dphi≈0.
-      const double dphi = phi_ray - phi_det;
-      const double deta = eta_SD  - eta_det;  // kept for information; not a Step-1 QA cut
-
-        // Magnitudes of the FACE / MECH incidence vectors in (φ,η) plane
-        const double amag_face = std::sqrt(aphi_face*aphi_face + aeta_face*aeta_face);
-        const double amag_mech = std::sqrt(aphi_mech*aphi_mech + aeta_mech*aeta_mech);
-
-        // FACE–MECH incidence differences in (φ,η) plane.
-        // These are only physically meaningful when both frames are available
-        // (have_face && have_mech), but we define them for all calls for simplicity.
-        double dalpha_phi = 0.0;
-        double dalpha_eta = 0.0;
-        double dalpha_mag = 0.0;
-        if (have_face && have_mech)
-        {
-          dalpha_phi = aphi_mech - aphi_face;
-          dalpha_eta = aeta_mech - aeta_face;
-          dalpha_mag = std::sqrt(dalpha_phi*dalpha_phi + dalpha_eta*dalpha_eta);
-        }
-
-        // Simple tagging / "color coding" via textual labels:
-        //  - FACE≈0     : FACE angles essentially zero (perfect cylinder sandbox)
-        //  - FACE≈MECH  : FACE and MECH magnitudes agree within ~0.3°
-        //  - TILT       : genuinely tilted (mechanical incidence differs from FACE)
-        std::string tag = "TILT";
-        const double tolZero  = 1.0e-3;  // ~0.057° in radians
-        const double tolMatch = 5.0e-3;  // ~0.29° in radians
-
-      if (std::fabs(aphi_face) < tolZero && std::fabs(aeta_face) < tolZero)
-      {
-        tag = "FACE≈0";
-      }
-      else if (std::fabs(amag_face - amag_mech) < tolMatch)
-      {
-        tag = "FACE≈MECH";
-      }
-
-      // --- Step-1 sandbox QA bookkeeping: FACE-only, no-tilt sandbox ---
-      // Runs irrespective of debug level; PASS/FAIL is decided later.
-      if (m_incNoTiltSandbox &&
-          kIncidenceMode == EIncidenceMode::FACE)
-      {
-        ++m_qas_nCalls;
-        m_qas_maxAbsDphi    = std::max(m_qas_maxAbsDphi,    std::fabs(dphi));
-        m_qas_maxAbsAlphaPh = std::max(m_qas_maxAbsAlphaPh, std::fabs(aphi_face));
-        m_qas_maxAbsAlphaEt = std::max(m_qas_maxAbsAlphaEt, std::fabs(aeta_face));
-
-        if (tag == "FACE≈0")
-        {
-          ++m_qas_nFaceZero;
-        }
-      }
-
-      // Only print the CSV-style [INC] lines when debug is enabled
-      if (dbg)
-      {
-        // Print header once (CSV-style; easy to grep / load in Python/ROOT)
-        static bool s_headerPrinted = false;
-          if (!s_headerPrinted)
-          {
-            std::cout << "# Columns ([INC] lines)\n"
-                      << "#  vtxZ_cm, ix, iy, "
-                      << "eta_det_IP, phi_det, eta_SD_vtx, phi_ray, "
-                      << "dphi, deta, "
-                      << "rotX_mrad, rotY_mrad, rotZ_mrad, "
-                      << "a_phi_face, a_eta_face, |a_face|, cos_phi_face, cos_eta_face, "
-                      << "a_phi_mech, a_eta_mech, |a_mech|, cos_phi_mech, cos_eta_mech, "
-                      << "dalpha_phi, dalpha_eta, |dalpha|, "
-                      << "tag\n";
-            s_headerPrinted = true;
-          }
-
-
-          std::cout << "[INC] "
-                    << fVz             << ", "
-                    << ix              << ", "
-                    << iy              << ", "
-                    << eta_det         << ", "
-                    << phi_det         << ", "
-                    << eta_SD          << ", "
-                    << phi_ray         << ", "
-                    << dphi            << ", "
-                    << deta            << ", "
-                    << g.rotX * 1.0e3  << ", "
-                    << g.rotY * 1.0e3  << ", "
-                    << g.rotZ * 1.0e3  << ", "
-                    << aphi_face       << ", "
-                    << aeta_face       << ", "
-                    << amag_face       << ", "
-                    << cphi_face       << ", "
-                    << ceta_face       << ", "
-                    << aphi_mech       << ", "
-                    << aeta_mech       << ", "
-                    << amag_mech       << ", "
-                    << cphi_mech       << ", "
-                    << ceta_mech       << ", "
-                    << dalpha_phi      << ", "
-                    << dalpha_eta      << ", "
-                    << dalpha_mag      << ", "
-                    << tag             << "\n";
+        ++m_qas_nFaceZero;
       }
     }
 
-    // Keep the very detailed vector dump only for high debug levels
-    if (dbg && m_incDbgLevel >= 10)
+    // --- STEP 2 QA bookkeeping: FACE vs MECH in real tilted geometry ---
+    if (!m_incNoTiltSandbox &&
+        kIncidenceMode == EIncidenceMode::BOTH &&
+        have_face && have_mech)
     {
-      dump_and_maybe_stop("post-compute", C, F, V, un, uphi, ueta, pF,
-                          pn, pph, pet, a_phi_sgn, a_eta_sgn, cos_a_phi, cos_a_eta);
+      ++s_q2_nCalls;
+
+      if (tag == "FACE≈MECH")
+      {
+        ++s_q2_nFaceMech;
+      }
+      else if (tag == "TILT")
+      {
+        ++s_q2_nTilt;
+      }
+
+      const double abs_dphi = std::fabs(dalpha_phi);
+      const double abs_deta = std::fabs(dalpha_eta);
+      const double abs_dmag = std::fabs(dalpha_mag);
+
+      if (abs_dphi > s_q2_maxAbsDalphaPh) s_q2_maxAbsDalphaPh = abs_dphi;
+      if (abs_deta > s_q2_maxAbsDalphaEt) s_q2_maxAbsDalphaEt = abs_deta;
+      if (abs_dmag > s_q2_maxAbsDalpha)   s_q2_maxAbsDalpha   = abs_dmag;
     }
 
-    return ok;
+    // Only print the CSV-style [INC] lines when debug is enabled
+    if (dbg)
+    {
+      // Print header once (CSV-style; easy to grep / load in Python/ROOT)
+      static bool s_headerPrinted = false;
+      if (!s_headerPrinted)
+      {
+        std::cout << "# Columns ([INC] lines)\n"
+                  << "#  vtxZ_cm, ix, iy, "
+                  << "eta_det_IP, phi_det, eta_SD_vtx, phi_ray, "
+                  << "dphi, deta, "
+                  << "rotX_mrad, rotY_mrad, rotZ_mrad, "
+                  << "a_phi_face, a_eta_face, |a_face|, cos_phi_face, cos_eta_face, "
+                  << "a_phi_mech, a_eta_mech, |a_mech|, cos_phi_mech, cos_eta_mech, "
+                  << "dalpha_phi, dalpha_eta, |dalpha|, "
+                  << "tag\n";
+        s_headerPrinted = true;
+      }
+
+      std::cout << "[INC] "
+                << fVz             << ", "
+                << ix              << ", "
+                << iy              << ", "
+                << eta_det         << ", "
+                << phi_det         << ", "
+                << eta_SD          << ", "
+                << phi_ray         << ", "
+                << dphi            << ", "
+                << deta            << ", "
+                << g.rotX * 1.0e3  << ", "
+                << g.rotY * 1.0e3  << ", "
+                << g.rotZ * 1.0e3  << ", "
+                << aphi_face       << ", "
+                << aeta_face       << ", "
+                << amag_face       << ", "
+                << cphi_face       << ", "
+                << ceta_face       << ", "
+                << aphi_mech       << ", "
+                << aeta_mech       << ", "
+                << amag_mech       << ", "
+                << cphi_mech       << ", "
+                << ceta_mech       << ", "
+                << dalpha_phi      << ", "
+                << dalpha_eta      << ", "
+                << dalpha_mag      << ", "
+                << tag             << "\n";
+    }
+  }
+
+  // Keep the very detailed vector dump only for high debug levels
+  if (dbg && m_incDbgLevel >= 10)
+  {
+    dump_and_maybe_stop("post-compute", C, F, V, un, uphi, ueta, pF,
+                        pn, pph, pet, a_phi_sgn, a_eta_sgn, cos_a_phi, cos_a_eta);
+  }
+
+  return ok;
 }
 
 // ----------------------------------------------------------------------
-// Step-1 sandbox QA summary: FACE + no-tilt test
+// STEP 1 sandbox QA summary: FACE + no-tilt test
 //   • On PASS: print a single compact line.
 //   • On FAIL: print full multi-line details (as before).
 // ----------------------------------------------------------------------
@@ -1530,6 +1560,44 @@ void BEmcRecCEMC::PrintIncidenceSandboxQASummary(double tolDphi,
             << "  max|αη_FACE| = " << m_qas_maxAbsAlphaEt << " rad\n"
             << "  STATUS       = " << status << "\n\n";
 }
+
+// ----------------------------------------------------------------------
+// STEP 2 QA helpers: FACE vs MECH (real tilted geometry)
+// ----------------------------------------------------------------------
+void BEmcRecCEMC::ResetIncidenceFaceMechQA()
+{
+  s_q2_nCalls         = 0;
+  s_q2_nFaceMech      = 0;
+  s_q2_nTilt          = 0;
+  s_q2_maxAbsDalphaPh = 0.0;
+  s_q2_maxAbsDalphaEt = 0.0;
+  s_q2_maxAbsDalpha   = 0.0;
+}
+
+// tolDalpha is the "acceptable" max |Δa|, e.g. ~5e-3 rad ≈ 0.29°.
+void BEmcRecCEMC::PrintIncidenceFaceMechQASummary(double tolDalpha) const
+{
+  std::cout << "\n[QA_STEP2] FACE vs MECH incidence summary (real geometry)\n"
+            << "  nCalls          = " << s_q2_nCalls    << "\n"
+            << "  nFACE≈MECH      = " << s_q2_nFaceMech << "\n"
+            << "  nTILT           = " << s_q2_nTilt     << "\n"
+            << "  max|Δαφ|        = " << s_q2_maxAbsDalphaPh << " rad\n"
+            << "  max|Δαη|        = " << s_q2_maxAbsDalphaEt << " rad\n"
+            << "  max|Δa|         = " << s_q2_maxAbsDalpha   << " rad\n"
+            << "  tol|Δa|         = " << tolDalpha           << " rad\n";
+
+  const bool pass =
+      (s_q2_nCalls > 0 && s_q2_maxAbsDalpha < tolDalpha);
+
+  std::cout << "  STATUS          = " << (pass ? "PASS" : "CHECK") << "\n\n";
+}
+
+
+
+
+
+
+
 
 
 

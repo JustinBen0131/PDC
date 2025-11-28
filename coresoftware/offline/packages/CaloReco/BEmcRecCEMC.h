@@ -101,6 +101,9 @@ class BEmcRecCEMC : public BEmcRec
     // Prints a short PASS/FAIL block based on the accumulated m_qas_* counters.
     void PrintIncidenceSandboxQASummary(double tolDphi  = 1.0e-3,
                                         double tolAlpha = 1.0e-3) const;
+    
+    void ResetIncidenceFaceMechQA();
+    void PrintIncidenceFaceMechQASummary(double tolDalpha) const;
 
    private:
     // Per-|η| band coefficients for 〈αφ^fold〉(E) = a − b ln E  [radians]
