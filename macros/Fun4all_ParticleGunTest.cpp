@@ -2145,11 +2145,9 @@ void Fun4all_ParticleGunTest(
                       const double yLow  = yMin - pad;
                       const double yHigh = yMax + pad;
 
-                      // Use TLatex-style label for Δη block tilt
-                      gFrame->GetYaxis()->SetTitle("#Delta #theta_{block} (m, b) [mrad]");
-                      gFrame->GetYaxis()->CenterTitle(true);
-                      gFrame->GetYaxis()->SetTitleSize(0.050);   // larger y-axis title font
-                      gFrame->GetYaxis()->SetTitleOffset(0.95);  // slight spacing from axis
+                      // We will draw the y–axis title ourselves with TLatex in NDC.
+                      // Keep only the range and tick labels on the axis object.
+                      gFrame->GetYaxis()->SetTitle("");
                       gFrame->GetYaxis()->SetLabelSize(0.035);   // slightly larger tick labels
                       gFrame->GetYaxis()->SetRangeUser(yLow, yHigh);
 
@@ -2238,6 +2236,15 @@ void Fun4all_ParticleGunTest(
                         const double xCenter = static_cast<double>(m) + 0.5;
                         latex.DrawLatex(xCenter, yLabel, Form("%d", m + 1));
                       }
+
+                      // Y–axis label drawn explicitly with TLatex in NDC so it never gets clipped
+                      TLatex latexY;
+                      latexY.SetNDC();                 // x,y are now in [0,1] NDC
+                      latexY.SetTextAngle(90);         // vertical text
+                      latexY.SetTextAlign(22);         // centered on its (x,y)
+                      latexY.SetTextSize(0.045);       // comparable to axis-title size
+                      // (0.04,0.55) ≈ a bit left of the plotting frame, vertically centered
+                      latexY.DrawLatex(0.032, 0.55, "#Delta #theta_{blk} [mrad]");
 
                       // Save PNG for this sector
                       std::string outName = "sector_module_summariesPNGs/sector_"
@@ -2429,16 +2436,31 @@ void Fun4all_ParticleGunTest(
                           << "  Module-wise global summary over sectors (" << label << ")\n"
                           << ANSI_RESET;
 
-                // Header row (compact labels with ±σ baked in)
-                std::cout << "  "
-                          << std::left  << std::setw(wModIdx) << "mod" << " "
-                          << std::right << std::setw(wPhiCol) << "Φ_mod±σ [mrad]" << " "
-                          << std::right << std::setw(wRmsCol) << "RMS_blk±σ [mrad]" << " "
-                          << std::right << std::setw(wBlkCol) << "Φ_b1±σ [mrad]" << " "
-                          << std::right << std::setw(wBlkCol) << "Φ_b2±σ [mrad]" << " "
-                          << std::right << std::setw(wBlkCol) << "Φ_b3±σ [mrad]" << " "
-                          << std::right << std::setw(wBlkCol) << "Φ_b4±σ [mrad]"
-                          << "\n";
+                  // Header row (compact labels with ±σ baked in; color only the block labels)
+                  std::cout << "  "
+                            << std::left  << std::setw(wModIdx) << "mod" << " "
+                            << std::right << std::setw(wPhiCol) << "Φ_mod±σ [mrad]" << " "
+                            << std::right << std::setw(wRmsCol) << "RMS_blk±σ [mrad]" << " ";
+
+                  // Φ_b1 label in blue
+                  std::cout << ANSI_DARK_BLUE
+                            << std::right << std::setw(wBlkCol) << "Φ_b1±σ [mrad]"
+                            << ANSI_RESET << " ";
+
+                  // Φ_b2 label in red
+                  std::cout << ANSI_DARK_RED
+                            << std::right << std::setw(wBlkCol) << "Φ_b2±σ [mrad]"
+                            << ANSI_RESET << " ";
+
+                  // Φ_b3 label in green
+                  std::cout << ANSI_DARK_GREEN
+                            << std::right << std::setw(wBlkCol) << "Φ_b3±σ [mrad]"
+                            << ANSI_RESET << " ";
+
+                  // Φ_b4 label in default color
+                  std::cout << std::right << std::setw(wBlkCol) << "Φ_b4±σ [mrad]"
+                            << "\n";
+
 
                 // Separator line
                 std::cout << "  " << std::string(wTotal, '-') << "\n";
@@ -2519,30 +2541,17 @@ void Fun4all_ParticleGunTest(
                     }
                   }
 
-                  // Print the row: module index, Φ_mod±σ, RMS_blk±σ, then colored blocks
-                  std::cout << "  "
-                            << std::right << std::setw(wModIdx) << (m + 1) << " "
-                            << std::right << std::setw(wPhiCol) << phiColStr << " "
-                            << std::right << std::setw(wRmsCol) << rmsColStr << " ";
+                    // Print the row: module index, Φ_mod±σ, RMS_blk±σ, then block means (all in default color)
+                    std::cout << "  "
+                              << std::right << std::setw(wModIdx) << (m + 1) << " "
+                              << std::right << std::setw(wPhiCol) << phiColStr << " "
+                              << std::right << std::setw(wRmsCol) << rmsColStr << " "
+                              << std::right << std::setw(wBlkCol) << blkColStr[0] << " "
+                              << std::right << std::setw(wBlkCol) << blkColStr[1] << " "
+                              << std::right << std::setw(wBlkCol) << blkColStr[2] << " "
+                              << std::right << std::setw(wBlkCol) << blkColStr[3]
+                              << "\n";
 
-                  // Block 1 → dark blue
-                  std::cout << ANSI_DARK_BLUE
-                            << std::right << std::setw(wBlkCol) << blkColStr[0]
-                            << ANSI_RESET << " ";
-
-                  // Block 2 → dark red
-                  std::cout << ANSI_DARK_RED
-                            << std::right << std::setw(wBlkCol) << blkColStr[1]
-                            << ANSI_RESET << " ";
-
-                  // Block 3 → dark green
-                  std::cout << ANSI_DARK_GREEN
-                            << std::right << std::setw(wBlkCol) << blkColStr[2]
-                            << ANSI_RESET << " ";
-
-                  // Block 4 → default color
-                  std::cout << std::right << std::setw(wBlkCol) << blkColStr[3]
-                            << "\n";
                 }
               };
 
@@ -2711,10 +2720,8 @@ void Fun4all_ParticleGunTest(
                   const double yLow  = yMin - pad;
                   const double yHigh = yMax + pad;
 
-                  gFrame->GetYaxis()->SetTitle("#Delta #theta_{block} (m, b) [mrad]");
-                  gFrame->GetYaxis()->CenterTitle(true);
-                  gFrame->GetYaxis()->SetTitleSize(0.050);
-                  gFrame->GetYaxis()->SetTitleOffset(0.95);
+                  // Use TLatex in NDC for the actual y–axis label; keep only ticks here.
+                  gFrame->GetYaxis()->SetTitle("");
                   gFrame->GetYaxis()->SetLabelSize(0.035);
                   gFrame->GetYaxis()->SetRangeUser(yLow, yHigh);
 
@@ -2781,22 +2788,30 @@ void Fun4all_ParticleGunTest(
                 }
                 leg->Draw();
 
-                // Dummy module labels 1..24 centred in each bin
-                TLatex latex;
-                latex.SetTextAlign(22);
-                latex.SetTextSize(0.030);
-                const double yLabel = yLow + 0.05 * (yHigh - yLow);
+                  // Dummy module labels 1..24 centred in each bin
+                  TLatex latex;
+                  latex.SetTextAlign(22);
+                  latex.SetTextSize(0.030);
+                  const double yLabel = yLow + 0.05 * (yHigh - yLow);
 
-                for (int m = 0; m < kModulesPerSector; ++m)
-                {
-                  const double xCenter = static_cast<double>(m) + 0.5;
-                  latex.DrawLatex(xCenter, yLabel, Form("%d", m + 1));
-                }
+                  for (int m = 0; m < kModulesPerSector; ++m)
+                  {
+                    const double xCenter = static_cast<double>(m) + 0.5;
+                    latex.DrawLatex(xCenter, yLabel, Form("%d", m + 1));
+                  }
 
-                std::string outName = std::string("sector_module_summariesPNGs/summary_sector_")
-                                      + fileLabel + ".png";
-                cSum->SaveAs(outName.c_str());
-              };
+                  // Y–axis label in NDC on the summary canvas
+                  TLatex latexY;
+                  latexY.SetNDC();
+                  latexY.SetTextAngle(90);
+                  latexY.SetTextAlign(22);
+                  latexY.SetTextSize(0.045);
+                  latexY.DrawLatex(0.032, 0.55, "#Delta #theta_{blk} [mrad]");
+
+                  std::string outName = std::string("sector_module_summariesPNGs/summary_sector_")
+                                        + fileLabel + ".png";
+                  cSum->SaveAs(outName.c_str());
+                };
 
               // North-hemisphere block averages: sectors 0-31
               makeBlockSummaryGraph(
