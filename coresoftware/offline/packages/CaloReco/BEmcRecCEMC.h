@@ -75,35 +75,28 @@ class BEmcRecCEMC : public BEmcRec
     /// call once before any Tower2Global / CorrectShowerDepth
     void SetPhiTiltVariant(ETiltVariant v);
 
-    // ───────── incidence mode (FACE vs MECH vs BOTH) ─────────
-    enum class EIncidenceMode {
-      FACE = 0,   // detailed front-face tangents only (legacy)
-      MECH = 1,   // mechanical rotations rotX/Y/Z only
-      BOTH = 2    // run BOTH; return MECH if available, also tabulate FACE+MECH
-    };
+    // ---- Incidence / mechanical tilt debugging ----
 
-    inline void SetIncidenceMode(EIncidenceMode m) { m_incMode = m; }
-
-    // ---- Incidence debug toggles (local to incidence only) ----
-    inline void SetIncidenceNoTiltSandbox(bool on) { m_incNoTiltSandbox = on; } // default false
+    // Incidence debug toggles (local to incidence only)
     inline void SetIncidenceDebugLevel(int lvl)    { m_incDbgLevel = lvl; }     // 0 = silent
     inline void SetIncidenceHardStopLevel(int lvl) { m_incHardStop = lvl; }     // >=0 enables stop
 
-    // Set event vertex z used by incidence calculations (front-face frame)
+    // Set event vertex z used by incidence calculations
     void SetVertexZ(float vz) { fVz = vz; }
 
-    // Front-face incidence: returns cosines and signed φ/η angles
-    bool ComputeIncidenceSD(float E, float x, float y,
-                            float& cos_a_phi, float& cos_a_eta,
-                            float& a_phi_sgn, float& a_eta_sgn);
+    // Mechanical incidence: returns cosines and signed φ/η angles.
+    // Uses the RawTowerGeomv5 mechanical rotations (rotX/rotY/rotZ) only
+    // to define the incidence frame.
+    bool CalculateMechIncidence(float E, float x, float y,
+                                float& cos_a_phi, float& cos_a_eta,
+                                float& a_phi_sgn, float& a_eta_sgn);
 
-    // Step-1 sandbox QA summary (FACE + no-tilt test)
-    // Prints a short PASS/FAIL block based on the accumulated m_qas_* counters.
-    void PrintIncidenceSandboxQASummary(double tolDphi  = 1.0e-3,
-                                        double tolAlpha = 1.0e-3) const;
-    
-    void ResetIncidenceFaceMechQA();
-    void PrintIncidenceFaceMechQASummary(double tolDalpha) const;
+    // Mechanical-incidence QA summary:
+    //  - ResetMechIncidenceQA() clears the internal per-process counters.
+    //  - PrintMechIncidenceQASummary(...) prints a compact PASS/CHECK block.
+    void ResetMechIncidenceQA();
+    void PrintMechIncidenceQASummary(double tolAlphaPhi = 0.1,
+                                     double tolAlphaEta = 0.1) const;
 
    private:
     // Per-|η| band coefficients for 〈αφ^fold〉(E) = a − b ln E  [radians]
@@ -112,20 +105,9 @@ class BEmcRecCEMC : public BEmcRec
     // 0.70 < |η| ≤ 1.10 → edge
     ETiltVariant   m_tiltVariant { ETiltVariant::DEFAULT };
 
-    // Incidence mode (FACE / MECH / BOTH); default is legacy FACE.
-    EIncidenceMode m_incMode     { EIncidenceMode::FACE };
-
     // Local-only incidence tracer switches (do not leak verbosity class-wide)
-    bool m_incNoTiltSandbox { false };  // force cylinder-aligned face frame (no shingling/tilt)
-    int  m_incDbgLevel      { 0 };      // 0 = silent; >0 prints trace
-    int  m_incHardStop      { 20 };     // if >=0 and incDbgLevel >= m_incHardStop → stop after dump
-
-    // --- Incidence QA (Step-1 sandbox) ---
-    int    m_qas_nCalls        = 0;
-    int    m_qas_nFaceZero     = 0;
-    double m_qas_maxAbsDphi    = 0.0;
-    double m_qas_maxAbsAlphaPh = 0.0;
-    double m_qas_maxAbsAlphaEt = 0.0;
+    int m_incDbgLevel { 0 };      // 0 = silent; >0 prints trace
+    int m_incHardStop { 20 };     // if >=0 and incDbgLevel >= m_incHardStop → stop after dump
 
     // keep angle caches
     float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };
