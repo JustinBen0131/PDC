@@ -33,7 +33,8 @@ libjetbase_la_LIBADD = \
   -lglobalvertex_io \
   -lgsl \
   -lgslcblas \
-  -lRecursiveTools
+  -lRecursiveTools \
+  -ltrackbase_historic_io
 
 pkginclude_HEADERS = \
   ClusterJetInput.h \
@@ -65,15 +66,8 @@ ROOTDICTS = \
   JetMapv1_Dict.cc
 
 pcmdir = $(libdir)
-
-nobase_dist_pcm_DATA = \
-  Jet_Dict_rdict.pcm \
-  Jetv1_Dict_rdict.pcm \
-  Jetv2_Dict_rdict.pcm \
-  JetContainer_Dict_rdict.pcm \
-  JetContainerv1_Dict_rdict.pcm \
-  JetMap_Dict_rdict.pcm \
-  JetMapv1_Dict_rdict.pcm
+# more elegant way to create pcm files (without listing them)
+nobase_dist_pcm_DATA = $(ROOTDICTS:.cc=_rdict.pcm)
 
 libjetbase_io_la_SOURCES = \
   $(ROOTDICTS) \

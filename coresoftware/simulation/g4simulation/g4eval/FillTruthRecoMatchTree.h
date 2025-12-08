@@ -1,5 +1,5 @@
-#ifndef FILLTRUTHRECOMATCHTREE_H
-#define FILLTRUTHRECOMATCHTREE_H
+#ifndef G4EVAL_FILLTRUTHRECOMATCHTREE_H
+#define G4EVAL_FILLTRUTHRECOMATCHTREE_H
 
 /**
  * @file trackbase/TrkrMatchDefs.h
@@ -46,6 +46,7 @@
 #include "g4evaltools.h"
 
 #include <fun4all/SubsysReco.h>
+
 #include <string>
 #include <vector>
 
@@ -55,8 +56,8 @@ class PHG4ParticleSvtxMap;
 class SvtxPHG4ParticleMap;
 class EmbRecoMatchContainer;
 class PHCompositeNode;
-class PHG4TpcCylinderGeom;
-class PHG4TpcCylinderGeomContainer;
+class PHG4TpcGeom;
+class PHG4TpcGeomContainer;
 class PHG4TruthInfoContainer;
 class SvtxTrack;
 class SvtxTrackMap;
@@ -66,15 +67,15 @@ class TrkrCluster;
 class TrkrTruthTrack;
 class TrkrTruthTrackContainer;
 class TTree;
-class TH2D;
+class TH2;
 
 class FillTruthRecoMatchTree : public SubsysReco
 {
  public:
   FillTruthRecoMatchTree(
-      bool _fill_clusters = true, bool _fill_svtxnomatch = false, float _cluster_nzwidths = 0.5, float _cluster_nphiwidths = 0.5, const std::string &tfile_name = "trackclusmatch.root");
+      bool _fill_clusters = true, bool _fill_SvUnMatched = false, float _cluster_nzwidths = 0.5, float _cluster_nphiwidths = 0.5, const std::string &tfile_name = "trackclusmatch.root");
 
-  virtual ~FillTruthRecoMatchTree();
+  ~FillTruthRecoMatchTree() override = default;
 
   int Init(PHCompositeNode *) override;
   int InitRun(PHCompositeNode *topNode) override;
@@ -98,7 +99,7 @@ class FillTruthRecoMatchTree : public SubsysReco
   /* TrkrClusterContainer         *m_TruthClusterContainer        {nullptr}; */
   /* TrkrClusterContainer         *m_RecoClusterContainer         {nullptr}; */
   TrkrTruthTrackContainer *m_TrkrTruthTrackContainer{nullptr};
-  /* PHG4TpcCylinderGeomContainer *m_PHG4TpcCylinderGeomContainer {nullptr}; */
+  /* PHG4TpcGeomContainer *m_PHG4TpcGeomContainer {nullptr}; */
 
   TTree *m_ttree;
   bool m_fill_clusters;
@@ -124,10 +125,10 @@ class FillTruthRecoMatchTree : public SubsysReco
   //  clusters:
   //    M : matched
   //    U : unmatched
-  TH2D *h2_G4_nPixelsPhi;
-  TH2D *h2_G4_nPixelsZ;
-  TH2D *h2_Sv_nPixelsPhi;
-  TH2D *h2_Sv_nPixelsZ;
+  TH2 *h2_G4_nPixelsPhi;
+  TH2 *h2_G4_nPixelsZ;
+  TH2 *h2_Sv_nPixelsPhi;
+  TH2 *h2_Sv_nPixelsZ;
 
   // Track tree
   int b_trackid{};
@@ -235,4 +236,4 @@ class FillTruthRecoMatchTree : public SubsysReco
   /* std::vector<float> b_SvU_clusU_r            {}; */
 };
 
-#endif  // FILLTRUTHRECOMATCHTREE_H
+#endif  // G4EVAL_FILLTRUTHRECOMATCHTREE_H

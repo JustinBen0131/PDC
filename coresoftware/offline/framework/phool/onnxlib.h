@@ -5,10 +5,16 @@
 #include <onnxruntime_cxx_api.h>
 // This is a stub for some ONNX code refactoring
 
-Ort::Session *onnxSession(std::string &modelfile);
+Ort::Session *onnxSession(std::string &modelfile, int verbosity = 0);
 
 std::vector<float> onnxInference(Ort::Session *session, std::vector<float> &input, int N, int Nsamp, int Nreturn);
 
 std::vector<float> onnxInference(Ort::Session *session, std::vector<float> &input, int N, int Nx, int Ny, int Nz, int Nreturn);
+
+namespace onnxlib
+{
+  extern int n_input;
+  extern int n_output;
+}  // namespace onnxlib
 
 #endif

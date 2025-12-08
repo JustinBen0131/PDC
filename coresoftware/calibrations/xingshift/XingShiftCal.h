@@ -5,8 +5,8 @@
 
 #include <fun4all/SubsysReco.h>
 
-#include <map>
 #include <cstdint>
+#include <map>
 #include <string>
 
 class PHCompositeNode;
@@ -14,23 +14,18 @@ class Packet;
 
 class XingShiftCal : public SubsysReco
 {
-  static const int NTRIG = 6;
-  static const int NBUNCHES = 120;
+  static const int NTRIG{6};
+  static const int NBUNCHES{120};
 
  public:
   XingShiftCal(const std::string &name = "XingShiftCal", const int poverwriteSpinEntry = 0);
 
-  ~XingShiftCal() override;
+  ~XingShiftCal() override = default;
 
   int Init(PHCompositeNode *topNode) override;
   int InitRun(PHCompositeNode *topNode) override;
   int process_event(PHCompositeNode *topNode) override;
-  int ResetEvent(PHCompositeNode *topNode) override;
-  // int EndRun(const int runnumber) override;
   int End(PHCompositeNode *topNode) override;
-  int Reset(PHCompositeNode * /*topNode*/) override;
-
-  void Print(const std::string &what = "ALL") const override;
 
   int Calibrate(const int final = 0);
   int CalculateCrossingShift(int &xingshift, uint64_t counts[NTRIG][NBUNCHES], bool &success);
@@ -46,8 +41,8 @@ class XingShiftCal : public SubsysReco
   //  Packet *pYellSpin {nullptr};
   Packet *pBluePol{nullptr};
   Packet *pYellPol{nullptr};
-  Packet *pBlueAsym {nullptr};
-  Packet *pYellAsym {nullptr};
+  Packet *pBlueAsym{nullptr};
+  Packet *pYellAsym{nullptr};
   Packet *pBlueIntPattern{nullptr};
   Packet *pYellIntPattern{nullptr};
   Packet *pBluePolPattern{nullptr};
@@ -60,13 +55,12 @@ class XingShiftCal : public SubsysReco
   int evtcap{50000};
   int done{0};
 
-
-  //const int packet_BLUESPIN  {14902};
-  //const int packet_YELLSPIN  {14903};
+  // const int packet_BLUESPIN  {14902};
+  // const int packet_YELLSPIN  {14903};
   const int packet_BLUEPOL{14905};
-  const int packet_BLUEASYM  {14906};
+  const int packet_BLUEASYM{14906};
   const int packet_YELLPOL{14907};
-  const int packet_YELLASYM  {14908};
+  const int packet_YELLASYM{14908};
   const int packet_BLUEINTPATTERN{14910};
   const int packet_BLUEPOLPATTERN{14911};
   const int packet_YELLINTPATTERN{14912};
@@ -106,12 +100,8 @@ class XingShiftCal : public SubsysReco
   int64_t mbdvtx[NBUNCHES]{0};
   int64_t zdcns[NBUNCHES]{0};
 
-
   std::map<std::string, std::string> preset_pattern_blue;
   std::map<std::string, std::string> preset_pattern_yellow;
-
-
-
 };
 
 #endif  // XINGSHIFT_XINGSHIFTCAL_H

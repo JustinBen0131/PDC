@@ -9,11 +9,7 @@
 
 #include <Geant4/G4SystemOfUnits.hh>
 
-// stacktrace gives a shadow warning
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshadow"
 #include <boost/stacktrace.hpp>
-#pragma GCC diagnostic pop
 
 #include <cassert>
 #include <cmath>
@@ -26,7 +22,9 @@
 PHField3DCartesian::PHField3DCartesian(const std::string &fname, const float magfield_rescale, const float innerradius, const float outerradius, const float size_z)
   : filename(fname)
 {
-  for (int i = 0; i < 2; i++)
+  std::cout << "PHField3DCartesian::PHField3DCartesian" << std::endl;
+
+  for (int i = 0; i < 2; i++) // NOLINT (modernize-loop-convert)
   {
     for (int j = 0; j < 2; j++)
     {
@@ -34,8 +32,7 @@ PHField3DCartesian::PHField3DCartesian(const std::string &fname, const float mag
       {
         for (int l = 0; l < 3; l++)
         {
-          xyz[i][j][k][l] = NAN;
-          bf[i][j][k][l] = NAN;
+          bf[i][j][k][l] = {std::numeric_limits<double>::quiet_NaN()};
         }
       }
     }
@@ -67,8 +64,12 @@ PHField3DCartesian::PHField3DCartesian(const std::string &fname, const float mag
     gSystem->Exit(1);
     exit(1);
   }
-  Float_t ROOT_X, ROOT_Y, ROOT_Z;
-  Float_t ROOT_BX, ROOT_BY, ROOT_BZ;
+  Float_t ROOT_X;
+  Float_t ROOT_Y;
+  Float_t ROOT_Z;
+  Float_t ROOT_BX;
+  Float_t ROOT_BY;
+  Float_t ROOT_BZ;
   field_map->SetBranchAddress("x", &ROOT_X);
   field_map->SetBranchAddress("y", &ROOT_Y);
   field_map->SetBranchAddress("z", &ROOT_Z);
@@ -127,13 +128,14 @@ PHField3DCartesian::~PHField3DCartesian()
 
 void PHField3DCartesian::GetFieldValue(const double point[4], double *Bfield) const
 {
+
   static double xsav = -1000000.;
   static double ysav = -1000000.;
   static double zsav = -1000000.;
 
-  double x = point[0];
-  double y = point[1];
-  double z = point[2];
+  const double& x = point[0];
+  const double& y = point[1];
+  const double& z = point[2];
 
   Bfield[0] = 0.0;
   Bfield[1] = 0.0;
@@ -144,17 +146,17 @@ void PHField3DCartesian::GetFieldValue(const double point[4], double *Bfield) co
     if (ifirst < 10)
     {
       std::cout << "PHField3DCartesian::GetFieldValue: "
-                << "Invalid coordinates: "
-                << "x: " << x / cm
-                << ", y: " << y / cm
-                << ", z: " << z / cm
-                << " bailing out returning zero bfield"
-                << std::endl;
+        << "Invalid coordinates: "
+        << "x: " << x / cm
+        << ", y: " << y / cm
+        << ", z: " << z / cm
+        << " bailing out returning zero bfield"
+        << std::endl;
       std::cout << "previous point: "
-                << "x: " << xsav / cm
-                << ", y: " << ysav / cm
-                << ", z: " << zsav / cm
-                << std::endl;
+        << "x: " << xsav / cm
+        << ", y: " << ysav / cm
+        << ", z: " << zsav / cm
+        << std::endl;
       std::cout << "Here is the stacktrace: " << std::endl;
       std::cout << boost::stacktrace::stacktrace();
       std::cout << "This is not a segfault. Check the stacktrace for the guilty party (typically #2)" << std::endl;
@@ -162,6 +164,7 @@ void PHField3DCartesian::GetFieldValue(const double point[4], double *Bfield) co
     }
     return;
   }
+
   xsav = x;
   ysav = y;
   zsav = z;
@@ -172,6 +175,7 @@ void PHField3DCartesian::GetFieldValue(const double point[4], double *Bfield) co
   {
     return;
   }
+
   double xkey[2];
   std::set<float>::const_iterator it = xvals.lower_bound(x);
   xkey[0] = *it;
@@ -224,6 +228,7 @@ void PHField3DCartesian::GetFieldValue(const double point[4], double *Bfield) co
     --it;
     zkey[1] = *it;
   }
+
   if (xkey_save != xkey[0] ||
       ykey_save != ykey[0] ||
       zkey_save != zkey[0])
@@ -251,20 +256,21 @@ void PHField3DCartesian::GetFieldValue(const double point[4], double *Bfield) co
                       << ", z: " << zkey[k] / cm << std::endl;
             return;
           }
-          xyz[i][j][k][0] = std::get<0>(magval->first);
-          xyz[i][j][k][1] = std::get<1>(magval->first);
-          xyz[i][j][k][2] = std::get<2>(magval->first);
           bf[i][j][k][0] = std::get<0>(magval->second);
           bf[i][j][k][1] = std::get<1>(magval->second);
           bf[i][j][k][2] = std::get<2>(magval->second);
           if (Verbosity() > 0)
           {
-            std::cout << "read x/y/z: " << xyz[i][j][k][0] / cm << "/"
-                      << xyz[i][j][k][1] / cm << "/"
-                      << xyz[i][j][k][2] / cm << " bx/by/bz: "
-                      << bf[i][j][k][0] / tesla << "/"
-                      << bf[i][j][k][1] / tesla << "/"
-                      << bf[i][j][k][2] / tesla << std::endl;
+            const double x_loc = std::get<0>(magval->first);
+            const double y_loc = std::get<1>(magval->first);
+            const double z_loc = std::get<2>(magval->first);
+
+            std::cout << "read x/y/z: " << x_loc / cm << "/"
+              << y_loc / cm << "/"
+              << z_loc / cm << " bx/by/bz: "
+              << bf[i][j][k][0] / tesla << "/"
+              << bf[i][j][k][1] / tesla << "/"
+              << bf[i][j][k][2] / tesla << std::endl;
           }
         }
       }
@@ -312,6 +318,163 @@ void PHField3DCartesian::GetFieldValue(const double point[4], double *Bfield) co
                 bf[0][1][1][i] * fractionx * (1. - fractiony) * (1. - fractionz) +
                 bf[1][1][0][i] * (1. - fractionx) * (1. - fractiony) * fractionz +
                 bf[1][1][1][i] * (1. - fractionx) * (1. - fractiony) * (1. - fractionz);
+  }
+
+  return;
+}
+
+//_____________________________________________________________
+void PHField3DCartesian::GetFieldValue_nocache(const double point[4], double *Bfield) const
+{
+
+  const double& x = point[0];
+  const double& y = point[1];
+  const double& z = point[2];
+
+  Bfield[0] = 0.0;
+  Bfield[1] = 0.0;
+  Bfield[2] = 0.0;
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+  { return; }
+
+  if (point[0] < xmin || point[0] > xmax ||
+      point[1] < ymin || point[1] > ymax ||
+      point[2] < zmin || point[2] > zmax)
+  { return; }
+
+  double xkey[2];
+  std::set<float>::const_iterator it = xvals.lower_bound(x);
+  xkey[0] = *it;
+  if (it == xvals.begin())
+  {
+    xkey[1] = *it;
+    if (x < xkey[0])
+    {
+      std::cout << PHWHERE << ": This should not happen! x too small - outside range: " << x / cm << std::endl;
+      return;
+    }
+  }
+  else
+  {
+    --it;
+    xkey[1] = *it;
+  }
+
+  double ykey[2];
+  it = yvals.lower_bound(y);
+  ykey[0] = *it;
+  if (it == yvals.begin())
+  {
+    ykey[1] = *it;
+    if (y < ykey[0])
+    {
+      std::cout << PHWHERE << ": This should not happen! y too small - outside range: " << y / cm << std::endl;
+      return;
+    }
+  }
+  else
+  {
+    --it;
+    ykey[1] = *it;
+  }
+  double zkey[2];
+  it = zvals.lower_bound(z);
+  zkey[0] = *it;
+  if (it == zvals.begin())
+  {
+    zkey[1] = *it;
+    if (z < zkey[0])
+    {
+      std::cout << PHWHERE << ": This should not happen! z too small - outside range: " << z / cm << std::endl;
+      return;
+    }
+  }
+  else
+  {
+    --it;
+    zkey[1] = *it;
+  }
+
+  // local xyz and field
+  double bf_loc[2][2][2][3]{};
+
+  std::map<std::tuple<float, float, float>, std::tuple<float, float, float> >::const_iterator magval;
+  trio key;
+  for (int i = 0; i < 2; i++)
+  {
+    for (int j = 0; j < 2; j++)
+    {
+      for (int k = 0; k < 2; k++)
+      {
+        key = std::make_tuple(xkey[i], ykey[j], zkey[k]);
+        magval = fieldmap.find(key);
+        if (magval == fieldmap.end())
+        {
+          std::cout << PHWHERE << " could not locate key in " << filename
+            << " value: x: " << xkey[i] / cm
+            << ", y: " << ykey[j] / cm
+            << ", z: " << zkey[k] / cm << std::endl;
+          return;
+        }
+
+        bf_loc[i][j][k][0] = std::get<0>(magval->second);
+        bf_loc[i][j][k][1] = std::get<1>(magval->second);
+        bf_loc[i][j][k][2] = std::get<2>(magval->second);
+        if (Verbosity() > 0)
+        {
+
+          const double x_loc = std::get<0>(magval->first);
+          const double y_loc = std::get<1>(magval->first);
+          const double z_loc = std::get<2>(magval->first);
+
+          std::cout << "read x/y/z: " << x_loc / cm << "/"
+            << y_loc / cm << "/"
+            << z_loc / cm << " bx/by/bz: "
+            << bf_loc[i][j][k][0] / tesla << "/"
+            << bf_loc[i][j][k][1] / tesla << "/"
+            << bf_loc[i][j][k][2] / tesla << std::endl;
+        }
+      }
+    }
+  }
+
+  // how far are we away from the reference point
+  double xinblock = point[0] - xkey[1];
+  double yinblock = point[1] - ykey[1];
+  double zinblock = point[2] - zkey[1];
+  // normalize distance to step size
+  double fractionx = xinblock / xstepsize;
+  double fractiony = yinblock / ystepsize;
+  double fractionz = zinblock / zstepsize;
+  if (Verbosity() > 0)
+  {
+    std::cout << "x/y/z stepsize: " << xstepsize / cm << "/" << ystepsize / cm << "/" << zstepsize / cm << std::endl;
+    std::cout << "x/y/z inblock: " << xinblock / cm << "/" << yinblock / cm << "/" << zinblock / cm << std::endl;
+    std::cout << "x/y/z fraction: " << fractionx << "/" << fractiony << "/" << fractionz << std::endl;
+  }
+
+  // linear extrapolation in cube:
+
+  // Vxyz =
+  // V000 * x * y * z +
+  // V100 * (1 - x) * y * z +
+  // V010 * x * (1 - y) * z +
+  // V001 * x y * (1 - z) +
+  // V101 * (1 - x) * y * (1 - z) +
+  // V011 * x * (1 - y) * (1 - z) +
+  // V110 * (1 - x) * (1 - y) * z +
+  // V111 * (1 - x) * (1 - y) * (1 - z)
+
+  for (int i = 0; i < 3; i++)
+  {
+    Bfield[i] = bf_loc[0][0][0][i] * fractionx * fractiony * fractionz +
+                bf_loc[1][0][0][i] * (1. - fractionx) * fractiony * fractionz +
+                bf_loc[0][1][0][i] * fractionx * (1. - fractiony) * fractionz +
+                bf_loc[0][0][1][i] * fractionx * fractiony * (1. - fractionz) +
+                bf_loc[1][0][1][i] * (1. - fractionx) * fractiony * (1. - fractionz) +
+                bf_loc[0][1][1][i] * fractionx * (1. - fractiony) * (1. - fractionz) +
+                bf_loc[1][1][0][i] * (1. - fractionx) * (1. - fractiony) * fractionz +
+                bf_loc[1][1][1][i] * (1. - fractionx) * (1. - fractiony) * (1. - fractionz);
   }
 
   return;

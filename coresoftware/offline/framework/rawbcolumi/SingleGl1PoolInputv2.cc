@@ -4,7 +4,7 @@
 #include <fun4allraw/InputManagerType.h>
 #include "Fun4AllStreamingLumiCountingInputManager.h"
 
-#include <ffarawobjects/Gl1Packetv2.h>
+#include <ffarawobjects/Gl1Packetv3.h>
 
 #include <phool/PHCompositeNode.h>
 #include <phool/PHIODataNode.h>    // for PHIODataNode
@@ -135,7 +135,7 @@ void SingleGl1PoolInputv2::FillPool(const unsigned int /*nbclks*/)
       packet->identify();
     }
 
-    Gl1Packet *newhit = new Gl1Packetv2();
+    Gl1Packet *newhit = new Gl1Packetv3();
     uint64_t gtm_bco = packet->lValue(0, "BCO");
     uint64_t bco_trim = gtm_bco & 0xFFFFFFFFFFU;
     //	std::cout<<bco_trim<<std::endl;
@@ -169,6 +169,7 @@ void SingleGl1PoolInputv2::FillPool(const unsigned int /*nbclks*/)
     newhit->setLiveVector(packet->lValue(0, "LiveVector"));
     newhit->setScaledVector(packet->lValue(0, "ScaledVector"));
     newhit->setGTMBusyVector(packet->lValue(0, "GTMBusyVector"));
+    newhit->setGTMAllBusyVector(packet->lValue(0, "GTMAllBusyVector"));
     for (int i = 0; i < 64; i++)
     {
       for (int j = 0; j < 3; j++)
@@ -228,7 +229,7 @@ void SingleGl1PoolInputv2::Print(const std::string &what) const
     for (const auto &bcliter : m_Gl1RawHitMap)
     {
       std::cout << PHWHERE << "Beam clock 0x" << std::hex << bcliter.first << std::dec << std::endl;
-      for (auto feeiter : bcliter.second)
+      for (auto *feeiter : bcliter.second)
       {
         std::cout << PHWHERE << "fee: " << feeiter->getBCO()
                   << " at " << std::hex << feeiter << std::dec << std::endl;
@@ -251,7 +252,7 @@ void SingleGl1PoolInputv2::CleanupUsedPackets(const uint64_t bclk)
   {
     if (iter.first <= bclk)
     {
-      for (auto pktiter : iter.second)
+      for (auto *pktiter : iter.second)
       {
         delete pktiter;
       }
@@ -354,7 +355,7 @@ void SingleGl1PoolInputv2::CreateDSTNode(PHCompositeNode *topNode)
   Gl1Packet *gl1hitcont = findNode::getClass<Gl1Packet>(detNode, "GL1RAWHIT");
   if (!gl1hitcont)
   {
-    gl1hitcont = new Gl1Packetv2();
+    gl1hitcont = new Gl1Packetv3();
     PHIODataNode<PHObject> *newNode = new PHIODataNode<PHObject>(gl1hitcont, "GL1RAWHIT", "PHObject");
     detNode->addNode(newNode);
   }

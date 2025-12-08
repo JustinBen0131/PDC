@@ -3,26 +3,20 @@
 
 #include <fun4all/Fun4AllHistoManager.h>
 #include <fun4all/Fun4AllReturnCodes.h>
+
 #include <phool/PHCompositeNode.h>
-#include <phool/PHIODataNode.h>    // for PHIODataNode
-#include <phool/PHNodeIterator.h>  // for PHNodeIterator
-#include <phool/PHObject.h>        // for PHObject
 #include <phool/getClass.h>
 
 #include <Event/Event.h>
 #include <Event/packet.h>
 
-#include <TFile.h>
-#include <TH1.h>
 #include <TH2.h>
 
-#include <cassert>
-#include <cstddef>
-#include <memory>
-
 #include <qautils/QAHistManagerDef.h>
-#include <boost/format.hpp>
 
+#include <cassert>
+#include <cstdint>
+#include <format>
 #include <iostream>
 #include <string>
 //
@@ -91,14 +85,14 @@ int TpcNoiseQA::process_event(PHCompositeNode *topNode)
   }
 
   // Call HistoManager
-  auto hm = QAHistManagerDef::getHistoManager();
+  auto *hm = QAHistManagerDef::getHistoManager();
   assert(hm);
 
   // Reference histograms initialized in header file to histos in HistoManager
-  h_NPol_Ped_Mean = dynamic_cast<TH2F *>(hm->getHisto(boost::str(boost::format("%sNPol_Ped_Mean") % getHistoPrefix()).c_str()));
-  h_NPol_Ped_RMS = dynamic_cast<TH2F *>(hm->getHisto(boost::str(boost::format("%sNPol_Ped_RMS") % getHistoPrefix()).c_str()));
-  h_SPol_Ped_Mean = dynamic_cast<TH2F *>(hm->getHisto(boost::str(boost::format("%sSPol_Ped_Mean") % getHistoPrefix()).c_str()));
-  h_SPol_Ped_RMS = dynamic_cast<TH2F *>(hm->getHisto(boost::str(boost::format("%sSPol_Ped_RMS") % getHistoPrefix()).c_str()));
+  h_NPol_Ped_Mean = dynamic_cast<TH2F *>(hm->getHisto(std::format("{}NPol_Ped_Mean", getHistoPrefix())));
+  h_NPol_Ped_RMS = dynamic_cast<TH2F *>(hm->getHisto(std::format("{}NPol_Ped_RMS", getHistoPrefix())));
+  h_SPol_Ped_Mean = dynamic_cast<TH2F *>(hm->getHisto(std::format("{}SPol_Ped_Mean", getHistoPrefix())));
+  h_SPol_Ped_RMS = dynamic_cast<TH2F *>(hm->getHisto(std::format("{}SPol_Ped_RMS", getHistoPrefix())));
   //
 
   int sector = 0;
@@ -106,7 +100,7 @@ int TpcNoiseQA::process_event(PHCompositeNode *topNode)
   std::vector<Packet *> pktvec = _event->getPacketVector();
 
   // Loop over packets in event
-  for (auto packet : pktvec)
+  for (auto *packet : pktvec)
   {
     if (!packet)
     {
@@ -270,27 +264,27 @@ std::string TpcNoiseQA::getHistoPrefix() const { return std::string("h_") + Name
 void TpcNoiseQA::createHistos()
 {
   // Initialize HistoManager
-  auto hm = QAHistManagerDef::getHistoManager();
+  auto *hm = QAHistManagerDef::getHistoManager();
   assert(hm);
 
   // Create and register histos in HistoManager
   {
-    auto h = new TH2F(boost::str(boost::format("%sNPol_Ped_Mean") % getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
+    auto *h = new TH2F(std::format("{}NPol_Ped_Mean", getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
     hm->registerHisto(h);
   }
 
   {
-    auto h = new TH2F(boost::str(boost::format("%sNPol_Ped_RMS") % getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
+    auto *h = new TH2F(std::format("{}NPol_Ped_RMS", getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
     hm->registerHisto(h);
   }
 
   {
-    auto h = new TH2F(boost::str(boost::format("%sSPol_Ped_Mean") % getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
+    auto *h = new TH2F(std::format("{}SPol_Ped_Mean", getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
     hm->registerHisto(h);
   }
 
   {
-    auto h = new TH2F(boost::str(boost::format("%sSPol_Ped_RMS") % getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
+    auto *h = new TH2F(std::format("{}SPol_Ped_RMS", getHistoPrefix()).c_str(), ";x;y", (2 * r_bins_N + nphi + 1), r_bins_new, (2 * r_bins_N + nphi + 1), r_bins_new);
     hm->registerHisto(h);
   }
 }

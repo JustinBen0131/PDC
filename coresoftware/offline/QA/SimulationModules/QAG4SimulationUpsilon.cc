@@ -33,6 +33,7 @@
 #include <cmath>
 #include <cstdlib>  // for abs
 #include <iostream>
+#include <limits>
 #include <set>
 #include <string>
 #include <utility>  // for pair
@@ -218,7 +219,7 @@ int QAG4SimulationUpsilon::process_event(PHCompositeNode *topNode)
       g4particle->identify();
     }
 
-    if (m_embeddingIDs.size() > 0)
+    if (!m_embeddingIDs.empty())
     {
       // only analyze subset of particle with proper embedding IDs
       int candidate_embedding_id = trutheval->get_embed(g4particle);
@@ -228,7 +229,7 @@ int QAG4SimulationUpsilon::process_event(PHCompositeNode *topNode)
       }
 
       // skip if no match
-      if (m_embeddingIDs.find(candidate_embedding_id) == m_embeddingIDs.end())
+      if (!m_embeddingIDs.contains(candidate_embedding_id))
       {
         continue;
       }
@@ -238,7 +239,7 @@ int QAG4SimulationUpsilon::process_event(PHCompositeNode *topNode)
     double const gpy = g4particle->get_py();
     double const gpz = g4particle->get_pz();
     double gpt = 0;
-    double geta = NAN;
+    double geta = std::numeric_limits<double>::quiet_NaN();
 
     if (gpx != 0 && gpy != 0)
     {
@@ -247,7 +248,7 @@ int QAG4SimulationUpsilon::process_event(PHCompositeNode *topNode)
       geta = gv.Eta();
       //      gphi = gv.Phi();
     }
-    if (m_etaRange.first < geta and geta < m_etaRange.second)
+    if (m_etaRange.first < geta && geta < m_etaRange.second)
     {
       if (Verbosity())
       {
@@ -265,7 +266,7 @@ int QAG4SimulationUpsilon::process_event(PHCompositeNode *topNode)
 
     const int pid = g4particle->get_pid();
 
-    if (abs(pid) != abs(m_daughterAbsPID))
+    if (std::abs(pid) != std::abs(m_daughterAbsPID))
     {
       if (Verbosity())
       {
@@ -374,7 +375,7 @@ int QAG4SimulationUpsilon::process_event(PHCompositeNode *topNode)
 
       const CLHEP::HepLorentzVector gv_quakonium = gv_pos + gv_neg;
 
-      if (fabs(quarkonium_mass - gv_quakonium.m()) > 1e-3)
+      if (std::abs(quarkonium_mass - gv_quakonium.m()) > 1e-3)
       {
         if (Verbosity())
         {
@@ -388,7 +389,7 @@ int QAG4SimulationUpsilon::process_event(PHCompositeNode *topNode)
       h_nGen_Pair_InvMassGen->Fill(gv_quakonium.m());
       h_norm->Fill("Truth Upsilon in Acc.", 1);
 
-      if (pair_pos.second and pair_neg.second)
+      if (pair_pos.second && pair_neg.second)
       {
         CLHEP::HepLorentzVector v_pos;
         CLHEP::HepLorentzVector v_neg;

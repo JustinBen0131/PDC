@@ -2,7 +2,7 @@
 #define TPC_LASERCLUSTERIZER_H
 
 #include <fun4all/SubsysReco.h>
-#include <g4detectors/PHG4TpcCylinderGeomContainer.h>
+#include <g4detectors/PHG4TpcGeomContainer.h>
 #include <trackbase/ActsGeometry.h>
 #include <trackbase/TrkrCluster.h>
 #include <trackbase/TrkrDefs.h>
@@ -25,17 +25,12 @@ class LaserCluster;
 class PHCompositeNode;
 class TrkrHitSet;
 class TrkrHitSetContainer;
-class PHG4TpcCylinderGeom;
-class PHG4TpcCylinderGeomContainer;
+class PHG4TpcGeom;
+class PHG4TpcGeomContainer;
 
 class LaserClusterizer : public SubsysReco
 {
  public:
-  typedef boost::geometry::model::point<float, 3, boost::geometry::cs::cartesian> point;
-  typedef boost::geometry::model::box<point> box;
-  typedef std::pair<TrkrDefs::hitkey, TrkrDefs::hitsetkey> specHitKey;
-  typedef std::pair<point, specHitKey> pointKeyLaser;
-
   LaserClusterizer(const std::string &name = "LaserClusterizer");
   ~LaserClusterizer() override = default;
 
@@ -51,6 +46,7 @@ class LaserClusterizer : public SubsysReco
   void set_max_time_samples(int val) { m_time_samples_max = val; }
   void set_lamination(bool val) { m_lamination = val; }
   void set_do_sequential(bool val) { m_do_sequential = val; }
+  void set_do_fitting(bool val) { m_do_fitting = val; }
 
  private:
   int m_event {-1};
@@ -63,7 +59,7 @@ class LaserClusterizer : public SubsysReco
   TrkrHitSetContainer *m_hits {nullptr};
   LaserClusterContainer *m_clusterlist {nullptr};
   ActsGeometry *m_tGeometry {nullptr};
-  PHG4TpcCylinderGeomContainer *m_geom_container {nullptr};
+  PHG4TpcGeomContainer *m_geom_container {nullptr};
   double min_clus_size {1};
   double min_adc_sum {10};
   double m_adc_threshold {74.4};
@@ -71,6 +67,8 @@ class LaserClusterizer : public SubsysReco
   bool m_lamination {false};
 
   bool m_do_sequential {false};
+
+  bool m_do_fitting {true};
   
   double m_tdriftmax {0};
   double AdcClockPeriod {53.0};  // ns

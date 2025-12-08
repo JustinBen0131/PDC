@@ -1,34 +1,43 @@
 #include "JetBackgroundCut.h"
+
+#include <calobase/RawTowerDefs.h>  // for CalorimeterId, encode_to...
 #include <calobase/RawTowerGeom.h>
 #include <calobase/RawTowerGeomContainer.h>
+#include <calobase/TowerInfo.h>  // for TowerInfo
 #include <calobase/TowerInfoContainer.h>
-#include <calobase/TowerInfoContainerv1.h>
-#include <ffarawobjects/Gl1Packetv2.h>
-#include <fun4all/Fun4AllReturnCodes.h>
-#include <globalvertex/GlobalVertexMapv1.h>
+
+#include <globalvertex/GlobalVertexMap.h>
+#include <globalvertex/Vertex.h>  // for Vertex
+
 #include <jetbase/Jet.h>
-#include <jetbase/JetContainerv1.h>
+#include <jetbase/JetContainer.h>
+
+#include <phparameter/PHParameters.h>
+
+#include <fun4all/Fun4AllReturnCodes.h>
+
 #include <phool/PHCompositeNode.h>
 #include <phool/getClass.h>
-#include <phparameter/PHParameters.h>
+
 #include <cmath>
+#include <iostream>  // for basic_ostream, operator<<
+#include <map>       // for _Rb_tree_iterator, opera...
+#include <utility>   // for pair
+#include <vector>    // for vector
 
 //____________________________________________________________________________..
 JetBackgroundCut::JetBackgroundCut(const std::string &jetNodeName, const std::string &name, const int debug, const bool doAbort, GlobalVertex::VTXTYPE vtxtype, int sysvar)
   : SubsysReco(name)
-  , _doAbort(doAbort), _name(name)
-  , _debug(debug), _jetNodeName(jetNodeName)
+  , _doAbort(doAbort)
+  , _name(name)
+  , _debug(debug)
+  , _jetNodeName(jetNodeName)
   , _vtxtype(vtxtype)
-  , _sysvar(sysvar), _cutParams(name)
+  , _sysvar(sysvar)
+  , _cutParams(name)
 {
-  
-  
-  
   SetDefaultParams();
 }
-
-//____________________________________________________________________________..
-JetBackgroundCut::~JetBackgroundCut() = default;
 
 //____________________________________________________________________________..
 int JetBackgroundCut::Init(PHCompositeNode *topNode)
@@ -54,10 +63,10 @@ void JetBackgroundCut::CreateNodeTree(PHCompositeNode *topNode)
 //____________________________________________________________________________..
 int JetBackgroundCut::process_event(PHCompositeNode *topNode)
 {
-  TowerInfoContainer *towersEM = findNode::getClass<TowerInfoContainer>(topNode, "TOWERINFO_CALIB_CEMC_RETOWER");
-  TowerInfoContainer *towersOH = findNode::getClass<TowerInfoContainer>(topNode, "TOWERINFO_CALIB_HCALOUT");
-  JetContainer *jets = findNode::getClass<JetContainerv1>(topNode, _jetNodeName);
-  GlobalVertexMap *gvtxmap = findNode::getClass<GlobalVertexMapv1>(topNode, "GlobalVertexMap");
+  TowerInfoContainer *towersEM = findNode::getClass<TowerInfoContainer>(topNode, m_input_cemc_tower_node);
+  TowerInfoContainer *towersOH = findNode::getClass<TowerInfoContainer>(topNode, m_input_ohcal_tower_node);
+  JetContainer *jets = findNode::getClass<JetContainer>(topNode, _jetNodeName);
+  GlobalVertexMap *gvtxmap = findNode::getClass<GlobalVertexMap>(topNode, "GlobalVertexMap");
 
   RawTowerGeomContainer *geom[2];
   geom[0] = findNode::getClass<RawTowerGeomContainer>(topNode, "TOWERGEOM_HCALIN");
@@ -207,7 +216,7 @@ int JetBackgroundCut::process_event(PHCompositeNode *topNode)
       {
         unsigned int channel = comp.second;
         TowerInfo *tower;
-        if (comp.first == 13 || comp.first == 28 || comp.first == 25)
+        if (comp.first == Jet::CEMC_TOWER_RETOWER || comp.first == Jet::CEMC_TOWERINFO_RETOWER || comp.first == Jet::CEMC_TOWERINFO || comp.first == Jet::CEMC_TOWERINFO_SUB1)
         {
           tower = towersEM->get_tower_at_channel(channel);
           int key = towersEM->encode_key(channel);
@@ -221,7 +230,7 @@ int JetBackgroundCut::process_event(PHCompositeNode *topNode)
           float towerEta = -log(std::tan(0.5 * newTheta));
           frcem += tower->get_energy() / std::cosh(towerEta);
         }
-        if (comp.first == 7 || comp.first == 27)
+        if (comp.first == Jet::HCALOUT_TOWER|| comp.first == Jet::HCALOUT_TOWERINFO || comp.first == Jet::HCALOUT_TOWERINFO_SUB1)
         {
           tower = towersOH->get_tower_at_channel(channel);
           int key = towersOH->encode_key(channel);

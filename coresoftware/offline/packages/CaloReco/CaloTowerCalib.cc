@@ -91,14 +91,14 @@ int CaloTowerCalib::InitRun(PHCompositeNode *topNode)
 
   ///////////////////////////////////////
   // energy calibration getting from CDB
-  std::string default_time_independent_calib = m_detector+"_calib_ADC_to_ETower_default";
+  std::string default_time_independent_calib = m_detector+"_calib_ADC_to_ETower_default"; 
   if (!m_overrideCalibName)
   {
     m_calibName = m_detector+"_calib_ADC_to_ETower";
   }
   if (!m_overrideFieldName)
   {
-    m_fieldname = m_detector+"_calib_ADC_to_ETower";
+    m_fieldname = m_detector+"_calib_ADC_to_ETower"; 
   }
 
   if (m_giveDirectURL)
@@ -164,14 +164,14 @@ int CaloTowerCalib::InitRun(PHCompositeNode *topNode)
   m_calibName_ZScrosscalib = m_detector + "_ZSCrossCalib";
   m_fieldname_ZScrosscalib = "ratio";
 
-  if (m_doZScrosscalib)
-  {
+  if (m_doZScrosscalib) 
+  { 
     if (m_giveDirectURL_ZScrosscalib)
     {
       calibdir = m_directURL_ZScrosscalib;
       std::cout << "CaloTowerCalib::InitRun: Using setted url " << calibdir << std::endl;
       cdbttree_ZScrosscalib = new CDBTTree(calibdir);
-    }
+    } 
     else
     {
       calibdir = CDBInterface::instance()->getUrl(m_calibName_ZScrosscalib);
@@ -192,7 +192,7 @@ int CaloTowerCalib::InitRun(PHCompositeNode *topNode)
         }
       }
     }
-  }
+  } 
 
   PHNodeIterator iter(topNode);
 
@@ -264,9 +264,9 @@ int CaloTowerCalib::process_event(PHCompositeNode *topNode)
     if (isZS && m_doZScrosscalib)
     {
       float crosscalibconst = m_cdbInfo_vec[channel].crosscalibconst;
-      if (crosscalibconst == 0)
-      {
-        crosscalibconst = 1;
+      if (crosscalibconst == 0) 
+      { 
+        crosscalibconst = 1; 
       }
       _calib_towers->get_tower_at_channel(channel)->set_energy(raw_amplitude * calibconst * crosscalibconst);
     }

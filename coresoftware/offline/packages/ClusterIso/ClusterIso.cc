@@ -27,9 +27,34 @@
 
 #include <CLHEP/Vector/ThreeVector.h>
 
+#include <cmath>
 #include <iostream>
 #include <map>
 #include <utility>
+
+namespace
+{
+  /** \Brief Function to find delta R between 2 objects
+   *
+   * Takes the eta and phi of each object and returns the difference
+   * of the etas and phis added in quadrature. Used to find towers
+   * inside a cone of delta R around a cluster.
+   */
+  float deltaR(float eta1, float eta2, float phi1, float phi2)
+  {
+    float deta = eta1 - eta2;
+    float dphi = phi1 - phi2;
+    if (dphi > M_PI)
+    {
+      dphi -= 2 * M_PI;  // corrects to keep range -pi to pi
+    }
+    if (dphi < -1 * M_PI)
+    {
+      dphi += 2 * M_PI;  // corrects to keep range -pi to pi
+    }
+    return std::sqrt(deta * deta + dphi * dphi);
+  }
+}  // namespace
 
 /** \Brief Function to get correct tower eta
  *
@@ -109,7 +134,7 @@ void ClusterIso::setConeSize(int coneSize)
 /**
  * Returns the minimum transverse energy required for a cluster to have its isolation calculated
  */
-/*const*/ float ClusterIso::geteTCut()
+float ClusterIso::geteTCut() const
 {
   return m_eTCut;
 }
@@ -117,7 +142,7 @@ void ClusterIso::setConeSize(int coneSize)
 /**
  * Returns size of isolation cone as integer multiple of 0.1 (i.e. 3 is an R=0.3 cone)
  */
-/*const*/ int ClusterIso::getConeSize()
+int ClusterIso::getConeSize() const
 {
   return (int) m_coneSize * 10;
 }
@@ -125,7 +150,7 @@ void ClusterIso::setConeSize(int coneSize)
 /**
  * Must be called to set the new vertex for the cluster
  */
-/*const*/ CLHEP::Hep3Vector ClusterIso::getVertex()
+CLHEP::Hep3Vector ClusterIso::getVertex() const
 {
   return CLHEP::Hep3Vector(m_vx, m_vy, m_vz);
 }
@@ -198,7 +223,7 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
       RawTowerGeomContainer *geomOH = findNode::getClass<RawTowerGeomContainer>(topNode, "TOWERGEOM_HCALOUT");
 
       {
-        RawClusterContainer *clusters = findNode::getClass<RawClusterContainer>(topNode, RawCemcClusterNodeName.c_str());
+        RawClusterContainer *clusters = findNode::getClass<RawClusterContainer>(topNode, RawCemcClusterNodeName);
         RawClusterContainer::ConstRange begin_end = clusters->getClusters();
         RawClusterContainer::ConstIterator rtiter;
         if (Verbosity() >= VERBOSITY_SOME)
@@ -248,6 +273,10 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
               {
                 continue;
               }
+              if (tower->get_energy() < m_minTowerEnergy)
+              {
+                continue;
+              }
               unsigned int towerkey = towersEM3old->encode_key(channel);
               int ieta = towersEM3old->getTowerEtaBin(towerkey);
               int iphi = towersEM3old->getTowerPhiBin(towerkey);
@@ -271,6 +300,10 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
             {
               TowerInfo *tower = towersIH3->get_tower_at_channel(channel);
               if (!IsAcceptableTower(tower))
+              {
+                continue;
+              }
+              if (tower->get_energy() < m_minTowerEnergy)
               {
                 continue;
               }
@@ -298,6 +331,10 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
               {
                 continue;
               }
+              if (tower->get_energy() < m_minTowerEnergy)
+              {
+                continue;
+              }
               unsigned int towerkey = towersOH3->encode_key(channel);
               int ieta = towersOH3->getTowerEtaBin(towerkey);
               int iphi = towersOH3->getTowerPhiBin(towerkey);
@@ -319,7 +356,7 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
             cluster->identify();
             std::cout << "=" << isoEt << '\n';
           }
-          cluster->set_et_iso(isoEt, (int) 10 * m_coneSize, true, true);
+          cluster->set_et_iso(isoEt, 10 * m_coneSize, true, true);
         }
       }
     }
@@ -361,7 +398,7 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
       RawTowerGeomContainer *geomOH = findNode::getClass<RawTowerGeomContainer>(topNode, "TOWERGEOM_HCALOUT");
 
       {
-        RawClusterContainer *clusters = findNode::getClass<RawClusterContainer>(topNode, RawCemcClusterNodeName.c_str());
+        RawClusterContainer *clusters = findNode::getClass<RawClusterContainer>(topNode, RawCemcClusterNodeName);
         RawClusterContainer::ConstRange begin_end = clusters->getClusters();
         RawClusterContainer::ConstIterator rtiter;
         if (Verbosity() >= VERBOSITY_SOME)
@@ -420,6 +457,10 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
               {
                 continue;
               }
+              if (tower->get_energy() < m_minTowerEnergy)
+              {
+                continue;
+              }
               unsigned int towerkey = towersEM3old->encode_key(channel);
               int ieta = towersEM3old->getTowerEtaBin(towerkey);
               int iphi = towersEM3old->getTowerPhiBin(towerkey);
@@ -444,6 +485,10 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
             {
               TowerInfo *tower = towersIH3->get_tower_at_channel(channel);
               if (!IsAcceptableTower(tower))
+              {
+                continue;
+              }
+              if (tower->get_energy() < m_minTowerEnergy)
               {
                 continue;
               }
@@ -474,6 +519,10 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
               {
                 continue;
               }
+              if (tower->get_energy() < m_minTowerEnergy)
+              {
+                continue;
+              }
               unsigned int towerkey = towersOH3->encode_key(channel);
               int ieta = towersOH3->getTowerEtaBin(towerkey);
               int iphi = towersOH3->getTowerPhiBin(towerkey);
@@ -498,7 +547,7 @@ int ClusterIso::process_event(PHCompositeNode *topNode)
             cluster->identify();
             std::cout << "=" << isoEt << '\n';
           }
-          cluster->set_et_iso(isoEt, (int) 10 * m_coneSize, false, true);
+          cluster->set_et_iso(isoEt, 10 * m_coneSize, false, true);
         }
       }
     }

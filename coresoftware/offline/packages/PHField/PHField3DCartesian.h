@@ -3,7 +3,7 @@
 
 #include "PHField.h"
 
-#include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -12,7 +12,11 @@
 class PHField3DCartesian : public PHField
 {
  public:
+
+  //! constructor
   explicit PHField3DCartesian(const std::string &fname, const float magfield_rescale = 1.0, const float innerradius = 0, const float outerradius = 1.e10, const float size_z = 1.e10);
+
+  //! destructor
   ~PHField3DCartesian() override;
 
   //! access field value
@@ -21,26 +25,28 @@ class PHField3DCartesian : public PHField
   //! @param[out] Bfield  field value. In the case of magnetic field, the order is Bx, By, Bz in in Geant4/CLHEP units
   void GetFieldValue(const double Point[4], double *Bfield) const override;
 
- private:
+  void GetFieldValue_nocache(const double Point[4], double *Bfield) const override;
+
+  private:
   std::string filename;
-  double xmin = 1000000;
-  double xmax = -1000000;
-  double ymin = 1000000;
-  double ymax = -1000000;
-  double zmin = 1000000;
-  double zmax = -1000000;
-  double xstepsize = NAN;
-  double ystepsize = NAN;
-  double zstepsize = NAN;
+  double xmin {1000000};
+  double xmax {-1000000};
+  double ymin {1000000};
+  double ymax {-1000000};
+  double zmin {1000000};
+  double zmax {-1000000};
+  double xstepsize {std::numeric_limits<double>::quiet_NaN()};
+  double ystepsize {std::numeric_limits<double>::quiet_NaN()};
+  double zstepsize {std::numeric_limits<double>::quiet_NaN()};
+
   // these are updated in a const method
   // to cache previous values
-  mutable double xyz[2][2][2][3]{};
   mutable double bf[2][2][2][3]{};
-  mutable double xkey_save = NAN;
-  mutable double ykey_save = NAN;
-  mutable double zkey_save = NAN;
-  mutable int cache_hits = 0;
-  mutable int cache_misses = 0;
+  mutable double xkey_save {std::numeric_limits<double>::quiet_NaN()};
+  mutable double ykey_save {std::numeric_limits<double>::quiet_NaN()};
+  mutable double zkey_save {std::numeric_limits<double>::quiet_NaN()};
+  mutable int cache_hits {0};
+  mutable int cache_misses {0};
 
   typedef std::tuple<float, float, float> trio;
   std::map<std::tuple<float, float, float>, std::tuple<float, float, float> > fieldmap;

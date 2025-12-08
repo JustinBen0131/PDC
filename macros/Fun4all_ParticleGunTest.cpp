@@ -3,6 +3,8 @@
   #pragma GCC diagnostic push
   #pragma GCC diagnostic ignored "-Wvirtual-function-default"
 #endif
+
+#include <RVersion.h>
 #if ROOT_VERSION_CODE >= ROOT_VERSION(6,00,0)
 
 ////////////////////////////////////////////////////////////
@@ -29,6 +31,7 @@
 #include <TLine.h>                             // ROOT line primitive (vertical dividers)
 #include <TLatex.h>                            // ROOT text (dummy module labels)
 #include <TLegend.h>                           // ROOT legend for block-color mapping
+#include <TAxis.h>                             // ROOT axis class (needed for GetXaxis()->...)
 #include <cassert>
 #include <cmath>
 #include <iomanip>
@@ -68,14 +71,832 @@ R__LOAD_LIBRARY(/sphenix/user/patsfan753/install/lib/libPDC.so)        // PDC (l
 
 #endif // ROOT>=6
 
-////////////////////////////////////////////////////////////
-// Main macro (no outputs; terminal prints only)
-////////////////////////////////////////////////////////////
+// ────────────────────────────────────────────────────────────────────────────
+// Helper: per-module incidence vs geom tilt for sectors 0 (N) and 32 (S)
+//
+//  • Uses the special configuration z_vtx = 0 so that the mechanical ray
+//    used inside BEmcRecCEMC is exactly the radial direction IP→tower centre,
+//    i.e. the "ideal" case where
+//        alpha_phi ≃ phi_tilt   and   alpha_eta ≃ eta_tilt
+//    for every tower (and therefore for the module-averaged values).
+//
+//  • For each of sectors 0 and 32:
+//      - loop towers sector-by-sector, module-by-module
+//      - for each module m (0..23), average over its 2×8 towers:
+//          * <a_phi>, <a_eta> from CalculateMechIncidence
+//          * per-module φ-tilt from sum_rT vs sum_aT (axis vs radial)
+//          * per-module η-tilt from 2×2 block tilts (same construction
+//            as dissectEtaBlocks)
+//      - make 2 PNGs:
+//          sector_XX_phi.png :  α_phi (red) and φ_tilt (blue) vs module index
+//          sector_XX_eta.png :  α_eta (red) and η_tilt (blue) vs module index
+//
+//  • PNGs live in:  incidence_vs_tiltPNGs/
+//
+//  • Axes:
+//      x: module index (1..24) drawn like your sector_module_summaries PNGs
+//      y: "Angle [rad]".
+// ────────────────────────────────────────────────────────────────────────────
+void MakeModuleIncidenceVsTiltPlots(RawTowerGeomContainer* geo,
+                                    BEmcRecCEMC*           bemc,
+                                    double                 EGeV)
+{
+  if (!geo || !bemc)
+  {
+    std::cerr << "[MakeModuleIncidenceVsTiltPlots] geo or bemc is null, skip.\n";
+    return;
+  }
+
+  const int nEta = geo->get_etabins();   // expect 96
+  const int nPhi = geo->get_phibins();   // expect 256
+
+  const int nSectorsTotal      = 64;                 // 2 (±η) × 32 (φ)
+  const int nPhiSectors        = nSectorsTotal / 2;  // 32 φ-sectors per endcap
+  const int phiTowersPerSector = nPhi / nPhiSectors; // 8 φ-towers per sector
+  const int etaSplitIndex      = nEta / 2;           // 48: North/South boundary
+  const int nModulesPerSector  = 24;                 // modules along η in a hemisphere
+
+  if (gSystem)
+  {
+    gSystem->mkdir("incidence_vs_tiltPNGs", true);
+  }
+
+  // Special case: vertex at IP (z_vtx = 0), so the ray is radial IP→tower centre.
+  bemc->SetVertexZ(0.0f);
+
+  // Disable stats boxes on the ROOT plots
+  gStyle->SetOptStat(0);
+
+  auto process_sector = [&](int sector)
+  {
+    const bool  isNorth      = (sector < nPhiSectors);
+    const int   phiSectorIdx = sector % nPhiSectors;
+    const int   iphi_min     = phiSectorIdx * phiTowersPerSector;
+    const int   iphi_max     = iphi_min + phiTowersPerSector - 1;
+    const int   ieta_min     = isNorth ? etaSplitIndex : 0;
+    const int   ieta_max     = isNorth ? (nEta - 1)    : (etaSplitIndex - 1);
+    const char* hemiLabel    = isNorth ? "N" : "S";
+
+    std::cout << "\n[incidenceVsTilt] Sector " << sector
+              << " (" << hemiLabel << ", phiIdx=" << phiSectorIdx
+              << ")  ieta=[" << ieta_min << "," << ieta_max
+              << "], iphi=[" << iphi_min << "," << iphi_max << "]\n";
+
+      // Per-module arrays (module index 0..23)
+      double x_mod[nModulesPerSector];         // module bin centre
+      double x_mod_phi[nModulesPerSector];     // left-shifted (φ diff)
+      double x_mod_eta[nModulesPerSector];     // right-shifted (η diff)
+
+      double aPhi_mod[nModulesPerSector];      // <a_phi>[rad]
+      double aPhiEff_mod[nModulesPerSector];   // <a_phi cosh(eta)>[rad]
+      double aEta_mod[nModulesPerSector];
+      double phiTilt_mod[nModulesPerSector];   // per-module |φ-tilt| (axis vs radial), abs value
+      double etaTilt_mod[nModulesPerSector];   // per-module η-tilt (from blocks)
+
+      // Absolute percent differences:
+      //   φ:  100 * |<a_phi cosh(η)> - φ_tilt| / |φ_tilt|
+      //   η:  100 * |a_eta - η_tilt|          / |η_tilt|
+      double dPhiPct_mod[nModulesPerSector];
+      double dEtaPct_mod[nModulesPerSector];
+
+      for (int m = 0; m < nModulesPerSector; ++m)
+      {
+        const double xm = static_cast<double>(m) + 0.5; // module bin centre
+
+        x_mod[m]     = xm;
+        x_mod_phi[m] = xm - 0.18;  // slight left shift for φ points
+        x_mod_eta[m] = xm + 0.18;  // slight right shift for η points
+
+        aPhi_mod[m]      = 0.0;
+        aPhiEff_mod[m]   = 0.0;
+        aEta_mod[m]      = 0.0;
+        phiTilt_mod[m]   = 0.0;
+        etaTilt_mod[m]   = 0.0;
+        dPhiPct_mod[m]   = 0.0;
+        dEtaPct_mod[m]   = 0.0;
+      }
+
+      // We keep per-module numbers in arrays during the loop.
+      // A compact, clean summary table (with only key quantities) will be
+      // printed **after** all plots for this sector are created, so that no
+      // other diagnostic output interleaves with the table.
+
+
+    for (int module = 0; module < nModulesPerSector; ++module)
+    {
+      // Local η indices in hemisphere and corresponding global η indices
+      const int ietaLocal0 = 2 * module;
+      const int ietaLocal1 = ietaLocal0 + 1;
+      const int ieta0      = isNorth ? (etaSplitIndex + ietaLocal0) : ietaLocal0;
+      const int ieta1      = isNorth ? (etaSplitIndex + ietaLocal1) : ietaLocal1;
+
+      // Accumulators for this module
+      TVector3 sum_rT(0., 0., 0.); // sum of radial vectors in xy-plane
+      TVector3 sum_aT(0., 0., 0.); // sum of axis projections in xy-plane
+
+      double sum_aPhi = 0.0;
+      double sum_aEta = 0.0;
+      int    nInc     = 0;
+
+        // For η: block-wise δθ_tower, then module tilt = average block tilt
+        double sum_dtheta_block[4] = {0.0, 0.0, 0.0, 0.0};
+        int    n_dtheta_block[4]   = {0, 0, 0, 0};
+
+        // For α_phi,eff = <a_phi cosh(eta)>:
+        // accumulate η per tower and the tower-wise product a_phi * cosh(η).
+        // This keeps the cosh factor inside the average, which is what matches
+        // the tower-wise relation  phi_tilt ≈ a_phi * cosh(η).
+        double sum_eta_det   = 0.0;
+        int    nEtaSamples   = 0;
+        double sum_aPhi_cosh = 0.0;
+
+        // Loop over the 2 η-towers in this module within the hemisphere
+        for (int etaInModule = 0; etaInModule < 2; ++etaInModule)
+        {
+          const int ietaLocal = 2 * module + etaInModule;
+          int       ieta      = isNorth ? (etaSplitIndex + ietaLocal) : ietaLocal;
+
+          if (ieta < ieta_min || ieta > ieta_max) continue;
+
+          // Loop over all 8 φ-towers in this sector
+          for (int iphiLocal = 0; iphiLocal < phiTowersPerSector; ++iphiLocal)
+          {
+            const int iphi = iphi_min + iphiLocal;
+            if (iphi < iphi_min || iphi > iphi_max) continue;
+
+            const RawTowerDefs::keytype key =
+              RawTowerDefs::encode_towerid(geo->get_calorimeter_id(), ieta, iphi);
+
+            RawTowerGeom* tgBase = geo->get_tower_geometry(key);
+            auto*         g5     = dynamic_cast<RawTowerGeomv5*>(tgBase);
+            if (!g5) continue;
+
+            // Front/back face centres and bulk centre
+            TVector3 Cint(g5->get_center_int_x(),
+                          g5->get_center_int_y(),
+                          g5->get_center_int_z());
+            TVector3 Cext(g5->get_center_ext_x(),
+                          g5->get_center_ext_y(),
+                          g5->get_center_ext_z());
+            TVector3 axis = Cext - Cint;
+            if (axis.Mag2() == 0.) continue;
+
+            TVector3 C(g5->get_center_x(),
+                       g5->get_center_y(),
+                       g5->get_center_z());
+
+            // φ: radial direction in xy-plane and axis projection in xy-plane
+            TVector3 rT(C.X(), C.Y(), 0.0);
+            TVector3 aT(axis.X(), axis.Y(), 0.0);
+            if (rT.Mag2() == 0. || aT.Mag2() == 0.) continue;
+
+            sum_rT += rT;
+            sum_aT += aT;
+
+            // η: δθ_tower from detailed geometry (same definition as dissectEtaBlocks)
+            TVector3 e_r = Cint.Unit();  // IP→inner-face centre
+            TVector3 e_a = axis.Unit();  // bar axis
+
+            const double theta_r = e_r.Theta();
+            const double theta_a = e_a.Theta();
+            const double dtheta  = theta_a - theta_r; // [rad]
+
+            // Pseudorapidity of this tower direction as seen from IP
+            // (η = -ln tan(θ/2)), used to build <a_phi cosh(η)> per module
+            const double eta_det = -std::log(std::tan(0.5 * theta_r));
+            sum_eta_det   += eta_det;
+            ++nEtaSamples;
+
+            const int blockPhi = iphiLocal / 2; // 0..3 within module
+            if (blockPhi >= 0 && blockPhi < 4)
+            {
+              sum_dtheta_block[blockPhi] += dtheta;
+              n_dtheta_block[blockPhi]   += 1;
+            }
+
+            // Mechanical incidence for this tower: special case z_vtx=0 ⇒
+            // ray is the radial IP→centre direction.
+            float cosphi = 0.f, coseta = 0.f, aPhi = 0.f, aEta = 0.f;
+            const bool ok = bemc->CalculateMechIncidence(
+                static_cast<float>(EGeV),
+                static_cast<float>(iphi),  // x index = φ
+                static_cast<float>(ieta),  // y index = η
+                cosphi, coseta, aPhi, aEta);
+
+            if (!ok) continue;
+
+            const double aPhi_d = static_cast<double>(aPhi);
+
+            sum_aPhi      += aPhi_d;
+            sum_aEta      += static_cast<double>(aEta);
+            sum_aPhi_cosh += aPhi_d * std::cosh(eta_det);
+            ++nInc;
+          }
+        }
+
+        // Per-module φ rigid tilt from aggregated sum_rT vs sum_aT
+        double phiTilt = 0.0;
+        if (sum_rT.Mag2() > 0.0 && sum_aT.Mag2() > 0.0)
+        {
+          TVector3 eR = sum_rT.Unit();
+          TVector3 eA = sum_aT.Unit();
+
+          const double phi_radial = std::atan2(eR.Y(), eR.X());
+          const double phi_axis   = std::atan2(eA.Y(), eA.X());
+          phiTilt = TVector2::Phi_mpi_pi(phi_axis - phi_radial); // [rad]
+        }
+        // Store |phi_tilt| so the table and plots show a positive tilt, like incidence
+        phiTilt_mod[module] = std::fabs(phiTilt);
+
+        // Per-module η rigid tilt from 2×2 blocks (same pattern as dissectEtaBlocks)
+        double sum_block_tilt = 0.0;
+        int    nBlocksUsed    = 0;
+        for (int b = 0; b < 4; ++b)
+        {
+          if (n_dtheta_block[b] <= 0) continue;
+          const double blockTilt = sum_dtheta_block[b] /
+                                   static_cast<double>(n_dtheta_block[b]);
+          sum_block_tilt += blockTilt;
+          ++nBlocksUsed;
+        }
+        double etaTilt = 0.0;
+        if (nBlocksUsed > 0)
+        {
+          etaTilt = sum_block_tilt / static_cast<double>(nBlocksUsed);
+        }
+        etaTilt_mod[module] = etaTilt;
+
+        // Module-averaged incidence <a_phi>, <a_eta> and <a_phi cosh(eta)>
+        if (nInc > 0)
+        {
+          aPhi_mod[module]    = sum_aPhi      / static_cast<double>(nInc);
+          aEta_mod[module]    = sum_aEta      / static_cast<double>(nInc);
+          aPhiEff_mod[module] = sum_aPhi_cosh / static_cast<double>(nInc);
+        }
+        else
+        {
+          aPhi_mod[module]    = 0.0;
+          aEta_mod[module]    = 0.0;
+          aPhiEff_mod[module] = 0.0;
+        }
+
+        // Average pseudorapidity of towers in this module (kept for info if needed)
+        double eta_mod = 0.0;
+        if (nEtaSamples > 0)
+        {
+          eta_mod = sum_eta_det / static_cast<double>(nEtaSamples);
+        }
+
+        // Compact φ comparison and percent-difference per module
+        //   inc_φ  = aPhiEff_mod[module]  = <a_phi cosh(eta)> [rad]
+        //   geom_φ = phiTilt_mod[module]  = |φ_tilt|          [rad]
+        //   dPhi[%] = 100 * |inc_φ - geom_φ| / |geom_φ|
+        double dPhiPct = 0.0;
+        {
+          const double inc_phi  = aPhiEff_mod[module];
+          const double geom_phi = phiTilt_mod[module];
+          if (std::fabs(geom_phi) > 0.0)
+          {
+            dPhiPct = 100.0 *
+                      std::fabs(inc_phi - geom_phi) /
+                      std::fabs(geom_phi);
+          }
+        }
+
+        // Compact η comparison and percent-difference per module
+        //   inc_η  = aEta_mod[module]     = <a_eta>     [rad]
+        //   geom_η = etaTilt_mod[module]  = η_tilt      [rad]
+        //   dEta[%] = 100 * |inc_η - geom_η| / |geom_η|
+        double dEtaPct = 0.0;
+        {
+          const double inc_eta  = aEta_mod[module];
+          const double geom_eta = etaTilt_mod[module];
+          if (std::fabs(geom_eta) > 0.0)
+          {
+            dEtaPct = 100.0 *
+                      std::fabs(inc_eta - geom_eta) /
+                      std::fabs(geom_eta);
+          }
+        }
+
+        // Store percent differences for later plotting and final summary table
+        dPhiPct_mod[module] = dPhiPct;
+        dEtaPct_mod[module] = dEtaPct;
+    } // end loop over modules
+
+      // ────────────────────────────────────────────────────────
+      //  Build φ plot: <α_phi>cosh(η) vs |φ_tilt| per module
+      // ────────────────────────────────────────────────────────
+      double yMinPhi =  1.0e9;
+      double yMaxPhi = -1.0e9;
+      for (int m = 0; m < nModulesPerSector; ++m)
+      {
+        yMinPhi = std::min(yMinPhi, aPhiEff_mod[m]);   // <α_φ>cosh(η)
+        yMinPhi = std::min(yMinPhi, phiTilt_mod[m]);   // |φ_tilt|
+        yMaxPhi = std::max(yMaxPhi, aPhiEff_mod[m]);
+        yMaxPhi = std::max(yMaxPhi, phiTilt_mod[m]);
+      }
+
+    if (yMinPhi > yMaxPhi)
+    {
+      yMinPhi = -0.01;
+      yMaxPhi =  0.01;
+    }
+    double spanPhi = yMaxPhi - yMinPhi;
+    if (spanPhi <= 0.0) spanPhi = std::max(1.0e-3, std::fabs(yMaxPhi));
+    double padPhi  = 0.25 * spanPhi;
+    double yLowPhi = yMinPhi - padPhi;
+    double yHighPhi= yMaxPhi + padPhi;
+
+      {
+        TCanvas* cPhi = new TCanvas(
+            Form("cIncTilt_phi_sector%d", sector),
+            Form("Sector %d (%s): <#alpha_{#phi}>cosh#eta vs |#phi_{tilt}|", sector, hemiLabel),
+            1600, 450);
+        cPhi->SetMargin(0.06, 0.02, 0.14, 0.08);
+        cPhi->SetGrid(0, 0);
+
+          // Frame graph for axes (use <α_phi>cosh(η) for the y-scale)
+          TGraph* gFramePhi = new TGraph(nModulesPerSector, x_mod, aPhiEff_mod);
+          gFramePhi->SetTitle(Form("Sector %d (%s);Module index;Angle [rad]",
+                                   sector, hemiLabel));
+          gFramePhi->SetMarkerStyle(20);
+          gFramePhi->SetMarkerSize(0.0);   // hide frame markers
+          gFramePhi->SetMarkerColor(kWhite);
+          gFramePhi->SetLineColor(0);
+          gFramePhi->Draw("AP");
+
+        gFramePhi->GetXaxis()->SetLimits(0.0, static_cast<double>(nModulesPerSector));
+        gFramePhi->GetXaxis()->SetNdivisions(nModulesPerSector, 0, 0);
+        gFramePhi->GetXaxis()->SetTickLength(0.02);
+        gFramePhi->GetXaxis()->CenterTitle(false);
+        gFramePhi->GetXaxis()->SetTitle("Module index");
+        gFramePhi->GetXaxis()->SetTitleSize(0.045);
+        gFramePhi->GetXaxis()->SetTitleOffset(1.0);
+        gFramePhi->GetXaxis()->SetLabelSize(0.0); // hide numeric tick labels
+
+        gFramePhi->GetYaxis()->SetTitle("");
+        gFramePhi->GetYaxis()->SetLabelSize(0.035);
+        gFramePhi->GetYaxis()->SetRangeUser(yLowPhi, yHighPhi);
+
+        // Vertical dashed lines at module edges
+        for (int edge = 0; edge <= nModulesPerSector; ++edge)
+        {
+          const double xEdge = static_cast<double>(edge);
+          TLine* l = new TLine(xEdge, yLowPhi, xEdge, yHighPhi);
+          l->SetLineStyle(2);
+          l->SetLineWidth(1);
+          l->SetLineColor(kGray + 1);
+          l->Draw("SAME");
+        }
+
+          // Incidence (red) and tilt (blue) markers, one point per module each
+          // Red: <α_φ>cosh(η) from incidence
+          TGraph* gIncPhi = new TGraph(nModulesPerSector, x_mod, aPhiEff_mod);
+          gIncPhi->SetName (Form("gIncPhi_sector%d", sector));
+          gIncPhi->SetMarkerStyle(20);
+          gIncPhi->SetMarkerSize(1.1);
+          gIncPhi->SetMarkerColor(kRed);
+          gIncPhi->SetLineColor(kRed);
+          gIncPhi->SetLineWidth(1);
+          gIncPhi->Draw("P SAME");
+
+          // Blue: |φ_tilt| from geometry
+          TGraph* gTiltPhi = new TGraph(nModulesPerSector, x_mod, phiTilt_mod);
+          gTiltPhi->SetName (Form("gTiltPhi_sector%d", sector));
+          gTiltPhi->SetMarkerStyle(24);
+          gTiltPhi->SetMarkerSize(1.1);
+          gTiltPhi->SetMarkerColor(kBlue);
+          gTiltPhi->SetLineColor(kBlue);
+          gTiltPhi->SetLineWidth(1);
+          gTiltPhi->Draw("P SAME");
+
+          // Legend:
+          //  • Sector 0 (N): push further to TOP–LEFT, larger font.
+          //  • Sector 32 (S): move to TOP–RIGHT, larger font.
+          //  • All others   : default position and font size.
+          double legPhiX1 = 0.14;
+          double legPhiY1 = 0.78;
+          double legPhiX2 = 0.40;
+          double legPhiY2 = 0.93;
+          double legPhiTextSize = 0.040;
+
+          if (sector == 0 && isNorth)
+          {
+            // Sector 0 (N) – further left, top LHS
+            legPhiX1      = 0.04;  // more left
+            legPhiY1      = 0.78;
+            legPhiX2      = 0.32;
+            legPhiY2      = 0.93;
+            legPhiTextSize = 0.055;
+          }
+          else if (sector == 32 && !isNorth)
+          {
+            // Sector 32 (S) – top RHS
+            legPhiX1      = 0.68;
+            legPhiY1      = 0.78;
+            legPhiX2      = 0.98;
+            legPhiY2      = 0.93;
+            legPhiTextSize = 0.055;
+          }
+
+          TLegend* legPhi = new TLegend(legPhiX1, legPhiY1, legPhiX2, legPhiY2);
+          legPhi->SetBorderSize(0);
+          legPhi->SetFillStyle(0);
+          legPhi->SetTextSize(legPhiTextSize);
+          legPhi->SetTextAlign(12);
+          legPhi->AddEntry(gIncPhi,  "<#alpha_{#phi}> cosh#eta (inc.)", "P");
+          legPhi->AddEntry(gTiltPhi, "|#phi_{tilt}| (geom)", "P");
+          legPhi->Draw();
+
+        // Dummy module labels 1..24 centred in each bin
+        TLatex latex;
+        latex.SetTextAlign(22);
+        latex.SetTextSize(0.030);
+        const double yLabelPhi = yLowPhi + 0.05 * (yHighPhi - yLowPhi);
+        for (int m = 0; m < nModulesPerSector; ++m)
+        {
+          const double xCenter = static_cast<double>(m) + 0.5;
+          latex.DrawLatex(xCenter, yLabelPhi, Form("%d", m + 1));
+        }
+
+        // Y-axis label in NDC so it never gets clipped
+        TLatex latexY;
+        latexY.SetNDC();
+        latexY.SetTextAngle(90);
+        latexY.SetTextAlign(22);
+        latexY.SetTextSize(0.045);
+        latexY.DrawLatex(0.032, 0.55, "Angle [rad]");
+
+        cPhi->SaveAs(Form("incidence_vs_tiltPNGs/sector_%02d_phi.png", sector));
+        std::cout << "[incidenceVsTilt] Saved PNG: incidence_vs_tiltPNGs/sector_"
+                  << std::setw(2) << std::setfill('0') << sector
+                  << "_phi.png\n" << std::setfill(' ');
+      }
+
+    // ────────────────────────────────────────────────────────
+    //  Build η plot: α_eta vs η_tilt per module
+    // ────────────────────────────────────────────────────────
+    double yMinEta =  1.0e9;
+    double yMaxEta = -1.0e9;
+    for (int m = 0; m < nModulesPerSector; ++m)
+    {
+      yMinEta = std::min(yMinEta, aEta_mod[m]);
+      yMinEta = std::min(yMinEta, etaTilt_mod[m]);
+      yMaxEta = std::max(yMaxEta, aEta_mod[m]);
+      yMaxEta = std::max(yMaxEta, etaTilt_mod[m]);
+    }
+    if (yMinEta > yMaxEta)
+    {
+      yMinEta = -0.01;
+      yMaxEta =  0.01;
+    }
+    double spanEta = yMaxEta - yMinEta;
+    if (spanEta <= 0.0) spanEta = std::max(1.0e-3, std::fabs(yMaxEta));
+    double padEta  = 0.25 * spanEta;
+    double yLowEta = yMinEta - padEta;
+    double yHighEta= yMaxEta + padEta;
+
+    {
+      TCanvas* cEta = new TCanvas(
+          Form("cIncTilt_eta_sector%d", sector),
+          Form("Sector %d (%s): #alpha_{#eta} vs #theta_{tilt}", sector, hemiLabel),
+          1600, 450);
+      cEta->SetMargin(0.06, 0.02, 0.14, 0.08);
+      cEta->SetGrid(0, 0);
+
+      TGraph* gFrameEta = new TGraph(nModulesPerSector, x_mod, aEta_mod);
+      gFrameEta->SetTitle(Form("Sector %d (%s);Module index;Angle [rad]",
+                               sector, hemiLabel));
+      gFrameEta->SetMarkerStyle(20);
+      gFrameEta->SetMarkerSize(0.0);
+      gFrameEta->SetMarkerColor(kWhite);
+      gFrameEta->SetLineColor(0);
+      gFrameEta->Draw("AP");
+
+      gFrameEta->GetXaxis()->SetLimits(0.0, static_cast<double>(nModulesPerSector));
+      gFrameEta->GetXaxis()->SetNdivisions(nModulesPerSector, 0, 0);
+      gFrameEta->GetXaxis()->SetTickLength(0.02);
+      gFrameEta->GetXaxis()->CenterTitle(false);
+      gFrameEta->GetXaxis()->SetTitle("Module index");
+      gFrameEta->GetXaxis()->SetTitleSize(0.045);
+      gFrameEta->GetXaxis()->SetTitleOffset(1.0);
+      gFrameEta->GetXaxis()->SetLabelSize(0.0);
+
+      gFrameEta->GetYaxis()->SetTitle("");
+      gFrameEta->GetYaxis()->SetLabelSize(0.035);
+      gFrameEta->GetYaxis()->SetRangeUser(yLowEta, yHighEta);
+
+      for (int edge = 0; edge <= nModulesPerSector; ++edge)
+      {
+        const double xEdge = static_cast<double>(edge);
+        TLine* l = new TLine(xEdge, yLowEta, xEdge, yHighEta);
+        l->SetLineStyle(2);
+        l->SetLineWidth(1);
+        l->SetLineColor(kGray + 1);
+        l->Draw("SAME");
+      }
+
+      TGraph* gIncEta = new TGraph(nModulesPerSector, x_mod, aEta_mod);
+      gIncEta->SetName (Form("gIncEta_sector%d", sector));
+      gIncEta->SetMarkerStyle(20);
+      gIncEta->SetMarkerSize(1.1);
+      gIncEta->SetMarkerColor(kRed);
+      gIncEta->SetLineColor(kRed);
+      gIncEta->SetLineWidth(1);
+      gIncEta->Draw("P SAME");
+
+      TGraph* gTiltEta = new TGraph(nModulesPerSector, x_mod, etaTilt_mod);
+      gTiltEta->SetName (Form("gTiltEta_sector%d", sector));
+      gTiltEta->SetMarkerStyle(24);
+      gTiltEta->SetMarkerSize(1.1);
+      gTiltEta->SetMarkerColor(kBlue);
+      gTiltEta->SetLineColor(kBlue);
+      gTiltEta->SetLineWidth(1);
+      gTiltEta->Draw("P SAME");
+
+        // Legend: for sector 0 (N) move to bottom–right and enlarge text,
+        // for all other sectors keep the original position/size.
+        double legX1 = 0.14;
+        double legY1 = 0.76;
+        double legX2 = 0.40;
+        double legY2 = 0.90;
+        double legTextSize = 0.055;
+
+        if (sector == 0 && isNorth)
+        {
+          // Bottom–right corner (RHS) for Sector 0 (N)
+          legX1 = 0.65;  // left
+          legY1 = 0.22;  // bottom
+          legX2 = 0.95;  // right
+          legY2 = 0.35;  // top
+          legTextSize = 0.055;  // slightly larger text
+        }
+
+        TLegend* legEta = new TLegend(legX1, legY1, legX2, legY2);
+        legEta->SetBorderSize(0);
+        legEta->SetFillStyle(0);
+        legEta->SetTextSize(legTextSize);
+        legEta->SetTextAlign(12);
+        legEta->AddEntry(gIncEta,  "#alpha_{#eta} (incidence)", "P");
+        legEta->AddEntry(gTiltEta, "#theta_{tilt} (geom, per module)", "P");
+        legEta->Draw();
+
+      TLatex latex;
+      latex.SetTextAlign(22);
+      latex.SetTextSize(0.030);
+      const double yLabelEta = yLowEta + 0.05 * (yHighEta - yLowEta);
+      for (int m = 0; m < nModulesPerSector; ++m)
+      {
+        const double xCenter = static_cast<double>(m) + 0.5;
+        latex.DrawLatex(xCenter, yLabelEta, Form("%d", m + 1));
+      }
+
+      TLatex latexY;
+      latexY.SetNDC();
+      latexY.SetTextAngle(90);
+      latexY.SetTextAlign(22);
+      latexY.SetTextSize(0.045);
+      latexY.DrawLatex(0.032, 0.55, "Angle [rad]");
+
+        cEta->SaveAs(Form("incidence_vs_tiltPNGs/sector_%02d_eta.png", sector));
+        std::cout << "[incidenceVsTilt] Saved PNG: incidence_vs_tiltPNGs/sector_"
+                  << std::setw(2) << std::setfill('0') << sector
+                  << "_eta.png\n" << std::setfill(' ');
+      }
+
+      // ────────────────────────────────────────────────────────
+      //  Build combined φ/η percent-difference plot per module
+      // ────────────────────────────────────────────────────────
+      {
+        double yMinDiff =  1.0e9;
+        double yMaxDiff = -1.0e9;
+        for (int m = 0; m < nModulesPerSector; ++m)
+        {
+          yMinDiff = std::min(yMinDiff, dPhiPct_mod[m]);
+          yMinDiff = std::min(yMinDiff, dEtaPct_mod[m]);
+          yMaxDiff = std::max(yMaxDiff, dPhiPct_mod[m]);
+          yMaxDiff = std::max(yMaxDiff, dEtaPct_mod[m]);
+        }
+        if (yMinDiff > yMaxDiff)
+        {
+          yMinDiff = 0.0;
+          yMaxDiff = 1.0;
+        }
+        double spanDiff = yMaxDiff - yMinDiff;
+        if (spanDiff <= 0.0) spanDiff = std::max(1.0, std::fabs(yMaxDiff));
+        double padDiff  = 0.25 * spanDiff;
+        double yLowDiff = yMinDiff - padDiff;
+        double yHighDiff= yMaxDiff + padDiff;
+
+        TCanvas* cDiff = new TCanvas(
+            Form("cIncTilt_diff_sector%d", sector),
+            Form("Sector %d (%s): incidence vs geom mismatch", sector, hemiLabel),
+            1600, 450);
+        cDiff->SetMargin(0.06, 0.02, 0.14, 0.08);
+        cDiff->SetGrid(0, 0);
+
+        // Frame graph for axes, using φ percent difference for the scale
+        TGraph* gFrameDiff = new TGraph(nModulesPerSector, x_mod, dPhiPct_mod);
+        gFrameDiff->SetTitle(
+            Form("Sector %d (%s);Module index;100 #times |inc - geom| / |geom|  [%%] for #phi, #eta",
+                 sector, hemiLabel));
+        gFrameDiff->SetMarkerStyle(20);
+        gFrameDiff->SetMarkerSize(0.0);
+        gFrameDiff->SetMarkerColor(kWhite);
+        gFrameDiff->SetLineColor(0);
+        gFrameDiff->Draw("AP");
+
+        gFrameDiff->GetXaxis()->SetLimits(0.0, static_cast<double>(nModulesPerSector));
+        gFrameDiff->GetXaxis()->SetNdivisions(nModulesPerSector, 0, 0);
+        gFrameDiff->GetXaxis()->SetTickLength(0.02);
+        gFrameDiff->GetXaxis()->CenterTitle(false);
+        gFrameDiff->GetXaxis()->SetTitle("Module index");
+        gFrameDiff->GetXaxis()->SetTitleSize(0.045);
+        gFrameDiff->GetXaxis()->SetTitleOffset(1.0);
+        gFrameDiff->GetXaxis()->SetLabelSize(0.0);
+
+        gFrameDiff->GetYaxis()->SetTitle("");
+        gFrameDiff->GetYaxis()->SetLabelSize(0.035);
+        gFrameDiff->GetYaxis()->SetRangeUser(yLowDiff, yHighDiff);
+
+        // Vertical dashed lines at module edges
+        for (int edge = 0; edge <= nModulesPerSector; ++edge)
+        {
+          const double xEdge = static_cast<double>(edge);
+          TLine* l = new TLine(xEdge, yLowDiff, xEdge, yHighDiff);
+          l->SetLineStyle(2);
+          l->SetLineWidth(1);
+          l->SetLineColor(kGray + 1);
+          l->Draw("SAME");
+        }
+
+        // Red: φ absolute percent difference, shifted slightly left
+        TGraph* gPhiDiff = new TGraph(nModulesPerSector, x_mod_phi, dPhiPct_mod);
+        gPhiDiff->SetName(Form("gPhiDiff_sector%d", sector));
+        gPhiDiff->SetMarkerStyle(20);
+        gPhiDiff->SetMarkerSize(1.1);
+        gPhiDiff->SetMarkerColor(kRed);
+        gPhiDiff->SetLineColor(kRed);
+        gPhiDiff->SetLineWidth(1);
+        gPhiDiff->Draw("P SAME");
+
+        // Blue: η absolute percent difference, shifted slightly right
+        TGraph* gEtaDiff = new TGraph(nModulesPerSector, x_mod_eta, dEtaPct_mod);
+        gEtaDiff->SetName(Form("gEtaDiff_sector%d", sector));
+        gEtaDiff->SetMarkerStyle(24);
+        gEtaDiff->SetMarkerSize(1.1);
+        gEtaDiff->SetMarkerColor(kBlue);
+        gEtaDiff->SetLineColor(kBlue);
+        gEtaDiff->SetLineWidth(1);
+        gEtaDiff->Draw("P SAME");
+
+        TLegend* legDiff = new TLegend(0.14, 0.76, 0.68, 0.90);
+        legDiff->SetBorderSize(0);
+        legDiff->SetFillStyle(0);
+        legDiff->SetTextSize(0.040);
+        legDiff->SetTextAlign(12);
+        legDiff->AddEntry(
+            gPhiDiff,
+            "#phi: 100|<#alpha_{#phi}cosh#eta>-#phi_{tilt}|/|#phi_{tilt}|",
+            "P");
+        legDiff->AddEntry(
+            gEtaDiff,
+            "#eta: 100|#alpha_{#eta}-#theta_{tilt}|/|#theta_{tilt}|",
+            "P");
+        legDiff->Draw();
+
+        // Dummy module labels 1..24 centred in each bin
+        TLatex latexDiff;
+        latexDiff.SetTextAlign(22);
+        latexDiff.SetTextSize(0.030);
+        const double yLabelDiff = yLowDiff + 0.05 * (yHighDiff - yLowDiff);
+        for (int m = 0; m < nModulesPerSector; ++m)
+        {
+          const double xCenter = static_cast<double>(m) + 0.5;
+          latexDiff.DrawLatex(xCenter, yLabelDiff, Form("%d", m + 1));
+        }
+
+        // Y-axis label in NDC so it never gets clipped
+        TLatex latexYdiff;
+        latexYdiff.SetNDC();
+        latexYdiff.SetTextAngle(90);
+        latexYdiff.SetTextAlign(22);
+        latexYdiff.SetTextSize(0.045);
+        latexYdiff.DrawLatex(
+            0.032, 0.55,
+            "100 #times |inc - geom| / |geom|  [%%] for #phi, #eta");
+
+        cDiff->SaveAs(Form("incidence_vs_tiltPNGs/sector_%02d_diff.png", sector));
+        std::cout << "[incidenceVsTilt] Saved PNG: incidence_vs_tiltPNGs/sector_"
+                  << std::setw(2) << std::setfill('0') << sector
+                  << "_diff.png\n" << std::setfill(' ');
+      }
+
+      // ────────────────────────────────────────────────────────
+      //  Compact, clean summary table (printed LAST for this sector)
+      // ────────────────────────────────────────────────────────
+      {
+        // Save current stream format so we can restore it afterwards
+        std::ios::fmtflags oldFlags = std::cout.flags();
+        std::streamsize    oldPrec  = std::cout.precision();
+
+        std::cout << std::fixed;
+        std::cout << std::setprecision(6);
+
+        // Column widths (shared by header and data rows so everything lines up)
+        const int wMod          = 3;
+        const int wIeta         = 2;
+        const int wAlphaPhi     = 10;
+        const int wAlphaPhiCosh = 21;
+        const int wPhiTilt      = 11;
+        const int wAlphaEta     = 12;
+        const int wEtaTilt      = 12;
+        const int wDPhiPct      = 10;
+        const int wDEtaPct      = 9;
+
+        // ANSI escape codes for bold header
+        const char* bold  = "\033[1m";
+        const char* reset = "\033[0m";
+
+        std::cout << "\n[incidenceVsTilt] Compact module summary for sector "
+                  << sector << " (" << hemiLabel << ")\n";
+
+        // Header line (bold, with the same field widths as the data rows)
+        std::cout << bold
+                  << "  "
+                  << std::setw(wMod) << "mod"
+                  << "   ["
+                  << std::setw(wIeta) << "i0" << ","
+                  << std::setw(wIeta) << "i1" << "]   "
+                  << std::setw(wAlphaPhi)     << "alpha_phi"
+                  << std::setw(wAlphaPhiCosh) << "alpha_phi*cosh(eta)"
+                  << std::setw(wPhiTilt)      << "phi_tilt"
+                  << std::setw(wAlphaEta)     << "alpha_eta"
+                  << std::setw(wEtaTilt)      << "eta_tilt"
+                  << std::setw(wDPhiPct)      << "dphi[%]"
+                  << std::setw(wDEtaPct)      << "deta[%]"
+                  << reset << "\n";
+
+        std::cout
+          << "  ---------------------------------------------------------------------------------------------\n";
+
+        for (int module = 0; module < nModulesPerSector; ++module)
+        {
+          const int ietaLocal0 = 2 * module;
+          const int ietaLocal1 = ietaLocal0 + 1;
+          const int ieta0      = isNorth ? (etaSplitIndex + ietaLocal0) : ietaLocal0;
+          const int ieta1      = isNorth ? (etaSplitIndex + ietaLocal1) : ietaLocal1;
+
+          std::cout << "  "
+                    << std::setw(wMod)  << module
+                    << "   ["
+                    << std::setw(wIeta) << ieta0 << ","
+                    << std::setw(wIeta) << ieta1 << "]   "
+                    << std::setw(wAlphaPhi)     << aPhi_mod[module]
+                    << std::setw(wAlphaPhiCosh) << aPhiEff_mod[module]
+                    << std::setw(wPhiTilt)      << phiTilt_mod[module]
+                    << std::setw(wAlphaEta)     << aEta_mod[module]
+                    << std::setw(wEtaTilt)      << etaTilt_mod[module];
+
+          // Percent columns with slightly reduced precision for readability
+          std::cout << std::setw(wDPhiPct) << std::setprecision(3) << dPhiPct_mod[module]
+                    << std::setw(wDEtaPct) << dEtaPct_mod[module]
+                    << "\n";
+
+          // Restore 6-digit precision for next row angles
+          std::cout << std::setprecision(6);
+        }
+
+        std::cout << "\n";
+
+        // Restore previous stream format
+        std::cout.flags(oldFlags);
+        std::cout.precision(oldPrec);
+      }
+
+    }; // end process_sector
+
+  // Sector 0 (North, phiIdx=0)
+  process_sector(0);
+
+  // Sector 32 (South, phiIdx=0)
+  process_sector(32);
+}
+
+
+
+
+
+
 void Fun4all_ParticleGunTest(
     // geometry / conditions
     int         runNumber           = 24,          // TIMESTAMP / RUNNUMBER for CDB
     // scan controls
-    const std::string& scanMode     = "ring",      // "ring" | "philine" | "etaZvGrid" | "none"
+    const std::string& scanMode     = "ring",      // "ring" | "phiScanFromCenter" | "philine"
+                                                 // | "etaZvGrid" | "dissectPhiSectors"
+                                                 // | "dissectEtaBlocks" | "moduleIncVsTilt"
+                                                 // | "none"
     int         ietaRing            = 48,          // used by scanMode=="ring" and "etaZvGrid"
     double      phiTarget           = 0.0,         // used by scanMode=="philine" (radians)
     // incidence controls
@@ -315,64 +1136,109 @@ void Fun4all_ParticleGunTest(
               cosphi, coseta, aphis, aetas);
 
 
-          // Per-tower [SCAN] output only when debug is enabled
-          if (incidenceDbgLevel > 0)
+      // Per-tower [SCAN] output only when debug is enabled
+      if (incidenceDbgLevel > 0)
+      {
+        // ANSI helpers (local to this lambda)
+        const char* ANSI_BOLD   = "\033[1m";
+        const char* ANSI_GREEN  = "\033[32m";
+        const char* ANSI_YELLOW = "\033[33m";
+        const char* ANSI_RED    = "\033[31m";
+        const char* ANSI_RESET  = "\033[0m";
+
+        // Mechanical tilts from RawTowerGeomv5 (rotations + axis vs radial)
+        double rotX = 0.0, rotY = 0.0, rotZ = 0.0;
+        double phiTilt_rad = 0.0;  // intrinsic bar yaw  (axis vs radial) in φ
+        double etaTilt_rad = 0.0;  // intrinsic bar pitch (axis vs radial) in η
+
+        if (auto* g5 = dynamic_cast<RawTowerGeomv5*>(tg))
+        {
+          rotX = g5->get_rotx();
+          rotY = g5->get_roty();
+          rotZ = g5->get_rotz();
+
+          // Tower axis from inner → outer face (full 3D).
+          TVector3 Cint(g5->get_center_int_x(),
+                        g5->get_center_int_y(),
+                        g5->get_center_int_z());
+          TVector3 Cext(g5->get_center_ext_x(),
+                        g5->get_center_ext_y(),
+                        g5->get_center_ext_z());
+          TVector3 axis = Cext - Cint;
+
+          // Radial direction in transverse plane (IP → inner-face center).
+          TVector3 rT(Cint.X(), Cint.Y(), 0.0);
+          TVector3 aT(axis.X(), axis.Y(), 0.0);
+
+          if (rT.Mag2() > 0.0 && aT.Mag2() > 0.0 && axis.Mag2() > 0.0)
           {
-            // ANSI helpers (local to this lambda)
-            const char* ANSI_BOLD   = "\033[1m";
-            const char* ANSI_GREEN  = "\033[32m";
-            const char* ANSI_YELLOW = "\033[33m";
-            const char* ANSI_RED    = "\033[31m";
-            const char* ANSI_RESET  = "\033[0m";
+            // φ tilt: yaw of bar axis vs radial in the transverse plane
+            TVector3 e_rT = rT.Unit();
+            TVector3 e_aT = aT.Unit();
+            const double phi_radial = std::atan2(e_rT.Y(), e_rT.X());
+            const double phi_axis   = std::atan2(e_aT.Y(), e_aT.X());
+            phiTilt_rad = TVector2::Phi_mpi_pi(phi_axis - phi_radial);
 
-            // Mechanical tilts (if detailed geometry is v5)
-            double rotX = 0.0, rotY = 0.0, rotZ = 0.0;
-            if (auto* g5 = dynamic_cast<RawTowerGeomv5*>(tg))
-            {
-              rotX = g5->get_rotx();
-              rotY = g5->get_roty();
-              rotZ = g5->get_rotz();
-            }
-
-            const double alpha_mag = std::sqrt(aphis*aphis + aetas*aetas);
-            const double tol_alpha = 5.0e-3; // same ~0.29° scale used in MECH QA
-
-            const char* statusColor = ok ? ANSI_GREEN : ANSI_RED;
-            const char* statusText  = ok ? "OK"       : "FAIL";
-
-            const char* tiltColor = (alpha_mag < tol_alpha)
-                                    ? ANSI_GREEN
-                                    : (alpha_mag < 3.0*tol_alpha ? ANSI_YELLOW : ANSI_RED);
-            const char* tiltTag   = (alpha_mag < tol_alpha)
-                                    ? "within_tol"
-                                    : (alpha_mag < 3.0*tol_alpha ? "moderate_tilt" : "large_tilt");
-
-            std::cout << "\n"
-                      << ANSI_BOLD << "[SCAN] tower (ieta=" << ieta
-                      << ", iphi=" << iphi << ") "
-                      << statusColor << statusText << ANSI_RESET << "\n";
-
-            std::cout << "  GEOM:  C=(" << Cx << ", " << Cy << ", " << Cz << ")"
-                      << "  R_cyl=" << Rc
-                      << "  phi_center=" << phiC
-                      << "  eta_det_IP=" << eta_det_IP
-                      << "  eta_SD=" << eta_SD
-                      << "  z_vtx=" << z_vtx << "\n";
-
-            std::cout << "  ROT :  rotX=" << rotX*1.0e3 << " mrad"
-                      << "  rotY=" << rotY*1.0e3 << " mrad"
-                      << "  rotZ=" << rotZ*1.0e3 << " mrad\n";
-
-            std::cout << "  INC :  a_phi=" << aphis
-                      << "  a_eta=" << aetas
-                      << "  |a|=" << alpha_mag
-                      << "  cos_phi=" << cosphi
-                      << "  cos_eta=" << coseta << "\n";
-
-            std::cout << "  TAGS:  " << tiltColor << tiltTag << ANSI_RESET
-                        << "\n";
-
+            // η tilt: difference of polar θ angles in the r–z plane
+            TVector3 e_r = Cint.Unit();
+            TVector3 e_a = axis.Unit();
+            const double theta_r = e_r.Theta();  // IP→center
+            const double theta_a = e_a.Theta();  // bar axis
+            etaTilt_rad = theta_a - theta_r;
           }
+        }
+
+        const double alpha_mag = std::sqrt(aphis*aphis + aetas*aetas);
+        const double tol_alpha = 5.0e-3; // same ~0.29° scale used in MECH QA
+
+        const char* statusColor = ok ? ANSI_GREEN : ANSI_RED;
+        const char* statusText  = ok ? "OK"       : "FAIL";
+
+        const char* tiltColor = (alpha_mag < tol_alpha)
+                                ? ANSI_GREEN
+                                : (alpha_mag < 3.0*tol_alpha ? ANSI_YELLOW : ANSI_RED);
+        const char* tiltTag   = (alpha_mag < tol_alpha)
+                                ? "within_tol"
+                                : (alpha_mag < 3.0*tol_alpha ? "moderate_tilt" : "large_tilt");
+
+        std::cout << "\n"
+                  << ANSI_BOLD << "[SCAN] tower (ieta=" << ieta
+                  << ", iphi=" << iphi << ") "
+                  << statusColor << statusText << ANSI_RESET << "\n";
+
+        std::cout << "  GEOM:  C=(" << Cx << ", " << Cy << ", " << Cz << ")"
+                  << "  R_cyl=" << Rc
+                  << "  phi_center=" << phiC
+                  << "  eta_det_IP=" << eta_det_IP
+                  << "  eta_SD=" << eta_SD
+                  << "  z_vtx=" << z_vtx << "\n";
+
+        std::cout << "  ROT :  rotX=" << rotX*1.0e3 << " mrad"
+                  << "  rotY=" << rotY*1.0e3 << " mrad"
+                  << "  rotZ=" << rotZ*1.0e3 << " mrad\n";
+
+        // Intrinsic tilts from detailed geometry (axis vs radial)
+        std::cout << "  GEOM-TILT : dphi_axis-radial=" << phiTilt_rad
+                  << " rad  ("
+                  << phiTilt_rad*1.0e3 << " mrad)"
+                  << "  dtheta_axis-radial=" << etaTilt_rad
+                  << " rad  (" << etaTilt_rad*1.0e3 << " mrad)\n";
+
+        // Incidence angles from mechanical frame
+        std::cout << "  INC  :  a_phi=" << aphis
+                  << "  a_eta=" << aetas
+                  << "  |a|=" << alpha_mag
+                  << "  cos_phi=" << cosphi
+                  << "  cos_eta=" << coseta << "\n";
+
+        // Direct comparison (this is the special z=0, center-hit case)
+        std::cout << "  CHECK:  a_phi - dphi = " << (aphis - phiTilt_rad)
+                  << " rad   "
+                  << "a_eta - dtheta = " << (aetas - etaTilt_rad)
+                  << " rad\n";
+
+        std::cout << "  TAGS :  " << tiltColor << tiltTag << ANSI_RESET << "\n";
+      }
 
       };
 
@@ -2873,12 +3739,38 @@ void Fun4all_ParticleGunTest(
               }
            }
         }
+      else if (scanMode == "moduleIncVsTilt")
+      {
+        std::cout << "[MODE] moduleIncVsTilt - per-module incidence vs tilt "
+                     "for sector 0 (N) and sector 32 (S), z_vtx = 0, IP→centre rays.\n";
+
+        // Special-case configuration: vertex at IP, so the mechanical ray
+        // used inside BEmcRecCEMC is exactly the radial direction IP→tower
+        // centre. In this configuration we expect:
+        //   alpha_phi  ≈  phi_tilt
+        //   alpha_eta  ≈  eta_tilt
+        // for every tower and for the module-averaged values.
+        bemc->SetVertexZ(0.0f);
+
+        // This mode makes many CalculateMechIncidence calls, so mark the flag
+        // so the MECH_QA summary is printed at the end.
+        incidenceEverCalled = true;
+
+        // Build 4 PNGs:
+        //   incidence_vs_tiltPNGs/sector_00_phi.png
+        //   incidence_vs_tiltPNGs/sector_00_eta.png
+        //   incidence_vs_tiltPNGs/sector_32_phi.png
+        //   incidence_vs_tiltPNGs/sector_32_eta.png
+        MakeModuleIncidenceVsTiltPlots(geo, bemc, EGeV);
+      }
       else
       {
         std::cout << "[INFO] scanMode='" << scanMode
                   << "' → nothing to do (use 'ring', 'phiScanFromCenter', "
-                  << "'philine', 'etaZvGrid', 'dissectPhiSectors', or 'dissectEtaBlocks').\n";
-    }
+                  << "'philine', 'etaZvGrid', 'dissectPhiSectors', "
+                  << "'dissectEtaBlocks', or 'moduleIncVsTilt').\n";
+      }
+
     // After scan: print mechanical-incidence QA summary (if any incidence calls
     // were made).  The tolerances (in radians) are the acceptable maxima for
     // |αφ_mech| and |αη_mech| over the whole scan.

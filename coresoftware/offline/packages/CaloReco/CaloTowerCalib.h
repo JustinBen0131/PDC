@@ -85,7 +85,7 @@ class CaloTowerCalib : public SubsysReco
 
   void set_doCalibOnly(bool docalib = true)
   {
-    if (docalib)
+    if (docalib) 
     {
       m_dotimecalib = false;
       m_doZScrosscalib = false;

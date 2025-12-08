@@ -233,6 +233,20 @@ unsigned int TowerInfoDefs::getCaloTowerEtaBin(const unsigned int key)
   return etabin;
 }
 
+// convert from emcal tower index to (sector, interface board)
+std::pair<int, int> TowerInfoDefs::getEMCalSectorIB(const unsigned int towerIndex)
+{
+  constexpr int channels_per_sector = 384;
+  constexpr int channels_per_ib = 64;
+
+  int k = towerIndex / channels_per_sector;
+
+  int sector = (k % 2) ? (k - 1) / 2 : (k / 2) + 32;
+  int ib = (towerIndex % channels_per_sector) / channels_per_ib;
+
+  return std::make_pair(sector, ib);
+}
+
 unsigned int TowerInfoDefs::encode_epd(const unsigned int towerIndex)  // convert from tower index to key
 {
   constexpr unsigned int channels_per_sector = 31;
@@ -305,18 +319,18 @@ unsigned int TowerInfoDefs::get_epd_rbin(unsigned int key)
 // convert from epd key to phi bin
 unsigned int TowerInfoDefs::get_epd_phibin(unsigned int key)
 {
-  int flip[24] = {1,-1,1,-1,1,-1,1,-1,1,-1,1,-1,1,-1,1,-1,1,-1,1,-1,1,-1,1,-1};
+  int flip[24] = {1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1};
   unsigned int arm = get_epd_arm(key);
   unsigned int rbin = get_epd_rbin(key);
   unsigned int sector = get_epd_sector(key);
   unsigned int channel = key - (sector << 5U) - (arm << 9U);
   unsigned int phibin = epd_phimap[channel] + 2 * sector;
-    
+
   if (arm == 1)
   {
     phibin = phibin + flip[phibin];
   }
-    
+
   if (rbin == 0)
   {
     phibin = sector;

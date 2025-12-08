@@ -103,7 +103,7 @@ int CaloTowerStatus::InitRun(PHCompositeNode *topNode)
       std::cout << "CaloTowerStatus::InitRun: Using default hotBadChi2" << calibdir << std::endl;
       m_cdbttree_chi2 = new CDBTTree(calibdir);
     }
-    else
+    else 
     {
       m_doHotChi2 = false;
       if (Verbosity() > 0)
@@ -180,7 +180,7 @@ int CaloTowerStatus::InitRun(PHCompositeNode *topNode)
       {
         std::cout << "CaloTowerStatus::InitRun hot map info, " << m_calibName_hotMap << " not found, not doing isHot" << std::endl;
       }
-    }
+    }  
   }
 
   if (Verbosity() > 0)

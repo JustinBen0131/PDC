@@ -28,6 +28,15 @@ ClockDiffCheck::ClockDiffCheck(const std::string &name)
 {
 }
 
+ClockDiffCheck::~ClockDiffCheck()
+{
+  for (auto &[packetid, tup] : m_PacketStuffMap)
+  {
+    delete std::get<3>(tup);
+    std::get<3>(tup) = nullptr;
+  }
+}
+
 //____________________________________________________________________________..
 int ClockDiffCheck::InitRun(PHCompositeNode *topNode)
 {
@@ -68,6 +77,7 @@ int ClockDiffCheck::InitRun(PHCompositeNode *topNode)
 //____________________________________________________________________________..
 int ClockDiffCheck::process_event(PHCompositeNode *topNode)
 {
+  count++;
   //  PHNodeIterator
   PHNodeIterator topnodeiter(topNode);
   for (auto &iter : m_PacketStuffMap)
@@ -102,13 +112,26 @@ int ClockDiffCheck::process_event(PHCompositeNode *topNode)
 
   for (const auto &iter : m_PacketNodeNames)
   {
+    if (iter == "14001") { continue;
+}
     CaloPacket *calopacket = findNode::getClass<CaloPacket>(topNode, iter);
     if (!calopacket)
     {
-      //      std::cout << "ClockDiffCheck: " << "could not find " << iter << " node" << std::endl;
+      std::cout << "ClockDiffCheck: " << "could not find " << iter << " node" << std::endl;
     }
     else
     {
+      if (calopacket->getStatus() != OfflinePacket::PACKET_OK)
+      {
+        static int npacketprnt = 0;
+        if ( npacketprnt < 100)
+        {
+          std::cout << "packet " << calopacket->getIdentifier() << " status marked as " << calopacket->getStatus() << ". Skipping diff check " << count << std::endl;
+          npacketprnt++;
+        }
+        std::get<1>(m_PacketStuffMap[calopacket->getIdentifier()]) = std::numeric_limits<uint64_t>::max();
+        continue;
+      }
       FillCaloClockDiffSngl(calopacket);
     }
   }
@@ -294,12 +317,14 @@ int ClockDiffCheck::process_event(PHCompositeNode *topNode)
       }
     }
     bool FemClockOk = CheckFemEventNr(calopacket);
-    if (delBadPkts && !FemClockOk)
+    if (!FemClockOk)
     {
-      if (Verbosity() > 1)
+      static int icnt = 0;
+      if (icnt < 100)
       {
-        std::cout << "ClockDiffCheck: " << "resetting packet " << calopacket->getIdentifier()
-                  << " with fem event and clock mismatch" << std::endl;
+        std::cout << "FemClockOk failed. Resetting packet " << calopacket->getIdentifier()
+          << " with fem event and clock mismatch" << std::endl;
+        icnt++;
       }
       calopacket->Reset();
     }
@@ -320,7 +345,7 @@ void ClockDiffCheck::FillCaloClockDiff(CaloPacketContainer *pktcont)
 void ClockDiffCheck::FillCaloClockDiffSngl(CaloPacket *calopkt)
 {
   unsigned int packetid = calopkt->getIdentifier();
-  if (m_PacketStuffMap.find(packetid) == m_PacketStuffMap.end())
+  if (!m_PacketStuffMap.contains(packetid))
   {
     std::string hname = "clkdiff" + std::to_string(packetid);
     TH1 *h1 = new TH1F(hname.c_str(), hname.c_str(), 100, 0, 99);
@@ -330,9 +355,9 @@ void ClockDiffCheck::FillCaloClockDiffSngl(CaloPacket *calopkt)
       std::cout << "ClockDiffCheck: " << "Add tuple for " << packetid << std::endl;
       auto &pktiter = m_PacketStuffMap[packetid];
       std::cout << PHWHERE << "packet init " << packetid << std::hex
-                << ", clk: " << std::get<1>(pktiter)
-                << ", clkdiff: " << std::get<2>(pktiter) << std::dec << ", valid: " << std::get<4>(pktiter)
-                << std::endl;
+        << ", clk: " << std::get<1>(pktiter)
+        << ", clkdiff: " << std::get<2>(pktiter) << std::dec << ", valid: " << std::get<4>(pktiter)
+        << std::endl;
     }
   }
   else
@@ -353,6 +378,7 @@ void ClockDiffCheck::FillCaloClockDiffSngl(CaloPacket *calopkt)
       std::get<2>(pktiter) = clkdiff;
       std::get<4>(pktiter) = true;
     }
+    
     if (Verbosity() > 2)
     {
       std::cout << "ClockDiffCheck: " << "packet " << packetid << ", clk: " << std::hex << clk
@@ -367,7 +393,7 @@ void ClockDiffCheck::FillPacketDiff(OfflinePacket *pkt)
 {
   unsigned int packetid = pkt->getIdentifier();
   uint64_t clk = (pkt->getBCO() & 0xFFFFFFFF);
-  if (m_PacketStuffMap.find(packetid) == m_PacketStuffMap.end())
+  if (!m_PacketStuffMap.contains(packetid))
   {
     std::string hname = "clkdiff" + std::to_string(packetid);
     TH1 *h1 = new TH1F(hname.c_str(), hname.c_str(), 100, 0, 99);

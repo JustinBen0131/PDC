@@ -54,7 +54,7 @@ namespace g4evalfn
     for (auto& reco : *m_SvtxTrackMap)
     {
       auto trkid = reco.first;
-      if (ids_matched.count(trkid) == 0)
+      if (!ids_matched.contains(trkid))
       {
         ids_unmatched.insert(trkid);
       }
@@ -71,7 +71,7 @@ namespace g4evalfn
 
   TrkrClusLoc clusloc_PHG4(TrkrClusterIsMatcher* ismatcher, TrkrDefs::cluskey key)
   {
-    auto cluster = ismatcher->m_TruthClusters->findCluster(key);
+    auto *cluster = ismatcher->m_TruthClusters->findCluster(key);
     Eigen::Vector3d gloc = ismatcher->m_ActsGeometry->getGlobalPosition(key, cluster);
     return {TrkrDefs::getLayer(key), gloc,
             cluster->getPosition(0), cluster->getPhiSize(), cluster->getPosition(1), cluster->getZSize(), key};
@@ -79,7 +79,7 @@ namespace g4evalfn
 
   TrkrClusLoc clusloc_SVTX(TrkrClusterIsMatcher* ismatcher, TrkrDefs::cluskey key)
   {
-    auto cluster = ismatcher->m_RecoClusters->findCluster(key);
+    auto *cluster = ismatcher->m_RecoClusters->findCluster(key);
     Eigen::Vector3d gloc = ismatcher->m_ActsGeometry->getGlobalPosition(key, cluster);
     return {TrkrDefs::getLayer(key), gloc,
             cluster->getPosition(0), cluster->getPhiSize(), cluster->getPosition(1), cluster->getZSize(), key};
@@ -89,8 +89,8 @@ namespace g4evalfn
   {
     int layer = TrkrDefs::getLayer(key_A);
     auto det_0123 = trklayer_det(layer);
-    auto clus_T = ismatcher->m_TruthClusters->findCluster(key_A);
-    auto clus_R = ismatcher->m_RecoClusters->findCluster(key_B);
+    auto *clus_T = ismatcher->m_TruthClusters->findCluster(key_A);
+    auto *clus_R = ismatcher->m_RecoClusters->findCluster(key_B);
     auto dphi = abs_dphi(clus_T->getPosition(0), clus_R->getPosition(0));
 
     float stat = 0.;
@@ -106,7 +106,7 @@ namespace g4evalfn
       {
         stat += dphi / (ismatcher->tol_pitch_phi[layer] * std::max(clus_T->getPhiSize(), clus_R->getPhiSize()));
       }
-      const float delta_z = std::fabs(clus_T->getPosition(1) - clus_R->getPosition(1));
+      const float delta_z = std::abs(clus_T->getPosition(1) - clus_R->getPosition(1));
       if (ismatcher->single_pixel_z_MVTX)
       {
         stat += delta_z / ismatcher->tol_pitch_z_MVTX;
@@ -139,7 +139,7 @@ namespace g4evalfn
       {
         stat += dphi / (ismatcher->tol_pitch_phi[layer] * std::max(clus_T->getPhiSize(), clus_R->getPhiSize()));
       }
-      const float delta_t = std::fabs(clus_T->getPosition(1) - clus_R->getPosition(1));
+      const float delta_t = std::abs(clus_T->getPosition(1) - clus_R->getPosition(1));
       if (ismatcher->single_bin_t_TPC)
       {
         stat += delta_t / ismatcher->tol_step_t_TPC;

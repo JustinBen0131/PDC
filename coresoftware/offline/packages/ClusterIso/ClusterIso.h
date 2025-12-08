@@ -33,16 +33,20 @@ class ClusterIso : public SubsysReco
   int process_event(PHCompositeNode*) override;
   int End(PHCompositeNode*) override;
 
-  void seteTCut(float x);
-  void setConeSize(int x);
-  /*const*/ float geteTCut();
+  void seteTCut(float eTCut);
+  void setConeSize(int coneSize);
+  float geteTCut() const;
   //! returns coneSize*10 as an int
-  /*const*/ int getConeSize();
-  /*const*/ CLHEP::Hep3Vector getVertex();
+  int getConeSize() const;
+  CLHEP::Hep3Vector getVertex() const;
   void set_use_towerinfo(bool usetowerinfo)
   {
     m_use_towerinfo = usetowerinfo;
   };
+
+  // Minimum tower energy (GeV) required for a tower to contribute to isolation sum
+  void setMinTowerEnergy(float emin) { m_minTowerEnergy = emin; }
+  float getMinTowerEnergy() const { return m_minTowerEnergy; }
 
   void set_cluster_node_name(const std::string& name)
   {
@@ -59,23 +63,9 @@ class ClusterIso : public SubsysReco
   float m_vz;          ///< Correct vertex z coordinate
   bool m_do_subtracted;
   bool m_do_unsubtracted;
-  bool m_use_towerinfo = true;
-  std::string m_cluster_node_name = "CLUSTERINFO_CEMC";
+  bool m_use_towerinfo{true};
+  std::string m_cluster_node_name{"CLUSTERINFO_CEMC"};
+  float m_minTowerEnergy{-100};  ///< Minimum tower energy for inclusion in isolation calculation
 };
-
-/** \Brief Function to find delta R between 2 objects
- *
- * Takes the eta and phi of each object and returns the difference
- * of the etas and phis added in quadrature. Used to find towers
- * inside a cone of delta R around a cluster.
- */
-inline /*const*/ float deltaR(float eta1, float eta2, float phi1, float phi2)
-{
-  float deta = eta1 - eta2;
-  float dphi = phi1 - phi2;
-  if (dphi > M_PI) dphi -= 2 * M_PI;       // corrects to keep range -pi to pi
-  if (dphi < -1 * M_PI) dphi += 2 * M_PI;  // corrects to keep range -pi to pi
-  return sqrt(deta * deta + dphi * dphi);
-}
 
 #endif

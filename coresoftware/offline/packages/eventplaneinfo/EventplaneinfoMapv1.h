@@ -1,14 +1,14 @@
 // Tell emacs that this is a C++ source
 //  -*- C++ -*-.
-#ifndef EVENTPLANEINFOMAPV1_H
-#define EVENTPLANEINFOMAPV1_H
+#ifndef EVENTPLANEINFO_EVENTPLANEINFOMAPV1_H
+#define EVENTPLANEINFO_EVENTPLANEINFOMAPV1_H
 
 #include "EventplaneinfoMap.h"
 
-#include "Eventplaneinfo.h"
-
 #include <iostream>
 #include <map>
+
+class Eventplaneinfo;
 
 class EventplaneinfoMapv1 : public EventplaneinfoMap
 {
@@ -24,6 +24,7 @@ class EventplaneinfoMapv1 : public EventplaneinfoMap
 
   const Eventplaneinfo* get(unsigned int idkey) const override;
   Eventplaneinfo* get(unsigned int idkey) override;
+
   Eventplaneinfo* insert(Eventplaneinfo* clus, EPTYPE id) override;
 
   ConstIter begin() const override { return _map.begin(); }
@@ -40,4 +41,4 @@ class EventplaneinfoMapv1 : public EventplaneinfoMap
   ClassDefOverride(EventplaneinfoMapv1, 1);
 };
 
-#endif  // EVENTPLANEINFOMAPV1_H
+#endif  // EVENTPLANEINFO_EVENTPLANEINFOMAPV1_H

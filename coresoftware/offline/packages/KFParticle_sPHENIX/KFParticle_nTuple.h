@@ -35,7 +35,19 @@ class KFParticle_nTuple : public KFParticle_truthAndDetTools, public KFParticle_
                   std::vector<KFParticle> intermediates);
 
   float calc_secondary_vertex_mass_noPID(std::vector<KFParticle> kfp_daughters);
+  
+  bool fillConditionMet();
 
+  /// Functions to get detailed subsystem information
+  void GetDetailedTracking(bool set_variable = true) { 
+    m_get_detailed_tracking = set_variable; 
+    if(m_get_detailed_tracking){m_detector_info = true;}
+  }
+  void GetDetailedCalorimetry(bool set_variable = true) { 
+    m_get_detailed_calorimetry = set_variable; 
+    if(m_get_detailed_calorimetry){m_calo_info = true;}
+  }
+  
  protected:
   bool m_has_intermediates_nTuple {false};
   bool m_extrapolateTracksToSV_nTuple{true};
@@ -48,6 +60,8 @@ class KFParticle_nTuple : public KFParticle_truthAndDetTools, public KFParticle_
   bool m_get_trigger_info {false};
   bool m_detector_info {false};
   bool m_calo_info {false};
+  bool m_require_track_emcal_match {false};
+  bool isTrackEMCalmatch {true};
   std::string m_mother_name;
   // std::string m_vtx_map_node_name_nTuple;
   bool m_use_intermediate_name {false};
@@ -92,7 +106,6 @@ class KFParticle_nTuple : public KFParticle_truthAndDetTools, public KFParticle_
   float m_calculated_mother_v = -1;
   float m_calculated_mother_chi2 = -1;
   int m_calculated_mother_ndof = -1;
-  float m_calculated_mother_SV_chi2_per_ndof = -1;
   int m_calculated_mother_pdgID = -1;
   // float *m_calculated_mother_cov;
   float m_calculated_mother_cov[21] = {0};
@@ -131,7 +144,6 @@ class KFParticle_nTuple : public KFParticle_truthAndDetTools, public KFParticle_
   float m_calculated_intermediate_v[max_intermediates] = {0};
   float m_calculated_intermediate_chi2[max_intermediates] = {0};
   int m_calculated_intermediate_ndof[max_intermediates] = {0};
-  float m_calculated_intermediate_SV_chi2_per_ndof[max_intermediates] = {0};
   int m_calculated_intermediate_pdgID[max_intermediates] = {0};
   // float *m_calculated_intermediate_cov[max_intermediates];
   float m_calculated_intermediate_cov[max_intermediates][21] = {{0}, {0}};
@@ -188,6 +200,7 @@ class KFParticle_nTuple : public KFParticle_truthAndDetTools, public KFParticle_
 
   int m_nPVs = -1;
   int m_multiplicity = -1;
+  int m_nTracksOfVertex = -1;
 
   int m_runNumber = -1;
   int m_evtNumber = -1;

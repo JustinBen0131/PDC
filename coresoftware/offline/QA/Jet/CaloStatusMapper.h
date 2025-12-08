@@ -11,28 +11,28 @@
 #ifndef CLUSTERSTATUSMAPPER_H
 #define CLUSTERSTATUSMAPPER_H
 
-// jet qa
-// FIXME change to local include when ready to merge
-#include <jetqa/JetQADefs.h>
-
 // module definitions
 #include "CaloStatusMapperDefs.h"
 
-// calo base
-#include <calobase/TowerInfoContainer.h>
+// jet qa
+#include <jetqa/JetQADefs.h>
 
+// calo base
 // f4a libraries
 #include <fun4all/SubsysReco.h>
 
 // c++ utilities
+#include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 // forward declarations
 class PHCompositeNode;
 class Fun4AllHistoManager;
 class TH1;
+class TowerInfoContainer;
 class TriggerAnalyzer;
 
 
@@ -56,6 +56,12 @@ class CaloStatusMapper : public SubsysReco
 
       ///! turn debug messages on/off
       bool debug {true};
+
+      ///! turn normalizing histograms on/off
+      bool doNorm {false};
+
+      ///! turn optional histograms on/off
+      bool doOptHist {false};
 
       ///! module name
       std::string moduleName {"CaloStatusMapper"};
@@ -112,8 +118,9 @@ class CaloStatusMapper : public SubsysReco
     ///! for checking which trigger fired
     TriggerAnalyzer* m_analyzer {nullptr};
 
-    ///! output histograms
-    std::map<std::string, TH1*> m_hists;
+  ///! output histograms
+  std::map<std::string, TH1*> m_hists;
+  TH1 *allCaloEnergy {nullptr};
 
     ///! input nodes
     std::vector<TowerInfoContainer*> m_inNodes;
@@ -121,6 +128,9 @@ class CaloStatusMapper : public SubsysReco
     ///! no. of events processed
     uint64_t m_nEvent {0};
 
+    ///! total bins for status histograms
+    std::map<std::string, int> m_totalBin;
+  
 };  // end CaloStatusMapper
 
 #endif

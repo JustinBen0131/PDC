@@ -161,7 +161,7 @@ int RawClusterBuilderTemplate::InitRun(PHCompositeNode *topNode)
   }
 
   // Ensure that the detailed geometry is available if the user requests it.
-  // Otherwise, use the default geometry
+  // Otherwise, use the default geometry 
   if (m_UseDetailedGeometry && detector != "CEMC")
   {
     m_UseDetailedGeometry = false;
@@ -285,7 +285,7 @@ int RawClusterBuilderTemplate::InitRun(PHCompositeNode *topNode)
   // geometry case
   // With the former geometry, the tower dimensions are approximated from
   // the consecutive tower center postions in the "CompleteTowerGeometry" method.
-  // With the detailed geometry, the information is already given in the
+  // With the detailed geometry, the information is already given in the 
   // RawTowerGeom node so no further step is required.
   if (!(m_UseDetailedGeometry && detector == "CEMC"))
   {
@@ -453,11 +453,11 @@ int RawClusterBuilderTemplate::process_event(PHCompositeNode *topNode)
     if (truthinfo)
     {
       PHG4TruthInfoContainer::VtxRange vtxrange = truthinfo->GetVtxRange();
-      for (PHG4TruthInfoContainer::ConstVtxIterator iter = vtxrange.first; iter != vtxrange.second; ++iter)
+      for (PHG4TruthInfoContainer::ConstVtxIterator iter = vtxrange.first; iter != vtxrange.second; ++iter) 
       {
          PHG4VtxPoint *vtx_tr = iter->second;
          if ( vtx_tr->get_id() == 1 )
-         {
+         { 
            vz = vtx_tr->get_z();
            vy = vtx_tr->get_y();
            vx = vtx_tr->get_x();
@@ -465,9 +465,9 @@ int RawClusterBuilderTemplate::process_event(PHCompositeNode *topNode)
       }
     }
     else {
-      std::cout << "RawClusterBuilderTemplate: Error requiring truth vertex but non was found. Exiting" << std::endl;
+      std::cout << "RawClusterBuilderTemplate: Error requiring truth vertex but non was found. Exiting" << std::endl;  
       return Fun4AllReturnCodes::ABORTEVENT;
-    }
+    } 
   }
 
   // Set vertex
@@ -506,7 +506,7 @@ int RawClusterBuilderTemplate::process_event(PHCompositeNode *topNode)
         // std::cout << "(" << tower->get_column() << "," << tower->get_row()
         //      << ")  (" << tower->get_binphi() << "," << tower->get_bineta()
         //      << ")" << std::endl;
-        //      ix = tower->get_column();
+        //	  ix = tower->get_column();
         RawTowerDefs::keytype towerid = tower->get_id();
         int ix = RawTowerDefs::decode_index2(towerid);  // index2 is phi in CYL
         int iy = RawTowerDefs::decode_index1(towerid);  // index1 is eta in CYL
@@ -725,7 +725,7 @@ int RawClusterBuilderTemplate::process_event(PHCompositeNode *topNode)
         //        RawTowerDefs::keytype twrkey = RawTowerDefs::encode_towerid(towers->getCalorimeterID(), ix + BINX0, iy + BINY0);
         const RawTowerDefs::CalorimeterId Calo_ID = towergeom->get_calorimeter_id();
         RawTowerDefs::keytype twrkey = RawTowerDefs::encode_towerid(Calo_ID, iy + BINY0, ix + BINX0);  // Becuase in this part index1 is iy
-        //    std::cout << iphi << " " << ieta << ": "
+        //	std::cout << iphi << " " << ieta << ": "
         //           << twrkey << " e = " << (*ph).amp) << std::endl;
           
         const float amp = (*ph).amp;
@@ -737,7 +737,7 @@ int RawClusterBuilderTemplate::process_event(PHCompositeNode *topNode)
         // accumulate EW time (finite guard; treat exact 0 as “no time”)
         if (std::isfinite(tof))
         {
-          if (std::fabs(tof) > 1e-9f) { saw_nonzero_t = true; }
+          if (std::abs(tof) > 1e-9F) { saw_nonzero_t = true; }
           ew_num += amp * tof;    // float math end-to-end
         }
         ew_den += amp;
@@ -752,7 +752,7 @@ int RawClusterBuilderTemplate::process_event(PHCompositeNode *topNode)
       bemc->CorrectPosition(ecl, xcg, ycg, xcorr, ycorr);
       cluster->set_tower_cog(xcg, ycg, xcorr, ycorr);
 
-      const float tmean = (ew_den > 0.0f && saw_nonzero_t)
+      const float tmean = (ew_den > 0.0F && saw_nonzero_t)
                             ? (ew_num / ew_den)
                             : std::numeric_limits<float>::quiet_NaN();
       cluster->set_mean_time(tmean);

@@ -33,7 +33,8 @@
 #include <cmath>
 #include <iostream>
 #include <iterator>  // for reverse_iterator
-#include <utility>   // for pair
+#include <limits>
+#include <utility>  // for pair
 #include <vector>
 
 QAG4SimulationCalorimeterSum::QAG4SimulationCalorimeterSum(
@@ -218,7 +219,7 @@ QAG4SimulationCalorimeterSum::get_truth_particle()
 {
   // get last primary
   assert(_truth_container);
-  assert(not _truth_container->GetMap().empty());
+  assert(!_truth_container->GetMap().empty());
   PHG4Particle *last_primary = _truth_container->GetMap().rbegin()->second;
   assert(last_primary);
 
@@ -367,13 +368,13 @@ bool QAG4SimulationCalorimeterSum::eval_trk_proj(const std::string &detector, Sv
   // straight projections thereafter
 
   std::vector<double> point;
-  point.assign(3, NAN);
+  point.assign(3, std::numeric_limits<double>::quiet_NaN());
 
   //  const double radius = towergeo->get_radius() + towergeo->get_thickness() * 0.5;
 
   //  PHG4HoughTransform::projectToRadius(track, _magField, radius, point);
 
-  if (std::isnan(point[0]) or std::isnan(point[1]) or std::isnan(point[2]))
+  if (std::isnan(point[0]) || std::isnan(point[1]) || std::isnan(point[2]))
   {
     // std::cout << __PRETTY_FUNCTION__ << "::" << Name()
     //      << " - Error - track extrapolation failure:";
@@ -381,9 +382,9 @@ bool QAG4SimulationCalorimeterSum::eval_trk_proj(const std::string &detector, Sv
     return false;
   }
 
-  assert(not std::isnan(point[0]));
-  assert(not std::isnan(point[1]));
-  assert(not std::isnan(point[2]));
+  assert(!std::isnan(point[0]));
+  assert(!std::isnan(point[1]));
+  assert(!std::isnan(point[2]));
 
   double const x = point[0];
   double const y = point[1];
@@ -397,7 +398,7 @@ bool QAG4SimulationCalorimeterSum::eval_trk_proj(const std::string &detector, Sv
   int const bineta = towergeo->get_etabin(eta);
 
   double etabin_width = towergeo->get_etabounds(bineta).second - towergeo->get_etabounds(bineta).first;
-  if (bineta > 1 and bineta < towergeo->get_etabins() - 1)
+  if (bineta > 1 && bineta < towergeo->get_etabins() - 1)
   {
     etabin_width = (towergeo->get_etacenter(bineta + 1) - towergeo->get_etacenter(bineta - 1)) / 2.;
   }

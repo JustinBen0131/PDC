@@ -1,5 +1,5 @@
-#ifndef FILLCLUSMATCHTREE__H
-#define FILLCLUSMATCHTREE__H
+#ifndef G4EVAL_FILLCLUSMATCHTREE_H
+#define G4EVAL_FILLCLUSMATCHTREE_H
 
 /**
  * @file trackbase/TrkrMatchDefs.h
@@ -57,8 +57,8 @@ class PHG4ParticleSvtxMap;
 class SvtxPHG4ParticleMap;
 class EmbRecoMatchContainer;
 class PHCompositeNode;
-class PHG4TpcCylinderGeom;
-class PHG4TpcCylinderGeomContainer;
+class PHG4TpcGeom;
+class PHG4TpcGeomContainer;
 class PHG4TruthInfoContainer;
 class SvtxTrack;
 class SvtxTrackMap;
@@ -67,7 +67,7 @@ class TrkrCluster;
 class TrkrTruthTrack;
 class TrkrTruthTrackContainer;
 class TTree;
-class TH2D;
+class TH2;
 class ClusHitsVerbose;
 class TrkrClusterIsMatcher;
 
@@ -75,7 +75,7 @@ class FillClusMatchTree : public SubsysReco
 {
  public:
   FillClusMatchTree(
-      TrkrClusterIsMatcher *_ismatcher, const std::string &tfile_name = "trackclusmatch.root", bool _fill_clusters = true, bool _fill_clusverbose = true, bool _fill_svtxnomatch = false);
+      TrkrClusterIsMatcher *_ismatcher, const std::string &tfile_name = "trackclusmatch.root", bool _fill_clusters = true, bool _fill_clusverbose = true, bool _fill_SvUnMatched = false);
 
   virtual ~FillClusMatchTree() = default;
 
@@ -103,7 +103,7 @@ class FillClusMatchTree : public SubsysReco
   ClusHitsVerbose *m_SvtxClusHitVerb{nullptr};
   /* TrkrClusterContainer         *m_TruthClusterContainer        {nullptr}; */
   /* TrkrClusterContainer         *m_RecoClusterContainer         {nullptr}; */
-  /* PHG4TpcCylinderGeomContainer *m_PHG4TpcCylinderGeomContainer {nullptr}; */
+  /* PHG4TpcGeomContainer *m_PHG4TpcGeomContainer {nullptr}; */
 
   TTree *m_ttree;
   std::string m_outfile_name;
@@ -132,10 +132,10 @@ class FillClusMatchTree : public SubsysReco
   //  clusters:
   //    M : matched
   //    U : unmatched
-  TH2D *h2_G4_nPixelsPhi;
-  TH2D *h2_G4_nPixelsZ;
-  TH2D *h2_Sv_nPixelsPhi;
-  TH2D *h2_Sv_nPixelsZ;
+  TH2 *h2_G4_nPixelsPhi;
+  TH2 *h2_G4_nPixelsZ;
+  TH2 *h2_Sv_nPixelsPhi;
+  TH2 *h2_Sv_nPixelsZ;
 
   // Track tree
   int b_trackid{};
@@ -189,4 +189,4 @@ class FillClusMatchTree : public SubsysReco
   /* void pushback_verb_bins(TrkrDefs::cluskey, bool isPHG4=true); */
 };
 
-#endif  // FILLTRUTHRECOMATCHTREE_H
+#endif  // G4EVAL_FILLCLUSMATCHTREE_H

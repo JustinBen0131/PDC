@@ -40,7 +40,7 @@ class TrackSeed;
 class TrackSeedContainer;
 class TrkrClusterContainer;
 class SvtxAlignmentStateMap;
-class PHG4TpcCylinderGeomContainer;
+class PHG4TpcGeomContainer;
 
 using SourceLink = ActsSourceLink;
 using FitResult = ActsTrackFittingAlgorithm::TrackFitterResult;
@@ -76,6 +76,12 @@ class PHActsTrkFitter : public SubsysReco
   void fitSiliconMMs(bool fitSiliconMMs)
   {
     m_fitSiliconMMs = fitSiliconMMs;
+  }
+
+  /// with direct navigation, force a fit with only silicon hits
+  void forceSiOnlyFit(bool forceSiOnlyFit)
+  {
+    m_forceSiOnlyFit = forceSiOnlyFit;
   }
 
   /// require micromegas in SiliconMM fits
@@ -119,9 +125,15 @@ class PHActsTrkFitter : public SubsysReco
   {
     m_outlierFinder.outfileName(outfilename);
   }
+
   void SetIteration(int iter) { _n_iteration = iter; }
   void set_track_map_name(const std::string& map_name) { _track_map_name = map_name; }
   void set_svtx_seed_map_name(const std::string& map_name) { _svtx_seed_map_name = map_name; }
+
+  void set_svtx_alignment_state_map_name(const std::string& map_name) {
+      _svtx_alignment_state_map_name = map_name;
+      m_alignStates.alignmentStateMap(map_name);
+  }
 
   /// Set flag for pp running
   void set_pp_mode(bool ispp) { m_pp_mode = ispp; }
@@ -131,7 +143,7 @@ class PHActsTrkFitter : public SubsysReco
   void ignoreLayer(int layer) { m_ignoreLayer.insert(layer); }
   void setTrkrClusterContainerName(std::string &name){ m_clusterContainerName = name; }
   void setDirectNavigation(bool flag) { m_directNavigation = flag; }
-    
+
  private:
   /// Get all the nodes
   int getNodes(PHCompositeNode* topNode);
@@ -142,10 +154,11 @@ class PHActsTrkFitter : public SubsysReco
   void loopTracks(Acts::Logging::Level logLevel);
 
   /// Convert the acts track fit result to an svtx track
-  void updateSvtxTrack(std::vector<Acts::MultiTrajectoryTraits::IndexType>& tips,
-                       Trajectory::IndexedParameters& paramsMap,
-                       ActsTrackFittingAlgorithm::TrackContainer& tracks,
-                       SvtxTrack* track);
+  void updateSvtxTrack(
+    const std::vector<Acts::MultiTrajectoryTraits::IndexType>& tips,
+    const Trajectory::IndexedParameters& paramsMap,
+    const ActsTrackFittingAlgorithm::TrackContainer& tracks,
+    SvtxTrack* track);
 
   /// Helper function to call either the regular navigation or direct
   /// navigation, depending on m_fitSiliconMMs
@@ -164,9 +177,9 @@ class PHActsTrkFitter : public SubsysReco
                                  SurfacePtrVec& surfaces) const;
   void checkSurfaceVec(SurfacePtrVec& surfaces) const;
 
-  bool getTrackFitResult(FitResult& fitOutput, TrackSeed* seed,
+  bool getTrackFitResult(const FitResult& fitOutput, TrackSeed* seed,
                          SvtxTrack* track,
-                         ActsTrackFittingAlgorithm::TrackContainer& tracks,
+                         const ActsTrackFittingAlgorithm::TrackContainer& tracks,
                          const ActsTrackFittingAlgorithm::MeasurementContainer& measurements);
 
   Acts::BoundSquareMatrix setDefaultCovariance() const;
@@ -200,6 +213,8 @@ class PHActsTrkFitter : public SubsysReco
   /// Acts::DirectedNavigator with a list of sorted silicon+MM surfaces
   bool m_fitSiliconMMs = false;
 
+  bool m_forceSiOnlyFit = false;
+
   /// requires micromegas present when fitting silicon-MM surfaces
   bool m_useMicromegas = true;
 
@@ -216,8 +231,8 @@ class PHActsTrkFitter : public SubsysReco
   /// Flag for pp running
   bool m_pp_mode = false;
 
-  bool m_directNavigation = false;
-  
+  bool m_directNavigation = true;
+
   // do we have a constant field
   bool m_ConstField{false};
   double fieldstrength{std::numeric_limits<double>::quiet_NaN()};
@@ -237,9 +252,6 @@ class PHActsTrkFitter : public SubsysReco
   std::string m_evalname = "ActsEvaluator.root";
   //@}
 
-  //! acts trajectories
-  std::map<const unsigned int, Trajectory>* m_trajectories = nullptr;
-
   //! tracks
 //  SvtxTrackMap* m_seedTracks = nullptr;
 
@@ -256,6 +268,7 @@ class PHActsTrkFitter : public SubsysReco
   int _n_iteration = 0;
   std::string _track_map_name = "SvtxTrackMap";
   std::string _svtx_seed_map_name = "SvtxTrackSeedContainer";
+  std::string _svtx_alignment_state_map_name =  "SvtxAlignmentStateMap";
 
   /// Default particle assumption to pion
   unsigned int m_pHypothesis = 211;
@@ -266,7 +279,7 @@ class PHActsTrkFitter : public SubsysReco
 
   bool m_enable_crossing_estimate = false;
 
-  PHG4TpcCylinderGeomContainer* _tpccellgeo = nullptr;
+  PHG4TpcGeomContainer* _tpccellgeo = nullptr;
 
   /// Variables for doing event time execution analysis
   bool m_timeAnalysis = false;
@@ -281,7 +294,7 @@ class PHActsTrkFitter : public SubsysReco
 
   struct MaterialSurfaceSelector {
     std::vector<const Acts::Surface*> surfaces = {};
-  
+
     /// @param surface is the test surface
     void operator()(const Acts::Surface* surface) {
       if (surface->surfaceMaterial() != nullptr) {

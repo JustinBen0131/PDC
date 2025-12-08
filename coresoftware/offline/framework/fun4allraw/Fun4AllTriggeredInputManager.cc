@@ -1,6 +1,5 @@
 #include "Fun4AllTriggeredInputManager.h"
 
-#include "SinglePrdfInput.h"
 #include "SingleTriggeredInput.h"
 
 #include <fun4all/Fun4AllInputManager.h>  // for Fun4AllInputManager
@@ -92,7 +91,9 @@ int Fun4AllTriggeredInputManager::run(const int /*nevents*/)
     return -1;
   }
   EventNumber(m_Gl1TriggeredInput->EventNumber());
-  MySyncManager()->CurrentEvent(EventNumber());
+  m_SyncObject->EventNumber(EventNumber());
+  m_SyncObject->RunNumber(m_RunNumber);
+  m_SyncObject->SegmentNumber(0);
   //    std::cout << "saving event on dst" << std::endl;
   return 0;
 }

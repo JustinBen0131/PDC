@@ -23,6 +23,7 @@ ROOTDICTS = \
   Gl1Packet_Dict.cc \
   Gl1Packetv1_Dict.cc \
   Gl1Packetv2_Dict.cc \
+  Gl1Packetv3_Dict.cc \
   Gl1RawHit_Dict.cc \
   Gl1RawHitv1_Dict.cc \
   Gl1RawHitv2_Dict.cc \
@@ -80,6 +81,7 @@ pkginclude_HEADERS = \
   Gl1Packet.h \
   Gl1Packetv1.h \
   Gl1Packetv2.h \
+  Gl1Packetv3.h \
   Gl1RawHit.h \
   Gl1RawHitv1.h \
   Gl1RawHitv2.h \
@@ -129,8 +131,10 @@ libffarawobjects_la_SOURCES = \
   $(ROOTDICTS) \
   CaloPacketv1.cc \
   CaloPacketContainerv1.cc \
+  Gl1Packet.cc \
   Gl1Packetv1.cc \
   Gl1Packetv2.cc \
+  Gl1Packetv3.cc \
   Gl1RawHit.cc \
   Gl1RawHitv1.cc \
   Gl1RawHitv2.cc \

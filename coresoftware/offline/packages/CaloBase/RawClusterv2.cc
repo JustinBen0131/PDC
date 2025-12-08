@@ -3,8 +3,8 @@
 void RawClusterv2::Reset()
 {
   RawClusterv1::Reset();
-  _x_raw  = std::numeric_limits<float>::quiet_NaN();
-  _y_raw  = std::numeric_limits<float>::quiet_NaN();
+  _x_raw = std::numeric_limits<float>::quiet_NaN();
+  _y_raw = std::numeric_limits<float>::quiet_NaN();
   _x_corr = std::numeric_limits<float>::quiet_NaN();
   _y_corr = std::numeric_limits<float>::quiet_NaN();
   _t_mean = std::numeric_limits<float>::quiet_NaN();

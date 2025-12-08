@@ -22,7 +22,6 @@ libg4dst_la_LDFLAGS = \
   -lg4detectors_io \
   -lg4eval_io \
   -lg4intt_io \
-  -lg4mbd_io \
   -lg4tracking_io \
   -lglobalvertex_io \
   -lintt_io \
@@ -41,6 +40,7 @@ libg4dst_la_LDFLAGS = \
   -ltpccalib_io \
   -ltrack_io \
   -ltrackbase_historic_io \
+  -luspin_io \
   -lzdcinfo_io
 
 libg4dst_la_SOURCES = \

@@ -1,8 +1,6 @@
 #include "PHNodeDump.h"
 #include "DumpObject.h"
 
-#include "DumpBbcPmtInfoContainer.h"
-#include "DumpBbcVertexMap.h"
 #include "DumpCaloPacket.h"
 #include "DumpCaloPacketContainer.h"
 #include "DumpCaloTriggerInfo.h"
@@ -61,6 +59,7 @@
 #include "DumpTrkrClusterHitAssoc.h"
 #include "DumpTrkrHitSetContainer.h"
 #include "DumpTrkrHitTruthAssoc.h"
+#include "DumpTruthVertexMap.h"
 #include "DumpZdcinfo.h"
 
 #include <ffaobjects/EventHeader.h>
@@ -91,7 +90,7 @@ PHNodeDump::~PHNodeDump()
 
 int PHNodeDump::AddIgnore(const std::string &name)
 {
-  if (ignore.find(name) != ignore.end())
+  if (ignore.contains(name))
   {
     std::cout << PHWHERE << " "
               << name << "already in ignore list" << std::endl;
@@ -103,7 +102,7 @@ int PHNodeDump::AddIgnore(const std::string &name)
 
 int PHNodeDump::Select(const std::string &name)
 {
-  if (exclusive.find(name) != exclusive.end())
+  if (exclusive.contains(name))
   {
     std::cout << PHWHERE << " "
               << name << "already in exclusive list" << std::endl;
@@ -175,7 +174,7 @@ int PHNodeDump::AddDumpObject(const std::string &NodeName, PHNode *node)
   DumpObject *newdump;
   if (!exclusive.empty())
   {
-    if (exclusive.find(NodeName) == exclusive.end())
+    if (!exclusive.contains(NodeName))
     {
       std::cout << "Exclusive find: Ignoring " << NodeName << std::endl;
       newdump = new DumpObject(NodeName);
@@ -183,7 +182,7 @@ int PHNodeDump::AddDumpObject(const std::string &NodeName, PHNode *node)
       return initdump(NodeName, newdump);
     }
   }
-  if (ignore.find(NodeName) != ignore.end())
+  if (ignore.contains(NodeName))
   {
     std::cout << "Ignoring " << NodeName << std::endl;
     newdump = new DumpObject(NodeName);
@@ -196,15 +195,7 @@ int PHNodeDump::AddDumpObject(const std::string &NodeName, PHNode *node)
       // need a static cast since only from DST these guys are of type PHIODataNode<TObject*>
       // when created they are normally  PHIODataNode<PHObject*> but can be anything else as well
       TObject *tmp = static_cast<TObject *>((static_cast<PHIODataNode<TObject> *>(node))->getData());  // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
-      if (tmp->InheritsFrom("BbcPmtInfoContainerV1"))
-      {
-        newdump = new DumpBbcPmtInfoContainer(NodeName);
-      }
-      else if (tmp->InheritsFrom("BbcVertexMap"))
-      {
-        newdump = new DumpBbcVertexMap(NodeName);
-      }
-      else if (tmp->InheritsFrom("CaloPacket"))
+      if (tmp->InheritsFrom("CaloPacket"))
       {
         newdump = new DumpCaloPacket(NodeName);
       }
@@ -435,6 +426,10 @@ int PHNodeDump::AddDumpObject(const std::string &NodeName, PHNode *node)
       else if (tmp->InheritsFrom("TrkrHitTruthAssoc"))
       {
         newdump = new DumpTrkrHitTruthAssoc(NodeName);
+      }
+      else if (tmp->InheritsFrom("TruthVertexMap"))
+      {
+        newdump = new DumpTruthVertexMap(NodeName);
       }
       else if (tmp->InheritsFrom("Zdcinfo"))
       {

@@ -107,12 +107,13 @@ int SubtractTowers::process_event(PHCompositeNode *topNode)
     emcal_towerinfos = findNode::getClass<TowerInfoContainer>(topNode, EMTowerName);
     ihcal_towerinfos = findNode::getClass<TowerInfoContainer>(topNode, IHTowerName);
     ohcal_towerinfos = findNode::getClass<TowerInfoContainer>(topNode, OHTowerName);
-  }
-  if (Verbosity() > 0)
-  {
-    std::cout << "SubtractTowers::process_event: starting with " << emcal_towerinfos->size() << EMTowerName << " towers" << std::endl;
-    std::cout << "SubtractTowers::process_event: starting with " << ihcal_towerinfos->size() << IHTowerName << " towers" << std::endl;
-    std::cout << "SubtractTowers::process_event: starting with " << ohcal_towerinfos->size() << OHTowerName << " towers" << std::endl;
+  
+    if (Verbosity() > 0)
+      {
+	std::cout << "SubtractTowers::process_event: starting with " << emcal_towerinfos->size() << EMTowerName << " towers" << std::endl;
+	std::cout << "SubtractTowers::process_event: starting with " << ihcal_towerinfos->size() << IHTowerName << " towers" << std::endl;
+	std::cout << "SubtractTowers::process_event: starting with " << ohcal_towerinfos->size() << OHTowerName << " towers" << std::endl;
+      }
   }
 
   else
@@ -159,7 +160,9 @@ int SubtractTowers::process_event(PHCompositeNode *topNode)
       {
         const RawTowerDefs::keytype key = RawTowerDefs::encode_towerid(RawTowerDefs::CalorimeterId::HCALIN, ieta, iphi);
         float tower_phi = geomIH->get_tower_geometry(key)->get_phi();
-        UE = UE * (1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2)));
+        float modulation_factor = 1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2));
+        modulation_factor = std::max(0.F, modulation_factor);
+        UE = UE * modulation_factor;
       }
       float new_energy = raw_energy - UE;
       // if a tower is masked, leave it at zero
@@ -216,7 +219,9 @@ int SubtractTowers::process_event(PHCompositeNode *topNode)
       if (_use_flow_modulation)
       {
         float tower_phi = geomIH->get_tower_geometry(tower->get_key())->get_phi();
-        UE = UE * (1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2)));
+        float modulation_factor = 1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2));
+        modulation_factor = std::max(0.F, modulation_factor);
+        UE = UE * modulation_factor;
       }
       float new_energy = raw_energy - UE;
       if (raw_energy == 0)
@@ -248,7 +253,9 @@ int SubtractTowers::process_event(PHCompositeNode *topNode)
       {
         const RawTowerDefs::keytype key = RawTowerDefs::encode_towerid(RawTowerDefs::CalorimeterId::HCALIN, ieta, iphi);
         float tower_phi = geomIH->get_tower_geometry(key)->get_phi();
-        UE = UE * (1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2)));
+        float modulation_factor = 1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2));
+        modulation_factor = std::max(0.F, modulation_factor);
+        UE = UE * modulation_factor;
       }
       float new_energy = raw_energy - UE;
       // if a tower is masked, leave it at zero
@@ -305,7 +312,9 @@ int SubtractTowers::process_event(PHCompositeNode *topNode)
       if (_use_flow_modulation)
       {
         float tower_phi = geomIH->get_tower_geometry(tower->get_key())->get_phi();
-        UE = UE * (1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2)));
+        float modulation_factor = 1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2));
+        modulation_factor = std::max(0.F, modulation_factor);
+        UE = UE * modulation_factor;
       }
       float new_energy = raw_energy - UE;
       if (raw_energy == 0)
@@ -333,7 +342,9 @@ int SubtractTowers::process_event(PHCompositeNode *topNode)
       {
         const RawTowerDefs::keytype key = RawTowerDefs::encode_towerid(RawTowerDefs::CalorimeterId::HCALOUT, ieta, iphi);
         float tower_phi = geomOH->get_tower_geometry(key)->get_phi();
-        UE = UE * (1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2)));
+        float modulation_factor = 1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2));
+        modulation_factor = std::max(0.F, modulation_factor);
+        UE = UE * modulation_factor;
       }
       float new_energy = raw_energy - UE;
       // if a tower is masked, leave it at zero
@@ -390,7 +401,9 @@ int SubtractTowers::process_event(PHCompositeNode *topNode)
       if (_use_flow_modulation)
       {
         float tower_phi = geomOH->get_tower_geometry(tower->get_key())->get_phi();
-        UE = UE * (1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2)));
+        float modulation_factor = 1 + 2 * background_v2 * std::cos(2 * (tower_phi - background_Psi2));
+        modulation_factor = std::max(0.F, modulation_factor);
+        UE = UE * modulation_factor;
       }
       float new_energy = raw_energy - UE;
       if (raw_energy == 0)

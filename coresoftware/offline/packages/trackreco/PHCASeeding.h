@@ -13,12 +13,12 @@
 /* #define _PHCASEEDING_CHAIN_FORKS_ */
 /* #define _PHCASEEDING_TIMER_OUT_ */
 
-#include "ALICEKF.h"
 #include "PHTrackSeeding.h"  // for PHTrackSeeding
 
 #include <tpc/TpcGlobalPositionWrapper.h>
 
 #include <trackbase/TrkrDefs.h>  // for cluskey
+#include <trackbase_historic/TrackSeed_v2.h>
 
 #include <phool/PHTimer.h>  // for PHTimer
 
@@ -98,7 +98,8 @@ class PHCASeeding : public PHTrackSeeding
       /* float cosTheta_limit = -0.8 */
   );
 
-  ~PHCASeeding() override {}
+  ~PHCASeeding() override = default;
+
   void SetSplitSeeds(bool opt = true) { _split_seeds = opt; }
   void SetLayerRange(unsigned int layer_low, unsigned int layer_up)
   {
@@ -129,17 +130,22 @@ class PHCASeeding : public PHTrackSeeding
     }
   }
 
-  void set_field_dir(const double rescale)
-  {
-    std::cout << "PHCASeeding::set_field_dir rescale: " << rescale << std::endl;
-    _fieldDir = 1;
-    if (rescale > 0)
-      _fieldDir = -1;
-  }
+  // obsolete
+  void set_field_dir(const double)
+  { std::cout << "PHCASeeding::set_field_dir - Warning - This function does nothing. Remove from macro" << std::endl; }
 
-  void magFieldFile(const std::string& fname) { m_magField = fname; }
-  void useConstBField(bool opt) { _use_const_field = opt; }
-  void constBField(float b) { _const_field = b; }
+  // obsolete
+  void magFieldFile(const std::string&)
+  { std::cout << "PHCASeeding::magFieldFile - Warning - This function does nothing. Remove from macro" << std::endl; }
+
+  // obsolete
+  void useConstBField(bool)
+  { std::cout << "PHCASeeding::useConstBField - Warning - This function does nothing. Remove from macro" << std::endl; }
+
+  // obsolete
+  void constBField(float)
+  { std::cout << "PHCASeeding::constBField - Warning - This function does nothing. Remove from macro" << std::endl; }
+
   void useFixedClusterError(bool opt) { _use_fixed_clus_err = opt; }
   void setFixedClusterError(int i, double val) { _fixed_clus_err.at(i) = val; }
   void set_pp_mode(bool mode) { _pp_mode = mode; }
@@ -250,24 +256,17 @@ class PHCASeeding : public PHTrackSeeding
   /* float _cosTheta_limit; */
   double _rz_outlier_threshold = 0.1;
   double _xy_outlier_threshold = 0.1;
-  double _fieldDir = -1;
-  bool _use_const_field = false;
   bool _split_seeds = true;
   bool _reject_zsize1 = false;
-  float _const_field = 1.4;
   bool _use_fixed_clus_err = false;
   bool _pp_mode = false;
   std::array<double, 3> _fixed_clus_err = {.1, .1, .1};
-
-  std::string m_magField;
 
   /// acts geometry
   ActsGeometry* m_tGeometry{nullptr};
 
   /// global position wrapper
   TpcGlobalPositionWrapper m_globalPositionWrapper;
-
-  std::unique_ptr<ALICEKF> fitter;
 
   std::unique_ptr<PHTimer> t_seed;
   std::unique_ptr<PHTimer> t_fill;

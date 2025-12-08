@@ -1,25 +1,85 @@
 #include "RawClusterv1.h"
 
+#include "RawTowerDefs.h"
+
 #include <phool/phool.h>
 
 #include <cstdlib>
 #include <limits>
 #include <string>
+#include <vector>
+
+RawClusterv1::RawClusterv1(const RawCluster& cluster)
+{
+  set_id(cluster.get_id());
+  set_energy(cluster.get_energy());
+  set_r(cluster.get_r());
+  set_phi(cluster.get_phi());
+  set_z(cluster.get_z());
+
+  for (const auto& tower : cluster.get_towermap())
+  {
+    addTower(tower.first, tower.second);
+  }
+
+  static const PROPERTY kKnownProperties[] = {
+      prop_ecore,
+      prop_prob,
+      prop_chi2,
+      prop_merged_cluster_prob,
+      prop_et_iso_calotower_sub_R01,
+      prop_et_iso_calotower_R01,
+      prop_et_iso_calotower_sub_R02,
+      prop_et_iso_calotower_R02,
+      prop_et_iso_calotower_sub_R03,
+      prop_et_iso_calotower_R03,
+      prop_et_iso_calotower_sub_R04,
+      prop_et_iso_calotower_R04};
+
+  for (const auto prop_id : kKnownProperties)
+  {
+    copy_property_from_cluster(cluster, prop_id);
+  }
+}
+
+void RawClusterv1::copy_property_from_cluster(const RawCluster& source, const PROPERTY prop_id)
+{
+  if (!source.has_property(prop_id))
+  {
+    return;
+  }
+
+  std::pair<const std::string, PROPERTY_TYPE> property_info = RawCluster::get_property_info(prop_id);
+  switch (property_info.second)
+  {
+  case type_int:
+    set_property(prop_id, source.get_property_int(prop_id));
+    break;
+  case type_uint:
+    set_property(prop_id, source.get_property_uint(prop_id));
+    break;
+  case type_float:
+    set_property(prop_id, source.get_property_float(prop_id));
+    break;
+  default:
+    break;
+  }
+}
 
 void RawClusterv1::Reset()
 {
   clusterid = 0;
-  _z = std::numeric_limits<float>::signaling_NaN();
-  _r = std::numeric_limits<float>::signaling_NaN();
-  _phi = std::numeric_limits<float>::signaling_NaN();
-  _energy = std::numeric_limits<float>::signaling_NaN();
+  _z = std::numeric_limits<float>::quiet_NaN();
+  _r = std::numeric_limits<float>::quiet_NaN();
+  _phi = std::numeric_limits<float>::quiet_NaN();
+  _energy = std::numeric_limits<float>::quiet_NaN();
   prop_map.clear();
   towermap.clear();
 }
 
 void RawClusterv1::addTower(const RawClusterDefs::keytype twrid, const float etower)
 {
-  if (towermap.find(twrid) != towermap.end())
+  if (towermap.contains(twrid))
   {
     std::cout << "tower 0x" << std::hex << twrid << ", dec: " << std::dec
               << twrid << " already exists, that is bad" << std::endl;
@@ -60,14 +120,14 @@ void RawClusterv1::identify(std::ostream& os) const
 ////! convert cluster location to psuedo-rapidity given a user chosen z-location
 // float RawClusterv1::get_eta(const float z) const
 //{
-//   if (get_r() <= 0) return numeric_limits<float>::signaling_NaN();
+//   if (get_r() <= 0) return numeric_limits<float>::quiet_NaN();
 //   return asinh((get_z() - z) / get_r());
 // }
 //
 ////! convert cluster E_T given a user chosen z-location
 // float RawClusterv1::get_et(const float z) const
 //{
-//   if (get_r() <= 0) return numeric_limits<float>::signaling_NaN();
+//   if (get_r() <= 0) return numeric_limits<float>::quiet_NaN();
 //   return get_energy() * sin(atan2(get_r(), (get_z() - z)));
 // }
 
@@ -94,7 +154,7 @@ float RawClusterv1::get_property_float(const PROPERTY prop_id) const
     return u_property(i->second).fdata;
   }
 
-  return std::numeric_limits<float>::signaling_NaN();
+  return std::numeric_limits<float>::quiet_NaN();
 }
 
 int RawClusterv1::get_property_int(const PROPERTY prop_id) const
@@ -266,7 +326,7 @@ float RawClusterv1::get_et_iso(const int radiusx10 = 3, bool subtracted = false,
       default:
         std::string warning = "get_et_iso(const int radiusx10, bool subtracted, bool clusterTower) - radius:" + std::to_string(radiusx10) + " has not been defined";
         PHOOL_VIRTUAL_WARN(warning.c_str());
-        r = std::numeric_limits<float>::signaling_NaN();
+        r = std::numeric_limits<float>::quiet_NaN();
         break;
       }
     }
@@ -289,7 +349,7 @@ float RawClusterv1::get_et_iso(const int radiusx10 = 3, bool subtracted = false,
       default:
         std::string warning = "get_et_iso(const int radiusx10, bool subtracted, bool clusterTower) - radius:" + std::to_string(radiusx10) + " has not been defined";
         PHOOL_VIRTUAL_WARN(warning.c_str());
-        r = std::numeric_limits<float>::signaling_NaN();
+        r = std::numeric_limits<float>::quiet_NaN();
         break;
       }
     }
@@ -297,7 +357,7 @@ float RawClusterv1::get_et_iso(const int radiusx10 = 3, bool subtracted = false,
   else
   {
     PHOOL_VIRTUAL_WARN("get_et_iso(const int radiusx10, bool subtracted, bool clusterTower) - nonclusterTower algorithms have not been defined");
-    r = std::numeric_limits<float>::signaling_NaN();
+    r = std::numeric_limits<float>::quiet_NaN();
   }
   return r;
 }
@@ -402,7 +462,7 @@ std::vector<float> RawClusterv1::get_shower_shapes(float tower_thresh) const
       return phi - totalphibins;
     }
     RawTowerDefs::keytype key = RawTowerDefs::encode_towerid(RawTowerDefs::CalorimeterId::CEMC, ieta, phi);
-    if (towermap.find(key) != towermap.end())
+    if (towermap.contains(key))
     {
       if (towermap.at(key) > tower_thresh)
       {

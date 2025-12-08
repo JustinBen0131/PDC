@@ -3,8 +3,10 @@
 
 #include <g4main/PHG4Particle.h>
 #include <g4main/PHG4TruthInfoContainer.h>
+
 #include <jetbase/Jet.h>
 #include <jetbase/Jetv2.h>
+
 #include <phool/getClass.h>
 #include <phool/phool.h>  // for PHWHERE
 
@@ -20,6 +22,7 @@
 TruthJetInput::TruthJetInput(Jet::SRC input)
   : m_Input(input)
 {
+  return;
 }
 
 void TruthJetInput::identify(std::ostream &os)
@@ -58,7 +61,7 @@ std::vector<Jet *> TruthJetInput::get_input(PHCompositeNode *topNode)
   //     (1) Loop on GetPrimaryParticleRange
   //     (2) Or add a loop on GetSecondaryParticleRange
   std::vector<Jet *> pseudojets;
-  PHG4TruthInfoContainer::ConstRange range = truthinfo->GetPrimaryParticleRange();
+  PHG4TruthInfoContainer::ConstRange range = truthinfo->GetSPHENIXPrimaryParticleRange();
   for (PHG4TruthInfoContainer::ConstIterator iter = range.first;
        iter != range.second;
        ++iter)

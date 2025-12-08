@@ -44,7 +44,7 @@ class Fun4AllOutputManager : public Fun4AllBase
     return 0;
   }
 
-  virtual int StripCompositeNode(const std::string & /*nodename*/) {return 0;}
+  virtual int StripCompositeNode(const std::string & /*nodename*/) { return 0; }
 
   virtual void SaveRunNode(const int) { return; }
   virtual void SaveDstNode(const int) { return; }
@@ -98,16 +98,27 @@ class Fun4AllOutputManager : public Fun4AllBase
   virtual void IncrementEvents(const unsigned int i) { m_NEvents += i; }
   //! set number of events
   virtual void SetEventsWritten(const unsigned int i) { m_NEvents = i; }
+  //! get number of Events
+  virtual void SetLastEventNumber(int ival) { m_LastEventNumber = ival; }
+  virtual int LastEventNumber() const { return m_LastEventNumber; }
+  virtual void UpdateLastEvent() { m_LastEventNumber += m_EventRollover; }
+  //! set number of events
+  virtual void SetEventNumberRollover(const int evtno);
   //! get output file name
   virtual std::string OutFileName() const { return m_OutFileName; }
   //! set compression level (if implemented)
   virtual void CompressionSetting(const int /*i*/) { return; }
+  virtual int GetEventNumberRollover() const {return m_EventRollover;}
+  virtual void InitializeLastEvent(int /*eventnumber*/) {return;}
+  virtual void StartSegment(int iseg) {m_CurrentSegment = iseg;}
 
   void OutFileName(const std::string &name) { m_OutFileName = name; }
   void SetClosingScript(const std::string &script) { m_RunAfterClosingScript = script; }
+  const std::string &GetClosingScript() const {return m_RunAfterClosingScript;}
   void SetClosingScriptArgs(const std::string &args) { m_ClosingArgs = args; }
+  const std::string &GetClosingScriptArgs() const { return m_ClosingArgs; }
   int RunAfterClosing();
-  void UseFileRule() { m_UseFileRuleFlag = true; }
+  void UseFileRule(bool b = true) { m_UseFileRuleFlag = b; }
   bool ApplyFileRule() const { return m_UseFileRuleFlag; }
   void SetNEvents(const unsigned int nevt);
   unsigned int GetNEvents() const { return m_MaxEvents; }
@@ -117,7 +128,7 @@ class Fun4AllOutputManager : public Fun4AllBase
   void BufferSize(const int size) { buffersize = size; }
   int SplitLevel() const { return splitlevel; }
   int BufferSize() const { return buffersize; }
-  int Segment() { return m_CurrentSegment; }
+  int Segment() const { return m_CurrentSegment; }
 
  protected:
   /*!
@@ -139,6 +150,12 @@ class Fun4AllOutputManager : public Fun4AllBase
 
   //! Split level of TBranches
   int splitlevel{std::numeric_limits<int>::min()};
+
+  //! Last Event Number in output file
+  int m_LastEventNumber{std::numeric_limits<int>::max()};
+
+  //! Event number for rollover
+  int m_EventRollover{0};
 
   //! Number of Events
   unsigned int m_NEvents{0};

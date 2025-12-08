@@ -28,7 +28,7 @@ typedef struct TowerGeom
   float dZ[2];
   float rotX; // Tower rotation
   float rotY;
-  float rotZ;
+  float rotZ; 
 
 } TowerGeom;
 

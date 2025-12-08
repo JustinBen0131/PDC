@@ -14,16 +14,19 @@ AM_LDFLAGS = \
   -L$(OFFLINE_MAIN)/lib
 
 libglobalvertex_io_la_LIBADD = \
-  -lphool \
-  -ltrackbase_historic_io
+  -lphool
 
 libglobalvertex_la_LIBADD = \
   libglobalvertex_io.la \
-  -ltrackbase_historic_io \
-  -lg4detectors \
-  -lfun4all
+  -lphg4hit \
+  -lSubsysReco \
+  -ltrackbase_historic_io
 
 pkginclude_HEADERS = \
+  CaloVertex.h \
+  CaloVertexv1.h \
+  CaloVertexMap.h \
+  CaloVertexMapv1.h \
   GlobalVertex.h \
   GlobalVertexv1.h \
   GlobalVertexv2.h \
@@ -40,9 +43,17 @@ pkginclude_HEADERS = \
   SvtxVertex_v2.h \
   SvtxVertexMap.h \
   SvtxVertexMap_v1.h \
+  TruthVertex.h \
+  TruthVertex_v1.h \
+  TruthVertexMap.h \
+  TruthVertexMap_v1.h \
   Vertex.h
 
 ROOTDICTS = \
+  CaloVertex_Dict.cc \
+  CaloVertexv1_Dict.cc \
+  CaloVertexMap_Dict.cc \
+  CaloVertexMapv1_Dict.cc \
   GlobalVertex_Dict.cc \
   GlobalVertexv1_Dict.cc \
   GlobalVertexv2_Dict.cc \
@@ -58,6 +69,10 @@ ROOTDICTS = \
   SvtxVertex_v2_Dict.cc \
   SvtxVertexMap_Dict.cc \
   SvtxVertexMap_v1_Dict.cc \
+  TruthVertex_Dict.cc \
+  TruthVertex_v1_Dict.cc \
+  TruthVertexMap_Dict.cc \
+  TruthVertexMap_v1_Dict.cc \
   Vertex_Dict.cc
 
 pcmdir = $(libdir)
@@ -66,6 +81,9 @@ nobase_dist_pcm_DATA = $(ROOTDICTS:.cc=_rdict.pcm)
 
 libglobalvertex_io_la_SOURCES = \
   $(ROOTDICTS) \
+  CaloVertexv1.cc \
+  CaloVertexMap.cc \
+  CaloVertexMapv1.cc \
   GlobalVertex.cc \
   GlobalVertexv1.cc \
   GlobalVertexv2.cc \
@@ -80,6 +98,10 @@ libglobalvertex_io_la_SOURCES = \
   SvtxVertex_v2.cc \
   SvtxVertexMap.cc \
   SvtxVertexMap_v1.cc \
+  TruthVertex.cc \
+  TruthVertex_v1.cc \
+  TruthVertexMap.cc \
+  TruthVertexMap_v1.cc \
   Vertex.cc
 
 libglobalvertex_la_SOURCES = \

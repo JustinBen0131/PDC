@@ -11,10 +11,9 @@
 #include <globalvertex/SvtxVertexMap.h>
 #include <phool/PHCompositeNode.h>
 #include <phool/getClass.h>
-#include <qautils/QAHistManagerDef.h>
 
-#include <trackbase/TrkrClusterContainer.h>
 #include <trackbase/TrackFitUtils.h>
+#include <trackbase/TrkrClusterContainer.h>
 
 #include <trackbase_historic/SvtxTrack.h>
 #include <trackbase_historic/SvtxTrackMap.h>
@@ -41,12 +40,12 @@ int SiliconSeedsQA::InitRun(PHCompositeNode * /*unused*/)
 //____________________________________________________________________________..
 int SiliconSeedsQA::process_event(PHCompositeNode *topNode)
 {
-  auto clustermap = findNode::getClass<TrkrClusterContainer>(topNode, m_clusterContainerName);
-  auto geometry = findNode::getClass<ActsGeometry>(topNode, m_actsgeometryName);
-  auto trackmap = findNode::getClass<SvtxTrackMap>(topNode, m_trackMapName);
-  auto vertexmap = findNode::getClass<SvtxVertexMap>(topNode, m_vertexMapName);
+  auto *clustermap = findNode::getClass<TrkrClusterContainer>(topNode, m_clusterContainerName);
+  auto *geometry = findNode::getClass<ActsGeometry>(topNode, m_actsgeometryName);
+  auto *trackmap = findNode::getClass<SvtxTrackMap>(topNode, m_trackMapName);
+  auto *vertexmap = findNode::getClass<SvtxVertexMap>(topNode, m_vertexMapName);
 
-  if (!trackmap or !clustermap or !geometry or !vertexmap)
+  if (!trackmap || !clustermap || !geometry || !vertexmap)
   {
     std::cout << PHWHERE << "Missing node(s), can't continue" << std::endl;
     return Fun4AllReturnCodes::ABORTEVENT;
@@ -76,8 +75,8 @@ int SiliconSeedsQA::process_event(PHCompositeNode *topNode)
 
     int nmaps = 0;
     int nintt = 0;
-//    int ntpc = 0;
-//    int nmms = 0;
+    //    int ntpc = 0;
+    //    int nmms = 0;
 
     for (auto &ckey : ckeys)
     {
@@ -96,14 +95,14 @@ int SiliconSeedsQA::process_event(PHCompositeNode *topNode)
       //   nmms++;
       //   break;
       default:
-	break;
+        break;
       }
     }
 
     Acts::Vector3 zero = Acts::Vector3::Zero();
     auto dcapair_origin = TrackAnalysisUtils::get_dca(track, zero);
 
-    auto trackvtx = vertexmap->get(track->get_vertex_id());
+    auto *trackvtx = vertexmap->get(track->get_vertex_id());
     if (!trackvtx)
     {
       ntrack_isfromvtx.first++;
@@ -215,7 +214,7 @@ std::string SiliconSeedsQA::getHistoPrefix() const
 
 void SiliconSeedsQA::createHistos()
 {
-  auto hm = QAHistManagerDef::getHistoManager();
+  auto *hm = QAHistManagerDef::getHistoManager();
   assert(hm);
 
   {
@@ -259,22 +258,22 @@ void SiliconSeedsQA::createHistos()
   }
 
   {
-    h_dcaxyorigin_phi = new TH2F(std::string(getHistoPrefix() + "dcaxyorigin_phi").c_str(), "DCA xy origin vs phi;#phi [rad];DCA_{xy} wrt origin [cm];Entries", 300, -3.14159, 3.1459, 90, -3, 3);
+    h_dcaxyorigin_phi = new TH2F(std::string(getHistoPrefix() + "dcaxyorigin_phi").c_str(), "DCA xy origin vs phi;#phi [rad];DCA_{xy} wrt origin [cm];Entries", 300, -3.14159, 3.1459, 600, -3, 3);
     hm->registerHisto(h_dcaxyorigin_phi);
   }
 
   {
-    h_dcaxyvtx_phi = new TH2F(std::string(getHistoPrefix() + "dcaxyvtx_phi").c_str(), "DCA xy vertex vs phi;#phi [rad];DCA_{xy} wrt vertex [cm];Entries", 300, -3.14159, 3.1459, 90, -3, 3);
+    h_dcaxyvtx_phi = new TH2F(std::string(getHistoPrefix() + "dcaxyvtx_phi").c_str(), "DCA xy vertex vs phi;#phi [rad];DCA_{xy} wrt vertex [cm];Entries", 300, -3.14159, 3.1459, 600, -3, 3);
     hm->registerHisto(h_dcaxyvtx_phi);
   }
 
   {
-    h_dcazorigin_phi = new TH2F(std::string(getHistoPrefix() + "dcazorigin_phi").c_str(), "DCA z origin vs phi;#phi [rad];DCA_{z} wrt origin [cm];Entries", 300, -3.14159, 3.1459, 160, -20, 20);
+    h_dcazorigin_phi = new TH2F(std::string(getHistoPrefix() + "dcazorigin_phi").c_str(), "DCA z origin vs phi;#phi [rad];DCA_{z} wrt origin [cm];Entries", 300, -3.14159, 3.1459, 600, -3, 3);
     hm->registerHisto(h_dcazorigin_phi);
   }
 
   {
-    h_dcazvtx_phi = new TH2F(std::string(getHistoPrefix() + "dcazvtx_phi").c_str(), "DCA z vertex vs phi;#phi [rad];DCA_{z} wrt vertex [cm];Entries", 300, -3.14159, 3.1459, 160, -20, 20);
+    h_dcazvtx_phi = new TH2F(std::string(getHistoPrefix() + "dcazvtx_phi").c_str(), "DCA z vertex vs phi;#phi [rad];DCA_{z} wrt vertex [cm];Entries", 300, -3.14159, 3.1459, 600, -3, 3);
     hm->registerHisto(h_dcazvtx_phi);
   }
 
@@ -310,17 +309,17 @@ void SiliconSeedsQA::createHistos()
   }
 
   {
-    h_vx = new TH1F(std::string(getHistoPrefix() + "vx").c_str(), "Vertex x;Vertex x [cm];Entries", 100, -2.5, 2.5);
+    h_vx = new TH1F(std::string(getHistoPrefix() + "vx").c_str(), "Vertex x;Vertex x [cm];Entries", 500, -2.5, 2.5);
     hm->registerHisto(h_vx);
   }
 
   {
-    h_vy = new TH1F(std::string(getHistoPrefix() + "vy").c_str(), "Vertex y;Vertex y [cm];Entries", 100, -2.5, 2.5);
+    h_vy = new TH1F(std::string(getHistoPrefix() + "vy").c_str(), "Vertex y;Vertex y [cm];Entries", 500, -2.5, 2.5);
     hm->registerHisto(h_vy);
   }
 
   {
-    h_vx_vy = new TH2F(std::string(getHistoPrefix() + "vx_vy").c_str(), "Vertex x vs y;Vertex x [cm];Vertex y [cm];Entries", 100, -2.5, 2.5, 100, -2.5, 2.5);
+    h_vx_vy = new TH2F(std::string(getHistoPrefix() + "vx_vy").c_str(), "Vertex x vs y;Vertex x [cm];Vertex y [cm];Entries", 500, -2.5, 2.5, 500, -2.5, 2.5);
     hm->registerHisto(h_vx_vy);
   }
 

@@ -51,7 +51,6 @@ class PHActsVertexPropagator : public SubsysReco
   SvtxVertexMap *m_vertexMap = nullptr;
   std::string m_trackMapName = "SvtxTrackMap";
   SvtxTrackMap *m_trackMap = nullptr;
-  std::map<const unsigned int, Trajectory> *m_trajectories = nullptr;
   std::string m_fieldMap = "";
 };
 

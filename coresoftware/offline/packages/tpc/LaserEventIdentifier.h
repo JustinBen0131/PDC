@@ -2,7 +2,7 @@
 #define TPC_LASEREVENTIDENTIFIER_H
 
 #include <fun4all/SubsysReco.h>
-#include <g4detectors/PHG4TpcCylinderGeomContainer.h>
+#include <g4detectors/PHG4TpcGeomContainer.h>
 #include <trackbase/ActsGeometry.h>
 #include <trackbase/TrkrDefs.h>
 
@@ -14,8 +14,8 @@
 class PHCompositeNode;
 class TrkrHitSet;
 class TrkrHitSetContainer;
-class PHG4TpcCylinderGeom;
-class PHG4TpcCylinderGeomContainer;
+class PHG4TpcGeom;
+class PHG4TpcGeomContainer;
 class LaserEventInfo;
 class LaserEventIdentifier : public SubsysReco
 {
@@ -30,6 +30,8 @@ class LaserEventIdentifier : public SubsysReco
 
   void set_max_time_samples(int val) { m_time_samples_max = val; }
 
+  void set_runnumber(int runnum) { m_runnumber = runnum; }
+
   void set_debug(bool debug) { m_debug = debug; }
   void set_debug_name(const std::string &name) { m_debugFileName = name; }
  private:
@@ -37,7 +39,7 @@ class LaserEventIdentifier : public SubsysReco
 
   TrkrHitSetContainer *m_hits = nullptr;
   ActsGeometry *m_tGeometry = nullptr;
-  PHG4TpcCylinderGeomContainer *m_geom_container = nullptr;
+  PHG4TpcGeomContainer *m_geom_container = nullptr;
 
   LaserEventInfo *m_laserEventInfo = nullptr ;
   bool m_debug = false;
@@ -47,11 +49,15 @@ class LaserEventIdentifier : public SubsysReco
   TH1I *m_itHist_0 = nullptr;
   TH1I *m_itHist_1 = nullptr;
   bool isLaserEvent = false;
+  bool isGl1LaserEvent = false;
+  bool isGl1LaserPileupEvent = false;
   int peakSample0 = -999;
   int peakSample1 = -999;
   float peakWidth0 = -999;
   float peakWidth1 = -999;
+  int m_runnumber = 0;
 
+  uint64_t prev_BCO = 0;
 };
 
 #endif

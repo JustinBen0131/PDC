@@ -80,7 +80,7 @@ void BEmcRec::PrintTowerGeometry(const std::string& fname)
                 << geom.Ycenter << " " << geom.Zcenter << " " << geom.dX[0] << " "
                 << geom.dY[0] << " " << geom.dZ[0] << " " << geom.dX[1] << " "
                 << geom.dY[1] << " " << geom.dZ[1] << std::endl;
-        //    std::cout << "Z0: " << geom.dZ[0] << " || Z1: " << geom.dZ[1] << std::endl;
+        //	std::cout << "Z0: " << geom.dZ[0] << " || Z1: " << geom.dZ[1] << std::endl;
       }
     }
   }
@@ -186,7 +186,7 @@ bool BEmcRec::SetTowerGeometry(int ix, int iy, const RawTowerGeom& raw_geom0)
     geom.rotY = 0;
     geom.rotZ = 0;
 
-    // The tower eta and phi directions should be computed
+    // The tower eta and phi directions should be computed 
     // in the CompleteTowerGeometry method afterwards
     geom.dX[0] = geom.dX[1] = 0;
     geom.dY[0] = geom.dY[1] = 0;
@@ -199,7 +199,7 @@ bool BEmcRec::SetTowerGeometry(int ix, int iy, const RawTowerGeom& raw_geom0)
   if (m_UseDetailedGeometry)
   {
     // copy the input geometry inside fTowerGeomDetailed (only for print)
-    RawTowerGeomv5 *geom_detailed = new RawTowerGeomv5(raw_geom0);
+    RawTowerGeomv5 *geom_detailed = new RawTowerGeomv5(raw_geom0); 
     fTowerGeomDetailed[ich] = geom_detailed;
   }
 
@@ -339,13 +339,13 @@ void BEmcRec::Tower2Global(float E, float xC, float yC,
   {
     CorrectShowerDepth(ix, iy, E, xt, yt, zt, xA, yA, zA);
   }
-  else
+  else 
   {
     // If zvtx is not used (m_UseAltZvtx = 2 in RawClusterBuilderTemplate)
     // then there is no correction of z_cluster
     float savzt = zt;
     CorrectShowerDepth(ix, iy, E, xt, yt, zt, xA, yA, zA);
-    zA = savzt;
+    zA = savzt; 
   }
 }
 
@@ -486,7 +486,7 @@ int BEmcRec::FindClusters()
         CopyVector(LenCltmp, LenCl, MaxLen);
         delete[] LenCltmp;
         MaxLen *= 2;
-        //    std::cout << "Extend array size to " << MaxLen << std::endl;
+        //	std::cout << "Extend array size to " << MaxLen << std::endl;
       }
       nCl++;
       LenCl[nCl - 1] = next - ib;
@@ -508,10 +508,10 @@ int BEmcRec::FindClusters()
           }
           for (int ichc = last; ichc >= last - leng + 1; ichc--)
           {
-            //        if( iab-vhit[ichc].ich >  fNx ) goto new_icl; // From PHENIX version !!! This may be not right for complicated clusters, where tower ordering is not conserved
+            //	    if( iab-vhit[ichc].ich >  fNx ) goto new_icl; // From PHENIX version !!! This may be not right for complicated clusters, where tower ordering is not conserved
 
-            //        if( iae-vhit[ichc].ich >= fNx // From PHENIX version
-        // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
+            //	    if( iae-vhit[ichc].ich >= fNx // From PHENIX version
+	    // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
             if ((vhit[ichc].ich + fNx <= iae && vhit[ichc].ich + fNx >= iab) || (bCYL && (iae % fNx == fNx - 1) && (iae - vhit[ichc].ich == fNx - 1))  // Only for CYLinder geom !!!!
             )
             {
@@ -570,7 +570,7 @@ int BEmcRec::FindClusters()
 // ///////////////////////////////////////////////////////////////////////////
 
 void BEmcRec::Momenta(std::vector<EmcModule>* phit, float& pe, float& px,
-                      float& py, float& pxx, float& pyy, float& pyx,
+                      float& py, float& pxx, float& pyy, float& pyx, 
                       float thresh) const
 {
   // First and second momenta calculation
@@ -610,7 +610,7 @@ void BEmcRec::Momenta(std::vector<EmcModule>* phit, float& pe, float& px,
       ichmax = ph->ich;
     }
     ++ph;
-  }
+  }  
 
   if (emax <= 0)
   {
