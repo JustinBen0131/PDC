@@ -43,7 +43,6 @@ class BEmcRecCEMC : public BEmcRec
   void CorrectShowerDepth(int ix, int iy, float energy, float x, float y, float z, float &xc, float &yc, float &zc) override;
 
   bool calculateIncidence(float x, float y,
-                          float& cos_a_phi, float& cos_a_eta,
                           float& a_phi_sgn, float& a_eta_sgn);
 
   // ---- PUBLIC (add near other getters) ----

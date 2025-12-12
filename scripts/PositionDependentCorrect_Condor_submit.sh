@@ -140,8 +140,8 @@ OUTDIR_DATA="/sphenix/tg/tg01/bulk/jbennett/PDC/output"
 OUTDIR_SIM="/sphenix/tg/tg01/bulk/jbennett/PDC/SimOut"
 
 # Where data DST .list files are
-DST_LIST_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/dst_list"
-# e.g. "dst_calo_run2pp-00047289.list"
+DST_LIST_DIR="/sphenix/u/patsfan753/scratch/PDCrun24pp/dst_lists_pp"
+# e.g. "dst_calofitting-00047289.list"
 
 # Simulation DST + G4Hits .list files
 # Defaults:
@@ -266,7 +266,7 @@ split_golden_run_list()(
     while IFS= read -r runRaw; do
         [[ -z "$runRaw" || "$runRaw" =~ ^# ]] && continue
         local run=$(printf "%08d" "$runRaw")
-        local list_file="${DST_LIST_DIR}/dst_calo_run2pp-${run}.list"
+        local list_file="${DST_LIST_DIR}/dst_calofitting-${run}.list"
 
         if [[ ! -f "$list_file" ]]; then
             echo -e "${CLR_Y}[WARN]${CLR_R} No DST list for run ${run} – skipped"
@@ -387,7 +387,7 @@ submit_data_condor() {
       while IFS= read -r rn; do
             [[ -z "$rn" || "$rn" =~ ^# ]] && continue
             rn=$(printf "%08d" "$((10#$rn))")   # force base-10; keep 8-digit zero-pad
-            lf="${DST_LIST_DIR}/dst_calo_run2pp-${rn}.list"
+            lf="${DST_LIST_DIR}/dst_calofitting-${rn}.list"
             if [[ -f "$lf" ]]; then
                 listFiles+=( "$lf" )
             else
@@ -395,7 +395,7 @@ submit_data_condor() {
             fi
       done < "$runListFile"
     else
-      mapfile -t listFiles < <(ls -1 "${DST_LIST_DIR}"/dst_calo_run2pp-*.list 2>/dev/null)
+      mapfile -t listFiles < <(ls -1 "${DST_LIST_DIR}"/dst_calofitting-*.list 2>/dev/null)
     fi
     (( ${#listFiles[@]} )) || return $(die "No run lists selected under $DST_LIST_DIR")
 
@@ -432,7 +432,7 @@ EOL
       ((++runCounter))
       local runBase runNum
       runBase="$(basename "$dlist")"
-      runNum="${runBase#dst_calo_run2pp-}"
+      runNum="${runBase#dst_calofitting-}"
       runNum="${runNum%.*}"
 
       mapfile -t allfiles < "$dlist"
@@ -564,7 +564,7 @@ local_run_data() {
       nFiles="$arg1"
     fi
     # pick the FIRST run-list in DST_LIST_DIR
-    chosenList=$(ls -1 "${DST_LIST_DIR}"/dst_calo_run2pp-*.list 2>/dev/null | head -n 1)
+    chosenList=$(ls -1 "${DST_LIST_DIR}"/dst_calofitting-*.list 2>/dev/null | head -n 1)
   fi
 
   if [[ -z "$chosenList" || ! -f "$chosenList" ]]; then
@@ -575,7 +575,7 @@ local_run_data() {
   # Derive run number from the chosen list
   local runBase runNum
   runBase="$(basename "$chosenList")"
-  runNum="${runBase#dst_calo_run2pp-}"
+  runNum="${runBase#dst_calofitting-}"
   runNum="${runNum%.*}"
 
   # Build a temporary list with the first N files of the chosen run-list

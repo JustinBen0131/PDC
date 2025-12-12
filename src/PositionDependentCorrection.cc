@@ -19,7 +19,6 @@
 #include <phool/getClass.h>
 #include <globalvertex/GlobalVertex.h>
 #include <globalvertex/GlobalVertexMap.h>
-#include <mbd/BbcGeom.h>
 #include <mbd/MbdPmtContainerV1.h>
 #include <mbd/MbdPmtHit.h>
 #include <TFile.h>
@@ -54,7 +53,7 @@
 #include <TSystem.h>
 #include <g4main/PHG4TruthInfoContainer.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawCluster.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterv2.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterv1.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterContainer.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterUtility.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTower.h"
@@ -2328,13 +2327,17 @@ namespace {
     xCG = yCG = std::numeric_limits<float>::quiet_NaN();
     if (!clus || !geo || !rec) return false;
 
-    // 1) Try RawClusterv2 tower-space getters
-    if (const auto* c2 = dynamic_cast<const RawClusterv2*>(clus))
-    {
-      const float xr = c2->x_tower_raw();
-      const float yr = c2->y_tower_raw();
-      if (std::isfinite(xr) && std::isfinite(yr)) { xCG = xr; yCG = yr; return true; }
-    }
+      // 1) Try property-based tower-space getters (RawClusterv1-backed)
+      {
+        const float xr = clus->x_tower_raw();
+        const float yr = clus->y_tower_raw();
+        if (std::isfinite(xr) && std::isfinite(yr))
+        {
+          xCG = xr;
+          yCG = yr;
+          return true;
+        }
+      }
 
     // 2) Fallback: rebuild the hit list and call Momenta (same as clusterizer)
     std::vector<EmcModule> hitlist;
@@ -2540,46 +2543,43 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     if (vb > 2)
       std::cout << "  CG(x,y)=(" << xCG << ',' << yCG << ")\n";
 
-    /* First-pass RAW CoG cross-check (tower units) using RawClusterv2. */
+    /* First-pass RAW CoG cross-check (tower units) using property CoG. */
     {
       static bool s_checked_raw_phi_once = false;
       if (!s_checked_raw_phi_once)
       {
         constexpr float kTolTw = 5e-4f;
-        const auto* c2 = dynamic_cast<const RawClusterv2*>(clus);
-        if (!c2)
+
+        const float x_raw = clus->x_tower_raw();
+        const float y_raw = clus->y_tower_raw();
+
+        if (!std::isfinite(x_raw) || !std::isfinite(y_raw))
         {
           if (vb > 0)
-            std::cout << "[φ-RAW check] cluster ID=" << clus->get_id()
-                      << " is not RawClusterv2 — skipping validation.\n";
+            std::cout << "[φ-RAW check] non-finite property CoG — skipping.\n";
         }
         else
         {
-          const float x_raw = c2->x_tower_raw();
-          const float y_raw = c2->y_tower_raw();
           const float dx = std::fabs(x_raw - xCG);
           const float dy = std::fabs(y_raw - yCG);
-          if (!std::isfinite(x_raw) || !std::isfinite(y_raw))
-          {
-            if (vb > 0)
-              std::cout << "[φ-RAW check] non-finite v2 CoG — skipping.\n";
-          }
-          else if (dx > kTolTw || dy > kTolTw)
+
+          if (dx > kTolTw || dy > kTolTw)
           {
             std::cerr << std::setprecision(7)
-                      << "[WARN] RAW v2 CoG mismatch (φ path)\n"
+                      << "[WARN] RAW property CoG mismatch (φ path)\n"
                       << "  cluster ID=" << clus->get_id()
                       << "  E=" << eReco << " GeV\n"
-                      << "  v2 (x,y)=(" << x_raw << "," << y_raw << ")\n"
+                      << "  prop (x,y)=(" << x_raw << "," << y_raw << ")\n"
                       << "  recomputed(x,y)=(" << xCG  << "," << yCG  << ")\n"
                       << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
           }
           else if (vb > 0)
           {
-            std::cout << "[φ-RAW check] v2 vs recomputed agree within "
+            std::cout << "[φ-RAW check] prop vs recomputed agree within "
                       << kTolTw << " tower units.\n";
           }
         }
+
         s_checked_raw_phi_once = true;
       }
     }
@@ -2673,46 +2673,43 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     if (vb > 9)
       std::cout << "[CLUS-CP] CorrectPosition  OUT : xC=" << xCP << "  yC=" << yCP << '\n';
 
-    /* First-pass CORR CoG cross-check (tower units) using RawClusterv2. */
+    /* First-pass CORR CoG cross-check (tower units) using property CoG. */
     {
       static bool s_checked_corr_phi_once = false;
       if (!s_checked_corr_phi_once)
       {
         constexpr float kTolTw = 5e-4f;
-        const auto* c2 = dynamic_cast<const RawClusterv2*>(clus);
-        if (!c2)
+
+        const float x_cor = clus->x_tower_corr();
+        const float y_cor = clus->y_tower_corr();
+
+        if (!std::isfinite(x_cor) || !std::isfinite(y_cor))
         {
           if (vb > 0)
-            std::cout << "[φ-CORR check] cluster ID=" << clus->get_id()
-                      << " is not RawClusterv2 — skipping validation.\n";
+            std::cout << "[φ-CORR check] non-finite property CoG — skipping.\n";
         }
         else
         {
-          const float x_cor = c2->x_tower_corr();
-          const float y_cor = c2->y_tower_corr();
           const float dx = std::fabs(x_cor - xCP);
           const float dy = std::fabs(y_cor - yCP);
-          if (!std::isfinite(x_cor) || !std::isfinite(y_cor))
-          {
-            if (vb > 0)
-              std::cout << "[φ-CORR check] non-finite v2 CoG — skipping.\n";
-          }
-          else if (dx > kTolTw || dy > kTolTw)
+
+          if (dx > kTolTw || dy > kTolTw)
           {
             std::cerr << std::setprecision(7)
-                      << "[WARN] CORR v2 CoG mismatch (φ path)\n"
+                      << "[WARN] CORR property CoG mismatch (φ path)\n"
                       << "  cluster ID=" << clus->get_id()
                       << "  E=" << eReco << " GeV\n"
-                      << "  v2 (xC,yC)=(" << x_cor << "," << y_cor << ")\n"
+                      << "  prop (xC,yC)=(" << x_cor << "," << y_cor << ")\n"
                       << "  recomputed(xC,yC)=(" << xCP   << "," << yCP   << ")\n"
                       << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
           }
           else if (vb > 0)
           {
-            std::cout << "[φ-CORR check] v2 vs recomputed agree within "
+            std::cout << "[φ-CORR check] prop vs recomputed agree within "
                       << kTolTw << " tower units.\n";
           }
         }
+
         s_checked_corr_phi_once = true;
       }
     }
@@ -2756,11 +2753,44 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
     {
-      const float aPhiSigned = m_bemcRec->lastSignedAlphaPhi();
+      // Mechanical + production-style incidence evaluated at the
+      // CorrectPosition CoG (xCP,yCP), to match the RawClusterv1 property.
+      float aPhi_mech   = std::numeric_limits<float>::quiet_NaN();
+      float aEtaDummy   = std::numeric_limits<float>::quiet_NaN();
+      float cosPhi      = std::numeric_limits<float>::quiet_NaN();
+      float cosEta      = std::numeric_limits<float>::quiet_NaN();
+
+      float aPhi_ci     = std::numeric_limits<float>::quiet_NaN();
+      float aEta_ci     = std::numeric_limits<float>::quiet_NaN();
+      bool  mech_ok     = false;
+      bool  ci_ok       = false;
+
+      auto* cemc = dynamic_cast<BEmcRecCEMC*>(m_bemcRec);
+      if (cemc && std::isfinite(xCP) && std::isfinite(yCP))
+      {
+        // 1) Mechanical incidence at CorrectPosition CoG
+        mech_ok = cemc->CalculateMechIncidence(
+            eReco, xCP, yCP,
+            cosPhi, cosEta,
+            aPhi_mech, aEtaDummy);
+
+        // 2) Production-style incidence at the same (xCP,yCP)
+        ci_ok = cemc->calculateIncidence(
+            xCP, yCP,
+            aPhi_ci, aEta_ci);
+      }
+
+      if (!mech_ok)
+      {
+        aPhi_mech = std::numeric_limits<float>::quiet_NaN();
+      }
+
+      const float aPhiSigned = aPhi_mech;
       const float aPhiAbs    = std::fabs(aPhiSigned);
 
       // η at shower depth (cluster direction from this vertex)
-      const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
+      const float etaSD_forQA =
+          cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
 
       // Detector η at the front face (tower-row orientation, independent of vtx)
       double etaDet = std::numeric_limits<double>::quiet_NaN();
@@ -2769,7 +2799,9 @@ void PositionDependentCorrection::fillDPhiAllVariants(
       }
 
       // Fill only if angles and both η’s are well-defined
-      if (std::isfinite(aPhiSigned) && std::isfinite(etaSD_forQA) && std::isfinite(etaDet))
+      if (std::isfinite(aPhiSigned) &&
+          std::isfinite(etaSD_forQA) &&
+          std::isfinite(etaDet))
       {
         // (1) Cluster front-face η *with* vtx_z dependence → "SD" TH3
         if (h3_alphaPhi_vsVz_vsEta)
@@ -2779,11 +2811,48 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         if (h3_alphaPhi_vsVz_vsEtaDet)
           h3_alphaPhi_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aPhiSigned);
 
-        if (vb > 0)
-          std::cout << "[INC-FILL φ] TH3  z=" << vtxZ
-                    << "  etaSD=" << etaSD_forQA
-                    << "  etaDet=" << etaDet
-                    << "  a_phi=" << aPhiSigned << "\n";
+        // --- QA vs RawClusterv1 property (filled via calculateIncidence at xcorr,ycorr) ---
+        if (vb > 0 && ci_ok && std::isfinite(aPhi_ci))
+        {
+          const float aPhi_prop =
+              clus->get_property_float(RawCluster::prop_incidence_alpha_phi);
+
+          if (std::isfinite(aPhi_prop))
+          {
+            const float diff_prop_mech = aPhi_prop - aPhi_mech;
+            const float diff_prop_ci   = aPhi_prop - aPhi_ci;
+
+            std::cout << "[INC-QA φ] prop vs recomputed @CP: "
+                      << "alpha_phi(prop)=" << aPhi_prop
+                      << "  alpha_phi(mech@CP)=" << aPhi_mech
+                      << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
+                      << "                     "
+                      << "alpha_phi(calcInc@CP)=" << aPhi_ci
+                      << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
+
+            // Crash only if property disagrees with mech at the same (xCP,yCP)
+            constexpr float kTolAlphaPhi = 1.0e-5f;
+            if (std::fabs(diff_prop_mech) > kTolAlphaPhi)
+            {
+              std::cerr << ANSI_RED
+                        << "[INC-ERROR φ] mismatch between RawClusterv1 property "
+                           "and BEmcRecCEMC incidence at CorrectPosition CoG\n"
+                        << "  clusID=" << clus->get_id()
+                        << "  E=" << eReco << " GeV\n"
+                        << "  alpha_phi(prop)=" << aPhi_prop << "\n"
+                        << "  alpha_phi(mech@CP)=" << aPhi_mech << "\n"
+                        << "  Δ=" << diff_prop_mech
+                        << "  tol=" << kTolAlphaPhi << "\n"
+                        << ANSI_RESET << std::endl;
+              std::abort();
+            }
+          }
+          else if (vb > 0)
+          {
+            std::cout << "[INC-QA φ]  alpha_phi(prop) is NaN/not set; "
+                         "skipping property cross-check.\n";
+          }
+        }
 
         // Per-E incidence maps: signed α on X, Xmeas on Y
         if (iE >= 0 && iE < N_Ebins)
@@ -2794,17 +2863,22 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                        : u_raw;
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
 
-          // sec is even in α, so sec(|α|) = sec(α)
-          const float secA = 1.f / std::max(1e-6f, std::cos(aPhiAbs));
+          // sec is even in α; prefer mech cos if available, otherwise fall back
+          const float cosA = std::isfinite(cosPhi)
+                           ? cosPhi
+                           : std::cos(aPhiAbs);
+          const float secA = 1.f / std::max(1e-6f, cosA);
 
           if (h2_XmeasPhi_vsAlpha_E[iE]) {
             auto* ax = h2_XmeasPhi_vsAlpha_E[iE]->GetXaxis();
             auto* ay = h2_XmeasPhi_vsAlpha_E[iE]->GetYaxis();
             const int ibx = ax->FindFixBin(aPhiSigned);
             const int iby = ay->FindFixBin(Xmeas);
-            const double before = h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            const double before =
+                h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx, iby);
             h2_XmeasPhi_vsAlpha_E[iE]->Fill(aPhiSigned, Xmeas);
-            const double after  = h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            const double after  =
+                h2_XmeasPhi_vsAlpha_E[iE]->GetBinContent(ibx, iby);
             if (vb > 0)
               std::cout << "[INC-FILL φ] h2_XmeasPhi_vsAlpha_E["<<iE<<"]  a="<<aPhiSigned
                         << "  Xmeas="<<Xmeas<<"  bin=("<<ibx<<","<<iby<<")"
@@ -2814,9 +2888,11 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           if (h_alphaPhi_E[iE]) {
             auto* ax = h_alphaPhi_E[iE]->GetXaxis();
             const int ibx = ax->FindFixBin(aPhiAbs);
-            const double before = h_alphaPhi_E[iE]->GetBinContent(ibx);
+            const double before =
+                h_alphaPhi_E[iE]->GetBinContent(ibx);
             h_alphaPhi_E[iE]->Fill(aPhiAbs);
-            const double after  = h_alphaPhi_E[iE]->GetBinContent(ibx);
+            const double after  =
+                h_alphaPhi_E[iE]->GetBinContent(ibx);
             if (vb > 0)
               std::cout << "[INC-FILL φ] h_alphaPhi_E["<<iE<<"]  a="<<aPhiAbs
                         << "  bin="<<ibx<<"  before="<<before<<"  after="<<after<<"\n";
@@ -2825,9 +2901,11 @@ void PositionDependentCorrection::fillDPhiAllVariants(
           if (p_secAlpha_phi_E[iE]) {
             auto* ax = p_secAlpha_phi_E[iE]->GetXaxis();
             const int ibx = ax->FindFixBin(aPhiAbs);
-            const double before = p_secAlpha_phi_E[iE]->GetBinContent(ibx);
+            const double before =
+                p_secAlpha_phi_E[iE]->GetBinContent(ibx);
             p_secAlpha_phi_E[iE]->Fill(aPhiAbs, secA);
-            const double after  = p_secAlpha_phi_E[iE]->GetBinContent(ibx);
+            const double after  =
+                p_secAlpha_phi_E[iE]->GetBinContent(ibx);
             if (vb > 0)
               std::cout << "[INC-FILL φ] p_secAlpha_phi_E["<<iE<<"]  a="<<aPhiAbs
                         << "  sec(a)="<<secA<<"  bin="<<ibx
@@ -2862,6 +2940,7 @@ void PositionDependentCorrection::fillDPhiAllVariants(
         }
       }
     }
+
 
 
 
@@ -3320,46 +3399,43 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     if (vb > 2)
       std::cout << "  CG(x,y)=(" << xCG << ',' << yCG << ")\n";
 
-    /* First-pass RAW CoG cross-check (η path) using RawClusterv2. */
+    /* First-pass RAW CoG cross-check (η path) using property CoG. */
     {
       static bool s_checked_raw_eta_once = false;
       if (!s_checked_raw_eta_once)
       {
         constexpr float kTolTw = 5e-4f;
-        const auto* c2 = dynamic_cast<const RawClusterv2*>(clus);
-        if (!c2)
+
+        const float x_raw = clus->x_tower_raw();
+        const float y_raw = clus->y_tower_raw();
+
+        if (!std::isfinite(x_raw) || !std::isfinite(y_raw))
         {
           if (vb > 0)
-            std::cout << "[η-RAW check] cluster ID=" << clus->get_id()
-                      << " is not RawClusterv2 — skipping validation.\n";
+            std::cout << "[η-RAW check] non-finite property CoG — skipping.\n";
         }
         else
         {
-          const float x_raw = c2->x_tower_raw();
-          const float y_raw = c2->y_tower_raw();
           const float dx = std::fabs(x_raw - xCG);
           const float dy = std::fabs(y_raw - yCG);
-          if (!std::isfinite(x_raw) || !std::isfinite(y_raw))
-          {
-            if (vb > 0)
-              std::cout << "[η-RAW check] non-finite v2 CoG — skipping.\n";
-          }
-          else if (dx > kTolTw || dy > kTolTw)
+
+          if (dx > kTolTw || dy > kTolTw)
           {
             std::cerr << std::setprecision(7)
-                      << "[WARN] RAW v2 CoG mismatch (η path)\n"
+                      << "[WARN] RAW property CoG mismatch (η path)\n"
                       << "  cluster ID=" << clus->get_id()
                       << "  E=" << eReco << " GeV\n"
-                      << "  v2 (x,y)=(" << x_raw << "," << y_raw << ")\n"
+                      << "  prop (x,y)=(" << x_raw << "," << y_raw << ")\n"
                       << "  recomputed(x,y)=(" << xCG   << "," << yCG   << ")\n"
                       << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
           }
           else if (vb > 0)
           {
-            std::cout << "[η-RAW check] v2 vs recomputed agree within "
+            std::cout << "[η-RAW check] prop vs recomputed agree within "
                       << kTolTw << " tower units.\n";
           }
         }
+
         s_checked_raw_eta_once = true;
       }
     }
@@ -3407,46 +3483,43 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     float xCP = xCG, yCP = yCG;
     m_bemcRec->CorrectPosition(eReco, xCG, yCG, xCP, yCP);
 
-    /* First-pass CORR CoG cross-check (η path) using RawClusterv2. */
+    /* First-pass CORR CoG cross-check (η path) using property CoG. */
     {
       static bool s_checked_corr_eta_once = false;
       if (!s_checked_corr_eta_once)
       {
         constexpr float kTolTw = 5e-4f;
-        const auto* c2 = dynamic_cast<const RawClusterv2*>(clus);
-        if (!c2)
+
+        const float x_cor = clus->x_tower_corr();
+        const float y_cor = clus->y_tower_corr();
+
+        if (!std::isfinite(x_cor) || !std::isfinite(y_cor))
         {
           if (vb > 0)
-            std::cout << "[η-CORR check] cluster ID=" << clus->get_id()
-                      << " is not RawClusterv2 — skipping validation.\n";
+            std::cout << "[η-CORR check] non-finite property CoG — skipping.\n";
         }
         else
         {
-          const float x_cor = c2->x_tower_corr();
-          const float y_cor = c2->y_tower_corr();
           const float dx = std::fabs(x_cor - xCP);
           const float dy = std::fabs(y_cor - yCP);
-          if (!std::isfinite(x_cor) || !std::isfinite(y_cor))
-          {
-            if (vb > 0)
-              std::cout << "[η-CORR check] non-finite v2 CoG — skipping.\n";
-          }
-          else if (dx > kTolTw || dy > kTolTw)
+
+          if (dx > kTolTw || dy > kTolTw)
           {
             std::cerr << std::setprecision(7)
-                      << "[WARN] CORR v2 CoG mismatch (η path)\n"
+                      << "[WARN] CORR property CoG mismatch (η path)\n"
                       << "  cluster ID=" << clus->get_id()
                       << "  E=" << eReco << " GeV\n"
-                      << "  v2 (xC,yC)=(" << x_cor << "," << y_cor << ")\n"
+                      << "  prop (xC,yC)=(" << x_cor << "," << y_cor << ")\n"
                       << "  recomputed(xC,yC)=(" << xCP   << "," << yCP   << ")\n"
                       << "  |Δ|=(" << dx << "," << dy << ")  tol=" << kTolTw << '\n';
           }
           else if (vb > 0)
           {
-            std::cout << "[η-CORR check] v2 vs recomputed agree within "
+            std::cout << "[η-CORR check] prop vs recomputed agree within "
                       << kTolTw << " tower units.\n";
           }
         }
+
         s_checked_corr_eta_once = true;
       }
     }
@@ -3483,11 +3556,44 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
     {
-      const float aEtaSigned = m_bemcRec->lastSignedAlphaEta();
+      // Mechanical + production-style incidence evaluated at the
+      // CorrectPosition CoG (xCP,yCP), to match the RawClusterv1 η property.
+      float aPhiDummy  = std::numeric_limits<float>::quiet_NaN();
+      float aEta_mech  = std::numeric_limits<float>::quiet_NaN();
+      float cosPhi     = std::numeric_limits<float>::quiet_NaN();
+      float cosEta     = std::numeric_limits<float>::quiet_NaN();
+
+      float aPhi_ci    = std::numeric_limits<float>::quiet_NaN();
+      float aEta_ci    = std::numeric_limits<float>::quiet_NaN();
+      bool  mech_ok    = false;
+      bool  ci_ok      = false;
+
+      auto* cemc = dynamic_cast<BEmcRecCEMC*>(m_bemcRec);
+      if (cemc && std::isfinite(xCP) && std::isfinite(yCP))
+      {
+        // 1) Mechanical incidence at CorrectPosition CoG
+        mech_ok = cemc->CalculateMechIncidence(
+            eReco, xCP, yCP,
+            cosPhi, cosEta,
+            aPhiDummy, aEta_mech);
+
+        // 2) Production-style incidence at the same (xCP,yCP)
+        ci_ok = cemc->calculateIncidence(
+            xCP, yCP,
+            aPhi_ci, aEta_ci);
+      }
+
+      if (!mech_ok)
+      {
+        aEta_mech = std::numeric_limits<float>::quiet_NaN();
+      }
+
+      const float aEtaSigned = aEta_mech;
       const float aEtaAbs    = std::fabs(aEtaSigned);
 
       // η at shower depth (cluster direction, vtx-dependent)
-      const float etaSD_forQA = cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
+      const float etaSD_forQA =
+          cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
 
       // Detector η at front face (tower row, independent of vtx)
       double etaDet = std::numeric_limits<double>::quiet_NaN();
@@ -3495,7 +3601,9 @@ void PositionDependentCorrection::fillDEtaAllVariants(
         etaDet = std::asinh(zFront / rFront);
       }
 
-      if (std::isfinite(aEtaSigned) && std::isfinite(etaSD_forQA) && std::isfinite(etaDet))
+      if (std::isfinite(aEtaSigned) &&
+          std::isfinite(etaSD_forQA) &&
+          std::isfinite(etaDet))
       {
         // (1) Cluster front-face / depth η (vtx-dependent) → "SD" TH3
         if (h3_alphaEta_vsVz_vsEta)
@@ -3505,30 +3613,72 @@ void PositionDependentCorrection::fillDEtaAllVariants(
         if (h3_alphaEta_vsVz_vsEtaDet)
           h3_alphaEta_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aEtaSigned);
 
-        if (vb > 0)
-          std::cout << "[INC-FILL η] TH3  z=" << vtxZ
-                    << "  etaSD=" << etaSD_forQA
-                    << "  etaDet=" << etaDet
-                    << "  a_eta=" << aEtaSigned << "\n";
+        // --- QA vs RawClusterv1 η property ---
+        if (vb > 0 && ci_ok && std::isfinite(aEta_ci))
+        {
+          const float aEta_prop =
+              clus->get_property_float(RawCluster::prop_incidence_alpha_eta);
+
+          if (std::isfinite(aEta_prop))
+          {
+            const float diff_prop_mech = aEta_prop - aEta_mech;
+            const float diff_prop_ci   = aEta_prop - aEta_ci;
+
+            std::cout << "[INC-QA η] prop vs recomputed @CP: "
+                      << "alpha_eta(prop)=" << aEta_prop
+                      << "  alpha_eta(mech@CP)=" << aEta_mech
+                      << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
+                      << "                     "
+                      << "alpha_eta(calcInc@CP)=" << aEta_ci
+                      << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
+
+            // Crash only if property disagrees with mech at the same (xCP,yCP)
+            constexpr float kTolAlphaEta = 1.0e-5f;
+            if (std::fabs(diff_prop_mech) > kTolAlphaEta)
+            {
+              std::cerr << ANSI_RED
+                        << "[INC-ERROR η] mismatch between RawClusterv1 property "
+                           "and BEmcRecCEMC incidence at CorrectPosition CoG\n"
+                        << "  clusID=" << clus->get_id()
+                        << "  E=" << eReco << " GeV\n"
+                        << "  alpha_eta(prop)=" << aEta_prop << "\n"
+                        << "  alpha_eta(mech@CP)=" << aEta_mech << "\n"
+                        << "  Δ=" << diff_prop_mech
+                        << "  tol=" << kTolAlphaEta << "\n"
+                        << ANSI_RESET << std::endl;
+              std::abort();
+            }
+          }
+          else if (vb > 0)
+          {
+            std::cout << "[INC-QA η]  alpha_eta(prop) is NaN/not set; "
+                         "skipping property cross-check.\n";
+          }
+        }
 
         if (iE >= 0 && iE < N_Ebins)
         {
           float u_raw  = blkCoord.first;
           float u_fold = (u_raw <= -0.5f || u_raw > 1.5f)
-                       ? std::fmod(u_raw + 2.f, 2.f)
+                       ? std::fmod(u_raw + 2.f, 2.0f)
                        : u_raw;
           const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
 
-          const float secA  = 1.f / std::max(1e-6f, std::cos(aEtaAbs));
+          const float cosA  = std::isfinite(cosEta)
+                            ? cosEta
+                            : std::cos(aEtaAbs);
+          const float secA  = 1.f / std::max(1e-6f, cosA);
 
           if (h2_XmeasEta_vsAlpha_E[iE]) {
             auto* ax = h2_XmeasEta_vsAlpha_E[iE]->GetXaxis();
             auto* ay = h2_XmeasEta_vsAlpha_E[iE]->GetYaxis();
             const int ibx = ax->FindFixBin(aEtaSigned);
             const int iby = ay->FindFixBin(Xmeas);
-            const double before = h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            const double before =
+                h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
             h2_XmeasEta_vsAlpha_E[iE]->Fill(aEtaSigned, Xmeas);
-            const double after  = h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
+            const double after  =
+                h2_XmeasEta_vsAlpha_E[iE]->GetBinContent(ibx,iby);
             if (vb > 0)
               std::cout << "[INC-FILL η] h2_XmeasEta_vsAlpha_E["<<iE<<"]  a="<<aEtaSigned
                         << "  Xmeas="<<Xmeas<<"  bin=("<<ibx<<","<<iby<<")"
@@ -3538,9 +3688,11 @@ void PositionDependentCorrection::fillDEtaAllVariants(
           if (h_alphaEta_E[iE]) {
             auto* ax = h_alphaEta_E[iE]->GetXaxis();
             const int ibx = ax->FindFixBin(aEtaAbs);
-            const double before = h_alphaEta_E[iE]->GetBinContent(ibx);
+            const double before =
+                h_alphaEta_E[iE]->GetBinContent(ibx);
             h_alphaEta_E[iE]->Fill(aEtaAbs);
-            const double after  = h_alphaEta_E[iE]->GetBinContent(ibx);
+            const double after  =
+                h_alphaEta_E[iE]->GetBinContent(ibx);
             if (vb > 0)
               std::cout << "[INC-FILL η] h_alphaEta_E["<<iE<<"]  a="<<aEtaAbs
                         << "  bin="<<ibx<<"  before="<<before<<"  after="<<after<<"\n";
@@ -3549,9 +3701,11 @@ void PositionDependentCorrection::fillDEtaAllVariants(
           if (p_secAlpha_eta_E[iE]) {
             auto* ax = p_secAlpha_eta_E[iE]->GetXaxis();
             const int ibx = ax->FindFixBin(aEtaAbs);
-            const double before = p_secAlpha_eta_E[iE]->GetBinContent(ibx);
+            const double before =
+                p_secAlpha_eta_E[iE]->GetBinContent(ibx);
             p_secAlpha_eta_E[iE]->Fill(aEtaAbs, secA);
-            const double after  = p_secAlpha_eta_E[iE]->GetBinContent(ibx);
+            const double after  =
+                p_secAlpha_eta_E[iE]->GetBinContent(ibx);
             if (vb > 0)
               std::cout << "[INC-FILL η] p_secAlpha_eta_E["<<iE<<"]  a="<<aEtaAbs
                         << "  sec(a)="<<secA<<"  bin="<<ibx
@@ -4507,18 +4661,26 @@ void PositionDependentCorrection::finalClusterLoop(
   {
     std::cout << "[DEBUG] finalClusterLoop: Starting OUTER loop over clusters...\n";
   }
-  // -----------------------------------------------------------------
-  // 1) Outer loop over clusters
-  // -----------------------------------------------------------------
-  for (cIt1 = clusterRange.first; cIt1 != clusterRange.second; ++cIt1)
-  {
-      RawCluster* clus1 = cIt1->second;
-      if (!clus1) continue;
-      s_cuts.c1_seen++;
+    // -----------------------------------------------------------------
+    // 1) Outer loop over clusters
+    // -----------------------------------------------------------------
+    for (cIt1 = clusterRange.first; cIt1 != clusterRange.second; ++cIt1)
+    {
+        RawCluster* clus1 = cIt1->second;
+        if (!clus1) continue;
+        s_cuts.c1_seen++;
 
-    CLHEP::Hep3Vector vertex(0,0,vtx_z);
+      // Event vertex used for photon 4-vector
+      CLHEP::Hep3Vector vertex(0,0,vtx_z);
 
-    CLHEP::Hep3Vector E_vec_1 = RawClusterUtility::GetEVec(*clus1, vertex);
+      // IMPORTANT: keep BEmcRecCEMC using the *same* vertex as the clusterizer
+      if (m_bemcRec)
+      {
+        float vtxArr[3] = {0.0f, 0.0f, vtx_z};
+        m_bemcRec->SetVertex(vtxArr);
+      }
+
+      CLHEP::Hep3Vector E_vec_1 = RawClusterUtility::GetEVec(*clus1, vertex);
       
 
       if (std::isnan(E_vec_1.mag()))
@@ -4695,79 +4857,120 @@ void PositionDependentCorrection::finalClusterLoop(
 
     /* 4) find energy slice ........................................... */
     const int iEbin = getEnergySlice( clusE );
-//      
-//      {
-//            const auto* c2 = dynamic_cast<const RawClusterv2*>(clus1);
-//            float x_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-//            float y_raw_v2 = std::numeric_limits<float>::quiet_NaN();
-//            float x_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-//            float y_cor_v2 = std::numeric_limits<float>::quiet_NaN();
-//            float t_mean_v2 = std::numeric_limits<float>::quiet_NaN();
-//            if (c2) {
-//                x_raw_v2 = c2->x_tower_raw();
-//                y_raw_v2 = c2->y_tower_raw();
-//                x_cor_v2 = c2->x_tower_corr();
-//                y_cor_v2 = c2->y_tower_corr();
-//                t_mean_v2 = c2->mean_time(); // NEW: energy-weighted mean time
-//            }
-//            
-//            // recompute CoG (raw) for a sanity check
-//            float x_cog = std::numeric_limits<float>::quiet_NaN();
-//            float y_cog = std::numeric_limits<float>::quiet_NaN();
-//            bool  got_cog = false;
-//            if (m_bemcRec && m_geometry)
-//            {
-//                std::vector<EmcModule> hitlist;
-//                hitlist.reserve(std::distance(clus1->get_towers().first, clus1->get_towers().second));
-//                const int Nx = m_bemcRec->GetNx();
-//                
-//                auto range = clus1->get_towers();
-//                for (auto it = range.first; it != range.second; ++it)
-//                {
-//                    const auto tg = m_geometry->get_tower_geometry(it->first);
-//                    if (!tg) continue;
-//                    EmcModule m;
-//                    m.ich = tg->get_bineta() * Nx + tg->get_binphi();
-//                    m.amp = static_cast<float>(it->second);
-//                    m.tof = 0.0f;
-//                    hitlist.push_back(m);
-//                }
-//                if (!hitlist.empty())
-//                {
-//                    float E=0, px=0, py=0, pxx=0, pyy=0, pyx=0;
-//                    m_bemcRec->Momenta(&hitlist, E, px, py, pxx, pyy, pyx, 0.0f);
-//                    if (E > 0.0f) { x_cog = px; y_cog = py; got_cog = true; }
-//                }
-//            }
-//            
-//            // reuse your existing histos to track v2 − recalc
-//            if (c2 && got_cog)
-//            {
-//                if (h_dx_prop_vsE) h_dx_prop_vsE->Fill(clusE, x_raw_v2 - x_cog);
-//                if (h_dy_prop_vsE) h_dy_prop_vsE->Fill(clusE, y_raw_v2 - y_cog);
-//            }
-//            
-//            if (m_print_first_N_clusters-- > 0)
-//            {
-//                std::cout << ANSI_BOLD << ANSI_GREEN
-//                << "[V2] clusID=" << clus1->get_id()
-//                << "  E=" << clusE << " GeV"
-//                << ANSI_RESET << "\n";
-//                std::cout << "  raw(v2):    (" << x_raw_v2  << "," << y_raw_v2  << ")  "
-//                << (c2 ? "[OK]" : "[MISSING]") << "\n";
-//                if (got_cog)
-//                    std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
-//                if (c2 && got_cog)
-//                    std::cout << "  Δ(raw v2 − recalc): (" << (x_raw_v2 - x_cog) << ","
-//                    << (y_raw_v2 - y_cog) << ")\n";
-//                std::cout << "  corr(v2):   (" << x_cor_v2  << "," << y_cor_v2  << ")  "
-//                << (c2 ? "[OK]" : "[MISSING]") << "\n";
-//                
-//                // NEW: print EW-mean time; mark NaN clearly so you know if timing existed
-//                std::cout << "  t_mean(v2): " << t_mean_v2 << "  "
-//                          << ((c2 && !(std::isnan(t_mean_v2))) ? "[OK]" : "[MISSING/NaN]") << "\n";
-//            }
-//        }
+      
+      //--------------------------------------------------------------------
+      // QA: check that CoG/time/incidence properties on RawClusterv1 are
+      //     accessible and consistent with a recomputed CoG.
+      //--------------------------------------------------------------------
+      {
+        // Property-based values (RawClusterv1 now implements these via property map)
+        const float x_raw_prop  = clus1->x_tower_raw();
+        const float y_raw_prop  = clus1->y_tower_raw();
+        const float x_cor_prop  = clus1->x_tower_corr();
+        const float y_cor_prop  = clus1->y_tower_corr();
+        const float t_mean_prop = clus1->mean_time();
+
+        // Incidence angles stored as properties (may be NaN on old DSTs)
+        const float a_phi_prop =
+            clus1->get_property_float(RawCluster::prop_incidence_alpha_phi);
+        const float a_eta_prop =
+            clus1->get_property_float(RawCluster::prop_incidence_alpha_eta);
+
+        // Recompute CoG (raw) in tower units for a sanity check
+        float x_cog = std::numeric_limits<float>::quiet_NaN();
+        float y_cog = std::numeric_limits<float>::quiet_NaN();
+        bool  got_cog = false;
+        if (m_bemcRec && m_geometry)
+        {
+          got_cog = PDC_detail::clusterCentreOfGravity(
+              clus1, m_geometry, m_bemcRec, x_cog, y_cog);
+        }
+
+        // Optionally recompute incidence at corrected CoG and compare
+        float a_phi_calc = std::numeric_limits<float>::quiet_NaN();
+        float a_eta_calc = std::numeric_limits<float>::quiet_NaN();
+        bool  got_inc    = false;
+        if (m_bemcRec && std::isfinite(x_cor_prop) && std::isfinite(y_cor_prop))
+        {
+          auto* cemc = dynamic_cast<BEmcRecCEMC*>(m_bemcRec);
+          if (cemc)
+          {
+            float a_phi_tmp = std::numeric_limits<float>::quiet_NaN();
+            float a_eta_tmp = std::numeric_limits<float>::quiet_NaN();
+            if (cemc->calculateIncidence(x_cor_prop, y_cor_prop,
+                                         a_phi_tmp, a_eta_tmp))
+            {
+              a_phi_calc = a_phi_tmp;
+              a_eta_calc = a_eta_tmp;
+              got_inc    = true;
+            }
+          }
+        }
+
+        // Fill QA histos: property raw CoG − recomputed CoG vs E
+        if (got_cog)
+        {
+          if (h_dx_prop_vsE && std::isfinite(x_raw_prop))
+            h_dx_prop_vsE->Fill(clusE, x_raw_prop - x_cog);
+          if (h_dy_prop_vsE && std::isfinite(y_raw_prop))
+            h_dy_prop_vsE->Fill(clusE, y_raw_prop - y_cog);
+        }
+
+        // Print a few clusters to verify everything is wired correctly
+        if (m_print_first_N_clusters-- > 0)
+        {
+          std::cout << ANSI_BOLD << ANSI_GREEN
+                    << "[V1-props] clusID=" << clus1->get_id()
+                    << "  E=" << clusE << " GeV"
+                    << ANSI_RESET << "\n";
+
+          // Raw CoG from properties
+          std::cout << "  raw(prop):   (" << x_raw_prop << "," << y_raw_prop << ")  "
+                    << ((std::isfinite(x_raw_prop) && std::isfinite(y_raw_prop))
+                          ? "[OK]" : "[NaN/missing]")
+                    << "\n";
+
+          // Recomputed CoG and difference
+          if (got_cog)
+          {
+            std::cout << "  raw(recalc):(" << x_cog << "," << y_cog << ")\n";
+            if (std::isfinite(x_raw_prop) && std::isfinite(y_raw_prop))
+            {
+              std::cout << "  Δ(raw prop − recalc): ("
+                        << (x_raw_prop - x_cog) << ","
+                        << (y_raw_prop - y_cog) << ")\n";
+            }
+          }
+
+          // Corrected CoG from properties
+          std::cout << "  corr(prop):  (" << x_cor_prop << "," << y_cor_prop << ")  "
+                    << ((std::isfinite(x_cor_prop) && std::isfinite(y_cor_prop))
+                          ? "[OK]" : "[NaN/missing]")
+                    << "\n";
+
+          // Mean time from properties
+          std::cout << "  t_mean(prop): " << t_mean_prop << "  "
+                    << (std::isfinite(t_mean_prop) ? "[OK]" : "[NaN/missing]")
+                    << "\n";
+
+          // Incidence angles from properties
+          std::cout << "  alpha_phi(prop): " << a_phi_prop << "  "
+                    << (std::isfinite(a_phi_prop) ? "[OK]" : "[NaN/missing]")
+                    << "\n";
+          std::cout << "  alpha_eta(prop): " << a_eta_prop << "  "
+                    << (std::isfinite(a_eta_prop) ? "[OK]" : "[NaN/missing]")
+                    << "\n";
+
+          // Optional: compare to freshly recomputed incidence at (x_corr,y_corr)
+          if (got_inc)
+          {
+            std::cout << "  alpha_phi(calc@corr): " << a_phi_calc
+                      << "  Δφ_inc = " << (a_phi_prop - a_phi_calc) << "\n";
+            std::cout << "  alpha_eta(calc@corr): " << a_eta_calc
+                      << "  Δη_inc = " << (a_eta_prop - a_eta_calc) << "\n";
+          }
+        }
+      }
 
 
 

@@ -25,7 +25,7 @@
 #include <fun4all/SubsysReco.h>
 #include <calotrigger/TriggerAnalyzer.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawCluster.h"
-#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterv2.h"
+#include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterv1.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawClusterContainer.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerDefs.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerGeom.h"
@@ -44,7 +44,7 @@ class RawTowerGeomContainer;
 class RawClusterContainer;
 class BEmcRecCEMC;
 class RawCluster;
-class RawClusterv2; 
+class RawClusterv1;
 
 /* ROOT */
 class TFile;  class TNtuple; class TTree;
