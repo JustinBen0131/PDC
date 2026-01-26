@@ -14,6 +14,8 @@
 #include <TH2F.h>
 #include <regex>
 #include <TH3F.h>
+#include <TTree.h>
+#include <TLine.h>
 #include <TString.h>
 #include <TVector2.h>
 #include <TF1.h>
@@ -33,7 +35,7 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <string>
+#include <string>x
 #include <utility>
 #include <vector>
 
@@ -1887,7 +1889,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       cSD.SetBottomMargin(0.12); cSD.SetTopMargin(0.08);
 
       TH2F frameSD("frameEta_SD",
-                   "#eta_{SD} Incidence in Bins of |#eta_{SD}| versus z;z_{vtx} (cm)  (|z|<60);#LT#alpha_{#eta}^{signed}#GT [rad]",
+                   "#eta Incidence in Bins of |#eta_{SD}| versus z;z_{vtx} (cm)  (|z|<60);#LT#alpha_{#eta}^{signed}#GT [rad]",
                    100, zRangeMin, zRangeMax, 100, yMin, yMax);
       frameSD.SetStats(0); frameSD.Draw();
 
@@ -1940,7 +1942,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
           cDet.SetBottomMargin(0.12); cDet.SetTopMargin(0.08);
 
           TH2F frameDet("frameEta_det",
-                        "#eta_{det} Incidence in Bins of |#eta_{det}| versus z;z_{vtx} (cm)  (|z|<60);#LT#alpha_{#eta}^{signed}#GT [rad]",
+                        "#eta Incidence in Bins of |#eta_{det}| versus z;z_{vtx} (cm)  (|z|<60);#LT#alpha_{#eta}^{signed}#GT [rad]",
                         100, zRangeMin, zRangeMax, 100, yMinDet, yMaxDet);
           frameDet.SetStats(0); frameDet.Draw();
 
@@ -2130,9 +2132,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
     }
 
 
-    // ===== <alpha>(η) with three |z| caps overlaid (η on x-axis) =====
-    // Build profile ⟨α⟩(η) integrating over |z|<cap; signed α carried on Z.
-    auto makeProfileVsEta = [&](TH3F* h3, const char* name, int zCap)->std::unique_ptr<TProfile>
+    auto makeProfileVsEta = [&](TH3F* h3, const char* name, double zAbsLo, double zAbsHi)->std::unique_ptr<TProfile>
     {
       if (!h3) return nullptr;
 
@@ -2140,8 +2140,9 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       auto* axEta = h3->GetYaxis();  // η (η_SD or η_det, depending on input)
       auto* axA   = h3->GetZaxis();  // α^{signed}
 
-      const int xlo = std::max(1, axZ->FindFixBin(-zCap));
-      const int xhi = std::min(axZ->GetNbins(), axZ->FindFixBin(+zCap));
+      // Only scan up to the *outer* edge; apply the inner edge via a per-bin |z| cut.
+      const int xlo = std::max(1, axZ->FindFixBin(-zAbsHi));
+      const int xhi = std::min(axZ->GetNbins(), axZ->FindFixBin(+zAbsHi));
 
       auto prof = std::make_unique<TProfile>(name, "",
                                              axEta->GetNbins(),
@@ -2152,8 +2153,18 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       for (int iy = 1; iy <= axEta->GetNbins(); ++iy)
       {
         double sumw = 0.0, sum = 0.0;
+
         for (int ix = xlo; ix <= xhi; ++ix)
         {
+          const double zc = axZ->GetBinCenter(ix);
+          const double az = std::fabs(zc);
+
+          // Disjoint |z| bins:
+          //   - first bin:       |z| <= zAbsHi             (zAbsLo == 0)
+          //   - subsequent bins:  zAbsLo < |z| <= zAbsHi   (zAbsLo > 0)
+          if (az > zAbsHi) continue;
+          if (zAbsLo > 0.0 && az <= zAbsLo) continue;
+
           // include α under/overflow defensively
           for (int ia = 0; ia <= axA->GetNbins() + 1; ++ia)
           {
@@ -2168,8 +2179,10 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
             sumw += w; sum += w * a;
           }
         }
+
         if (sumw > 0.0) prof->Fill(axEta->GetBinCenter(iy), sum / sumw, sumw);
       }
+
       return prof;
     };
 
@@ -2218,12 +2231,12 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       if (p30) { p30->SetLineColor(kBlue +1); p30->SetLineWidth(3); p30->SetMarkerStyle(0); p30->Draw("hist same"); }
       if (p60) { p60->SetLineColor(kRed  +1); p60->SetLineWidth(3); p60->SetMarkerStyle(0); p60->Draw("hist same"); }
 
-      TLegend lg(0.60,0.75,0.92,0.90);
-      lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.038);
-      if (p10) lg.AddEntry(p10, "|z_{vtx}| #leq 10", "l");
-      if (p30) lg.AddEntry(p30, "|z_{vtx}| #leq 30", "l");
-      if (p60) lg.AddEntry(p60, "|z_{vtx}| #leq 60", "l");
-      lg.Draw();
+        TLegend lg(0.60,0.75,0.92,0.90);
+        lg.SetBorderSize(0); lg.SetFillStyle(0); lg.SetTextSize(0.038);
+        if (p10) lg.AddEntry(p10, "|z_{vtx}| #leq 10", "l");
+        if (p30) lg.AddEntry(p30, "10 < |z_{vtx}| #leq 30", "l");
+        if (p60) lg.AddEntry(p60, "30 < |z_{vtx}| #leq 60", "l");
+        lg.Draw();
 
       c.SaveAs(pngPath.c_str());
     };
@@ -2237,36 +2250,40 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       std::unique_ptr<TProfile> pEta10, pEta30, pEta60;
       std::unique_ptr<TProfile> pPhi10, pPhi30, pPhi60;
 
-      if (h3Eta) {
-        pEta10 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_SD_cap10", 10);
-        pEta30 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_SD_cap30", 30);
-        pEta60 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_SD_cap60", 60);
-        // Label x-axis as η_SD
-        if (pEta10) pEta10->GetXaxis()->SetTitle("#eta_{SD}");
-        if (pEta30) pEta30->GetXaxis()->SetTitle("#eta_{SD}");
-        if (pEta60) pEta60->GetXaxis()->SetTitle("#eta_{SD}");
+        if (h3Eta) {
+          // Disjoint |z| bins: |z|<=10, 10<|z|<=30, 30<|z|<=60
+          pEta10 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_SD_zbin0_10",  0.0, 10.0);
+          pEta30 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_SD_zbin10_30", 10.0, 30.0);
+          pEta60 = makeProfileVsEta(h3Eta.get(), "p_alphaEta_vsEta_SD_zbin30_60", 30.0, 60.0);
 
-        drawEtaXOverlay(pEta10.get(), pEta30.get(), pEta60.get(),
-                        outPngEtaSD.c_str(),
-                        "#eta Incidence in Bins of |z| versus #eta_{SD}",
-                        "#eta_{SD}");
-        std::cout << "[incidenceQA] wrote " << outPngEtaSD << "\n";
-      }
+          // Label x-axis as η_SD
+          if (pEta10) pEta10->GetXaxis()->SetTitle("#eta_{SD}");
+          if (pEta30) pEta30->GetXaxis()->SetTitle("#eta_{SD}");
+          if (pEta60) pEta60->GetXaxis()->SetTitle("#eta_{SD}");
 
-      if (h3Phi) {
-        pPhi10 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_SD_cap10", 10);
-        pPhi30 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_SD_cap30", 30);
-        pPhi60 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_SD_cap60", 60);
-        if (pPhi10) pPhi10->GetXaxis()->SetTitle("#eta_{SD}");
-        if (pPhi30) pPhi30->GetXaxis()->SetTitle("#eta_{SD}");
-        if (pPhi60) pPhi60->GetXaxis()->SetTitle("#eta_{SD}");
+          drawEtaXOverlay(pEta10.get(), pEta30.get(), pEta60.get(),
+                          outPngEtaSD.c_str(),
+                          "#eta Incidence in Bins of |z| versus #eta_{SD}",
+                          "#eta_{SD}");
+          std::cout << "[incidenceQA] wrote " << outPngEtaSD << "\n";
+        }
 
-        drawEtaXOverlay(pPhi10.get(), pPhi30.get(), pPhi60.get(),
-                        outPngPhiSD.c_str(),
-                        "#LT#alpha_{#varphi}^{signed}#GT vs #eta_{SD}",
-                        "#eta_{SD}");
-        std::cout << "[incidenceQA] wrote " << outPngPhiSD << "\n";
-      }
+        if (h3Phi) {
+          // Disjoint |z| bins: |z|<=10, 10<|z|<=30, 30<|z|<=60
+          pPhi10 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_SD_zbin0_10",  0.0, 10.0);
+          pPhi30 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_SD_zbin10_30", 10.0, 30.0);
+          pPhi60 = makeProfileVsEta(h3Phi.get(), "p_alphaPhi_vsEta_SD_zbin30_60", 30.0, 60.0);
+
+          if (pPhi10) pPhi10->GetXaxis()->SetTitle("#eta_{SD}");
+          if (pPhi30) pPhi30->GetXaxis()->SetTitle("#eta_{SD}");
+          if (pPhi60) pPhi60->GetXaxis()->SetTitle("#eta_{SD}");
+
+          drawEtaXOverlay(pPhi10.get(), pPhi30.get(), pPhi60.get(),
+                          outPngPhiSD.c_str(),
+                          "#LT#alpha_{#varphi}^{signed}#GT vs #eta_{SD}",
+                          "#eta_{SD}");
+          std::cout << "[incidenceQA] wrote " << outPngPhiSD << "\n";
+        }
 
       // ---------- η_det-based overlays (detector η) ----------
       if (h3EtaDet || h3PhiDet) {
@@ -2276,35 +2293,39 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
         std::unique_ptr<TProfile> pEta10Det, pEta30Det, pEta60Det;
         std::unique_ptr<TProfile> pPhi10Det, pPhi30Det, pPhi60Det;
 
-        if (h3EtaDet) {
-          pEta10Det = makeProfileVsEta(h3EtaDet.get(), "p_alphaEta_vsEtaDet_cap10", 10);
-          pEta30Det = makeProfileVsEta(h3EtaDet.get(), "p_alphaEta_vsEtaDet_cap30", 30);
-          pEta60Det = makeProfileVsEta(h3EtaDet.get(), "p_alphaEta_vsEtaDet_cap60", 60);
-          if (pEta10Det) pEta10Det->GetXaxis()->SetTitle("#eta_{det}");
-          if (pEta30Det) pEta30Det->GetXaxis()->SetTitle("#eta_{det}");
-          if (pEta60Det) pEta60Det->GetXaxis()->SetTitle("#eta_{det}");
+          if (h3EtaDet) {
+            // Disjoint |z| bins: |z|<=10, 10<|z|<=30, 30<|z|<=60
+            pEta10Det = makeProfileVsEta(h3EtaDet.get(), "p_alphaEta_vsEtaDet_zbin0_10",  0.0, 10.0);
+            pEta30Det = makeProfileVsEta(h3EtaDet.get(), "p_alphaEta_vsEtaDet_zbin10_30", 10.0, 30.0);
+            pEta60Det = makeProfileVsEta(h3EtaDet.get(), "p_alphaEta_vsEtaDet_zbin30_60", 30.0, 60.0);
 
-          drawEtaXOverlay(pEta10Det.get(), pEta30Det.get(), pEta60Det.get(),
-                          outPngEtaDet.c_str(),
-                          "#eta Incidence in Bins of |z| versus #eta_{det}",
-                          "#eta_{det}");
-          std::cout << "[incidenceQA] wrote " << outPngEtaDet << "\n";
-        }
+            if (pEta10Det) pEta10Det->GetXaxis()->SetTitle("#eta_{det}");
+            if (pEta30Det) pEta30Det->GetXaxis()->SetTitle("#eta_{det}");
+            if (pEta60Det) pEta60Det->GetXaxis()->SetTitle("#eta_{det}");
 
-        if (h3PhiDet) {
-          pPhi10Det = makeProfileVsEta(h3PhiDet.get(), "p_alphaPhi_vsEtaDet_cap10", 10);
-          pPhi30Det = makeProfileVsEta(h3PhiDet.get(), "p_alphaPhi_vsEtaDet_cap30", 30);
-          pPhi60Det = makeProfileVsEta(h3PhiDet.get(), "p_alphaPhi_vsEtaDet_cap60", 60);
-          if (pPhi10Det) pPhi10Det->GetXaxis()->SetTitle("#eta_{det}");
-          if (pPhi30Det) pPhi30Det->GetXaxis()->SetTitle("#eta_{det}");
-          if (pPhi60Det) pPhi60Det->GetXaxis()->SetTitle("#eta_{det}");
+            drawEtaXOverlay(pEta10Det.get(), pEta30Det.get(), pEta60Det.get(),
+                            outPngEtaDet.c_str(),
+                            "#eta Incidence in Bins of |z| versus #eta_{det}",
+                            "#eta_{det}");
+            std::cout << "[incidenceQA] wrote " << outPngEtaDet << "\n";
+          }
 
-          drawEtaXOverlay(pPhi10Det.get(), pPhi30Det.get(), pPhi60Det.get(),
-                          outPngPhiDet.c_str(),
-                          "#LT#alpha_{#varphi}^{signed}#GT vs #eta_{det}",
-                          "#eta_{det}");
-          std::cout << "[incidenceQA] wrote " << outPngPhiDet << "\n";
-        }
+          if (h3PhiDet) {
+            // Disjoint |z| bins: |z|<=10, 10<|z|<=30, 30<|z|<=60
+            pPhi10Det = makeProfileVsEta(h3PhiDet.get(), "p_alphaPhi_vsEtaDet_zbin0_10",  0.0, 10.0);
+            pPhi30Det = makeProfileVsEta(h3PhiDet.get(), "p_alphaPhi_vsEtaDet_zbin10_30", 10.0, 30.0);
+            pPhi60Det = makeProfileVsEta(h3PhiDet.get(), "p_alphaPhi_vsEtaDet_zbin30_60", 30.0, 60.0);
+
+            if (pPhi10Det) pPhi10Det->GetXaxis()->SetTitle("#eta_{det}");
+            if (pPhi30Det) pPhi30Det->GetXaxis()->SetTitle("#eta_{det}");
+            if (pPhi60Det) pPhi60Det->GetXaxis()->SetTitle("#eta_{det}");
+
+            drawEtaXOverlay(pPhi10Det.get(), pPhi30Det.get(), pPhi60Det.get(),
+                            outPngPhiDet.c_str(),
+                            "#LT#alpha_{#varphi}^{signed}#GT vs #eta_{det}",
+                            "#eta_{det}");
+            std::cout << "[incidenceQA] wrote " << outPngPhiDet << "\n";
+          }
       }
     }
 
@@ -5163,6 +5184,525 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
 }
 
 
+// ============================================================================
+// NEW: Blockwise b(E) extraction per sector/module/blockPhi (tilt-style output)
+//
+// Reads TH3s written by PositionDependentCorrection.cc (flat in the ROOT file):
+//   h3_blockCoord_E_full_sXX_mYY_bZ_range
+//   h3_blockCoord_E_full_sXX_mYY_bZ_disc
+//
+// Where:
+//   sector  sXX = 00..63
+//   module  mYY = 00..23   (within that hemisphere)
+//   blockPhi bZ = 0..3     (four 2×2 blocks per module in phi)
+//
+// Outputs (under outBaseDir):
+//   1) PDC_bvalues.root  : TTree "bvalsSMB" (machine-readable)
+//   2) bvaluePNGs/sector_XX/ : tilt-style PNGs + summary_table.txt
+//
+// Fit logic is EXACTLY the same as your global workflow:
+//   For each TH3 and energy bin:
+//     - restrict Z to [Elo,Ehi]
+//     - Project3D("y") => phi distribution
+//     - Project3D("x") => eta distribution
+//     - FitAsinh1D() on each projection (same seeds, same fit window)
+//
+// This is intentionally "derived-output only"; it does NOT reorganize the
+// raw TH3s in the input file.
+// ============================================================================
+
+static inline TH3F* GetSMBHistFull(TFile* fin,
+                                  int sector,
+                                  int module,
+                                  int blockPhi,
+                                  std::string& usedMode)
+{
+  usedMode.clear();
+  if (!fin) return nullptr;
+
+  // Prefer range if both exist
+  const char* modes[] = {"range", "disc"};
+  for (const char* m : modes)
+  {
+    TH3F* h = nullptr;
+    fin->GetObject(Form("h3_blockCoord_E_full_s%02d_m%02d_b%d_%s",
+                        sector, module, blockPhi, m), h);
+    if (h)
+    {
+      usedMode = m;
+      return h;
+    }
+  }
+  return nullptr;
+}
+
+static inline bool FitBFromSMBHist(TH3F* h3,
+                                  double eLo,
+                                  double eHi,
+                                  BRes& outPhi,
+                                  BRes& outEta,
+                                  Long64_t& nPhi,
+                                  Long64_t& nEta)
+{
+  outPhi = BRes();
+  outEta = BRes();
+  nPhi   = 0;
+  nEta   = 0;
+  if (!h3) return false;
+
+  // Save axis ranges (restore after)
+  TAxis* axX = h3->GetXaxis();
+  TAxis* axY = h3->GetYaxis();
+  TAxis* axZ = h3->GetZaxis();
+
+  const int xFirst = axX->GetFirst(), xLast = axX->GetLast();
+  const int yFirst = axY->GetFirst(), yLast = axY->GetLast();
+  const int zFirst = axZ->GetFirst(), zLast = axZ->GetLast();
+
+  const int zLo = std::max(1, axZ->FindBin(eLo + 1e-9));
+  const int zHi = std::min(h3->GetNbinsZ(), axZ->FindBin(eHi - 1e-9));
+
+  axZ->SetRange(zLo, zHi);
+  axX->SetRange(1, h3->GetNbinsX());
+  axY->SetRange(1, h3->GetNbinsY());
+
+  // φ (Y projection)
+  TH1D* hPhi = static_cast<TH1D*>(h3->Project3D("y"));
+  if (!hPhi)
+  {
+    axX->SetRange(xFirst,xLast); axY->SetRange(yFirst,yLast); axZ->SetRange(zFirst,zLast);
+    return false;
+  }
+  hPhi->SetDirectory(nullptr);
+
+  // η (X projection)
+  TH1D* hEta = static_cast<TH1D*>(h3->Project3D("x"));
+  if (!hEta)
+  {
+    delete hPhi;
+    axX->SetRange(xFirst,xLast); axY->SetRange(yFirst,yLast); axZ->SetRange(zFirst,zLast);
+    return false;
+  }
+  hEta->SetDirectory(nullptr);
+
+  nPhi = static_cast<Long64_t>(hPhi->GetEntries());
+  nEta = static_cast<Long64_t>(hEta->GetEntries());
+
+  outPhi = FitAsinh1D(hPhi);
+  outEta = FitAsinh1D(hEta);
+
+  delete hPhi;
+  delete hEta;
+
+  // Restore ranges
+  axX->SetRange(xFirst,xLast);
+  axY->SetRange(yFirst,yLast);
+  axZ->SetRange(zFirst,zLast);
+
+  const bool okPhi = std::isfinite(outPhi.val);
+  const bool okEta = std::isfinite(outEta.val);
+  return (okPhi || okEta);
+}
+
+static inline void SaveBvsModulePlot(const std::string& outPng,
+                                     int sector,
+                                     const char* canvasKey,
+                                     const char* plotTitle,
+                                     const char* yAxisLabel,
+                                     const char* energyLabel,
+                                     const double bVal[24][4],
+                                     const double bErr[24][4],
+                                     const bool   has [24][4])
+{
+  gStyle->SetOptStat(0);
+
+  const int nMod = 24;
+  const int nBlk = 4;
+  const double dx = 0.20;
+
+  double xPts[nBlk][nMod];
+  double yPts[nBlk][nMod];
+  double exPts[nBlk][nMod];
+  double eyPts[nBlk][nMod];
+  int    nPts[nBlk] = {0,0,0,0};
+
+  double yMin =  1.0e9;
+  double yMax = -1.0e9;
+
+  for (int m=0;m<nMod;++m)
+  {
+    const double xc = static_cast<double>(m) + 0.5;
+    for (int b=0;b<nBlk;++b)
+    {
+      if (!has[m][b]) continue;
+
+      const int idx = nPts[b];
+      const double x = xc + (static_cast<double>(b) - 1.5) * dx;
+
+      xPts[b][idx]  = x;
+      yPts[b][idx]  = bVal[m][b];
+      exPts[b][idx] = 0.0;
+      eyPts[b][idx] = bErr[m][b];
+      nPts[b]++;
+
+      if (std::isfinite(bVal[m][b]))
+      {
+        yMin = std::min(yMin, bVal[m][b]);
+        yMax = std::max(yMax, bVal[m][b]);
+      }
+    }
+  }
+
+  int frameBlock = -1;
+  for (int b=0;b<nBlk;++b) { if (nPts[b]>0) { frameBlock=b; break; } }
+  if (frameBlock < 0) return;
+
+  if (!(std::isfinite(yMin) && std::isfinite(yMax))) { yMin = 0.0; yMax = 1.0; }
+  double span = yMax - yMin;
+  if (span <= 0.0) span = std::max(1.0e-3, std::fabs(yMax));
+  double pad  = 0.25 * span;
+  const double yLow  = yMin - pad;
+  const double yHigh = yMax + pad;
+
+  TCanvas* c = new TCanvas(Form("c_%s_s%02d_%s", canvasKey, sector, energyLabel),
+                           Form("Sector %02d", sector),
+                           1600, 450);
+  c->SetMargin(0.06, 0.02, 0.14, 0.08);
+  c->SetGrid(0,0);
+
+  TGraphErrors* gFrame = new TGraphErrors(nPts[frameBlock],
+                                          xPts[frameBlock],
+                                          yPts[frameBlock],
+                                          exPts[frameBlock],
+                                          eyPts[frameBlock]);
+  gFrame->SetTitle(Form("Sector %02d — %s (%s);Module index;%s",
+                        sector, plotTitle, energyLabel, yAxisLabel));
+  gFrame->SetMarkerStyle(20);
+  gFrame->SetMarkerSize(0.0);
+  gFrame->SetMarkerColor(kWhite);
+  gFrame->SetLineColor(0);
+  gFrame->Draw("AP");
+
+  gFrame->GetXaxis()->SetLimits(0.0, static_cast<double>(nMod));
+  gFrame->GetXaxis()->SetNdivisions(nMod, 0, 0);
+  gFrame->GetXaxis()->SetTickLength(0.02);
+  gFrame->GetXaxis()->SetTitle("Module index");
+  gFrame->GetXaxis()->SetTitleSize(0.045);
+  gFrame->GetXaxis()->SetTitleOffset(1.0);
+  gFrame->GetXaxis()->SetLabelSize(0.0);
+
+  gFrame->GetYaxis()->SetTitle("");
+  gFrame->GetYaxis()->SetLabelSize(0.035);
+  gFrame->GetYaxis()->SetRangeUser(yLow, yHigh);
+
+  // Vertical dashed lines at module edges
+  for (int edge=0; edge<=nMod; ++edge)
+  {
+    const double xEdge = static_cast<double>(edge);
+    TLine* l = new TLine(xEdge, yLow, xEdge, yHigh);
+    l->SetLineStyle(2);
+    l->SetLineWidth(1);
+    l->SetLineColor(kGray+1);
+    l->Draw("SAME");
+  }
+
+  int blockColor[nBlk] = { kBlue, kRed, kGreen+2, kBlack };
+  TGraphErrors* gB[nBlk] = {nullptr,nullptr,nullptr,nullptr};
+
+  for (int b=0;b<nBlk;++b)
+  {
+    if (nPts[b] <= 0) continue;
+    gB[b] = new TGraphErrors(nPts[b], xPts[b], yPts[b], exPts[b], eyPts[b]);
+    gB[b]->SetMarkerStyle(20);
+    gB[b]->SetMarkerSize(1.1);
+    gB[b]->SetMarkerColor(blockColor[b]);
+    gB[b]->SetLineColor(blockColor[b]);
+    gB[b]->SetLineWidth(1);
+    gB[b]->Draw("P SAME");
+  }
+
+  // Legend placement like your tilt plots:
+  // North sectors -> bottom-right, South -> top-left
+  const bool isNorth = (sector < 32);
+  double x1,y1,x2,y2;
+  if (isNorth) { x1=0.78; y1=0.30; x2=0.97; y2=0.52; }
+  else         { x1=0.10; y1=0.66; x2=0.30; y2=0.88; }
+
+  TLegend* leg = new TLegend(x1,y1,x2,y2);
+  leg->SetBorderSize(0);
+  leg->SetFillStyle(0);
+  leg->SetTextSize(0.040);
+  leg->SetTextAlign(12);
+  leg->SetHeader("#bf{Blocks within Modules}", "L");
+  for (int b=0;b<nBlk;++b)
+  {
+    if (!gB[b]) continue;
+    leg->AddEntry(gB[b], Form("Block %d", b+1), "P");
+  }
+  leg->Draw();
+
+  // Dummy module labels 1..24
+  TLatex latex;
+  latex.SetTextAlign(22);
+  latex.SetTextSize(0.030);
+  const double yLabel = yLow + 0.05 * (yHigh-yLow);
+  for (int m=0;m<nMod;++m)
+  {
+    const double xc = static_cast<double>(m) + 0.5;
+    latex.DrawLatex(xc, yLabel, Form("%d", m+1));
+  }
+
+  // Y-axis label in NDC to avoid clipping
+  TLatex latexY;
+  latexY.SetNDC();
+  latexY.SetTextAngle(90);
+  latexY.SetTextAlign(22);
+  latexY.SetTextSize(0.045);
+  latexY.DrawLatex(0.032,0.55,yAxisLabel);
+
+  c->SaveAs(outPng.c_str());
+
+  delete leg;
+  for (int b=0;b<nBlk;++b) { delete gB[b]; }
+  delete gFrame;
+  delete c;
+}
+
+static void RunBlockwiseBExtraction(TFile* fin,
+                                   const std::string& outBaseDir,
+                                   const std::vector<std::pair<double,double>>& eEdges)
+{
+  if (!fin) return;
+
+  const std::string pngBase = outBaseDir + "/bvaluePNGs";
+  EnsureDir(pngBase);
+
+  const std::string outRoot = outBaseDir + "/PDC_bvalues.root";
+  std::unique_ptr<TFile> fout(TFile::Open(outRoot.c_str(),"RECREATE"));
+  if (!fout || fout->IsZombie())
+  {
+    std::cerr << "[RunBlockwiseBExtraction] ERROR: cannot create " << outRoot << "\n";
+    return;
+  }
+
+  // Tree schema
+  int sector=0, module=0, blockPhi=0, ebin=0;
+  double Elo=0.0, Ehi=0.0;
+  double b_phi=std::numeric_limits<double>::quiet_NaN();
+  double b_phi_err=0.0;
+  double b_eta=std::numeric_limits<double>::quiet_NaN();
+  double b_eta_err=0.0;
+  Long64_t nPhi=0, nEta=0;
+  char modeUsed[8] = "";
+
+  TTree* t = new TTree("bvalsSMB","b-values per (sector,module,blockPhi) and E-bin");
+  t->Branch("sector",&sector,"sector/I");
+  t->Branch("module",&module,"module/I");
+  t->Branch("blockPhi",&blockPhi,"blockPhi/I");
+  t->Branch("ebin",&ebin,"ebin/I");
+  t->Branch("Elo",&Elo,"Elo/D");
+  t->Branch("Ehi",&Ehi,"Ehi/D");
+  t->Branch("b_phi",&b_phi,"b_phi/D");
+  t->Branch("b_phi_err",&b_phi_err,"b_phi_err/D");
+  t->Branch("b_eta",&b_eta,"b_eta/D");
+  t->Branch("b_eta_err",&b_eta_err,"b_eta_err/D");
+  t->Branch("nPhi",&nPhi,"nPhi/L");
+  t->Branch("nEta",&nEta,"nEta/L");
+  t->Branch("mode",modeUsed,"mode[8]/C");
+
+  // Loop sectors
+  for (int s=0; s<64; ++s)
+  {
+    sector = s;
+    const std::string secDir = pngBase + Form("/sector_%02d", s);
+    EnsureDir(secDir);
+
+    std::ofstream txt(secDir + "/summary_table.txt");
+    if (txt.is_open())
+    {
+      txt << "# sector module blockPhi ebin Elo Ehi b_phi b_phi_err b_eta b_eta_err nPhi nEta mode\n";
+    }
+
+    // Per-energy plots
+    for (int ie=0; ie<(int)eEdges.size(); ++ie)
+    {
+      ebin = ie;
+      Elo  = eEdges[ie].first;
+      Ehi  = eEdges[ie].second;
+
+      double bPhiArr[24][4]; double bEtaArr[24][4];
+      double bPhiErrArr[24][4]; double bEtaErrArr[24][4];
+      bool   hasPhiArr[24][4]; bool hasEtaArr[24][4];
+
+      for (int m=0;m<24;++m) for (int b=0;b<4;++b)
+      {
+        bPhiArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
+        bEtaArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
+        bPhiErrArr[m][b] = 0.0;
+        bEtaErrArr[m][b] = 0.0;
+        hasPhiArr[m][b]  = false;
+        hasEtaArr[m][b]  = false;
+      }
+
+      for (int m=0; m<24; ++m)
+      {
+        module = m;
+        for (int b=0; b<4; ++b)
+        {
+          blockPhi = b;
+
+          std::string usedMode;
+          TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
+          if (!h3) continue;
+
+          BRes bp, be;
+          Long64_t nP=0, nE=0;
+          FitBFromSMBHist(h3, Elo, Ehi, bp, be, nP, nE);
+
+          if (std::isfinite(bp.val))
+          {
+            bPhiArr[m][b]    = bp.val;
+            bPhiErrArr[m][b] = bp.err;
+            hasPhiArr[m][b]  = true;
+          }
+          if (std::isfinite(be.val))
+          {
+            bEtaArr[m][b]    = be.val;
+            bEtaErrArr[m][b] = be.err;
+            hasEtaArr[m][b]  = true;
+          }
+
+          // Fill tree row
+          b_phi = bp.val; b_phi_err = bp.err;
+          b_eta = be.val; b_eta_err = be.err;
+          nPhi  = nP;
+          nEta  = nE;
+          std::snprintf(modeUsed, sizeof(modeUsed), "%s", usedMode.c_str());
+          t->Fill();
+
+          // Optional: also log to text
+          if (txt.is_open())
+          {
+            txt << s << " " << m << " " << b << " " << ie
+                << " " << std::fixed << std::setprecision(1) << Elo
+                << " " << Ehi
+                << " " << std::setprecision(6) << b_phi
+                << " " << b_phi_err
+                << " " << b_eta
+                << " " << b_eta_err
+                << " " << nPhi
+                << " " << nEta
+                << " " << usedMode
+                << "\n";
+          }
+        }
+      }
+
+      const std::string eLabel = Form("E%.0fto%.0f", Elo, Ehi);
+
+      SaveBvsModulePlot(secDir + Form("/bphi_vs_module_%s.png", eLabel.c_str()),
+                        s, "bphi", "b_{#varphi}", "b_{#varphi}", eLabel.c_str(),
+                        bPhiArr, bPhiErrArr, hasPhiArr);
+
+      SaveBvsModulePlot(secDir + Form("/beta_vs_module_%s.png", eLabel.c_str()),
+                        s, "beta", "b_{#eta}", "b_{#eta}", eLabel.c_str(),
+                        bEtaArr, bEtaErrArr, hasEtaArr);
+    }
+
+    // Integrated-E plots (store as ebin = -1)
+    {
+      ebin = -1;
+      Elo = eEdges.front().first;
+      Ehi = eEdges.back().second;
+
+      double bPhiArr[24][4]; double bEtaArr[24][4];
+      double bPhiErrArr[24][4]; double bEtaErrArr[24][4];
+      bool   hasPhiArr[24][4]; bool hasEtaArr[24][4];
+
+      for (int m=0;m<24;++m) for (int b=0;b<4;++b)
+      {
+        bPhiArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
+        bEtaArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
+        bPhiErrArr[m][b] = 0.0;
+        bEtaErrArr[m][b] = 0.0;
+        hasPhiArr[m][b]  = false;
+        hasEtaArr[m][b]  = false;
+      }
+
+      for (int m=0;m<24;++m)
+      {
+        module = m;
+        for (int b=0;b<4;++b)
+        {
+          blockPhi = b;
+
+          std::string usedMode;
+          TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
+          if (!h3) continue;
+
+          BRes bp, be;
+          Long64_t nP=0, nE=0;
+          FitBFromSMBHist(h3, Elo, Ehi, bp, be, nP, nE);
+
+          if (std::isfinite(bp.val))
+          {
+            bPhiArr[m][b]    = bp.val;
+            bPhiErrArr[m][b] = bp.err;
+            hasPhiArr[m][b]  = true;
+          }
+          if (std::isfinite(be.val))
+          {
+            bEtaArr[m][b]    = be.val;
+            bEtaErrArr[m][b] = be.err;
+            hasEtaArr[m][b]  = true;
+          }
+
+          b_phi = bp.val; b_phi_err = bp.err;
+          b_eta = be.val; b_eta_err = be.err;
+          nPhi  = nP;
+          nEta  = nE;
+          std::snprintf(modeUsed, sizeof(modeUsed), "%s", usedMode.c_str());
+          t->Fill();
+
+          if (txt.is_open())
+          {
+            txt << s << " " << m << " " << b << " " << ebin
+                << " " << std::fixed << std::setprecision(1) << Elo
+                << " " << Ehi
+                << " " << std::setprecision(6) << b_phi
+                << " " << b_phi_err
+                << " " << b_eta
+                << " " << b_eta_err
+                << " " << nPhi
+                << " " << nEta
+                << " " << usedMode
+                << "\n";
+          }
+        }
+      }
+
+      SaveBvsModulePlot(secDir + "/bphi_vs_module_integratedE.png",
+                        s, "bphiInt", "b_{#varphi}", "b_{#varphi}", "integratedE",
+                        bPhiArr, bPhiErrArr, hasPhiArr);
+
+      SaveBvsModulePlot(secDir + "/beta_vs_module_integratedE.png",
+                        s, "betaInt", "b_{#eta}", "b_{#eta}", "integratedE",
+                        bEtaArr, bEtaErrArr, hasEtaArr);
+    }
+
+    if (txt.is_open()) txt.close();
+  }
+
+  fout->cd();
+  t->Write();
+  fout->Write();
+  fout->Close();
+
+  std::cout << "[RunBlockwiseBExtraction] Wrote: " << outRoot << "\n"
+            << "[RunBlockwiseBExtraction] PNGs under: " << pngBase << "\n";
+}
+
+
 void PDCAnalysisPRIMEPRIME()
 {
   gROOT->SetBatch(kTRUE);
@@ -5961,7 +6501,14 @@ void PDCAnalysisPRIMEPRIME()
     SaveOverlayAcrossVariants(outBaseDir, eCent, phiByVariant, phiErrByVariant, /*isPhi*/true , ""  );
     SaveOverlayAcrossVariants(outBaseDir, eCent, etaByVariant, etaErrByVariant, /*isPhi*/false, ""  );
 
-    // ==================== NEW: Step-4 — build δ(E,α) & (c0,m) ====================
+    // ==================== NEW: Blockwise b(E) maps per sector/module/blockPhi ====================
+    // Reads: h3_blockCoord_E_full_sXX_mYY_bZ_{range|disc}
+    // Writes:
+    //   outBaseDir/PDC_bvalues.root
+    //   outBaseDir/bvaluePNGs/sector_XX/...
+    RunBlockwiseBExtraction(fin.get(), outBaseDir, eEdges);
+
+    // ==================== Step-5 — build δ(E,α) & (c0,m) ====================
     // Use the b(E) lines we just wrote in outBaseDir + "/bValues.txt"
     BuildDeltaAndWriteFits(fin.get(),
                            outBaseDir,

@@ -84,6 +84,97 @@ R__LOAD_LIBRARY(libLiteCaloEvalTowSlope.so)
 using namespace std;
 namespace CLHEP { class Hep3Vector; }
 
+// -------------------------------------------------------------------
+// Per-(sector,module,blockPhi) uncorrected TH3 storage for b-value fits
+//
+// Goal:
+//   Fill *uncorrected* block-local coordinate distributions vs energy
+//   separately for each hardware 2×2 block inside each module/sector,
+//   so offline you can project per E-bin and fit b(E) per block/module.
+//
+// Output histogram naming (one TH3 per block):
+//   h3_blockCoord_E_full_sXX_mYY_bZ_<range|disc>
+//
+// Filled under the SAME conditions as h3_cluster_block_cord_E_full:
+//   - inside fillGlobal (|z_vtx| ≤ 10 cm gate)
+//   - |eta| ≤ 1.10
+// -------------------------------------------------------------------
+namespace
+{
+  constexpr int kPDC_PhiSectors        = 32;  // per hemisphere
+  constexpr int kPDC_SectorsTotal      = 64;  // 2 hemispheres × 32
+  constexpr int kPDC_ModulesPerSector  = 24;  // along eta in a hemisphere
+  constexpr int kPDC_BlocksPhiPerMod   = 4;   // along phi in a sector/module
+  constexpr int kPDC_NBlockHists =
+      kPDC_SectorsTotal * kPDC_ModulesPerSector * kPDC_BlocksPhiPerMod;
+
+  // Lazy-created histogram pointers; index = (sector,module,blockPhi) linearized
+  std::vector<TH3F*> g_h3_blockCoord_E_full_bySMB;
+
+  // Match the global hist binning:
+  //   local coords in [-0.5, 1.5] with 14 bins (15 edges)
+  //   energy edges: {2,4,6,8,10,12,15,20,30} (8 bins)
+  Double_t g_blkXEdges[15];
+  Double_t g_blkYEdges[15];
+  constexpr Double_t g_blkEEdges[9] = {2,4,6,8,10,12,15,20,30};
+  bool g_blkBinningInit = false;
+
+  inline void initBlockCoordBinning()
+  {
+    if (g_blkBinningInit) return;
+    const double s = 2.0 / 14.0;
+    for (int i = 0; i <= 14; ++i)
+    {
+      g_blkXEdges[i] = -0.5 + i * s;
+      g_blkYEdges[i] = -0.5 + i * s;
+    }
+    g_blkBinningInit = true;
+  }
+
+  inline int smbLinearIndex(int sector, int module, int blockPhi)
+  {
+    return (sector * kPDC_ModulesPerSector + module) * kPDC_BlocksPhiPerMod + blockPhi;
+  }
+
+  inline TH3F* GetOrCreateBlockCoordEFullHist(TFile* outfile,
+                                              const char* modeTag,
+                                              int sector,
+                                              int module,
+                                              int blockPhi)
+  {
+    if (sector < 0 || sector >= kPDC_SectorsTotal) return nullptr;
+    if (module < 0 || module >= kPDC_ModulesPerSector) return nullptr;
+    if (blockPhi < 0 || blockPhi >= kPDC_BlocksPhiPerMod) return nullptr;
+
+    if (g_h3_blockCoord_E_full_bySMB.empty())
+    {
+      g_h3_blockCoord_E_full_bySMB.resize(kPDC_NBlockHists, nullptr);
+    }
+
+    initBlockCoordBinning();
+
+    const int idx = smbLinearIndex(sector, module, blockPhi);
+    TH3F*& h = g_h3_blockCoord_E_full_bySMB[idx];
+
+    if (!h)
+    {
+      if (outfile) outfile->cd();
+
+      h = new TH3F(
+          Form("h3_blockCoord_E_full_s%02d_m%02d_b%d_%s", sector, module, blockPhi, modeTag),
+          Form("Uncorrected local block coords vs E (full |#eta|<=1.10) [sector=%d,module=%d,blockPhi=%d];block #eta_{local};block #phi_{local};E [GeV]",
+               sector, module, blockPhi),
+          14, g_blkXEdges,
+          14, g_blkYEdges,
+           8, g_blkEEdges);
+
+      if (outfile) h->SetDirectory(outfile);
+    }
+
+    return h;
+  }
+} // end anonymous namespace
+
 PositionDependentCorrection::PositionDependentCorrection(const std::string &name,
                                                          const std::string &filename)
   : SubsysReco(name)
@@ -4999,8 +5090,49 @@ void PositionDependentCorrection::finalClusterLoop(
         // 2) Uncorrected η-slices in parallel
         const float absEta = std::fabs(clusEta);
 
-        if (h3_cluster_block_cord_E_full && absEta <= 1.10f)
-          h3_cluster_block_cord_E_full->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+          if (absEta <= 1.10f)
+          {
+            // Existing global "full" fill (unchanged behavior)
+            if (h3_cluster_block_cord_E_full)
+              h3_cluster_block_cord_E_full->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+
+            // NEW: per-(sector,module,blockPhi) uncorrected TH3 fill for b(E) per block
+            //
+            // We derive (sector,module,blockPhi) from the coarse 2×2 block indices:
+            //   blkEtaCoarse = maxTowerEta/2 in [0..47]
+            //   blkPhiCoarse = maxTowerPhi/2 in [0..127]
+            //
+            // Mapping:
+            //   hemi      = (blkEtaCoarse < 24) ? 0 : 1
+            //   module    =  blkEtaCoarse % 24         (0..23)
+            //   phiSector =  blkPhiCoarse / 4          (0..31)   // 4 blocks per phi-sector
+            //   blockPhi  =  blkPhiCoarse % 4          (0..3)
+            //   sector    =  phiSector + 32*hemi       (0..63)
+            //
+            // Histogram name:
+            //   h3_blockCoord_E_full_sXX_mYY_bZ_<range|disc>
+            if (blkEtaCoarse >= 0 && blkPhiCoarse >= 0)
+            {
+              const char* modeTagSMB =
+                  (m_binningMode == EBinningMode::kRange ? "range" : "disc");
+
+              const int hemi      = (blkEtaCoarse < 24) ? 0 : 1;
+              const int moduleSMB = blkEtaCoarse % 24;
+              const int phiSector = blkPhiCoarse / 4;
+              const int blockPhi  = blkPhiCoarse % 4;
+              const int sectorSMB = phiSector + 32 * hemi;
+
+              TH3F* hSMB = GetOrCreateBlockCoordEFullHist(outfile,
+                                                          modeTagSMB,
+                                                          sectorSMB,
+                                                          moduleSMB,
+                                                          blockPhi);
+              if (hSMB)
+              {
+                hSMB->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+              }
+            }
+          }
 
         if (h3_cluster_block_cord_E_etaCore && absEta <= 0.20f)
           h3_cluster_block_cord_E_etaCore->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
