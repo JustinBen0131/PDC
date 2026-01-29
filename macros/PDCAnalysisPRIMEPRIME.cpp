@@ -52,6 +52,17 @@ static inline void ensureDir(const char* p)               { gSystem->mkdir(p,tru
 static inline void ensureDir(const std::string& p)        { gSystem->mkdir(p.c_str(), true); }
 static inline void EnsureDir(const std::string& p)        { gSystem->mkdir(p.c_str(), true); } // you already had this one
 
+// Optional prefix to prevent overwriting when emitting many PNGs into one folder
+static std::string gOutNamePrefix = "";
+
+// RAII helper to set a prefix for the duration of a scope
+struct ScopedOutNamePrefix
+{
+  std::string prev;
+  explicit ScopedOutNamePrefix(const std::string& p) : prev(gOutNamePrefix) { gOutNamePrefix = p; }
+  ~ScopedOutNamePrefix() { gOutNamePrefix = prev; }
+};
+
 // Marker/color tables used by some summary plots
 static const Color_t kCol[5] = { kBlue+1, kBlue+1, kRed+1, kRed+1, kRed+1 };
 static const Style_t kMk [5] = { 20,      24,      20,     24,     21      };
@@ -289,8 +300,8 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
 
   }
 
-  TString out2D_unc = Form("%s/BlockCoord2D_E_unc.png", outDir);
-  c2D_unc.SaveAs(out2D_unc);
+    TString out2D_unc = Form("%s/%sBlockCoord2D_E_unc.png", outDir, gOutNamePrefix.c_str());
+    c2D_unc.SaveAs(out2D_unc);
 
   // Corrected table only if requested and available
   if (!firstPass && hCor3D)
@@ -336,8 +347,8 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
 
     }
 
-    TString out2D_cor = Form("%s/BlockCoord2D_E_cor.png", outDir);
-    c2D_cor.SaveAs(out2D_cor);
+      TString out2D_cor = Form("%s/%sBlockCoord2D_E_cor.png", outDir, gOutNamePrefix.c_str());
+      c2D_cor.SaveAs(out2D_cor);
   }
 }
 
@@ -463,8 +474,8 @@ static void OverlayUncorrPhiEta(TH3F*  hUnc3D,
       tl.DrawLatex(0.88, 0.84, Form("b_{#eta}=%.3g#pm%.2g",     bEta.val, bEta.err));
   }
 
-  TString outName = Form("%s/LocalPhiEtaOverlay_4by2.png", outDir);
-  cOv.SaveAs(outName);
+    TString outName = Form("%s/%sLocalPhiEtaOverlay_4by2.png", outDir, gOutNamePrefix.c_str());
+    cOv.SaveAs(outName);
 }
 
 // ============== Compute bφ(E) & bη(E) and save a combined plot ==============
@@ -654,7 +665,7 @@ static BVecs MakeBvaluesVsEnergyPlot(TH3F* hUnc3D,
 
     cB.Modified();
     cB.Update();
-    TString outName = Form("%s/bValues_vs_E.png", outDir);
+    TString outName = Form("%s/%sbValues_vs_E.png", outDir, gOutNamePrefix.c_str());
     cB.SaveAs(outName);
 
     delete frame;
@@ -5326,43 +5337,46 @@ static inline void SaveBvsModulePlot(const std::string& outPng,
   double eyPts[nBlk][nMod];
   int    nPts[nBlk] = {0,0,0,0};
 
-  double yMin =  1.0e9;
-  double yMax = -1.0e9;
+    double yMin =  1.0e9;
+    double yMax = -1.0e9;
+    double maxErr = 0.0;
 
-  for (int m=0;m<nMod;++m)
-  {
-    const double xc = static_cast<double>(m) + 0.5;
-    for (int b=0;b<nBlk;++b)
+    for (int m=0;m<nMod;++m)
     {
-      if (!has[m][b]) continue;
-
-      const int idx = nPts[b];
-      const double x = xc + (static_cast<double>(b) - 1.5) * dx;
-
-      xPts[b][idx]  = x;
-      yPts[b][idx]  = bVal[m][b];
-      exPts[b][idx] = 0.0;
-      eyPts[b][idx] = bErr[m][b];
-      nPts[b]++;
-
-      if (std::isfinite(bVal[m][b]))
+      const double xc = static_cast<double>(m) + 0.5;
+      for (int b=0;b<nBlk;++b)
       {
-        yMin = std::min(yMin, bVal[m][b]);
-        yMax = std::max(yMax, bVal[m][b]);
+        if (!has[m][b]) continue;
+
+        const int idx = nPts[b];
+        const double x = xc + (static_cast<double>(b) - 1.5) * dx;
+
+        xPts[b][idx]  = x;
+        yPts[b][idx]  = bVal[m][b];
+        exPts[b][idx] = 0.0;
+        eyPts[b][idx] = bErr[m][b];
+        nPts[b]++;
+
+        if (std::isfinite(bVal[m][b]))
+        {
+          const double e = (std::isfinite(bErr[m][b]) ? std::fabs(bErr[m][b]) : 0.0);
+          yMin = std::min(yMin, bVal[m][b] - e);
+          yMax = std::max(yMax, bVal[m][b] + e);
+          maxErr = std::max(maxErr, e);
+        }
       }
     }
-  }
 
-  int frameBlock = -1;
-  for (int b=0;b<nBlk;++b) { if (nPts[b]>0) { frameBlock=b; break; } }
-  if (frameBlock < 0) return;
+    int frameBlock = -1;
+    for (int b=0;b<nBlk;++b) { if (nPts[b]>0) { frameBlock=b; break; } }
+    if (frameBlock < 0) return;
 
-  if (!(std::isfinite(yMin) && std::isfinite(yMax))) { yMin = 0.0; yMax = 1.0; }
-  double span = yMax - yMin;
-  if (span <= 0.0) span = std::max(1.0e-3, std::fabs(yMax));
-  double pad  = 0.25 * span;
-  const double yLow  = yMin - pad;
-  const double yHigh = yMax + pad;
+    if (!(std::isfinite(yMin) && std::isfinite(yMax))) { yMin = 0.0; yMax = 1.0; maxErr = 0.0; }
+    double span = yMax - yMin;
+    if (span <= 0.0) span = std::max(1.0e-3, std::fabs(yMax));
+    double pad  = std::max(0.25 * span, 1.25 * maxErr);
+    const double yLow  = yMin - pad;
+    const double yHigh = yMax + pad;
 
   TCanvas* c = new TCanvas(Form("c_%s_s%02d_%s", canvasKey, sector, energyLabel),
                            Form("Sector %02d", sector),
@@ -5462,16 +5476,184 @@ static inline void SaveBvsModulePlot(const std::string& outPng,
 
   c->SaveAs(outPng.c_str());
 
-  delete leg;
-  for (int b=0;b<nBlk;++b) { delete gB[b]; }
-  delete gFrame;
-  delete c;
+    delete leg;
+    for (int b=0;b<nBlk;++b) { delete gB[b]; }
+    delete gFrame;
+    delete c;
+}
+
+static inline void SaveBvsModulePlotTwoSeries(const std::string& outPng,
+                                                const char* canvasKey,
+                                                const char* plotTitle,
+                                                const char* yAxisLabel,
+                                                const char* energyLabel,
+                                                const double bPhi[24],
+                                                const double bPhiErr[24],
+                                                const bool   hasPhi[24],
+                                                const double bEta[24],
+                                                const double bEtaErr[24],
+                                                const bool   hasEta[24])
+  {
+    gStyle->SetOptStat(0);
+
+    const int nMod = 24;
+    const double dx = 0.14;
+
+    double xP[nMod], yP[nMod], exP[nMod], eyP[nMod]; int nP=0;
+    double xE[nMod], yE[nMod], exE[nMod], eyE[nMod]; int nE=0;
+
+    double yMin =  1.0e9;
+    double yMax = -1.0e9;
+    double maxErr = 0.0;
+
+    for (int m=0; m<nMod; ++m)
+    {
+      const double xc = static_cast<double>(m) + 0.5;
+
+      if (hasPhi[m] && std::isfinite(bPhi[m]))
+      {
+        xP[nP]  = xc - 0.5*dx;
+        yP[nP]  = bPhi[m];
+        exP[nP] = 0.0;
+        eyP[nP] = bPhiErr[m];
+        const double e = (std::isfinite(bPhiErr[m]) ? std::fabs(bPhiErr[m]) : 0.0);
+        yMin = std::min(yMin, bPhi[m] - e);
+        yMax = std::max(yMax, bPhi[m] + e);
+        maxErr = std::max(maxErr, e);
+        nP++;
+      }
+
+      if (hasEta[m] && std::isfinite(bEta[m]))
+      {
+        xE[nE]  = xc + 0.5*dx;
+        yE[nE]  = bEta[m];
+        exE[nE] = 0.0;
+        eyE[nE] = bEtaErr[m];
+        const double e = (std::isfinite(bEtaErr[m]) ? std::fabs(bEtaErr[m]) : 0.0);
+        yMin = std::min(yMin, bEta[m] - e);
+        yMax = std::max(yMax, bEta[m] + e);
+        maxErr = std::max(maxErr, e);
+        nE++;
+      }
+    }
+
+    if (nP<=0 && nE<=0) return;
+
+    if (!(std::isfinite(yMin) && std::isfinite(yMax))) { yMin = 0.0; yMax = 1.0; maxErr = 0.0; }
+    double span = yMax - yMin;
+    if (span <= 0.0) span = std::max(1.0e-3, std::fabs(yMax));
+    double pad  = std::max(0.25 * span, 1.25 * maxErr);
+    const double yLow  = yMin - pad;
+    const double yHigh = yMax + pad;
+
+    TCanvas* c = new TCanvas(Form("c_%s_%s", canvasKey, energyLabel),
+                             Form("%s", plotTitle),
+                             1600, 450);
+    c->SetMargin(0.06, 0.02, 0.14, 0.08);
+    c->SetGrid(0,0);
+
+    // Frame (use whichever series is non-empty)
+    TGraphErrors* gFrame = nullptr;
+    if (nP > 0) gFrame = new TGraphErrors(nP, xP, yP, exP, eyP);
+    else        gFrame = new TGraphErrors(nE, xE, yE, exE, eyE);
+
+    gFrame->SetTitle(Form("%s - %s (%s);Module index;%s",
+                          plotTitle, yAxisLabel, energyLabel, yAxisLabel));
+    gFrame->SetMarkerStyle(20);
+    gFrame->SetMarkerSize(0.0);
+    gFrame->SetMarkerColor(kWhite);
+    gFrame->SetLineColor(0);
+    gFrame->Draw("AP");
+
+    gFrame->GetXaxis()->SetLimits(0.0, static_cast<double>(nMod));
+    gFrame->GetXaxis()->SetNdivisions(nMod, 0, 0);
+    gFrame->GetXaxis()->SetTickLength(0.02);
+    gFrame->GetXaxis()->SetTitle("Module index");
+    gFrame->GetXaxis()->SetTitleSize(0.045);
+    gFrame->GetXaxis()->SetTitleOffset(1.0);
+    gFrame->GetXaxis()->SetLabelSize(0.0);
+
+    gFrame->GetYaxis()->SetTitle("");
+    gFrame->GetYaxis()->SetLabelSize(0.035);
+    gFrame->GetYaxis()->SetRangeUser(yLow, yHigh);
+
+    // Vertical dashed lines at module edges (matches sector plot formatting)
+    for (int edge=0; edge<=nMod; ++edge)
+    {
+      const double xEdge = static_cast<double>(edge);
+      TLine* l = new TLine(xEdge, yLow, xEdge, yHigh);
+      l->SetLineStyle(2);
+      l->SetLineWidth(1);
+      l->SetLineColor(kGray+1);
+      l->Draw("SAME");
+    }
+
+    TGraphErrors* gPhi = nullptr;
+    TGraphErrors* gEta = nullptr;
+
+    if (nP > 0)
+    {
+      gPhi = new TGraphErrors(nP, xP, yP, exP, eyP);
+      gPhi->SetMarkerStyle(21);
+      gPhi->SetMarkerSize(1.1);
+      gPhi->SetMarkerColor(kRed+1);
+      gPhi->SetLineColor(kRed+1);
+      gPhi->SetLineWidth(1);
+      gPhi->Draw("P SAME");
+    }
+
+    if (nE > 0)
+    {
+      gEta = new TGraphErrors(nE, xE, yE, exE, eyE);
+      gEta->SetMarkerStyle(20);
+      gEta->SetMarkerSize(1.1);
+      gEta->SetMarkerColor(kBlue+1);
+      gEta->SetLineColor(kBlue+1);
+      gEta->SetLineWidth(1);
+      gEta->Draw("P SAME");
+    }
+
+    // Legend (two-series, no block labels)
+    TLegend* leg = new TLegend(0.78,0.74,0.97,0.90);
+    leg->SetBorderSize(0);
+    leg->SetFillStyle(0);
+    leg->SetTextSize(0.040);
+    if (gPhi) leg->AddEntry(gPhi, "b_{#varphi}", "P");
+    if (gEta) leg->AddEntry(gEta, "b_{#eta}",    "P");
+    leg->Draw();
+
+    // Dummy module labels 1..24 (matches sector plot formatting)
+    TLatex latex;
+    latex.SetTextAlign(22);
+    latex.SetTextSize(0.030);
+    const double yLabel = yLow + 0.05 * (yHigh-yLow);
+    for (int m=0;m<nMod;++m)
+    {
+      const double xc = static_cast<double>(m) + 0.5;
+      latex.DrawLatex(xc, yLabel, Form("%d", m+1));
+    }
+
+    // Y-axis label in NDC to avoid clipping (matches sector plot formatting)
+    TLatex latexY;
+    latexY.SetNDC();
+    latexY.SetTextAngle(90);
+    latexY.SetTextAlign(22);
+    latexY.SetTextSize(0.045);
+    latexY.DrawLatex(0.032,0.55,yAxisLabel);
+
+    c->SaveAs(outPng.c_str());
+
+    delete leg;
+    delete gPhi;
+    delete gEta;
+    delete gFrame;
+    delete c;
 }
 
 static void RunBlockwiseBExtraction(TFile* fin,
-                                   const std::string& outBaseDir,
-                                   const std::vector<std::pair<double,double>>& eEdges)
-{
+                                     const std::string& outBaseDir,
+                                     const std::vector<std::pair<double,double>>& eEdges)
+  {
   if (!fin) return;
 
   // Toggle audit volume here (safe defaults)
@@ -5482,57 +5664,78 @@ static void RunBlockwiseBExtraction(TFile* fin,
   if (nE <= 0) return;
 
   const std::string pngBase = outBaseDir + "/bvaluePNGsByGeom";
-  EnsureDir(pngBase);
+    EnsureDir(pngBase);
 
-  // Write one README (idempotent)
-  {
-    std::ofstream rd(pngBase + "/README.txt");
-    if (rd.is_open())
+    // Write one README (idempotent)
     {
-      rd <<
-        "bvaluePNGsByGeom/\n"
-        "  Raw per-block TH3s live in the input ROOT file (flat):\n"
-        "    h3_blockCoord_E_full_sXX_mYY_bZ_{range|disc}\n"
-        "\n"
-        "  This folder contains DERIVED b(E) outputs organized by geometry:\n"
-        "    sector_XX/\n"
-        "      tables/ : 3x4 pages (modules 01-12, 13-24), each tile is b(E) overlay (4 blocks)\n"
-        "      module_YY/\n"
-        "        bphi_vsE_overlay_blocks.png\n"
-        "        beta_vsE_overlay_blocks.png\n"
-        "        fits_integratedE_phiEta_4by2.png   (audit)\n"
-        "        summary.txt\n";
-      rd.close();
+      std::ofstream rd(pngBase + "/README.txt");
+      if (rd.is_open())
+      {
+        rd <<
+          "bvaluePNGsByGeom/\n"
+          "  Raw per-block TH3s live in the input ROOT file (flat):\n"
+          "    h3_blockCoord_E_full_sXX_mYY_bZ_{range|disc}\n"
+          "\n"
+          "  This folder contains DERIVED b(E) outputs organized by geometry.\n"
+          "\n"
+          "  (A) sectorIntegrated/  [PRIMARY calibration products from high-stat collapse]\n"
+          "    perModule/            <-- THIS is the module-resolved calibration space\n"
+          "      module_YY/\n"
+          "        BlockCoord2D_E_unc.png          (4x2 TH2 table across energy bins)\n"
+          "        LocalPhiEtaOverlay_4by2.png     (4x2 eta/phi overlays + fits)\n"
+          "        bValues_vs_E.png                (b_phi(E,m), b_eta(E,m))\n"
+          "    dashboards/           <-- QA summaries across modules (NOT calibration objects)\n"
+          "      b_vs_module_byEbin_4by2.png       (8 panels: b vs module per energy bin)\n"
+          "      b_vs_module_E12to15.png           (reference energy bin)\n"
+          "      b_vs_module_integratedE.png       (E-averaged summary)\n"
+          "    globalQA/             <-- sanity checks on fully collapsed sample (NOT calibration)\n"
+          "      BlockCoord2D_E_unc.png\n"
+          "      LocalPhiEtaOverlay_4by2.png\n"
+          "      bValues_vs_E.png\n"
+          "\n"
+          "  (B) sector_XX/  [per-sector diagnostics; stats can be limited]\n"
+          "    tables/ : 3x4 pages (modules 01-12, 13-24), each tile is b(E) overlay (4 blocks)\n"
+          "    module_YY/\n"
+          "      bphi_vsE_overlay_blocks.png\n"
+          "      beta_vsE_overlay_blocks.png\n"
+          "      fits_integratedE_phiEta_4by2.png   (audit)\n"
+          "      summary.txt\n";
+        rd.close();
+      }
     }
-  }
 
-  // Machine-readable ROOT output
-  const std::string outRoot = outBaseDir + "/PDC_bvalues.root";
-  std::unique_ptr<TFile> fout(TFile::Open(outRoot.c_str(),"RECREATE"));
-  if (!fout || fout->IsZombie())
-  {
-    std::cerr << "[RunBlockwiseBExtraction] ERROR: cannot create " << outRoot << "\n";
-    return;
-  }
+    // NOTE:
+    //   sectorIntegrated/ outputs are produced later (pre-sector-loop) to avoid
+    //   duplication and to ensure the first products written are the high-stat
+    //   sector-collapsed (module-resolved) calibration artifacts.
 
-  // Tree schema (same as before)
-  int sector=0, module=0, blockPhi=0, ebin=0;
-  double Elo=0.0, Ehi=0.0;
-  double b_phi=std::numeric_limits<double>::quiet_NaN();
-  double b_phi_err=0.0;
-  double b_eta=std::numeric_limits<double>::quiet_NaN();
-  double b_eta_err=0.0;
-  Long64_t nPhi=0, nEta=0;
-  char modeUsed[8] = "";
+    // Machine-readable ROOT output
+    const std::string outRoot = outBaseDir + "/PDC_bvalues.root";
+    std::unique_ptr<TFile> fout(TFile::Open(outRoot.c_str(),"RECREATE"));
+    if (!fout || fout->IsZombie())
+    {
+      std::cerr << "[RunBlockwiseBExtraction] ERROR: cannot create " << outRoot << "\n";
+      return;
+    }
 
-  TTree* t = new TTree("bvalsSMB","b-values per (sector,module,blockPhi) and E-bin");
-  t->Branch("sector",&sector,"sector/I");
-  t->Branch("module",&module,"module/I");
-  t->Branch("blockPhi",&blockPhi,"blockPhi/I");
-  t->Branch("ebin",&ebin,"ebin/I");         // 0..nE-1, and -1 for integratedE rows
-  t->Branch("Elo",&Elo,"Elo/D");
-  t->Branch("Ehi",&Ehi,"Ehi/D");
-  t->Branch("b_phi",&b_phi,"b_phi/D");
+    // Tree schema (same as before)
+    int sector=0, module=0, blockPhi=0, ebin=0;
+    double Elo=0.0, Ehi=0.0;
+    double b_phi=std::numeric_limits<double>::quiet_NaN();
+    double b_phi_err=0.0;
+    double b_eta=std::numeric_limits<double>::quiet_NaN();
+    double b_eta_err=0.0;
+    Long64_t nPhi=0, nEta=0;
+    char modeUsed[8] = "";
+
+    TTree* t = new TTree("bvalsSMB","b-values per (sector,module,blockPhi) and E-bin");
+    t->Branch("sector",&sector,"sector/I");
+    t->Branch("module",&module,"module/I");
+    t->Branch("blockPhi",&blockPhi,"blockPhi/I");
+    t->Branch("ebin",&ebin,"ebin/I");         // 0..nE-1, and -1 for integratedE rows
+    t->Branch("Elo",&Elo,"Elo/D");
+    t->Branch("Ehi",&Ehi,"Ehi/D");
+    t->Branch("b_phi",&b_phi,"b_phi/D");
   t->Branch("b_phi_err",&b_phi_err,"b_phi_err/D");
   t->Branch("b_eta",&b_eta,"b_eta/D");
   t->Branch("b_eta_err",&b_eta_err,"b_eta_err/D");
@@ -5553,22 +5756,26 @@ static void RunBlockwiseBExtraction(TFile* fin,
     const double Emin = eEdges.front().first;
     const double Emax = eEdges.back().second;
 
-    double yMin = +1e99, yMax = -1e99;
-    for (int ie=0; ie<nE; ++ie)
-    {
-      for (int b=0;b<4;++b)
+      double yMin = +1e99, yMax = -1e99;
+      double maxErr = 0.0;
+      for (int ie=0; ie<nE; ++ie)
       {
-        if (!has[ie][b]) continue;
-        const double v = bV[ie][b];
-        if (!std::isfinite(v)) continue;
-        yMin = std::min(yMin, v);
-        yMax = std::max(yMax, v);
+        for (int b=0;b<4;++b)
+        {
+          if (!has[ie][b]) continue;
+          const double v = bV[ie][b];
+          if (!std::isfinite(v)) continue;
+          const double e = (std::isfinite(bE[ie][b]) ? std::fabs(bE[ie][b]) : 0.0);
+          yMin = std::min(yMin, v - e);
+          yMax = std::max(yMax, v + e);
+          maxErr = std::max(maxErr, e);
+        }
       }
-    }
-    if (!(yMin < yMax)) { yMin = -0.02; yMax = +0.02; }
-    const double span = (yMax-yMin>0? (yMax-yMin):0.10);
-    const double yLo = yMin - 0.12*span;
-    const double yHi = yMax + 0.25*span;
+      if (!(yMin < yMax)) { yMin = -0.02; yMax = +0.02; maxErr = 0.0; }
+      const double span = (yMax-yMin>0? (yMax-yMin):0.10);
+      const double pad = std::max(0.25*span, 1.25*maxErr);
+      const double yLo = yMin - pad;
+      const double yHi = yMax + pad;
 
     if (compact)
     {
@@ -5892,25 +6099,186 @@ static void RunBlockwiseBExtraction(TFile* fin,
   };
     
 
-  // -------------------------
-  // Main sector loop
-  // -------------------------
+    // -------------------------
+    // Main sector loop
+    // -------------------------
 
-  // NEW: track per-sector fit statistics (entries in 1D projections)
-  // We accumulate per-fit entries for phi and eta separately:
-  //   - sectorSumEntries[s] += nP and/or nE0
-  //   - sectorNFits[s]      += 1 for each non-empty projection fit
-  long long sectorSumEntries[64] = {0};
-  long long sectorNFits[64]      = {0};
+    // -------------------------------------------------------------------------
+    // NEW: Sector-integrated module b(E,m) extraction (sum over ALL sectors + blocks)
+    //
+    // Outputs (clean + minimal):
+    //   bvaluePNGsByGeom/sectorIntegrated/
+    //     b_vs_module_integratedE.png
+    //     energyDependent/
+    //       b_vs_module_E2to4.png
+    //       ...
+    //       b_vs_module_E20to30.png
+    //     perModule/
+    //       module_YY/
+    //         BlockCoord2D_E_unc.png
+    //         LocalPhiEtaOverlay_4by2.png
+    //         bValues_vs_E.png
+    // -------------------------------------------------------------------------
+    {
+      const std::string secIntDir    = pngBase + "/sectorIntegrated";
+      const std::string perModuleDir = secIntDir + "/perModule";
+      const std::string eDepDir      = secIntDir + "/energyDependent";
+      EnsureDir(secIntDir);
+      EnsureDir(perModuleDir);
+      EnsureDir(eDepDir);
 
-  for (int s=0; s<64; ++s)
-  {
+      // Cache b(E) per module for energyDependent and integratedE plots
+      std::vector<std::vector<double>> bphiM(24, std::vector<double>(nE, std::numeric_limits<double>::quiet_NaN()));
+      std::vector<std::vector<double>> betaM(24, std::vector<double>(nE, std::numeric_limits<double>::quiet_NaN()));
+      std::vector<std::vector<double>> ebphiM(24, std::vector<double>(nE, 0.0));
+      std::vector<std::vector<double>> ebetaM(24, std::vector<double>(nE, 0.0));
+      std::vector<std::vector<char  >> hasMphi(24, std::vector<char  >(nE, 0));
+      std::vector<std::vector<char  >> hasMeta(24, std::vector<char  >(nE, 0));
+
+      // (A) perModule/: high-stat calibration artifacts (keep module index!)
+      for (int m=0; m<24; ++m)
+      {
+        const std::string mDir = perModuleDir + Form("/module_%02d", m+1);
+        EnsureDir(mDir);
+
+        TH3F* hSum = nullptr;
+
+        for (int s=0; s<64; ++s)
+        {
+          for (int b=0; b<4; ++b)
+          {
+            std::string usedMode;
+            TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
+            if (!h3) continue;
+
+            if (!hSum)
+            {
+              hSum = static_cast<TH3F*>(h3->Clone(Form("h3_sectorIntegrated_m%02d_sum", m+1)));
+              hSum->SetDirectory(nullptr);
+              hSum->Reset();
+            }
+            hSum->Add(h3);
+          }
+        }
+
+        if (!hSum) continue;
+
+        {
+          const std::string prettyTH2 = Form("All sectors  M%02d (sum of blocks)", m+1);
+          const std::string prettyOv  = Form("All sectors  M%02d", m+1);
+
+          Plot2DBlockEtaPhi(hSum, nullptr, /*firstPass*/true, eEdges, mDir.c_str(), prettyTH2.c_str());
+          OverlayUncorrPhiEta(hSum, eEdges, mDir.c_str(), prettyOv.c_str());
+          BVecs bv = MakeBvaluesVsEnergyPlot(hSum, eEdges, mDir.c_str(), prettyOv.c_str());
+
+          if ((int)bv.bphi.size() == nE && (int)bv.beta.size() == nE)
+          {
+            for (int ie=0; ie<nE; ++ie)
+            {
+              if (std::isfinite(bv.bphi[ie])) { bphiM[m][ie] = bv.bphi[ie]; ebphiM[m][ie] = (ie < (int)bv.bphiErr.size() ? bv.bphiErr[ie] : 0.0); hasMphi[m][ie] = 1; }
+              if (std::isfinite(bv.beta[ie])) { betaM[m][ie] = bv.beta[ie]; ebetaM[m][ie] = (ie < (int)bv.betaErr.size() ? bv.betaErr[ie] : 0.0); hasMeta[m][ie] = 1; }
+            }
+          }
+        }
+
+        delete hSum;
+      }
+
+      // (B) energyDependent/: per-energy-bin module-indexed plots (sector-style formatting)
+      for (int ie=0; ie<nE; ++ie)
+      {
+        const int eLoI = (int)std::llround(eEdges[ie].first);
+        const int eHiI = (int)std::llround(eEdges[ie].second);
+        const std::string eLabel = Form("E%dto%d", eLoI, eHiI);
+
+        double bPhi[24], bEta[24], ePhi[24], eEta[24];
+        bool   hPhi[24], hEta[24];
+
+        for (int m=0; m<24; ++m)
+        {
+          bPhi[m] = bphiM[m][ie];
+          bEta[m] = betaM[m][ie];
+          ePhi[m] = ebphiM[m][ie];
+          eEta[m] = ebetaM[m][ie];
+          hPhi[m] = (hasMphi[m][ie] != 0) && std::isfinite(bPhi[m]);
+          hEta[m] = (hasMeta[m][ie] != 0) && std::isfinite(bEta[m]);
+        }
+
+        SaveBvsModulePlotTwoSeries(eDepDir + Form("/b_vs_module_%s.png", eLabel.c_str()),
+                                   "secInt",
+                                   "Sector-integrated",
+                                   "b",
+                                   eLabel.c_str(),
+                                   bPhi, ePhi, hPhi,
+                                   bEta, eEta, hEta);
+      }
+
+      // (C) sectorIntegrated/: integrated-over-energy summary (inverse-variance weighted mean over E bins)
+      {
+        double bPhi[24], bEta[24], ePhi[24], eEta[24];
+        bool   hPhi[24], hEta[24];
+
+        for (int m=0; m<24; ++m)
+        {
+          double S_w_phi=0.0, S_wb_phi=0.0;
+          double S_w_eta=0.0, S_wb_eta=0.0;
+
+          for (int ie=0; ie<nE; ++ie)
+          {
+            if (hasMphi[m][ie] && std::isfinite(bphiM[m][ie]))
+            {
+              double w = 1.0;
+              if (std::isfinite(ebphiM[m][ie]) && ebphiM[m][ie] > 0.0) w = 1.0/(ebphiM[m][ie]*ebphiM[m][ie]);
+              S_w_phi  += w;
+              S_wb_phi += w*bphiM[m][ie];
+            }
+            if (hasMeta[m][ie] && std::isfinite(betaM[m][ie]))
+            {
+              double w = 1.0;
+              if (std::isfinite(ebetaM[m][ie]) && ebetaM[m][ie] > 0.0) w = 1.0/(ebetaM[m][ie]*ebetaM[m][ie]);
+              S_w_eta  += w;
+              S_wb_eta += w*betaM[m][ie];
+            }
+          }
+
+          if (S_w_phi > 0.0) { bPhi[m] = S_wb_phi/S_w_phi; ePhi[m] = std::sqrt(1.0/S_w_phi); hPhi[m] = std::isfinite(bPhi[m]); }
+          else               { bPhi[m] = std::numeric_limits<double>::quiet_NaN(); ePhi[m] = 0.0; hPhi[m] = false; }
+
+          if (S_w_eta > 0.0) { bEta[m] = S_wb_eta/S_w_eta; eEta[m] = std::sqrt(1.0/S_w_eta); hEta[m] = std::isfinite(bEta[m]); }
+          else               { bEta[m] = std::numeric_limits<double>::quiet_NaN(); eEta[m] = 0.0; hEta[m] = false; }
+        }
+
+        SaveBvsModulePlotTwoSeries(secIntDir + "/b_vs_module_integratedE.png",
+                                   "secInt",
+                                   "Sector-integrated",
+                                   "b",
+                                   "integratedE",
+                                   bPhi, ePhi, hPhi,
+                                   bEta, eEta, hEta);
+      }
+    }
+
+    // NEW: track per-sector fit statistics (entries in 1D projections)
+    // We accumulate per-fit entries for phi and eta separately:
+    //   - sectorSumEntries[s] += nP and/or nE0
+    //   - sectorNFits[s]      += 1 for each non-empty projection fit
+    long long sectorSumEntries[64] = {0};
+    long long sectorNFits[64]      = {0};
+
+    for (int s=0; s<64; ++s)
+    {
     sector = s;
 
-    const std::string secDir = pngBase + Form("/sector_%02d", s);
-    const std::string tablesDir = secDir + "/tables";
-    EnsureDir(secDir);
-    EnsureDir(tablesDir);
+      const std::string secDir = pngBase + Form("/sector_%02d", s);
+      const std::string tablesDir = secDir + "/tables";
+      const std::string perModuleTH2sDir = secDir + "/perModuleTH2s";
+      const std::string perModuleOvDir   = secDir + "/perModuleEtaPhiOverlays";
+      const std::string perModuleBDir    = secDir + "/perModuleBvalueSummaryVsEnergy";
+      EnsureDir(secDir);
+      EnsureDir(tablesDir);
+      EnsureDir(perModuleTH2sDir);
+      EnsureDir(perModuleOvDir);
+      EnsureDir(perModuleBDir);
 
     // Keep your old sector-level summary_table.txt too (unchanged)
     std::ofstream txt(secDir + "/summary_table.txt");
@@ -5954,15 +6322,21 @@ static void RunBlockwiseBExtraction(TFile* fin,
         sm << "# columns: ebin Elo Ehi blockPhi b_phi b_phi_err nPhi b_eta b_eta_err nEta mode\n";
       }
 
-      // Fill b(E) for this module over blocks and energies
-      for (int b=0; b<4; ++b)
-      {
-        std::string usedMode;
-        TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
-        if (!h3) continue;
+        // Cache raw per-block TH3s for this module (used for perBlock outputs and module-summed outputs)
+        TH3F* h3Blocks[4] = {nullptr, nullptr, nullptr, nullptr};
+        std::string h3Mode[4];
 
-        for (int ie=0; ie<nE; ++ie)
+        // Fill b(E) for this module over blocks and energies
+        for (int b=0; b<4; ++b)
         {
+          std::string usedMode;
+          TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
+          h3Blocks[b] = h3;
+          h3Mode[b]   = usedMode;
+          if (!h3) continue;
+
+          for (int ie=0; ie<nE; ++ie)
+          {
           ebin = ie;
           Elo  = eEdges[ie].first;
           Ehi  = eEdges[ie].second;
@@ -6053,20 +6427,80 @@ static void RunBlockwiseBExtraction(TFile* fin,
         }
       } // end block loop
 
-      if (sm.is_open()) sm.close();
+        if (sm.is_open()) sm.close();
 
-      // Module “money” overlays
-      SaveModuleOverlay(moduleDir + "/bphi_vsE_overlay_blocks.png",
-                        s, m,
-                        "b_{#varphi}(E) overlay (Blocks 1–4)",
-                        "b_{#varphi}",
-                        bPhiByMod[m], bPhiErrByMod[m], hasPhiByMod[m]);
+        // ---------------------------------------------------------------------
+        // NEW: Visual QA outputs organized by geometry
+        //
+        // 1) Per module folder: module_YY/perBlock/
+        //    - For each block (1..4): TH2 tables, η/φ overlays w/ fits, b(E)
+        //
+        // 2) Per sector folder:
+        //    - perModuleTH2s/                    (24 module PNGs)
+        //    - perModuleEtaPhiOverlays/          (24 module PNGs)
+        //    - perModuleBvalueSummaryVsEnergy/   (24 module PNGs)
+        //
+        // These use gOutNamePrefix so files do not overwrite.
+        // ---------------------------------------------------------------------
 
-      SaveModuleOverlay(moduleDir + "/beta_vsE_overlay_blocks.png",
-                        s, m,
-                        "b_{#eta}(E) overlay (Blocks 1–4)",
-                        "b_{#eta}",
-                        bEtaByMod[m], bEtaErrByMod[m], hasEtaByMod[m]);
+        // (A) Per-block outputs under module folder
+        {
+          const std::string perBlockDir = moduleDir + "/perBlock";
+          EnsureDir(perBlockDir);
+
+          for (int b=0; b<4; ++b)
+          {
+            if (!h3Blocks[b]) continue;
+
+            const std::string pretty = Form("S%02d  M%02d  B%d", s, m+1, b+1);
+
+            ScopedOutNamePrefix pref(Form("block%d_", b+1));
+            Plot2DBlockEtaPhi(h3Blocks[b], nullptr, /*firstPass*/true, eEdges, perBlockDir.c_str(), pretty.c_str());
+            OverlayUncorrPhiEta(h3Blocks[b], eEdges, perBlockDir.c_str(), pretty.c_str());
+            MakeBvaluesVsEnergyPlot(h3Blocks[b], eEdges, perBlockDir.c_str(), pretty.c_str());
+          }
+        }
+
+        // (B) Per-module outputs (sum over the 4 blocks) into sector-level folders
+        {
+          TH3F* hModSum = nullptr;
+          for (int b=0; b<4; ++b)
+          {
+            if (!h3Blocks[b]) continue;
+            if (!hModSum)
+            {
+              hModSum = static_cast<TH3F*>(h3Blocks[b]->Clone(Form("h3_blockCoord_E_full_s%02d_m%02d_sum", s, m+1)));
+              hModSum->SetDirectory(nullptr);
+              hModSum->Reset();
+            }
+            hModSum->Add(h3Blocks[b]);
+          }
+
+          if (hModSum)
+          {
+            const std::string pretty = Form("S%02d  M%02d (sum of blocks)", s, m+1);
+
+            ScopedOutNamePrefix pref(Form("module%02d_", m+1));
+            Plot2DBlockEtaPhi(hModSum, nullptr, /*firstPass*/true, eEdges, perModuleTH2sDir.c_str(), pretty.c_str());
+            OverlayUncorrPhiEta(hModSum, eEdges, perModuleOvDir.c_str(), pretty.c_str());
+            MakeBvaluesVsEnergyPlot(hModSum, eEdges, perModuleBDir.c_str(), pretty.c_str());
+
+            delete hModSum;
+          }
+        }
+
+        // Module “money” overlays
+        SaveModuleOverlay(moduleDir + "/bphi_vsE_overlay_blocks.png",
+                          s, m,
+                          "b_{#varphi}(E) overlay (Blocks 1–4)",
+                          "b_{#varphi}",
+                          bPhiByMod[m], bPhiErrByMod[m], hasPhiByMod[m]);
+
+        SaveModuleOverlay(moduleDir + "/beta_vsE_overlay_blocks.png",
+                          s, m,
+                          "b_{#eta}(E) overlay (Blocks 1–4)",
+                          "b_{#eta}",
+                          bEtaByMod[m], bEtaErrByMod[m], hasEtaByMod[m]);
 
       // Audit grids
       if (doAuditFits)
@@ -6176,10 +6610,10 @@ static void RunBlockwiseBExtraction(TFile* fin,
     SaveSectorTable3x4(tablesDir, s, "beta_vsE", "b_{#eta}",
                        bEtaByMod, bEtaErrByMod, hasEtaByMod);
 
-    if (txt.is_open()) txt.close();
-  } // end sector loop
+      if (txt.is_open()) txt.close();
+    } // end sector loop
 
-  fout->cd();
+    fout->cd();
   t->Write();
   fout->Write();
   fout->Close();
