@@ -35,7 +35,7 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <string>x
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -1867,10 +1867,10 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
           bmin = std::min(bmin, y);
           bmax = std::max(bmax, y);
         }
-        if (bmin < bmax) {
-          std::cout << Form("[incidenceQA] alphaEta SD band %-5s : min = %+ .5f  max = %+ .5f  [rad]\n",
-                            label, bmin, bmax);
-        }
+          if (bmin < bmax) {
+            std::cout << Form("[incidenceQA] alphaEta SD band %-5s : min = %+.5f  max = %+.5f  [rad]\n",
+                              label, bmin, bmax);
+          }
       };
       printBandMinMax("core", pCoreSD.get());
       printBandMinMax("mid" , pMidSD.get());
@@ -1964,7 +1964,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       }
 
 
-    // alphaPhi_EtaOverlay.png — absolute-|η| bands for η_SD and η_det
+    // alphaPhi_EtaOverlay.png - absolute-|η| bands for η_SD and η_det
     // SD version → showerDepthEta/, det version → detectorEta/
     {
       // ---------- SD version (η_SD) ----------
@@ -1998,10 +1998,10 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
           bmin = std::min(bmin, y);
           bmax = std::max(bmax, y);
         }
-        if (bmin < bmax) {
-          std::cout << Form("[incidenceQA] alphaPhi SD band %-5s : min = %+ .5f  max = %+ .5f  [rad]\n",
-                            label, bmin, bmax);
-        }
+          if (bmin < bmax) {
+            std::cout << Form("[incidenceQA] alphaPhi SD band %-5s : min = %+.5f  max = %+.5f  [rad]\n",
+                              label, bmin, bmax);
+          }
       };
       printBandMinMaxPhi("core", pCore.get());
       printBandMinMaxPhi("mid" , pMid.get());
@@ -2028,8 +2028,8 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
             }
             if (nUsed > 0) {
               double avg = sumY / nUsed;
-              std::cout << Form("  z = %+6.2f cm : <alphaPhi>_avg(|eta| bands) = %+ .5f [rad]\n",
-                                z, avg);
+                std::cout << Form("  z = %+6.2f cm : <alphaPhi>_avg(|eta| bands) = %+.5f [rad]\n",
+                                  z, avg);
             }
           }
         }
@@ -2218,7 +2218,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
       else if (p30) { xMin = p30->GetXaxis()->GetXmin(); xMax = p30->GetXaxis()->GetXmax(); }
       else if (p60) { xMin = p60->GetXaxis()->GetXmin(); xMax = p60->GetXaxis()->GetXmax(); }
 
-      TCanvas c("c_etaX_overlay", "alpha vs eta — z caps", 900, 600);
+      TCanvas c("c_etaX_overlay", "alpha vs eta - z caps", 900, 600);
       c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
       c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
 
@@ -2458,7 +2458,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
 
         // Canvas & graph (no grid lines)
         TCanvas c(Form("c_alphaPhi_mean_vs_E_%s", B.key),
-                  Form("<#alpha_{#varphi}^{fold}> vs E — %s", B.tag), 900, 600);
+                  Form("<#alpha_{#varphi}^{fold}> vs E - %s", B.tag), 900, 600);
         c.SetLeftMargin(0.12); c.SetRightMargin(0.06);
         c.SetBottomMargin(0.12); c.SetTopMargin(0.08);
 
@@ -2477,7 +2477,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
           gr.reset(new TGraph((int)vx.size(), vx.data(), vy.data()));
         }
 
-        gr->SetTitle(Form("<#alpha_{#varphi}^{fold}> vs E — %s;E_{#gamma} [GeV];<#alpha_{#varphi}^{fold}> [rad]", B.tag));
+        gr->SetTitle(Form("<#alpha_{#varphi}^{fold}> vs E - %s;E_{#gamma} [GeV];<#alpha_{#varphi}^{fold}> [rad]", B.tag));
         gr->SetMarkerStyle(20);
         gr->SetMarkerSize(1.2);
         gr->SetLineColor(B.col);
@@ -2523,7 +2523,7 @@ static void SaveIncidenceQA(TFile* fin, const std::string& outBaseDir)
         yMinAll -= padL; yMaxAll += padU;
 
         TCanvas cAll("c_alphaPhi_mean_vs_E_overlay",
-                     "<#alpha_{#varphi}^{fold}> vs E — core/mid/edge", 950, 650);
+                     "<#alpha_{#varphi}^{fold}> vs E - core/mid/edge", 950, 650);
         cAll.SetLeftMargin(0.12); cAll.SetRightMargin(0.06);
         cAll.SetBottomMargin(0.12); cAll.SetTopMargin(0.08);
 
@@ -2915,7 +2915,7 @@ static void BuildDeltaAndWriteFits(TFile* fin,
     };
 
 
-    // 1) loop energy slices — accumulate δ vs sinα points (no per-slice PNGs)
+    // 1) loop energy slices - accumulate δ vs sinα points (no per-slice PNGs)
     const size_t NE = eEdges.size();
     std::vector<std::vector<double>> xs_phi(NE), ys_phi(NE), eys_phi(NE);
     std::vector<std::vector<double>> xs_eta(NE), ys_eta(NE), eys_eta(NE);
@@ -2992,7 +2992,7 @@ static void BuildDeltaAndWriteFits(TFile* fin,
         g.SetPoint(i, X[i], Y[i]);
         g.SetPointError(i, 0.0, EY[i]);
       }
-      g.SetTitle(Form("c_{1}(E) fit — %s;ln(E/E_{0});c_{1}", tag));
+      g.SetTitle(Form("c_{1}(E) fit - %s;ln(E/E_{0});c_{1}", tag));
 
       TF1 f("f_c1", "[0] + [1]*x",
             *std::min_element(X.begin(), X.end()),
@@ -3005,7 +3005,7 @@ static void BuildDeltaAndWriteFits(TFile* fin,
       em  = f.GetParError(1);
 
       // Quick PNG of the fit
-      TCanvas c(Form("c_c1_%s", tag), Form("c1 vs lnE — %s", tag), 800, 550);
+      TCanvas c(Form("c_c1_%s", tag), Form("c1 vs lnE - %s", tag), 800, 550);
       g.SetMarkerStyle(20);
       g.Draw("AP");
       f.SetLineColor(kGray + 2);
@@ -3048,7 +3048,7 @@ static void BuildDeltaAndWriteFits(TFile* fin,
         gPhi.SetPoint(static_cast<int>(i), xE, yC);
         gPhi.SetPointError(static_cast<int>(i), 0.0, eY);
       }
-      gPhi.SetTitle("c_{1}(E) — #phi;E [GeV];c_{1}");
+      gPhi.SetTitle("c_{1}(E) - #phi;E [GeV];c_{1}");
       gPhi.SetMarkerStyle(20);
       gPhi.Draw("AP");
       cEphi.SaveAs((outDir + "/c1_phi_vs_E.png").c_str());
@@ -5003,7 +5003,7 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
     }
   } // end φ tilt fits wrapper
 
-    // ---- Min-RMS CSVs (quiet) — φ only in phiTILTfits ----
+    // ---- Min-RMS CSVs (quiet) - φ only in phiTILTfits ----
     {
       const std::string summaryDir = DIR_PH + std::string("/Overlays/phiTILTfits");
       Var2Stats S_ET_dummy; // do not write any eta artifacts under phiTILTfits
@@ -5171,14 +5171,14 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
     const std::vector<std::string> keysClusNoRaw = {
       "CLUSCP","CLUSCP_EA","CLUSCP_EA_vzDep","CLUSCP_EA_etaDep","CLUSCP_EA_vzEtaDep","CLUSCP_EA_EandIncident"
     };
-    printFinalDeltaTable("phi (Δφ) — CLUS family", S_PH, keysClusNoRaw);
-    printFinalDeltaTable("eta (Δη) — CLUS family", S_ET, keysClusNoRaw);
+    printFinalDeltaTable("phi (Δφ) - CLUS family", S_PH, keysClusNoRaw);
+    printFinalDeltaTable("eta (Δη) - CLUS family", S_ET, keysClusNoRaw);
 
-    // 2) ALL variants vs CLUSRAW (φ then η) — exclude baseline itself
+    // 2) ALL variants vs CLUSRAW (φ then η) - exclude baseline itself
     std::vector<std::string> keysAllNoRaw;
     for (const auto& v : kVariants) if (v.key != "CLUSRAW") keysAllNoRaw.push_back(v.key);
-    printFinalDeltaTable("phi (Δφ) — ALL variants", S_PH, keysAllNoRaw);
-    printFinalDeltaTable("eta (Δη) — ALL variants", S_ET, keysAllNoRaw);
+    printFinalDeltaTable("phi (Δφ) - ALL variants", S_PH, keysAllNoRaw);
+    printFinalDeltaTable("eta (Δη) - ALL variants", S_ET, keysAllNoRaw);
 
     std::cout << "\n[MakeResidualsSuite] Residuals suite written under: " << RESID << "\n";
 }
@@ -5198,7 +5198,7 @@ static void MakeResidualsSuite(TFile* fin, const std::string& outBaseDir)
 //
 // Outputs (under outBaseDir):
 //   1) PDC_bvalues.root  : TTree "bvalsSMB" (machine-readable)
-//   2) bvaluePNGs/sector_XX/ : tilt-style PNGs + summary_table.txt
+//   2) bvaluePNGsByGeom/sector_XX/ : tilt-style PNGs + summary_table.txt
 //
 // Fit logic is EXACTLY the same as your global workflow:
 //   For each TH3 and energy bin:
@@ -5375,7 +5375,7 @@ static inline void SaveBvsModulePlot(const std::string& outPng,
                                           yPts[frameBlock],
                                           exPts[frameBlock],
                                           eyPts[frameBlock]);
-  gFrame->SetTitle(Form("Sector %02d — %s (%s);Module index;%s",
+  gFrame->SetTitle(Form("Sector %02d - %s (%s);Module index;%s",
                         sector, plotTitle, energyLabel, yAxisLabel));
   gFrame->SetMarkerStyle(20);
   gFrame->SetMarkerSize(0.0);
@@ -5474,9 +5474,39 @@ static void RunBlockwiseBExtraction(TFile* fin,
 {
   if (!fin) return;
 
-  const std::string pngBase = outBaseDir + "/bvaluePNGs";
+  // Toggle audit volume here (safe defaults)
+  const bool doAuditFits     = true;   // per-module integratedE 4x2 fit grids
+  const bool doAuditLowHigh  = false;  // also do first/last energy-bin grids
+
+  const int nE = (int)eEdges.size();
+  if (nE <= 0) return;
+
+  const std::string pngBase = outBaseDir + "/bvaluePNGsByGeom";
   EnsureDir(pngBase);
 
+  // Write one README (idempotent)
+  {
+    std::ofstream rd(pngBase + "/README.txt");
+    if (rd.is_open())
+    {
+      rd <<
+        "bvaluePNGsByGeom/\n"
+        "  Raw per-block TH3s live in the input ROOT file (flat):\n"
+        "    h3_blockCoord_E_full_sXX_mYY_bZ_{range|disc}\n"
+        "\n"
+        "  This folder contains DERIVED b(E) outputs organized by geometry:\n"
+        "    sector_XX/\n"
+        "      tables/ : 3x4 pages (modules 01-12, 13-24), each tile is b(E) overlay (4 blocks)\n"
+        "      module_YY/\n"
+        "        bphi_vsE_overlay_blocks.png\n"
+        "        beta_vsE_overlay_blocks.png\n"
+        "        fits_integratedE_phiEta_4by2.png   (audit)\n"
+        "        summary.txt\n";
+      rd.close();
+    }
+  }
+
+  // Machine-readable ROOT output
   const std::string outRoot = outBaseDir + "/PDC_bvalues.root";
   std::unique_ptr<TFile> fout(TFile::Open(outRoot.c_str(),"RECREATE"));
   if (!fout || fout->IsZombie())
@@ -5485,7 +5515,7 @@ static void RunBlockwiseBExtraction(TFile* fin,
     return;
   }
 
-  // Tree schema
+  // Tree schema (same as before)
   int sector=0, module=0, blockPhi=0, ebin=0;
   double Elo=0.0, Ehi=0.0;
   double b_phi=std::numeric_limits<double>::quiet_NaN();
@@ -5499,7 +5529,7 @@ static void RunBlockwiseBExtraction(TFile* fin,
   t->Branch("sector",&sector,"sector/I");
   t->Branch("module",&module,"module/I");
   t->Branch("blockPhi",&blockPhi,"blockPhi/I");
-  t->Branch("ebin",&ebin,"ebin/I");
+  t->Branch("ebin",&ebin,"ebin/I");         // 0..nE-1, and -1 for integratedE rows
   t->Branch("Elo",&Elo,"Elo/D");
   t->Branch("Ehi",&Ehi,"Ehi/D");
   t->Branch("b_phi",&b_phi,"b_phi/D");
@@ -5510,77 +5540,466 @@ static void RunBlockwiseBExtraction(TFile* fin,
   t->Branch("nEta",&nEta,"nEta/L");
   t->Branch("mode",modeUsed,"mode[8]/C");
 
-  // Loop sectors
+  // Helper: draw b(E) overlay for 4 blocks into the CURRENT pad
+  auto DrawBvsEOverlayBlocksPad =
+    [&](int s, int m0,
+        const char* yLabel,
+        const std::vector<std::array<double,4>>& bV,     // size nE
+        const std::vector<std::array<double,4>>& bE,     // size nE
+        const std::vector<std::array<char  ,4>>& has,
+        bool compact,
+        bool drawLegend)
+  {
+    const double Emin = eEdges.front().first;
+    const double Emax = eEdges.back().second;
+
+    double yMin = +1e99, yMax = -1e99;
+    for (int ie=0; ie<nE; ++ie)
+    {
+      for (int b=0;b<4;++b)
+      {
+        if (!has[ie][b]) continue;
+        const double v = bV[ie][b];
+        if (!std::isfinite(v)) continue;
+        yMin = std::min(yMin, v);
+        yMax = std::max(yMax, v);
+      }
+    }
+    if (!(yMin < yMax)) { yMin = -0.02; yMax = +0.02; }
+    const double span = (yMax-yMin>0? (yMax-yMin):0.10);
+    const double yLo = yMin - 0.12*span;
+    const double yHi = yMax + 0.25*span;
+
+    if (compact)
+    {
+      gPad->SetLeftMargin(0.12);
+      gPad->SetRightMargin(0.04);
+      gPad->SetBottomMargin(0.14);
+      gPad->SetTopMargin(0.10);
+    }
+    else
+    {
+      gPad->SetLeftMargin(0.12);
+      gPad->SetRightMargin(0.06);
+      gPad->SetBottomMargin(0.12);
+      gPad->SetTopMargin(0.08);
+    }
+
+      TH2F* frame = new TH2F(Form("frame_bvsE_s%02d_m%02d_%p", s, m0, (void*)gPad),
+                             "", 100, Emin, Emax, 100, yLo, yHi);
+      frame->SetDirectory(nullptr);
+      frame->SetBit(kCanDelete);   // allow pad/canvas to own & delete it safely
+      frame->SetStats(0);
+      frame->Draw();
+
+      if (!compact)
+      {
+        frame->GetXaxis()->SetTitle("E_{#gamma} [GeV]");
+        frame->GetYaxis()->SetTitle(yLabel);
+      }
+
+      frame->GetXaxis()->SetLabelSize(compact ? 0.07 : 0.045);
+      frame->GetYaxis()->SetLabelSize(compact ? 0.07 : 0.045);
+
+    int blockColor[4] = { kBlue, kRed, kGreen+2, kBlack };
+    TGraphErrors* g[4] = {nullptr,nullptr,nullptr,nullptr};
+
+    for (int b=0;b<4;++b)
+    {
+      std::vector<double> x,y,ex,ey;
+      for (int ie=0; ie<nE; ++ie)
+      {
+        if (!has[ie][b]) continue;
+        const double v = bV[ie][b];
+        if (!std::isfinite(v)) continue;
+        const double eCtr = 0.5*(eEdges[ie].first + eEdges[ie].second);
+        x.push_back(eCtr);
+        y.push_back(v);
+        ex.push_back(0.0);
+        ey.push_back(bE[ie][b]);
+      }
+      if (x.empty()) continue;
+
+        g[b] = new TGraphErrors((int)x.size(), x.data(), y.data(), ex.data(), ey.data());
+        g[b]->SetBit(kCanDelete);
+        g[b]->SetMarkerStyle(20);
+        g[b]->SetMarkerSize(compact ? 0.65 : 1.05);
+        g[b]->SetMarkerColor(blockColor[b]);
+        g[b]->SetLineColor(blockColor[b]);
+        g[b]->SetLineWidth(2);
+        g[b]->Draw("P SAME");
+    }
+
+    TLatex tx;
+    tx.SetNDC(true);
+    tx.SetTextSize(compact ? 0.085 : 0.050);
+    tx.DrawLatex(0.14, 0.90, Form("M%02d", m0+1));
+
+    if (drawLegend)
+    {
+      TLegend lg(0.55, 0.68, 0.95, 0.90);
+      lg.SetBorderSize(0);
+      lg.SetFillStyle(0);
+      lg.SetTextSize(compact ? 0.070 : 0.040);
+      lg.SetHeader("#bf{Blocks}", "L");
+      for (int b=0;b<4;++b) if (g[b]) lg.AddEntry(g[b], Form("B%d", b+1), "P");
+      lg.Draw();
+    }
+
+      for (int b=0;b<4;++b)
+        if (g[b]) g[b]->SetBit(kCanDelete);
+  };
+
+  // Helper: save one module overlay PNG
+  auto SaveModuleOverlay =
+    [&](const std::string& outPng,
+        int s, int m0,
+        const char* titleMain,
+        const char* yLabel,
+        const std::vector<std::array<double,4>>& bV,
+        const std::vector<std::array<double,4>>& bE,
+        const std::vector<std::array<char  ,4>>& has)
+  {
+    TCanvas c(Form("c_bvsE_s%02d_m%02d_%s", s, m0, titleMain),
+              Form("Sector %02d Module %02d", s, m0+1), 900, 600);
+    c.SetGrid(0,0);
+
+    DrawBvsEOverlayBlocksPad(s, m0, yLabel, bV, bE, has, /*compact=*/false, /*drawLegend=*/true);
+
+    TLatex hdr;
+    hdr.SetNDC(true);
+    hdr.SetTextSize(0.045);
+    hdr.DrawLatex(0.14, 0.965, Form("Sector %02d  Module %02d - %s", s, m0+1, titleMain));
+
+    c.SaveAs(outPng.c_str());
+  };
+
+  // Helper: per-module 4x2 audit fit grid (integratedE or a specific energy bin)
+  auto SaveFitGridPhiEta4x2 =
+    [&](const std::string& outPng,
+        int s, int m0,
+        double eLo, double eHi,
+        const char* eLabel,
+        bool restrictEnergy)
+  {
+    gStyle->SetOptStat(0);
+
+    TCanvas c(Form("c_fitgrid_s%02d_m%02d_%s", s, m0, eLabel),
+              Form("fits s%02d m%02d %s", s, m0, eLabel), 1800, 700);
+    c.Divide(4,2);
+
+    // keep TF1s alive until the canvas saves
+    std::vector<std::unique_ptr<TF1>> keepFits;
+    keepFits.reserve(32);
+
+    for (int b=0; b<4; ++b)
+    {
+      std::string usedMode;
+      TH3F* h3 = GetSMBHistFull(fin, s, m0, b, usedMode);
+
+      // Row 1: phi projection
+      c.cd(b+1);
+      gPad->SetLeftMargin(0.14); gPad->SetRightMargin(0.05);
+      gPad->SetBottomMargin(0.14); gPad->SetTopMargin(0.10);
+
+      if (!h3)
+      {
+        TLatex t; t.SetNDC(true); t.SetTextSize(0.08);
+        t.DrawLatex(0.12,0.55,"MISSING TH3");
+        t.DrawLatex(0.12,0.42,Form("B%d", b+1));
+      }
+      else
+      {
+        // Reuse your existing “truth”: project + FitAsinh1D
+        auto* axZ = h3->GetZaxis();
+        const int zFirst = axZ->GetFirst();
+        const int zLast  = axZ->GetLast();
+
+        if (restrictEnergy)
+        {
+          const int zLo = std::max(1, axZ->FindBin(eLo + 1e-9));
+          const int zHi = std::min(h3->GetNbinsZ(), axZ->FindBin(eHi - 1e-9));
+          axZ->SetRange(zLo, zHi);
+        }
+        else
+        {
+          axZ->SetRange(1, h3->GetNbinsZ());
+        }
+
+        h3->GetXaxis()->SetRange(1, h3->GetNbinsX());
+        h3->GetYaxis()->SetRange(1, h3->GetNbinsY());
+
+          TH1D* hPhi = static_cast<TH1D*>(h3->Project3D("y"));
+          axZ->SetRange(zFirst, zLast);
+
+          if (hPhi)
+          {
+            hPhi->SetDirectory(nullptr);
+            hPhi->SetBit(kCanDelete);   // pad/canvas can delete it
+            hPhi->SetLineWidth(2);
+            hPhi->SetTitle("");
+            hPhi->GetXaxis()->SetTitle("#phi_{CG} (block-local)");
+            hPhi->GetYaxis()->SetTitle("Counts");
+            hPhi->GetXaxis()->SetRangeUser(-0.5, 0.5);
+            hPhi->Draw("hist");
+
+            const BRes bf = FitAsinh1D(hPhi);
+          if (std::isfinite(bf.val) && bf.val > 0.0)
+          {
+            auto f = std::make_unique<TF1>(Form("f_asinh_phi_s%02d_m%02d_b%d_%s", s, m0, b, eLabel),
+                                           asinhModel, -0.5, 0.5, 2);
+            f->SetParameters(bf.norm, bf.val);
+            f->SetLineColor(kGray+2);
+            f->SetLineStyle(2);
+            f->SetLineWidth(3);
+            f->Draw("same");
+            keepFits.emplace_back(std::move(f));
+          }
+
+          TLatex tx; tx.SetNDC(true);
+          tx.SetTextSize(0.065);
+          tx.DrawLatex(0.14, 0.90, Form("B%d  (#phi)", b+1));
+          tx.SetTextSize(0.055);
+          tx.DrawLatex(0.14, 0.80, Form("b = %.6f #pm %.2g", bf.val, bf.err));
+          tx.DrawLatex(0.14, 0.72, Form("N = %.0f", hPhi->GetEntries()));
+          tx.DrawLatex(0.14, 0.64, usedMode.c_str());
+        }
+      }
+
+      // Row 2: eta projection
+      c.cd(b+1+4);
+      gPad->SetLeftMargin(0.14); gPad->SetRightMargin(0.05);
+      gPad->SetBottomMargin(0.14); gPad->SetTopMargin(0.10);
+
+      if (!h3)
+      {
+        TLatex t; t.SetNDC(true); t.SetTextSize(0.08);
+        t.DrawLatex(0.12,0.55,"MISSING TH3");
+        t.DrawLatex(0.12,0.42,Form("B%d", b+1));
+      }
+      else
+      {
+        auto* axZ = h3->GetZaxis();
+        const int zFirst = axZ->GetFirst();
+        const int zLast  = axZ->GetLast();
+
+        if (restrictEnergy)
+        {
+          const int zLo = std::max(1, axZ->FindBin(eLo + 1e-9));
+          const int zHi = std::min(h3->GetNbinsZ(), axZ->FindBin(eHi - 1e-9));
+          axZ->SetRange(zLo, zHi);
+        }
+        else
+        {
+          axZ->SetRange(1, h3->GetNbinsZ());
+        }
+
+        h3->GetXaxis()->SetRange(1, h3->GetNbinsX());
+        h3->GetYaxis()->SetRange(1, h3->GetNbinsY());
+
+          TH1D* hEta = static_cast<TH1D*>(h3->Project3D("x"));
+          axZ->SetRange(zFirst, zLast);
+
+          if (hEta)
+          {
+            hEta->SetDirectory(nullptr);
+            hEta->SetBit(kCanDelete);   // pad/canvas can delete it
+            hEta->SetLineWidth(2);
+            hEta->SetTitle("");
+            hEta->GetXaxis()->SetTitle("#eta_{CG} (block-local)");
+            hEta->GetYaxis()->SetTitle("Counts");
+            hEta->GetXaxis()->SetRangeUser(-0.5, 0.5);
+            hEta->Draw("hist");
+
+            const BRes bf = FitAsinh1D(hEta);
+          if (std::isfinite(bf.val) && bf.val > 0.0)
+          {
+            auto f = std::make_unique<TF1>(Form("f_asinh_eta_s%02d_m%02d_b%d_%s", s, m0, b, eLabel),
+                                           asinhModel, -0.5, 0.5, 2);
+            f->SetParameters(bf.norm, bf.val);
+            f->SetLineColor(kGray+2);
+            f->SetLineStyle(2);
+            f->SetLineWidth(3);
+            f->Draw("same");
+            keepFits.emplace_back(std::move(f));
+          }
+
+          TLatex tx; tx.SetNDC(true);
+          tx.SetTextSize(0.065);
+          tx.DrawLatex(0.14, 0.90, Form("B%d  (#eta)", b+1));
+          tx.SetTextSize(0.055);
+          tx.DrawLatex(0.14, 0.80, Form("b = %.6f #pm %.2g", bf.val, bf.err));
+          tx.DrawLatex(0.14, 0.72, Form("N = %.0f", hEta->GetEntries()));
+          tx.DrawLatex(0.14, 0.64, usedMode.c_str());
+        }
+      }
+    }
+
+    // Global header on pad 1
+    c.cd(1);
+    TLatex hdr;
+    hdr.SetNDC(true);
+    hdr.SetTextSize(0.060);
+    hdr.DrawLatex(0.14, 0.99, Form("Sector %02d  Module %02d - %s", s, m0+1, eLabel));
+
+    c.SaveAs(outPng.c_str());
+  };
+
+  // Helper: sector 3x4 table pages for b(E) overlays
+  auto SaveSectorTable3x4 =
+    [&](const std::string& tablesDir,
+        int s,
+        const char* stem,
+        const char* yLabel,
+        const std::vector<std::vector<std::array<double,4>>>& bVByMod,
+        const std::vector<std::vector<std::array<double,4>>>& bEByMod,
+        const std::vector<std::vector<std::array<char  ,4>>>& hasByMod)
+  {
+    EnsureDir(tablesDir);
+
+    const int perPage = 12;
+    for (int page=0; page<2; ++page)
+    {
+      const int mStart = page*perPage;
+      const int mEnd   = std::min(24, mStart+perPage);
+
+      TCanvas c(Form("c_tbl_%s_s%02d_p%d", stem, s, page+1),
+                Form("Sector %02d %s page %d", s, stem, page+1),
+                1700, 1100);
+      c.Divide(4,3);
+
+      int padIdx = 1;
+      for (int m=mStart; m<mEnd; ++m)
+      {
+        c.cd(padIdx);
+        DrawBvsEOverlayBlocksPad(s, m, yLabel,
+                                 bVByMod[m], bEByMod[m], hasByMod[m],
+                                 /*compact=*/true,
+                                 /*drawLegend=*/(padIdx==1));
+        padIdx++;
+      }
+
+      c.cd(1);
+      TLatex hdr;
+      hdr.SetNDC(true);
+      hdr.SetTextSize(0.075);
+      hdr.DrawLatex(0.14, 0.99, Form("Sector %02d - %s - Modules %02d–%02d",
+                                     s, stem, mStart+1, mEnd));
+
+      const std::string outPng = tablesDir + Form("/%s_table3x4_page%d.png", stem, page+1);
+      c.SaveAs(outPng.c_str());
+    }
+  };
+    
+
+  // -------------------------
+  // Main sector loop
+  // -------------------------
+
+  // NEW: track per-sector fit statistics (entries in 1D projections)
+  // We accumulate per-fit entries for phi and eta separately:
+  //   - sectorSumEntries[s] += nP and/or nE0
+  //   - sectorNFits[s]      += 1 for each non-empty projection fit
+  long long sectorSumEntries[64] = {0};
+  long long sectorNFits[64]      = {0};
+
   for (int s=0; s<64; ++s)
   {
     sector = s;
-    const std::string secDir = pngBase + Form("/sector_%02d", s);
-    EnsureDir(secDir);
 
+    const std::string secDir = pngBase + Form("/sector_%02d", s);
+    const std::string tablesDir = secDir + "/tables";
+    EnsureDir(secDir);
+    EnsureDir(tablesDir);
+
+    // Keep your old sector-level summary_table.txt too (unchanged)
     std::ofstream txt(secDir + "/summary_table.txt");
     if (txt.is_open())
     {
       txt << "# sector module blockPhi ebin Elo Ehi b_phi b_phi_err b_eta b_eta_err nPhi nEta mode\n";
     }
 
-    // Per-energy plots
-    for (int ie=0; ie<(int)eEdges.size(); ++ie)
+    // Per-module storage for “b vs E overlays” and table pages
+    std::vector<std::vector<std::array<double,4>>> bPhiByMod(24, std::vector<std::array<double,4>>(nE));
+    std::vector<std::vector<std::array<double,4>>> bEtaByMod(24, std::vector<std::array<double,4>>(nE));
+    std::vector<std::vector<std::array<double,4>>> bPhiErrByMod(24, std::vector<std::array<double,4>>(nE));
+    std::vector<std::vector<std::array<double,4>>> bEtaErrByMod(24, std::vector<std::array<double,4>>(nE));
+    std::vector<std::vector<std::array<char  ,4>>> hasPhiByMod(24, std::vector<std::array<char  ,4>>(nE));
+    std::vector<std::vector<std::array<char  ,4>>> hasEtaByMod(24, std::vector<std::array<char  ,4>>(nE));
+
+    for (int m=0; m<24; ++m)
     {
-      ebin = ie;
-      Elo  = eEdges[ie].first;
-      Ehi  = eEdges[ie].second;
+      const std::string moduleDir = secDir + Form("/module_%02d", m+1);
+      EnsureDir(moduleDir);
 
-      double bPhiArr[24][4]; double bEtaArr[24][4];
-      double bPhiErrArr[24][4]; double bEtaErrArr[24][4];
-      bool   hasPhiArr[24][4]; bool hasEtaArr[24][4];
-
-      for (int m=0;m<24;++m) for (int b=0;b<4;++b)
+      // Initialize arrays
+      for (int ie=0; ie<nE; ++ie)
       {
-        bPhiArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
-        bEtaArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
-        bPhiErrArr[m][b] = 0.0;
-        bEtaErrArr[m][b] = 0.0;
-        hasPhiArr[m][b]  = false;
-        hasEtaArr[m][b]  = false;
-      }
-
-      for (int m=0; m<24; ++m)
-      {
-        module = m;
         for (int b=0; b<4; ++b)
         {
-          blockPhi = b;
+          bPhiByMod[m][ie][b]    = std::numeric_limits<double>::quiet_NaN();
+          bEtaByMod[m][ie][b]    = std::numeric_limits<double>::quiet_NaN();
+          bPhiErrByMod[m][ie][b] = 0.0;
+          bEtaErrByMod[m][ie][b] = 0.0;
+          hasPhiByMod[m][ie][b]  = 0;
+          hasEtaByMod[m][ie][b]  = 0;
+        }
+      }
 
-          std::string usedMode;
-          TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
-          if (!h3) continue;
+      // Per-module summary file (transparent)
+      std::ofstream sm(moduleDir + "/summary.txt");
+      if (sm.is_open())
+      {
+        sm << "# sector " << s << "  module0based " << m << " (module=" << (m+1) << ")\n";
+        sm << "# columns: ebin Elo Ehi blockPhi b_phi b_phi_err nPhi b_eta b_eta_err nEta mode\n";
+      }
+
+      // Fill b(E) for this module over blocks and energies
+      for (int b=0; b<4; ++b)
+      {
+        std::string usedMode;
+        TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
+        if (!h3) continue;
+
+        for (int ie=0; ie<nE; ++ie)
+        {
+          ebin = ie;
+          Elo  = eEdges[ie].first;
+          Ehi  = eEdges[ie].second;
 
           BRes bp, be;
-          Long64_t nP=0, nE=0;
-          FitBFromSMBHist(h3, Elo, Ehi, bp, be, nP, nE);
+          Long64_t nP=0, nE0=0;
+          FitBFromSMBHist(h3, Elo, Ehi, bp, be, nP, nE0);
+
+          // NEW: per-sector stats for "which sectors have the cleanest fits"
+          // Count each non-empty projection as one fit (phi and eta counted separately).
+          // NOTE: this ranking uses the per-energy-bin fits (not the integrated-E rows).
+          if (nP > 0)  { sectorSumEntries[s] += (long long)nP;  sectorNFits[s] += 1; }
+          if (nE0 > 0) { sectorSumEntries[s] += (long long)nE0; sectorNFits[s] += 1; }
 
           if (std::isfinite(bp.val))
           {
-            bPhiArr[m][b]    = bp.val;
-            bPhiErrArr[m][b] = bp.err;
-            hasPhiArr[m][b]  = true;
+            bPhiByMod[m][ie][b]    = bp.val;
+            bPhiErrByMod[m][ie][b] = bp.err;
+            hasPhiByMod[m][ie][b]  = 1;
           }
           if (std::isfinite(be.val))
           {
-            bEtaArr[m][b]    = be.val;
-            bEtaErrArr[m][b] = be.err;
-            hasEtaArr[m][b]  = true;
+            bEtaByMod[m][ie][b]    = be.val;
+            bEtaErrByMod[m][ie][b] = be.err;
+            hasEtaByMod[m][ie][b]  = 1;
           }
 
-          // Fill tree row
+          // Tree row (same as before)
+          sector = s; module = m; blockPhi = b;
           b_phi = bp.val; b_phi_err = bp.err;
           b_eta = be.val; b_eta_err = be.err;
           nPhi  = nP;
-          nEta  = nE;
+          nEta  = nE0;
           std::snprintf(modeUsed, sizeof(modeUsed), "%s", usedMode.c_str());
           t->Fill();
 
-          // Optional: also log to text
+          // keep your sector summary_table too (unchanged)
           if (txt.is_open())
           {
             txt << s << " " << m << " " << b << " " << ie
@@ -5595,10 +6014,109 @@ static void RunBlockwiseBExtraction(TFile* fin,
                 << " " << usedMode
                 << "\n";
           }
+
+          // per-module summary.txt (by module folder)
+          if (sm.is_open())
+          {
+            sm << s << " " << m << " " << b << " " << ie
+               << " " << std::fixed << std::setprecision(1) << Elo
+               << " " << Ehi
+               << " " << std::setprecision(8) << b_phi
+               << " " << std::setprecision(3) << b_phi_err
+               << " " << nPhi
+               << " " << std::setprecision(8) << b_eta
+               << " " << std::setprecision(3) << b_eta_err
+               << " " << nEta
+               << " " << usedMode
+               << "\n";
+          }
+        }
+
+        // Integrated-E tree row (ebin=-1) for each block
+        {
+          ebin = -1;
+          sector = s; module = m; blockPhi = b;
+          Elo = eEdges.front().first;
+          Ehi = eEdges.back().second;
+
+          BRes bp, be;
+          Long64_t nP=0, nE0=0;
+          // Use full Z-range by calling FitBFromSMBHist with full bounds:
+          FitBFromSMBHist(h3, Elo, Ehi, bp, be, nP, nE0);
+
+          b_phi = bp.val; b_phi_err = bp.err;
+          b_eta = be.val; b_eta_err = be.err;
+          nPhi  = nP;
+          nEta  = nE0;
+          std::snprintf(modeUsed, sizeof(modeUsed), "%s", usedMode.c_str());
+          t->Fill();
+        }
+      } // end block loop
+
+      if (sm.is_open()) sm.close();
+
+      // Module “money” overlays
+      SaveModuleOverlay(moduleDir + "/bphi_vsE_overlay_blocks.png",
+                        s, m,
+                        "b_{#varphi}(E) overlay (Blocks 1–4)",
+                        "b_{#varphi}",
+                        bPhiByMod[m], bPhiErrByMod[m], hasPhiByMod[m]);
+
+      SaveModuleOverlay(moduleDir + "/beta_vsE_overlay_blocks.png",
+                        s, m,
+                        "b_{#eta}(E) overlay (Blocks 1–4)",
+                        "b_{#eta}",
+                        bEtaByMod[m], bEtaErrByMod[m], hasEtaByMod[m]);
+
+      // Audit grids
+      if (doAuditFits)
+      {
+        SaveFitGridPhiEta4x2(moduleDir + "/fits_integratedE_phiEta_4by2.png",
+                             s, m,
+                             0.0, 0.0,
+                             "integratedE",
+                             /*restrictEnergy=*/false);
+
+        if (doAuditLowHigh && nE >= 1)
+        {
+          const double lo1 = eEdges.front().first;
+          const double hi1 = eEdges.front().second;
+          const double lol = eEdges.back().first;
+          const double hil = eEdges.back().second;
+
+          SaveFitGridPhiEta4x2(moduleDir + Form("/fits_E%.0fto%.0f_phiEta_4by2.png", lo1, hi1),
+                               s, m, lo1, hi1, Form("E%.0fto%.0f", lo1, hi1), true);
+
+          SaveFitGridPhiEta4x2(moduleDir + Form("/fits_E%.0fto%.0f_phiEta_4by2.png", lol, hil),
+                               s, m, lol, hil, Form("E%.0fto%.0f", lol, hil), true);
+        }
+      }
+    } // end module loop
+
+    // Keep your existing per-energy “b vs module” plots (unchanged outputs)
+    for (int ie=0; ie<nE; ++ie)
+    {
+      const double Elo2 = eEdges[ie].first;
+      const double Ehi2 = eEdges[ie].second;
+
+      double bPhiArr[24][4], bEtaArr[24][4];
+      double bPhiErrArr[24][4], bEtaErrArr[24][4];
+      bool hasPhiArr[24][4], hasEtaArr[24][4];
+
+      for (int m=0; m<24; ++m)
+      {
+        for (int b=0; b<4; ++b)
+        {
+          bPhiArr[m][b]    = bPhiByMod[m][ie][b];
+          bEtaArr[m][b]    = bEtaByMod[m][ie][b];
+          bPhiErrArr[m][b] = bPhiErrByMod[m][ie][b];
+          bEtaErrArr[m][b] = bEtaErrByMod[m][ie][b];
+          hasPhiArr[m][b]  = hasPhiByMod[m][ie][b] != 0;
+          hasEtaArr[m][b]  = hasEtaByMod[m][ie][b] != 0;
         }
       }
 
-      const std::string eLabel = Form("E%.0fto%.0f", Elo, Ehi);
+      const std::string eLabel = Form("E%.0fto%.0f", Elo2, Ehi2);
 
       SaveBvsModulePlot(secDir + Form("/bphi_vs_module_%s.png", eLabel.c_str()),
                         s, "bphi", "b_{#varphi}", "b_{#varphi}", eLabel.c_str(),
@@ -5609,75 +6127,36 @@ static void RunBlockwiseBExtraction(TFile* fin,
                         bEtaArr, bEtaErrArr, hasEtaArr);
     }
 
-    // Integrated-E plots (store as ebin = -1)
+    // Integrated-E “b vs module” plots (unchanged outputs)
     {
-      ebin = -1;
-      Elo = eEdges.front().first;
-      Ehi = eEdges.back().second;
+      double bPhiArr[24][4], bEtaArr[24][4];
+      double bPhiErrArr[24][4], bEtaErrArr[24][4];
+      bool hasPhiArr[24][4], hasEtaArr[24][4];
 
-      double bPhiArr[24][4]; double bEtaArr[24][4];
-      double bPhiErrArr[24][4]; double bEtaErrArr[24][4];
-      bool   hasPhiArr[24][4]; bool hasEtaArr[24][4];
-
-      for (int m=0;m<24;++m) for (int b=0;b<4;++b)
+      for (int m=0; m<24; ++m)
       {
-        bPhiArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
-        bEtaArr[m][b]    = std::numeric_limits<double>::quiet_NaN();
-        bPhiErrArr[m][b] = 0.0;
-        bEtaErrArr[m][b] = 0.0;
-        hasPhiArr[m][b]  = false;
-        hasEtaArr[m][b]  = false;
-      }
+        // integratedE estimate = simple mean over E bins (only for plotting)
+        // (the audit grids are the real “integrated” check)
+        double sumP[4]={0,0,0,0}, sumE[4]={0,0,0,0};
+        int nP[4]={0,0,0,0}, nE0[4]={0,0,0,0};
 
-      for (int m=0;m<24;++m)
-      {
-        module = m;
+        for (int ie=0; ie<nE; ++ie)
+        {
+          for (int b=0;b<4;++b)
+          {
+            if (hasPhiByMod[m][ie][b]) { sumP[b] += bPhiByMod[m][ie][b]; nP[b]++; }
+            if (hasEtaByMod[m][ie][b]) { sumE[b] += bEtaByMod[m][ie][b]; nE0[b]++; }
+          }
+        }
+
         for (int b=0;b<4;++b)
         {
-          blockPhi = b;
-
-          std::string usedMode;
-          TH3F* h3 = GetSMBHistFull(fin, s, m, b, usedMode);
-          if (!h3) continue;
-
-          BRes bp, be;
-          Long64_t nP=0, nE=0;
-          FitBFromSMBHist(h3, Elo, Ehi, bp, be, nP, nE);
-
-          if (std::isfinite(bp.val))
-          {
-            bPhiArr[m][b]    = bp.val;
-            bPhiErrArr[m][b] = bp.err;
-            hasPhiArr[m][b]  = true;
-          }
-          if (std::isfinite(be.val))
-          {
-            bEtaArr[m][b]    = be.val;
-            bEtaErrArr[m][b] = be.err;
-            hasEtaArr[m][b]  = true;
-          }
-
-          b_phi = bp.val; b_phi_err = bp.err;
-          b_eta = be.val; b_eta_err = be.err;
-          nPhi  = nP;
-          nEta  = nE;
-          std::snprintf(modeUsed, sizeof(modeUsed), "%s", usedMode.c_str());
-          t->Fill();
-
-          if (txt.is_open())
-          {
-            txt << s << " " << m << " " << b << " " << ebin
-                << " " << std::fixed << std::setprecision(1) << Elo
-                << " " << Ehi
-                << " " << std::setprecision(6) << b_phi
-                << " " << b_phi_err
-                << " " << b_eta
-                << " " << b_eta_err
-                << " " << nPhi
-                << " " << nEta
-                << " " << usedMode
-                << "\n";
-          }
+          bPhiArr[m][b]    = (nP[b]>0)  ? (sumP[b]/nP[b])  : std::numeric_limits<double>::quiet_NaN();
+          bEtaArr[m][b]    = (nE0[b]>0) ? (sumE[b]/nE0[b]) : std::numeric_limits<double>::quiet_NaN();
+          bPhiErrArr[m][b] = 0.0;
+          bEtaErrArr[m][b] = 0.0;
+          hasPhiArr[m][b]  = (nP[b]>0);
+          hasEtaArr[m][b]  = (nE0[b]>0);
         }
       }
 
@@ -5690,8 +6169,15 @@ static void RunBlockwiseBExtraction(TFile* fin,
                         bEtaArr, bEtaErrArr, hasEtaArr);
     }
 
+    // NEW: Sector tables (3×4 pages) built from module b(E) overlays
+    SaveSectorTable3x4(tablesDir, s, "bphi_vsE", "b_{#varphi}",
+                       bPhiByMod, bPhiErrByMod, hasPhiByMod);
+
+    SaveSectorTable3x4(tablesDir, s, "beta_vsE", "b_{#eta}",
+                       bEtaByMod, bEtaErrByMod, hasEtaByMod);
+
     if (txt.is_open()) txt.close();
-  }
+  } // end sector loop
 
   fout->cd();
   t->Write();
@@ -5700,6 +6186,59 @@ static void RunBlockwiseBExtraction(TFile* fin,
 
   std::cout << "[RunBlockwiseBExtraction] Wrote: " << outRoot << "\n"
             << "[RunBlockwiseBExtraction] PNGs under: " << pngBase << "\n";
+
+  // NEW: rank sectors by average projection entries per fit (higher => cleaner)
+  {
+    struct Row { int s; long long sum; long long n; double avg; };
+    std::vector<Row> rows;
+    rows.reserve(64);
+
+    for (int s = 0; s < 64; ++s)
+    {
+      if (sectorNFits[s] <= 0) continue;
+      Row r;
+      r.s   = s;
+      r.sum = sectorSumEntries[s];
+      r.n   = sectorNFits[s];
+      r.avg = (r.n > 0) ? (double)r.sum / (double)r.n : 0.0;
+      rows.push_back(r);
+    }
+
+    std::sort(rows.begin(), rows.end(),
+              [](const Row& a, const Row& b)
+              {
+                if (a.avg != b.avg) return a.avg > b.avg;
+                return a.sum > b.sum;
+              });
+
+    std::cout << "\n";
+    std::cout << "╔══════════════════════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║  Sector ranking by fit statistics (avg 1D projection entries per fit)       ║\n";
+    std::cout << "║  Higher avg ⇒ more statistics ⇒ typically cleaner b fits                    ║\n";
+    std::cout << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
+    std::cout << std::left
+              << std::setw(8)  << "Rank"
+              << std::setw(10) << "Sector"
+              << std::setw(18) << "Fits(count)"
+              << std::setw(18) << "SumEntries"
+              << std::setw(18) << "AvgEntries/Fit"
+              << "\n";
+    std::cout << std::string(72, '-') << "\n";
+
+    int rank = 1;
+    for (const auto& r : rows)
+    {
+      std::cout << std::left
+                << std::setw(8)  << rank
+                << std::setw(10) << r.s
+                << std::setw(18) << r.n
+                << std::setw(18) << r.sum
+                << std::setw(18) << std::fixed << std::setprecision(1) << r.avg
+                << "\n";
+      ++rank;
+    }
+    std::cout << "\n";
+  }
 }
 
 
@@ -5930,7 +6469,7 @@ void PDCAnalysisPRIMEPRIME()
 //                fr->SetStats(0);
 //                fr->Draw();
 //
-//                // Data (filled) — use CLOSED CIRCLES for b_phi (red) and keep b_eta (blue) as closed circles
+//                // Data (filled) - use CLOSED CIRCLES for b_phi (red) and keep b_eta (blue) as closed circles
 //                TGraphErrors gPhi_data(bv.ecenters.size(), &bv.ecenters[0], &bv.bphi[0],  nullptr, &bv.bphiErr[0]);
 //                TGraphErrors gEta_data(bv.ecenters.size(), &bv.ecenters[0], &bv.beta[0],  nullptr, &bv.betaErr[0]);
 //                gPhi_data.SetMarkerStyle(20); gPhi_data.SetMarkerColor(kRed+1);   gPhi_data.SetLineColor(kRed+1);   // closed red circle
@@ -5948,7 +6487,7 @@ void PDCAnalysisPRIMEPRIME()
 //                gPhi_sim.Draw("P SAME");
 //                gEta_sim.Draw("P SAME");
 //
-//                // Legend (top-right) — TWO COLUMNS: left=DATA, right=SIM; top row=b_phi, bottom row=b_eta
+//                // Legend (top-right) - TWO COLUMNS: left=DATA, right=SIM; top row=b_phi, bottom row=b_eta
 //                TLegend legB(0.58,0.78,0.9,0.90);
 //                legB.SetBorderSize(0); legB.SetFillStyle(0); legB.SetTextSize(0.040);
 //                legB.SetNColumns(2);
@@ -6501,14 +7040,7 @@ void PDCAnalysisPRIMEPRIME()
     SaveOverlayAcrossVariants(outBaseDir, eCent, phiByVariant, phiErrByVariant, /*isPhi*/true , ""  );
     SaveOverlayAcrossVariants(outBaseDir, eCent, etaByVariant, etaErrByVariant, /*isPhi*/false, ""  );
 
-    // ==================== NEW: Blockwise b(E) maps per sector/module/blockPhi ====================
-    // Reads: h3_blockCoord_E_full_sXX_mYY_bZ_{range|disc}
-    // Writes:
-    //   outBaseDir/PDC_bvalues.root
-    //   outBaseDir/bvaluePNGs/sector_XX/...
-    RunBlockwiseBExtraction(fin.get(), outBaseDir, eEdges);
-
-    // ==================== Step-5 — build δ(E,α) & (c0,m) ====================
+    // ==================== Step-5 - build δ(E,α) & (c0,m) ====================
     // Use the b(E) lines we just wrote in outBaseDir + "/bValues.txt"
     BuildDeltaAndWriteFits(fin.get(),
                            outBaseDir,
@@ -6518,6 +7050,13 @@ void PDCAnalysisPRIMEPRIME()
                            /*E0=*/3.0);
 
     std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
+
+    // ==================== NEW: Blockwise b(E) maps per sector/module/blockPhi ====================
+    // Reads: h3_blockCoord_E_full_sXX_mYY_bZ_{range|disc}
+    // Writes:
+    //   outBaseDir/PDC_bvalues.root
+    //   outBaseDir/bvaluePNGsByGeom/sector_XX/...
+    RunBlockwiseBExtraction(fin.get(), outBaseDir, eEdges);
 }
 
 // Auto-run when invoked as a ROOT script:  root -b -q -l PDCAnalysisPrime.cpp
