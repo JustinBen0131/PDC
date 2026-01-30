@@ -73,6 +73,18 @@
 using namespace PDC_detail;
 PositionDependentCorrection::Pi0CutCounters PositionDependentCorrection::s_cuts{};
 
+// -------------------------------------------------------------------
+// DEBUG counters for THnSparse master-fill (incidence + ηdet + ηSD + zvtx)
+// -------------------------------------------------------------------
+static std::uint64_t g_hns_try = 0;
+static std::uint64_t g_hns_ok_phi = 0;
+static std::uint64_t g_hns_ok_eta = 0;
+static std::uint64_t g_hns_bad_etaDet = 0;
+static std::uint64_t g_hns_bad_etaSD  = 0;
+static std::uint64_t g_hns_bad_aPhi   = 0;
+static std::uint64_t g_hns_bad_aEta   = 0;
+static std::uint64_t g_hns_bad_z      = 0;
+
 constexpr const char* ANSI_BOLD  = "\033[1m";
 constexpr const char* ANSI_RESET = "\033[0m";
 constexpr const char* ANSI_GREEN = "\033[32m";
@@ -5306,42 +5318,87 @@ void PositionDependentCorrection::finalClusterLoop(
                 }
               }
             }
-            const double absEtaDet = std::fabs(etaDet);
+              const double absEtaDet = std::fabs(etaDet);
 
-            // Only fill when all “slicing levers” are defined and within axis ranges
-            if (std::isfinite(absEtaDet) && absEtaDet <= 1.10 &&
-                std::isfinite(absEtaSD)  && absEtaSD  <= 1.10)
-            {
-              if (hns_blockCoord_E_alphaPhi &&
-                  std::isfinite(absAPhi) && absAPhi <= 0.20f)
+              // Debug bookkeeping for sparse fill attempt
+              g_hns_try++;
+
+              if (!(std::fabs(vtxZ) <= 60.f)) g_hns_bad_z++;
+
+              const bool okEtaDet = (std::isfinite(absEtaDet) && absEtaDet <= 1.10);
+              const bool okEtaSD  = (std::isfinite(absEtaSD)  && absEtaSD  <= 1.10);
+
+              if (!okEtaDet) g_hns_bad_etaDet++;
+              if (!okEtaSD)  g_hns_bad_etaSD++;
+
+              // Only fill when all “slicing levers” are defined and within axis ranges
+              if (okEtaDet && okEtaSD)
               {
-                Double_t vv[7] = {
-                  blkCoord.first,
-                  blkCoord.second,
-                  clusE,
-                  absAPhi,
-                  absEtaDet,
-                  absEtaSD,
-                  vtxZ
-                };
-                hns_blockCoord_E_alphaPhi->Fill(vv, kFillW);
+                if (hns_blockCoord_E_alphaPhi)
+                {
+                  if (std::isfinite(absAPhi) && absAPhi <= 0.20f)
+                  {
+                    Double_t vv[7] = {
+                      blkCoord.first,
+                      blkCoord.second,
+                      clusE,
+                      absAPhi,
+                      absEtaDet,
+                      absEtaSD,
+                      vtxZ
+                    };
+                    hns_blockCoord_E_alphaPhi->Fill(vv, kFillW);
+                    g_hns_ok_phi++;
+                  }
+                  else
+                  {
+                    g_hns_bad_aPhi++;
+                  }
+                }
+
+                if (hns_blockCoord_E_alphaEta)
+                {
+                  if (std::isfinite(absAEta) && absAEta <= 0.25f)
+                  {
+                    Double_t vv[7] = {
+                      blkCoord.first,
+                      blkCoord.second,
+                      clusE,
+                      absAEta,
+                      absEtaDet,
+                      absEtaSD,
+                      vtxZ
+                    };
+                    hns_blockCoord_E_alphaEta->Fill(vv, kFillW);
+                    g_hns_ok_eta++;
+                  }
+                  else
+                  {
+                    g_hns_bad_aEta++;
+                  }
+                }
               }
 
-              if (hns_blockCoord_E_alphaEta &&
-                  std::isfinite(absAEta) && absAEta <= 0.25f)
+              // Lightweight debug print (throttled)
+              if (Verbosity() > 1)
               {
-                Double_t vv[7] = {
-                  blkCoord.first,
-                  blkCoord.second,
-                  clusE,
-                  absAEta,
-                  absEtaDet,
-                  absEtaSD,
-                  vtxZ
-                };
-                hns_blockCoord_E_alphaEta->Fill(vv, kFillW);
+                if (g_hns_try <= 10 || (g_hns_try % 50000ULL) == 0ULL)
+                {
+                  std::cout << "[HNS-FILL] try=" << g_hns_try
+                            << " okPhi=" << g_hns_ok_phi
+                            << " okEta=" << g_hns_ok_eta
+                            << " badEtaDet=" << g_hns_bad_etaDet
+                            << " badEtaSD="  << g_hns_bad_etaSD
+                            << " badAPhi="   << g_hns_bad_aPhi
+                            << " badAEta="   << g_hns_bad_aEta
+                            << " |aPhi|=" << absAPhi
+                            << " |aEta|=" << absAEta
+                            << " |etaDet|=" << absEtaDet
+                            << " |etaSD|=" << absEtaSD
+                            << " z=" << vtxZ
+                            << '\n';
+                }
               }
-            }
           }
         }
       }
@@ -6186,31 +6243,60 @@ int PositionDependentCorrection::End(PHCompositeNode* /*topNode*/)
 
   if (outfile)
   {
-    outfile->cd();
-    if (Verbosity() > 0)
-      std::cout << "[DEBUG] Writing histograms to " << outfilename << " …\n";
+      outfile->cd();
+      if (Verbosity() > 0)
+        std::cout << "[DEBUG] Writing histograms to " << outfilename << " …\n";
 
-    outfile->Write();
+      // Ensure THnSparse objects are actually written (they are not TH1 and may not show in the inventory)
+      if (hns_blockCoord_E_alphaPhi)
+        hns_blockCoord_E_alphaPhi->Write();
+      if (hns_blockCoord_E_alphaEta)
+        hns_blockCoord_E_alphaEta->Write();
 
-    /* optional inventory printout ------------------------------------- */
-    if (Verbosity() > 0)
-    {
-      std::cout << "\n[INFO] Histograms written – content overview\n"
-                << std::left << std::setw(30) << "Histogram"
-                << std::setw(14)              << "Type"
-                << std::setw(12)              << "#Entries\n"
-                << "────────────────────────────────────────────────────────\n";
+      outfile->Write();
 
-      TIter nextKey(gDirectory->GetListOfKeys());
-      while (TKey* key = static_cast<TKey*>(nextKey()))
-        if (TH1* h = dynamic_cast<TH1*>(key->ReadObj()))
-          std::cout << std::left << std::setw(30) << key->GetName()
-                    << std::setw(14)             << key->GetClassName()
-                    << std::right<< std::setw(12)<< (Long64_t)h->GetEntries()
+      /* optional inventory printout ------------------------------------- */
+      if (Verbosity() > 0)
+      {
+        std::cout << "\n[INFO] Histograms written – content overview\n"
+                  << std::left << std::setw(30) << "Histogram"
+                  << std::setw(14)              << "Type"
+                  << std::setw(12)              << "#Entries\n"
+                  << "────────────────────────────────────────────────────────\n";
+
+        TIter nextKey(gDirectory->GetListOfKeys());
+        while (TKey* key = static_cast<TKey*>(nextKey()))
+          if (TH1* h = dynamic_cast<TH1*>(key->ReadObj()))
+            std::cout << std::left << std::setw(30) << key->GetName()
+                      << std::setw(14)             << key->GetClassName()
+                      << std::right<< std::setw(12)<< (Long64_t)h->GetEntries()
+                      << '\n';
+
+        // Print THnSparse entries explicitly (they are not TH1, so they don't show above)
+        if (hns_blockCoord_E_alphaPhi)
+          std::cout << std::left << std::setw(30) << hns_blockCoord_E_alphaPhi->GetName()
+                    << std::setw(14)             << "THnSparseF"
+                    << std::right<< std::setw(12)<< (Long64_t)hns_blockCoord_E_alphaPhi->GetEntries()
+                    << '\n';
+        if (hns_blockCoord_E_alphaEta)
+          std::cout << std::left << std::setw(30) << hns_blockCoord_E_alphaEta->GetName()
+                    << std::setw(14)             << "THnSparseF"
+                    << std::right<< std::setw(12)<< (Long64_t)hns_blockCoord_E_alphaEta->GetEntries()
                     << '\n';
 
-      std::cout << "────────────────────────────────────────────────────────\n";
-    }
+        std::cout << "────────────────────────────────────────────────────────\n";
+
+        // Debug summary for sparse filling
+        std::cout << "[INFO] THnSparse fill counters: try=" << g_hns_try
+                  << " okPhi=" << g_hns_ok_phi
+                  << " okEta=" << g_hns_ok_eta
+                  << " badEtaDet=" << g_hns_bad_etaDet
+                  << " badEtaSD="  << g_hns_bad_etaSD
+                  << " badAPhi="   << g_hns_bad_aPhi
+                  << " badAEta="   << g_hns_bad_aEta
+                  << " badZ="      << g_hns_bad_z
+                  << '\n';
+      }
 
     outfile->Close();
     delete outfile;

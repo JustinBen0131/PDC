@@ -31,6 +31,7 @@
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerGeom.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloBase/RawTowerGeomContainer.h"
 #include <TString.h>
+#include <THnSparse.h>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/BEmcRec.h"
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/coresoftware/offline/packages/CaloReco/BEmcRecCEMC.h"
 
@@ -49,7 +50,6 @@ class RawClusterv1;
 /* ROOT */
 class TFile;  class TNtuple; class TTree;
 class TH1;    class TH1F;    class TH2;    class TH2F; class TH3;    class TH3F;
-class THnSparseF;
 class TF1;    class TProfile;class TProfile2D;
 class TRandom3;
 
