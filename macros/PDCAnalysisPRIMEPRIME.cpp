@@ -5614,10 +5614,10 @@ static inline void SaveBvsModulePlotTwoSeries(const std::string& outPng,
     }
 
     // Legend (two-series, no block labels)
-    TLegend* leg = new TLegend(0.78,0.74,0.97,0.90);
+    TLegend* leg = new TLegend(0.10,0.74,0.30,0.90);
     leg->SetBorderSize(0);
     leg->SetFillStyle(0);
-    leg->SetTextSize(0.040);
+    leg->SetTextSize(0.060);
     if (gPhi) leg->AddEntry(gPhi, "b_{#varphi}", "P");
     if (gEta) leg->AddEntry(gEta, "b_{#eta}",    "P");
     leg->Draw();
@@ -5648,6 +5648,161 @@ static inline void SaveBvsModulePlotTwoSeries(const std::string& outPng,
     delete gEta;
     delete gFrame;
     delete c;
+}
+
+static inline void SaveBvsModuleOverlayAcrossE(const std::string& outPng,
+                                              const char* canvasKey,
+                                              const char* plotTitle,
+                                              const char* yAxisLabel,
+                                              const std::vector<std::pair<double,double>>& eEdges,
+                                              const std::vector<std::vector<double>>& bM,
+                                              const std::vector<std::vector<double>>& ebM,
+                                              const std::vector<std::vector<char  >>& hasM)
+{
+  gStyle->SetOptStat(0);
+
+  const int nMod = 24;
+  const int nE   = (int)eEdges.size();
+  if (nE <= 0) return;
+
+  // Consistent per-energy colors (shared across b_phi and b_eta overlay plots)
+  static const Color_t kECol[8] = { kRed+1, kBlue+1, kGreen+2, kMagenta+1, kOrange+7, kCyan+1, kViolet+1, kBlack };
+
+  // Determine y-range across all energy bins and modules
+  double yMin =  1.0e9;
+  double yMax = -1.0e9;
+  double maxErr = 0.0;
+  int nAny = 0;
+
+  for (int ie=0; ie<nE; ++ie)
+  {
+    for (int m=0; m<nMod; ++m)
+    {
+      if (!(hasM[m][ie] && std::isfinite(bM[m][ie]))) continue;
+      const double e = (std::isfinite(ebM[m][ie]) ? std::fabs(ebM[m][ie]) : 0.0);
+      yMin = std::min(yMin, bM[m][ie] - e);
+      yMax = std::max(yMax, bM[m][ie] + e);
+      maxErr = std::max(maxErr, e);
+      nAny++;
+    }
+  }
+
+  if (nAny <= 0) return;
+
+  if (!(std::isfinite(yMin) && std::isfinite(yMax))) { yMin = 0.0; yMax = 1.0; maxErr = 0.0; }
+  double span = yMax - yMin;
+  if (span <= 0.0) span = std::max(1.0e-3, std::fabs(yMax));
+  double pad  = std::max(0.25 * span, 1.25 * maxErr);
+  const double yLow  = yMin - pad;
+  const double yHigh = yMax + pad;
+
+  TCanvas* c = new TCanvas(Form("c_%s_overlayAllE", canvasKey),
+                           Form("%s", plotTitle),
+                           1600, 450);
+  c->SetMargin(0.06, 0.02, 0.14, 0.08);
+  c->SetGrid(0,0);
+
+  // Frame
+  TH2F* frame = new TH2F(Form("fr_%s_overlayAllE_%p", canvasKey, (void*)c),
+                         Form("%s - %s (all E bins);Module index;%s",
+                              plotTitle, yAxisLabel, yAxisLabel),
+                         100, 0.0, (double)nMod, 100, yLow, yHigh);
+  frame->SetStats(0);
+  frame->GetXaxis()->SetNdivisions(nMod, 0, 0);
+  frame->GetXaxis()->SetTickLength(0.02);
+  frame->GetXaxis()->SetTitle("Module index");
+  frame->GetXaxis()->SetTitleSize(0.045);
+  frame->GetXaxis()->SetTitleOffset(1.0);
+  frame->GetXaxis()->SetLabelSize(0.0);
+  frame->GetYaxis()->SetTitle("");
+  frame->GetYaxis()->SetLabelSize(0.035);
+  frame->Draw();
+
+  // Vertical dashed lines at module edges (match sector plot formatting)
+  for (int edge=0; edge<=nMod; ++edge)
+  {
+    const double xEdge = static_cast<double>(edge);
+    TLine* l = new TLine(xEdge, yLow, xEdge, yHigh);
+    l->SetLineStyle(2);
+    l->SetLineWidth(1);
+    l->SetLineColor(kGray+1);
+    l->Draw("SAME");
+  }
+
+  // Build and draw one graph per energy bin
+  std::vector<std::unique_ptr<TGraphErrors>> graphs;
+  graphs.reserve(nE);
+
+  for (int ie=0; ie<nE; ++ie)
+  {
+    std::vector<double> x, y, ex, ey;
+    x.reserve(nMod); y.reserve(nMod); ex.reserve(nMod); ey.reserve(nMod);
+
+    for (int m=0; m<nMod; ++m)
+    {
+      if (!(hasM[m][ie] && std::isfinite(bM[m][ie]))) continue;
+      x.push_back((double)m + 0.5);
+      y.push_back(bM[m][ie]);
+      ex.push_back(0.0);
+      ey.push_back(ebM[m][ie]);
+    }
+
+    if (x.empty()) continue;
+
+    auto g = std::make_unique<TGraphErrors>((int)x.size(), x.data(), y.data(), ex.data(), ey.data());
+
+    const int col = kECol[ie % 8];
+    const bool open = (ie % 2) == 1;
+
+    g->SetMarkerStyle(open ? 24 : 20);     // open/filled circles
+    g->SetMarkerSize(1.05);
+    g->SetMarkerColor(col);
+    g->SetLineColor(col);
+    g->SetLineWidth(1);
+    g->Draw("P SAME");
+
+    graphs.emplace_back(std::move(g));
+  }
+
+  // Legend: one entry per energy bin (2 columns)
+  TLegend* leg = new TLegend(0.10,0.72,0.42,0.92);
+  leg->SetBorderSize(0);
+  leg->SetFillStyle(0);
+  leg->SetTextSize(0.050);
+  leg->SetNColumns(2);
+
+  for (int ie=0; ie<nE && ie<(int)graphs.size(); ++ie)
+  {
+    const int eLoI = (int)std::llround(eEdges[ie].first);
+    const int eHiI = (int)std::llround(eEdges[ie].second);
+    leg->AddEntry(graphs[ie].get(), Form("%d-%d GeV", eLoI, eHiI), "P");
+  }
+  leg->Draw();
+
+  // Dummy module labels 1..24 (match sector plot formatting)
+  TLatex latex;
+  latex.SetTextAlign(22);
+  latex.SetTextSize(0.030);
+  const double yLabel = yLow + 0.05 * (yHigh-yLow);
+  for (int m=0;m<nMod;++m)
+  {
+    const double xc = static_cast<double>(m) + 0.5;
+    latex.DrawLatex(xc, yLabel, Form("%d", m+1));
+  }
+
+  // Y-axis label in NDC to avoid clipping
+  TLatex latexY;
+  latexY.SetNDC();
+  latexY.SetTextAngle(90);
+  latexY.SetTextAlign(22);
+  latexY.SetTextSize(0.045);
+  latexY.DrawLatex(0.032,0.55,yAxisLabel);
+
+  c->SaveAs(outPng.c_str());
+
+  delete leg;
+  delete frame;
+  delete c;
 }
 
 static void RunBlockwiseBExtraction(TFile* fin,
@@ -6184,34 +6339,53 @@ static void RunBlockwiseBExtraction(TFile* fin,
         delete hSum;
       }
 
-      // (B) energyDependent/: per-energy-bin module-indexed plots (sector-style formatting)
-      for (int ie=0; ie<nE; ++ie)
-      {
-        const int eLoI = (int)std::llround(eEdges[ie].first);
-        const int eHiI = (int)std::llround(eEdges[ie].second);
-        const std::string eLabel = Form("E%dto%d", eLoI, eHiI);
-
-        double bPhi[24], bEta[24], ePhi[24], eEta[24];
-        bool   hPhi[24], hEta[24];
-
-        for (int m=0; m<24; ++m)
+        // (B) energyDependent/: per-energy-bin module-indexed plots (sector-style formatting)
+        for (int ie=0; ie<nE; ++ie)
         {
-          bPhi[m] = bphiM[m][ie];
-          bEta[m] = betaM[m][ie];
-          ePhi[m] = ebphiM[m][ie];
-          eEta[m] = ebetaM[m][ie];
-          hPhi[m] = (hasMphi[m][ie] != 0) && std::isfinite(bPhi[m]);
-          hEta[m] = (hasMeta[m][ie] != 0) && std::isfinite(bEta[m]);
+          const int eLoI = (int)std::llround(eEdges[ie].first);
+          const int eHiI = (int)std::llround(eEdges[ie].second);
+          const std::string eLabel = Form("E%dto%d", eLoI, eHiI);
+
+          double bPhi[24], bEta[24], ePhi[24], eEta[24];
+          bool   hPhi[24], hEta[24];
+
+          for (int m=0; m<24; ++m)
+          {
+            bPhi[m] = bphiM[m][ie];
+            bEta[m] = betaM[m][ie];
+            ePhi[m] = ebphiM[m][ie];
+            eEta[m] = ebetaM[m][ie];
+            hPhi[m] = (hasMphi[m][ie] != 0) && std::isfinite(bPhi[m]);
+            hEta[m] = (hasMeta[m][ie] != 0) && std::isfinite(bEta[m]);
+          }
+
+          SaveBvsModulePlotTwoSeries(eDepDir + Form("/b_vs_module_%s.png", eLabel.c_str()),
+                                     "secInt",
+                                     "Sector-integrated",
+                                     "b",
+                                     eLabel.c_str(),
+                                     bPhi, ePhi, hPhi,
+                                     bEta, eEta, hEta);
         }
 
-        SaveBvsModulePlotTwoSeries(eDepDir + Form("/b_vs_module_%s.png", eLabel.c_str()),
-                                   "secInt",
-                                   "Sector-integrated",
-                                   "b",
-                                   eLabel.c_str(),
-                                   bPhi, ePhi, hPhi,
-                                   bEta, eEta, hEta);
-      }
+        // NEW: overlay ALL energy bins on one module-indexed plot (phi-only and eta-only)
+        SaveBvsModuleOverlayAcrossE(eDepDir + "/bphi_vs_module_allE.png",
+                                    "secInt_bphi",
+                                    "Sector-integrated",
+                                    "b_{#varphi}",
+                                    eEdges,
+                                    bphiM,
+                                    ebphiM,
+                                    hasMphi);
+
+        SaveBvsModuleOverlayAcrossE(eDepDir + "/beta_vs_module_allE.png",
+                                    "secInt_beta",
+                                    "Sector-integrated",
+                                    "b_{#eta}",
+                                    eEdges,
+                                    betaM,
+                                    ebetaM,
+                                    hasMeta);
 
       // (C) sectorIntegrated/: integrated-over-energy summary (inverse-variance weighted mean over E bins)
       {
