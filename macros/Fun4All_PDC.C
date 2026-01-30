@@ -526,7 +526,7 @@ void Fun4All_PDC(int nevents = 0,
   ------------------------------------------------------------*/
   pdc->setBinningMode(PositionDependentCorrection::EBinningMode::kRange);
 
-  pdc->Verbosity(0);                 // 0 = silent → raise for debugging
+  pdc->Verbosity(10);                 // 0 = silent → raise for debugging
 
   // Finally register the module with Fun4All
   se->registerSubsystem(pdc);

@@ -256,15 +256,26 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
     h->GetZaxis()->SetTitleOffset(1.80);
   };
 
-  // Uncorrected table
-  TCanvas c2D_unc("c2D_unc","Uncorrected 2D block coords vs E",2400,1200);
-  c2D_unc.Divide(4,2);
-    for (int p=1; p<=8; ++p) {
-      TPad *pad = (TPad*) c2D_unc.cd(p);
-      pad->SetRightMargin(0.18);
-      pad->SetLeftMargin (0.12);
-      pad->SetBottomMargin(0.12);
-      pad->SetTopMargin   (0.16);  // space for header
+    // Uncorrected table
+    TCanvas c2D_unc("c2D_unc","Uncorrected 2D block coords vs E",2400,1200);
+    c2D_unc.Divide(4,2);
+      for (int p=1; p<=8; ++p) {
+        TPad *pad = (TPad*) c2D_unc.cd(p);
+        pad->SetRightMargin(0.18);
+        pad->SetLeftMargin (0.12);
+        pad->SetBottomMargin(0.12);
+        pad->SetTopMargin   (0.18);  // extra space for global module title
+      }
+
+    // ---- global canvas title (module printed ONCE) ----
+    c2D_unc.cd(0);
+    {
+      TLatex tl;
+      tl.SetNDC();
+      tl.SetTextFont(42);
+      tl.SetTextSize(0.060);
+      tl.SetTextAlign(23);  // center, top
+      tl.DrawLatex(0.50, 0.985, etaPretty);
     }
 
 
@@ -293,9 +304,8 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
       h2->Draw("COLZ");
 
       TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
-      // left-top header; sits inside the pad, clear of the color bar
       tl.SetTextSize(0.050); tl.SetTextAlign(13);
-      tl.DrawLatex(0.14, 0.96, Form("UNCORR:  E = %.1f - %.1f GeV   %s", eLo, eHi, etaPretty));
+      tl.DrawLatex(0.14, 0.96, Form("UNCORR:  E = %.1f - %.1f GeV", eLo, eHi));
 
 
   }
@@ -343,7 +353,7 @@ static void Plot2DBlockEtaPhi(TH3F* hUnc3D,
 
         TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
         tl.SetTextSize(0.050); tl.SetTextAlign(13);
-        tl.DrawLatex(0.14, 0.96, Form("CORR:    E = %.1f - %.1f GeV   %s", eLo, eHi, etaPretty));
+        tl.DrawLatex(0.14, 0.96, Form("CORR:    E = %.1f - %.1f GeV", eLo, eHi));
 
     }
 
@@ -364,9 +374,28 @@ static void OverlayUncorrPhiEta(TH3F*  hUnc3D,
   gStyle->SetOptStat(0);
   const int N = static_cast<int>(eEdges.size());
 
-  TCanvas cOv("LocalPhiEtaOverlay_4by2",
-              "Uncorr #varphi (red) and #eta (blue) overlays", 1600, 1200);
-  cOv.Divide(4,2);
+    TCanvas cOv("LocalPhiEtaOverlay_4by2",
+                "Uncorr #varphi (red) and #eta (blue) overlays", 1600, 1200);
+    cOv.Divide(4,2);
+
+    for (int p=1; p<=8; ++p) {
+      TPad *pad = (TPad*) cOv.cd(p);
+      pad->SetLeftMargin (0.12);
+      pad->SetRightMargin(0.05);
+      pad->SetBottomMargin(0.12);
+      pad->SetTopMargin   (0.18);  // room for global title
+    }
+
+    // ---- global canvas title (module printed ONCE) ----
+    cOv.cd(0);
+    {
+      TLatex tl;
+      tl.SetNDC();
+      tl.SetTextFont(42);
+      tl.SetTextSize(0.060);
+      tl.SetTextAlign(23);
+      tl.DrawLatex(0.50, 0.985, etaPretty);
+    }
 
   for (int i=0;i<N;++i)
   {
