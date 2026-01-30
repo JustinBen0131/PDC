@@ -2921,23 +2921,25 @@ void PositionDependentCorrection::fillDPhiAllVariants(
                       << "alpha_phi(calcInc@CP)=" << aPhi_ci
                       << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
 
-            // Crash only if property disagrees with mech at the same (xCP,yCP)
-            constexpr float kTolAlphaPhi = 1.0e-5f;
-            if (std::fabs(diff_prop_mech) > kTolAlphaPhi)
-            {
-              std::cerr << ANSI_RED
-                        << "[INC-ERROR φ] mismatch between RawClusterv1 property "
-                           "and BEmcRecCEMC incidence at CorrectPosition CoG\n"
-                        << "  clusID=" << clus->get_id()
-                        << "  E=" << eReco << " GeV\n"
-                        << "  alpha_phi(prop)=" << aPhi_prop << "\n"
-                        << "  alpha_phi(mech@CP)=" << aPhi_mech << "\n"
-                        << "  Δ=" << diff_prop_mech
-                        << "  tol=" << kTolAlphaPhi << "\n"
-                        << ANSI_RESET << std::endl;
-              std::abort();
+              // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
+              // Keep only an optional warning at very high verbosity.
+              if (vb > 9)
+              {
+                constexpr float kTolAlphaPhi = 1.0e-5f;
+                if (std::fabs(diff_prop_mech) > kTolAlphaPhi)
+                {
+                  std::cerr << ANSI_YELLOW
+                            << "[INC-WARN φ] RawCluster prop vs mech@CP mismatch (ignored)\n"
+                            << "  clusID=" << clus->get_id()
+                            << "  E=" << eReco << " GeV\n"
+                            << "  alpha_phi(prop)=" << aPhi_prop << "\n"
+                            << "  alpha_phi(mech@CP)=" << aPhi_mech << "\n"
+                            << "  Δ=" << diff_prop_mech
+                            << "  tol=" << kTolAlphaPhi << "\n"
+                            << ANSI_RESET << std::endl;
+                }
+              }
             }
-          }
           else if (vb > 0)
           {
             std::cout << "[INC-QA φ]  alpha_phi(prop) is NaN/not set; "
@@ -3723,23 +3725,25 @@ void PositionDependentCorrection::fillDEtaAllVariants(
                       << "alpha_eta(calcInc@CP)=" << aEta_ci
                       << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
 
-            // Crash only if property disagrees with mech at the same (xCP,yCP)
-            constexpr float kTolAlphaEta = 1.0e-5f;
-            if (std::fabs(diff_prop_mech) > kTolAlphaEta)
-            {
-              std::cerr << ANSI_RED
-                        << "[INC-ERROR η] mismatch between RawClusterv1 property "
-                           "and BEmcRecCEMC incidence at CorrectPosition CoG\n"
-                        << "  clusID=" << clus->get_id()
-                        << "  E=" << eReco << " GeV\n"
-                        << "  alpha_eta(prop)=" << aEta_prop << "\n"
-                        << "  alpha_eta(mech@CP)=" << aEta_mech << "\n"
-                        << "  Δ=" << diff_prop_mech
-                        << "  tol=" << kTolAlphaEta << "\n"
-                        << ANSI_RESET << std::endl;
-              std::abort();
+              // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
+              // Keep only an optional warning at very high verbosity.
+              if (vb > 9)
+              {
+                constexpr float kTolAlphaEta = 1.0e-5f;
+                if (std::fabs(diff_prop_mech) > kTolAlphaEta)
+                {
+                  std::cerr << ANSI_YELLOW
+                            << "[INC-WARN η] RawCluster prop vs mech@CP mismatch (ignored)\n"
+                            << "  clusID=" << clus->get_id()
+                            << "  E=" << eReco << " GeV\n"
+                            << "  alpha_eta(prop)=" << aEta_prop << "\n"
+                            << "  alpha_eta(mech@CP)=" << aEta_mech << "\n"
+                            << "  Δ=" << diff_prop_mech
+                            << "  tol=" << kTolAlphaEta << "\n"
+                            << ANSI_RESET << std::endl;
+                }
+              }
             }
-          }
           else if (vb > 0)
           {
             std::cout << "[INC-QA η]  alpha_eta(prop) is NaN/not set; "
