@@ -49,6 +49,7 @@ class RawClusterv1;
 /* ROOT */
 class TFile;  class TNtuple; class TTree;
 class TH1;    class TH1F;    class TH2;    class TH2F; class TH3;    class TH3F;
+class THnSparseF;
 class TF1;    class TProfile;class TProfile2D;
 class TRandom3;
 
@@ -653,7 +654,14 @@ class PositionDependentCorrection : public SubsysReco
     
     TH3F* h3_alphaPhi_vsVz_vsEtaDet {nullptr};
     TH3F* h3_alphaEta_vsVz_vsEtaDet {nullptr};
-    // ---------- Step (3): incidence‑aware per‑energy maps ----------
+
+    // NEW: master sparse hists that contain TH3(ηloc,φloc,E) as a projection
+    //      and allow rerun-free slicing by:
+    //        |alpha_phi| or |alpha_eta|, |eta_det|, |eta_SD|, and z_vtx
+    THnSparseF* hns_blockCoord_E_alphaPhi {nullptr};  // axis 3 = |alpha_phi|
+    THnSparseF* hns_blockCoord_E_alphaEta {nullptr};  // axis 3 = |alpha_eta|
+
+    // ---------- Step (3): incidence-aware per-energy maps ----------
     // α binning: 0 … 0.30 rad in 180 bins (≈1.667 mrad/bin)
     // X^{meas} binning: −0.5 … +0.5 in 200 bins (0.005 tower/bin)
     static constexpr int   NAlphaBins = 180;

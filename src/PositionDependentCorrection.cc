@@ -26,6 +26,7 @@
 #include <TH1.h>
 #include <TH1F.h>
 #include <TH3F.h>
+#include <THnSparse.h>
 #include <TH2.h>
 #include <TH3.h>
 #include <TNtuple.h>
@@ -334,6 +335,69 @@ void PositionDependentCorrection::bookCommonHistograms
            "Uncorrected local block coords vs. E_{centre} (0.70 < |#eta| #leq 1.10)"),
         14, xEdges, 14, yEdges, 8, eEdges);
   }
+
+  // ==================================================================
+  // NEW: Master sparse hists for rerun-free slicing by incidence + ηdet + ηSD + zvtx
+  //
+  // Axes order (so offline projection is trivial):
+  //   0: ηloc   (block local)
+  //   1: φloc   (block local)
+  //   2: E      (2–4–…–30 GeV slices)
+  //   3: |αφ|   (or |αη| for the second sparse)
+  //   4: |ηdet|
+  //   5: |ηSD|
+  //   6: zvtx   (signed)
+  // ==================================================================
+  if (!hns_blockCoord_E_alphaPhi)
+  {
+    const Int_t   dim = 7;
+    const Int_t   nb [dim] = {14, 14, 8, 40, 44, 44, 60};
+    const Double_t xmn[dim] = {-0.5, -0.5, 2.0, 0.0, 0.0, 0.0, -60.0};
+    const Double_t xmx[dim] = { 1.5,  1.5, 30.0, 0.20, 1.10, 1.10,  60.0};
+
+    hns_blockCoord_E_alphaPhi = new THnSparseF(
+        Form("hns_blockCoord_E_alphaPhi_%s", modeTag),
+        "Master sparse: (ηloc,φloc,E,|αφ|,|ηdet|,|ηSD|,zvtx) → project to TH3(ηloc,φloc,E)",
+        dim, nb, xmn, xmx);
+
+    hns_blockCoord_E_alphaPhi->GetAxis(0)->Set(14, xEdges);
+    hns_blockCoord_E_alphaPhi->GetAxis(1)->Set(14, yEdges);
+    hns_blockCoord_E_alphaPhi->GetAxis(2)->Set(8,  eEdges);
+
+    hns_blockCoord_E_alphaPhi->GetAxis(0)->SetTitle("block #eta_{local, 2#times 2}");
+    hns_blockCoord_E_alphaPhi->GetAxis(1)->SetTitle("block #varphi_{local, 2#times 2}");
+    hns_blockCoord_E_alphaPhi->GetAxis(2)->SetTitle("Cluster E  [GeV]");
+    hns_blockCoord_E_alphaPhi->GetAxis(3)->SetTitle("|#alpha_{#varphi}|  [rad]");
+    hns_blockCoord_E_alphaPhi->GetAxis(4)->SetTitle("|#eta_{det}|");
+    hns_blockCoord_E_alphaPhi->GetAxis(5)->SetTitle("|#eta_{SD}|");
+    hns_blockCoord_E_alphaPhi->GetAxis(6)->SetTitle("z_{vtx}  [cm]");
+  }
+
+  if (!hns_blockCoord_E_alphaEta)
+  {
+    const Int_t   dim = 7;
+    const Int_t   nb [dim] = {14, 14, 8, 50, 44, 44, 60};
+    const Double_t xmn[dim] = {-0.5, -0.5, 2.0, 0.0, 0.0, 0.0, -60.0};
+    const Double_t xmx[dim] = { 1.5,  1.5, 30.0, 0.25, 1.10, 1.10,  60.0};
+
+    hns_blockCoord_E_alphaEta = new THnSparseF(
+        Form("hns_blockCoord_E_alphaEta_%s", modeTag),
+        "Master sparse: (ηloc,φloc,E,|αη|,|ηdet|,|ηSD|,zvtx) → project to TH3(ηloc,φloc,E)",
+        dim, nb, xmn, xmx);
+
+    hns_blockCoord_E_alphaEta->GetAxis(0)->Set(14, xEdges);
+    hns_blockCoord_E_alphaEta->GetAxis(1)->Set(14, yEdges);
+    hns_blockCoord_E_alphaEta->GetAxis(2)->Set(8,  eEdges);
+
+    hns_blockCoord_E_alphaEta->GetAxis(0)->SetTitle("block #eta_{local, 2#times 2}");
+    hns_blockCoord_E_alphaEta->GetAxis(1)->SetTitle("block #varphi_{local, 2#times 2}");
+    hns_blockCoord_E_alphaEta->GetAxis(2)->SetTitle("Cluster E  [GeV]");
+    hns_blockCoord_E_alphaEta->GetAxis(3)->SetTitle("|#alpha_{#eta}|  [rad]");
+    hns_blockCoord_E_alphaEta->GetAxis(4)->SetTitle("|#eta_{det}|");
+    hns_blockCoord_E_alphaEta->GetAxis(5)->SetTitle("|#eta_{SD}|");
+    hns_blockCoord_E_alphaEta->GetAxis(6)->SetTitle("z_{vtx}  [cm]");
+  }
+
     // --- NEW: uncorrected |z_vtx| slices (COARSE 0–150) ---
     for (int iz = 0; iz < N_VzH3Bins; ++iz)
     {
@@ -5146,6 +5210,140 @@ void PositionDependentCorrection::finalClusterLoop(
 
         if (h3_cluster_block_cord_E_etaEdge && absEta > 0.70f && absEta <= 1.10f)
           h3_cluster_block_cord_E_etaEdge->Fill(blkCoord.first, blkCoord.second, clusE, kFillW);
+      }
+
+      // --- NEW: master THnSparse fills for rerun-free slicing by incidence + ηdet + ηSD + zvtx ---
+      {
+        // Require the acceptance window that matches your existing "full" analysis
+        const float absEtaDetCoarse = std::fabs(clusEta);
+        if (absEtaDetCoarse <= 1.10f)
+        {
+          // Signed vertex (store signed; you can take |z| offline)
+          const float vtxZ = vtx_z;
+          if (std::fabs(vtxZ) <= 60.f)
+          {
+            // Corrected CoG (tower units) from RawClusterv1 properties
+            const float x_cor = clus1->x_tower_corr();
+            const float y_cor = clus1->y_tower_corr();
+
+            // Pull incidence from cluster properties if present; otherwise recompute at (x_cor,y_cor)
+            float aPhi = clus1->get_property_float(RawCluster::prop_incidence_alpha_phi);
+            float aEta = clus1->get_property_float(RawCluster::prop_incidence_alpha_eta);
+
+            if ((!std::isfinite(aPhi) || !std::isfinite(aEta)) &&
+                m_bemcRec && std::isfinite(x_cor) && std::isfinite(y_cor))
+            {
+              auto* cemc = dynamic_cast<BEmcRecCEMC*>(m_bemcRec);
+              if (cemc)
+              {
+                float a_phi_tmp = std::numeric_limits<float>::quiet_NaN();
+                float a_eta_tmp = std::numeric_limits<float>::quiet_NaN();
+                if (cemc->calculateIncidence(x_cor, y_cor, a_phi_tmp, a_eta_tmp))
+                {
+                  if (!std::isfinite(aPhi)) aPhi = a_phi_tmp;
+                  if (!std::isfinite(aEta)) aEta = a_eta_tmp;
+                }
+              }
+            }
+
+            const float absAPhi = std::fabs(aPhi);
+            const float absAEta = std::fabs(aEta);
+
+            // η at shower depth (vertex-dependent direction label)
+            float etaSD = std::numeric_limits<float>::quiet_NaN();
+            if (m_bemcRec && std::isfinite(x_cor) && std::isfinite(y_cor))
+            {
+              etaSD = cg2ShowerEta(m_bemcRec, clusE, x_cor, y_cor, vtxZ);
+            }
+            const float absEtaSD = std::fabs(etaSD);
+
+            // Detector η at the tower front face (vertex-independent ring label)
+            double etaDet = std::numeric_limits<double>::quiet_NaN();
+            if (!towerEs.empty() &&
+                towerEtas.size() == towerEs.size() &&
+                towerPhis.size() == towerEs.size() &&
+                m_geometry)
+            {
+              int leadIdx = -1;
+              float leadE = -1.f;
+              for (size_t it = 0; it < towerEs.size(); ++it)
+              {
+                if (towerEs[it] > leadE) { leadE = towerEs[it]; leadIdx = (int)it; }
+              }
+
+              if (leadIdx >= 0)
+              {
+                const int iEtaLead = towerEtas[leadIdx];
+                const int iPhiLead = towerPhis[leadIdx];
+
+                RawTowerDefs::keytype keyLead =
+                    RawTowerDefs::encode_towerid(RawTowerDefs::CEMC, iEtaLead, iPhiLead);
+
+                const RawTowerGeom* tgLead = m_geometry->get_tower_geometry(keyLead);
+                if (tgLead)
+                {
+                  double rFront = std::numeric_limits<double>::quiet_NaN();
+                  double zFront = std::numeric_limits<double>::quiet_NaN();
+
+                  const auto* g5 = dynamic_cast<const RawTowerGeomv5*>(tgLead);
+                  if (g5)
+                  {
+                    const double xF = g5->get_center_int_x();
+                    const double yF = g5->get_center_int_y();
+                    rFront = std::sqrt(xF * xF + yF * yF);
+                    zFront = g5->get_center_int_z();
+                  }
+                  else
+                  {
+                    rFront = tgLead->get_center_radius();
+                    zFront = tgLead->get_center_z();
+                  }
+
+                  if (rFront > 0.0)
+                  {
+                    etaDet = std::asinh(zFront / rFront);
+                  }
+                }
+              }
+            }
+            const double absEtaDet = std::fabs(etaDet);
+
+            // Only fill when all “slicing levers” are defined and within axis ranges
+            if (std::isfinite(absEtaDet) && absEtaDet <= 1.10 &&
+                std::isfinite(absEtaSD)  && absEtaSD  <= 1.10)
+            {
+              if (hns_blockCoord_E_alphaPhi &&
+                  std::isfinite(absAPhi) && absAPhi <= 0.20f)
+              {
+                Double_t vv[7] = {
+                  blkCoord.first,
+                  blkCoord.second,
+                  clusE,
+                  absAPhi,
+                  absEtaDet,
+                  absEtaSD,
+                  vtxZ
+                };
+                hns_blockCoord_E_alphaPhi->Fill(vv, kFillW);
+              }
+
+              if (hns_blockCoord_E_alphaEta &&
+                  std::isfinite(absAEta) && absAEta <= 0.25f)
+              {
+                Double_t vv[7] = {
+                  blkCoord.first,
+                  blkCoord.second,
+                  clusE,
+                  absAEta,
+                  absEtaDet,
+                  absEtaSD,
+                  vtxZ
+                };
+                hns_blockCoord_E_alphaEta->Fill(vv, kFillW);
+              }
+            }
+          }
+        }
       }
 
       // --- NEW: always fill uncorrected |z_vtx|-sliced TH3s (COARSE 0–150, and FINE 0–10)
