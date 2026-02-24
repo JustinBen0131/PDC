@@ -8161,7 +8161,6 @@ void PDCAnalysisPRIMEPRIME()
                            outBaseDir + "/bValues.txt",
                            "originalEta", "originalZRange",
                            /*E0=*/3.0);
-                           /*E0=*/3.0);
 
     std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
 
