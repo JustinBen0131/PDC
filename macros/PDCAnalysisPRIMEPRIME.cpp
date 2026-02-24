@@ -14,6 +14,7 @@
 #include <TH2F.h>
 #include <regex>
 #include <TH3F.h>
+#include <THnSparse.h>
 #include <TTree.h>
 #include <TLine.h>
 #include <TString.h>
@@ -81,6 +82,8 @@ struct BRes {
   double val  = std::numeric_limits<double>::quiet_NaN();  // best-fit b
   double err  = 0.0;                                       // σ_b
   double norm = std::numeric_limits<double>::quiet_NaN();  // best-fit Norm
+  double chi2 = std::numeric_limits<double>::quiet_NaN();  // χ²
+  int    ndf  = 0;                                         // NDF
 };
 
 // Variant keys and pretty labels for legends/titles
@@ -139,6 +142,109 @@ static TH3F* GetTH3FByNames(TFile* f, const std::vector<TString>& names)
     if (h) return h;
   }
   return nullptr;
+}
+
+static THnSparseF* GetTHnSparseFByNames(TFile* f, const std::vector<TString>& names)
+{
+  for (const auto& n : names)
+  {
+    THnSparseF* h = dynamic_cast<THnSparseF*>( f->Get(n) );
+    if (h) return h;
+  }
+  return nullptr;
+}
+
+static TH3F* ConvertTH3ToTH3F(const TH3* hIn, const char* newName)
+{
+  if (!hIn) return nullptr;
+
+  const int nx = hIn->GetXaxis()->GetNbins();
+  const int ny = hIn->GetYaxis()->GetNbins();
+  const int nz = hIn->GetZaxis()->GetNbins();
+
+  std::vector<double> xedges(nx+1), yedges(ny+1), zedges(nz+1);
+  for (int i=1;i<=nx;++i) xedges[i-1] = hIn->GetXaxis()->GetBinLowEdge(i);
+  xedges[nx] = hIn->GetXaxis()->GetBinUpEdge(nx);
+
+  for (int i=1;i<=ny;++i) yedges[i-1] = hIn->GetYaxis()->GetBinLowEdge(i);
+  yedges[ny] = hIn->GetYaxis()->GetBinUpEdge(ny);
+
+  for (int i=1;i<=nz;++i) zedges[i-1] = hIn->GetZaxis()->GetBinLowEdge(i);
+  zedges[nz] = hIn->GetZaxis()->GetBinUpEdge(nz);
+
+  TH3F* h = new TH3F(newName,
+                     hIn->GetTitle(),
+                     nx, xedges.data(),
+                     ny, yedges.data(),
+                     nz, zedges.data());
+  h->SetDirectory(nullptr);
+
+  for (int ix=1; ix<=nx; ++ix)
+    for (int iy=1; iy<=ny; ++iy)
+      for (int iz=1; iz<=nz; ++iz)
+      {
+        const double c = hIn->GetBinContent(ix,iy,iz);
+        const double e = hIn->GetBinError  (ix,iy,iz);
+        if (c != 0.0) h->SetBinContent(ix,iy,iz,c);
+        if (e != 0.0) h->SetBinError  (ix,iy,iz,e);
+      }
+
+  h->SetEntries(hIn->GetEntries());
+  return h;
+}
+
+static TH3F* ProjectHNS_toTH3F(THnSparseF* hns,
+                              double alphaLo,
+                              double alphaHi,
+                              bool   useZ,
+                              double zLo,
+                              double zHi,
+                              bool   useEtaDet,
+                              double etaDetLo,
+                              double etaDetHi,
+                              const char* outName)
+{
+  if (!hns) return nullptr;
+
+  // reset slice axes: 3=|alpha|, 4=|etaDet|, 5=|etaSD|, 6=zVtx
+  for (int ax=3; ax<=6; ++ax) hns->GetAxis(ax)->SetRange(0,0);
+
+  // alpha slice
+  {
+    TAxis* a = hns->GetAxis(3);
+    const int lo = std::max(1, a->FindBin(alphaLo + 1e-9));
+    const int hi = std::min(a->GetNbins(), a->FindBin(alphaHi - 1e-9));
+    if (hi < lo) return nullptr;
+    a->SetRange(lo, hi);
+  }
+
+  // z slice (optional)
+  if (useZ)
+  {
+    TAxis* z = hns->GetAxis(6);
+    const int lo = std::max(1, z->FindBin(zLo + 1e-9));
+    const int hi = std::min(z->GetNbins(), z->FindBin(zHi - 1e-9));
+    if (hi < lo) return nullptr;
+    z->SetRange(lo, hi);
+  }
+
+  // etaDet slice (optional)
+  if (useEtaDet)
+  {
+    TAxis* e = hns->GetAxis(4);
+    const int lo = std::max(1, e->FindBin(etaDetLo + 1e-9));
+    const int hi = std::min(e->GetNbins(), e->FindBin(etaDetHi - 1e-9));
+    if (hi < lo) return nullptr;
+    e->SetRange(lo, hi);
+  }
+
+  TH3* h3proj = dynamic_cast<TH3*>( hns->Projection(0,1,2) );
+  if (!h3proj) return nullptr;
+  h3proj->SetDirectory(nullptr);
+
+  TH3F* h3f = ConvertTH3ToTH3F(h3proj, outName);
+  delete h3proj;
+  return h3f;
 }
 
 static void SaveTH3Lego(TH3* h3, const char* outPNG, const char* etaLabelPretty)
@@ -223,8 +329,24 @@ static BRes FitAsinh1D(TH1D* h, double xmin=-0.5, double xmax=0.5)
       best.val  = trial.GetParameter(1);   // b
       best.err  = trial.GetParError(1);
       best.norm = trial.GetParameter(0);   // FITTED Norm (use this to draw)
+      best.chi2 = r->Chi2();
+      best.ndf  = (int)r->Ndf();
     }
   }
+
+  if (const char* env = std::getenv("PDC_INC_VERBOSE"))
+  {
+    const int v = std::atoi(env);
+    if (v >= 3)
+    {
+      std::cout << "[FitAsinh1D] " << (h ? h->GetName() : "(null)")
+                << " entries=" << (h ? (Long64_t)h->GetEntries() : 0)
+                << " b=" << best.val << " +/- " << best.err
+                << " chi2/ndf=" << best.chi2 << "/" << best.ndf
+                << "\n";
+    }
+  }
+
   return best;
 }
 
@@ -5834,10 +5956,364 @@ static inline void SaveBvsModuleOverlayAcrossE(const std::string& outPng,
   delete c;
 }
 
-static void RunBlockwiseBExtraction(TFile* fin,
-                                     const std::string& outBaseDir,
-                                     const std::vector<std::pair<double,double>>& eEdges)
+static void RunIncidenceProof_FirstPass(TFile* fin,
+                                        const std::string& outBaseDir,
+                                        const std::vector<std::pair<double,double>>& eEdges)
+{
+  if (!fin) return;
+
+  const char* env = std::getenv("PDC_INC_VERBOSE");
+  const int v = env ? std::atoi(env) : 1;
+
+  THnSparseF* hAphi = nullptr;
+  THnSparseF* hAeta = nullptr;
+  std::string modeTag = "";
+
+  fin->GetObject("hns_blockCoord_E_alphaPhi_range", hAphi);
+  if (hAphi) modeTag = "range";
+  if (!hAphi) fin->GetObject("hns_blockCoord_E_alphaPhi_disc", hAphi);
+
+  fin->GetObject("hns_blockCoord_E_alphaEta_range", hAeta);
+  if (hAeta && modeTag.empty()) modeTag = "range";
+  if (!hAeta) fin->GetObject("hns_blockCoord_E_alphaEta_disc", hAeta);
+  if (hAeta && modeTag.empty()) modeTag = "disc";
+
+  if (!hAphi && !hAeta)
   {
+    std::cout << "[IncidenceProof] No THnSparse masters found. Expected:\n"
+              << "  hns_blockCoord_E_alphaPhi_{range|disc}\n"
+              << "  hns_blockCoord_E_alphaEta_{range|disc}\n";
+    return;
+  }
+
+  const std::string base = outBaseDir + "/bvaluePNGsByGeom/IncidenceProof/" + modeTag;
+  EnsureDir(outBaseDir + "/bvaluePNGsByGeom");
+  EnsureDir(outBaseDir + "/bvaluePNGsByGeom/IncidenceProof");
+  EnsureDir(base);
+
+  auto fitIntE = [&](TH3F* h3, double& bphi, double& ebphi, double& beta, double& ebeta) -> bool
+  {
+    bphi = std::numeric_limits<double>::quiet_NaN();
+    ebphi = 0.0;
+    beta = std::numeric_limits<double>::quiet_NaN();
+    ebeta = 0.0;
+
+    if (!h3 || h3->GetEntries() <= 0) return false;
+
+    TH1D* hPhi = static_cast<TH1D*>( h3->Project3D("y") ); // integrates over etaLoc and E
+    TH1D* hEta = static_cast<TH1D*>( h3->Project3D("x") ); // integrates over phiLoc and E
+    if (!hPhi || !hEta) { if (hPhi) delete hPhi; if (hEta) delete hEta; return false; }
+
+    hPhi->SetDirectory(nullptr);
+    hEta->SetDirectory(nullptr);
+
+    BRes rPhi = FitAsinh1D(hPhi);
+    BRes rEta = FitAsinh1D(hEta);
+
+    bphi  = rPhi.val;  ebphi = rPhi.err;
+    beta  = rEta.val;  ebeta = rEta.err;
+
+    if (v >= 2)
+    {
+      std::cout << "[IncidenceProof] TH3=" << h3->GetName()
+                << " entries=" << (Long64_t)h3->GetEntries()
+                << "  Phi1D=" << (Long64_t)hPhi->GetEntries()
+                << "  Eta1D=" << (Long64_t)hEta->GetEntries()
+                << "  bphi=" << bphi << "+/-" << ebphi << " (chi2/ndf=" << rPhi.chi2 << "/" << rPhi.ndf << ")"
+                << "  beta=" << beta << "+/-" << ebeta << " (chi2/ndf=" << rEta.chi2 << "/" << rEta.ndf << ")"
+                << "\n";
+    }
+
+    delete hPhi;
+    delete hEta;
+
+    return (std::isfinite(bphi) || std::isfinite(beta));
+  };
+
+  auto runOne = [&](const char* tag,
+                    THnSparseF* hns,
+                    const std::vector<std::pair<double,double>>& aBins)
+  {
+    if (!hns) return;
+
+    const std::string dir = base + "/" + tag;
+    const std::string globalDir = dir + "/global";
+    const std::string collapseZ = dir + "/collapse_vs_z";
+    const std::string collapseEtaDet = dir + "/collapse_vs_etaDet";
+    EnsureDir(dir);
+    EnsureDir(globalDir);
+    EnsureDir(collapseZ);
+    EnsureDir(collapseEtaDet);
+
+    std::vector<double> aC, bP, eP, bE, eE;
+    aC.reserve(aBins.size());
+
+    // --- Global: b(intE) vs |alpha| ---
+    for (size_t i=0;i<aBins.size();++i)
+    {
+      const double aLo = aBins[i].first;
+      const double aHi = aBins[i].second;
+      const double aMid = 0.5*(aLo+aHi);
+
+      TH3F* h3 = ProjectHNS_toTH3F(hns, aLo, aHi,
+                                   /*useZ*/false, 0, 0,
+                                   /*useEtaDet*/false, 0, 0,
+                                   Form("h3_%s_absA_%zu", tag, i));
+      if (!h3) continue;
+      if (h3->GetEntries() <= 0) { delete h3; continue; }
+
+      const std::string binDir = globalDir + Form("/absAlphaBin_%zu", i);
+      EnsureDir(binDir);
+
+      const char* alphaSym = (std::string(tag) == "alphaPhi") ? "|#alpha_{#varphi}|" : "|#alpha_{#eta}|";
+      const std::string pretty = Form("%s = %.3f - %.3f rad", alphaSym, aLo, aHi);
+
+      // Optional: reuse your pretty plot pages (these are already implemented)
+      // Pass the incidence label/range so EVERY page is self-documenting.
+      Plot2DBlockEtaPhi(h3, nullptr, /*firstPass*/true, eEdges, binDir.c_str(), pretty.c_str());
+      OverlayUncorrPhiEta(h3, eEdges, binDir.c_str(), pretty.c_str());
+
+      double bphi=0, ebphi=0, beta=0, ebeta=0;
+      if (fitIntE(h3, bphi, ebphi, beta, ebeta))
+      {
+        aC.push_back(aMid);
+        bP.push_back(bphi);
+        eP.push_back(ebphi);
+        bE.push_back(beta);
+        eE.push_back(ebeta);
+      }
+
+      delete h3;
+    }
+
+    if (!aC.empty())
+    {
+      const int N = (int)aC.size();
+      std::vector<double> ex(N, 0.0);
+
+      TGraphErrors gPhi(N, aC.data(), bP.data(), ex.data(), eP.data());
+      TGraphErrors gEta(N, aC.data(), bE.data(), ex.data(), eE.data());
+      gPhi.SetMarkerStyle(21); gPhi.SetMarkerColor(kRed+1);  gPhi.SetLineColor(kRed+1);
+      gEta.SetMarkerStyle(20); gEta.SetMarkerColor(kBlue+1); gEta.SetLineColor(kBlue+1);
+
+      double yMin=+1e99, yMax=-1e99;
+      for (int i=0;i<N;++i)
+      {
+        if (std::isfinite(bP[i])) { yMin = std::min(yMin, bP[i]-std::fabs(eP[i])); yMax = std::max(yMax, bP[i]+std::fabs(eP[i])); }
+        if (std::isfinite(bE[i])) { yMin = std::min(yMin, bE[i]-std::fabs(eE[i])); yMax = std::max(yMax, bE[i]+std::fabs(eE[i])); }
+      }
+      if (!(yMin < yMax)) { yMin = 0.10; yMax = 0.22; }
+      const double span = std::max(1e-6, yMax-yMin);
+      const double yLo  = yMin - 0.25*span;
+      const double yHi  = yMax + 0.25*span;
+
+      const char* alphaSym = (std::string(tag) == "alphaPhi") ? "|#alpha_{#varphi}|" : "|#alpha_{#eta}|";
+
+      TH2F frame(Form("fr_%s_b_vs_absAlpha", tag),
+                   Form("%s: b(intE) vs %s;%s [rad];b", tag, alphaSym, alphaSym),
+                   100, aBins.front().first, aBins.back().second, 100, yLo, yHi);
+      frame.SetStats(0);
+
+      TCanvas c(Form("c_%s_b_vs_absAlpha", tag),"",900,700);
+      frame.Draw();
+      gPhi.Draw("P SAME");
+      gEta.Draw("P SAME");
+
+      TLegend leg(0.14,0.78,0.44,0.90);
+      leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.045);
+      leg.AddEntry(&gPhi, "b_{#varphi} (intE)", "lp");
+      leg.AddEntry(&gEta, "b_{#eta} (intE)",    "lp");
+      leg.Draw();
+
+      c.SaveAs(Form("%s/b_vs_absAlpha_intE.png", globalDir.c_str()));
+    }
+
+    // --- Collapse test (fixed mid incidence bin): b(intE) vs zVtx-bin ---
+    // Use bin index 2 if available, else use last bin.
+    size_t iMid = (aBins.size() >= 3 ? 2 : (aBins.empty() ? 0 : aBins.size()-1));
+    if (!aBins.empty())
+    {
+      const double aLo = aBins[iMid].first;
+      const double aHi = aBins[iMid].second;
+
+      const std::vector<std::pair<double,double>> zBins = {
+        {  0.0, 10.0},
+        { 10.0, 20.0},
+        { 20.0, 30.0},
+        { 30.0, 45.0},
+        { 45.0, 60.0}
+      };
+
+      std::vector<double> zC, bPz, ePz, bEz, eEz;
+      for (size_t iz=0; iz<zBins.size(); ++iz)
+      {
+        const double zLo = zBins[iz].first;
+        const double zHi = zBins[iz].second;
+        const double zMid = 0.5*(zLo+zHi);
+
+        TH3F* h3 = ProjectHNS_toTH3F(hns, aLo, aHi,
+                                     /*useZ*/true,  zLo, zHi,
+                                     /*useEtaDet*/false, 0, 0,
+                                     Form("h3_%s_midA_z%zu", tag, iz));
+        if (!h3) continue;
+        if (h3->GetEntries() <= 0) { delete h3; continue; }
+
+        double bphi=0, ebphi=0, beta=0, ebeta=0;
+        if (fitIntE(h3, bphi, ebphi, beta, ebeta))
+        {
+          zC.push_back(zMid);
+          bPz.push_back(bphi); ePz.push_back(ebphi);
+          bEz.push_back(beta); eEz.push_back(ebeta);
+        }
+
+        delete h3;
+      }
+
+      if (!zC.empty())
+      {
+        const int N = (int)zC.size();
+        std::vector<double> ex(N, 0.0);
+
+        TGraphErrors gPhi(N, zC.data(), bPz.data(), ex.data(), ePz.data());
+        TGraphErrors gEta(N, zC.data(), bEz.data(), ex.data(), eEz.data());
+        gPhi.SetMarkerStyle(21); gPhi.SetMarkerColor(kRed+1);  gPhi.SetLineColor(kRed+1);
+        gEta.SetMarkerStyle(20); gEta.SetMarkerColor(kBlue+1); gEta.SetLineColor(kBlue+1);
+
+        double yMin=+1e99, yMax=-1e99;
+        for (int i=0;i<N;++i)
+        {
+          if (std::isfinite(bPz[i])) { yMin = std::min(yMin, bPz[i]-std::fabs(ePz[i])); yMax = std::max(yMax, bPz[i]+std::fabs(ePz[i])); }
+          if (std::isfinite(bEz[i])) { yMin = std::min(yMin, bEz[i]-std::fabs(eEz[i])); yMax = std::max(yMax, bEz[i]+std::fabs(eEz[i])); }
+        }
+        if (!(yMin < yMax)) { yMin = 0.10; yMax = 0.22; }
+        const double span = std::max(1e-6, yMax-yMin);
+        const double yLo  = yMin - 0.25*span;
+        const double yHi  = yMax + 0.25*span;
+
+        const char* alphaSym = (std::string(tag) == "alphaPhi") ? "|#alpha_{#varphi}|" : "|#alpha_{#eta}|";
+
+        TH2F frame(Form("fr_%s_b_vs_z_midA", tag),
+                     Form("%s: b(intE) vs |z_{vtx}| at fixed %s = %.3f - %.3f rad;|z_{vtx}| bin center [cm];b",
+                          tag, alphaSym, aLo, aHi),
+                     100, 0.0, 60.0, 100, yLo, yHi);
+        frame.SetStats(0);
+
+        TCanvas c(Form("c_%s_b_vs_z_midA", tag),"",900,700);
+        frame.Draw();
+        gPhi.Draw("P SAME");
+        gEta.Draw("P SAME");
+
+        TLegend leg(0.14,0.78,0.44,0.90);
+        leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.045);
+        leg.AddEntry(&gPhi, "b_{#varphi} (intE)", "lp");
+        leg.AddEntry(&gEta, "b_{#eta} (intE)",    "lp");
+        leg.Draw();
+
+        c.SaveAs(Form("%s/b_vs_zVtx_fixedAbsAlpha_intE.png", collapseZ.c_str()));
+      }
+    }
+
+    // --- Collapse vs |etaDet| at fixed mid incidence bin (core/mid/edge) ---
+    if (!aBins.empty())
+    {
+      const double aLo = aBins[iMid].first;
+      const double aHi = aBins[iMid].second;
+
+      const std::vector<std::pair<double,double>> etaDetBins = {
+        {0.00, 0.20},
+        {0.20, 0.70},
+        {0.70, 1.10}
+      };
+
+      std::vector<double> eC, bPe, ePe, bEe, eEe;
+
+      for (size_t ie=0; ie<etaDetBins.size(); ++ie)
+      {
+        const double lo = etaDetBins[ie].first;
+        const double hi = etaDetBins[ie].second;
+        const double mid = 0.5*(lo+hi);
+
+        TH3F* h3 = ProjectHNS_toTH3F(hns, aLo, aHi,
+                                     /*useZ*/false, 0, 0,
+                                     /*useEtaDet*/true, lo, hi,
+                                     Form("h3_%s_midA_etaDet%zu", tag, ie));
+        if (!h3) continue;
+        if (h3->GetEntries() <= 0) { delete h3; continue; }
+
+        double bphi=0, ebphi=0, beta=0, ebeta=0;
+        if (fitIntE(h3, bphi, ebphi, beta, ebeta))
+        {
+          eC.push_back(mid);
+          bPe.push_back(bphi); ePe.push_back(ebphi);
+          bEe.push_back(beta); eEe.push_back(ebeta);
+        }
+
+        delete h3;
+      }
+
+      if (!eC.empty())
+      {
+        const int N = (int)eC.size();
+        std::vector<double> ex(N, 0.0);
+
+        TGraphErrors gPhi(N, eC.data(), bPe.data(), ex.data(), ePe.data());
+        TGraphErrors gEta(N, eC.data(), bEe.data(), ex.data(), eEe.data());
+        gPhi.SetMarkerStyle(21); gPhi.SetMarkerColor(kRed+1);  gPhi.SetLineColor(kRed+1);
+        gEta.SetMarkerStyle(20); gEta.SetMarkerColor(kBlue+1); gEta.SetLineColor(kBlue+1);
+
+        double yMin=+1e99, yMax=-1e99;
+        for (int i=0;i<N;++i)
+        {
+          if (std::isfinite(bPe[i])) { yMin = std::min(yMin, bPe[i]-std::fabs(ePe[i])); yMax = std::max(yMax, bPe[i]+std::fabs(ePe[i])); }
+          if (std::isfinite(bEe[i])) { yMin = std::min(yMin, bEe[i]-std::fabs(eEe[i])); yMax = std::max(yMax, bEe[i]+std::fabs(eEe[i])); }
+        }
+        if (!(yMin < yMax)) { yMin = 0.10; yMax = 0.22; }
+        const double span = std::max(1e-6, yMax-yMin);
+        const double yLo  = yMin - 0.25*span;
+        const double yHi  = yMax + 0.25*span;
+
+        const char* alphaSym = (std::string(tag) == "alphaPhi") ? "|#alpha_{#varphi}|" : "|#alpha_{#eta}|";
+
+        TH2F frame(Form("fr_%s_b_vs_etaDet_midA", tag),
+                     Form("%s: b(intE) vs |#eta_{det}| at fixed %s = %.3f - %.3f rad;|#eta_{det}| bin center;b",
+                          tag, alphaSym, aLo, aHi),
+                     100, 0.0, 1.10, 100, yLo, yHi);
+        frame.SetStats(0);
+
+        TCanvas c(Form("c_%s_b_vs_etaDet_midA", tag),"",900,700);
+        frame.Draw();
+        gPhi.Draw("P SAME");
+        gEta.Draw("P SAME");
+
+        TLegend leg(0.14,0.78,0.44,0.90);
+        leg.SetBorderSize(0); leg.SetFillStyle(0); leg.SetTextSize(0.045);
+        leg.AddEntry(&gPhi, "b_{#varphi} (intE)", "lp");
+        leg.AddEntry(&gEta, "b_{#eta} (intE)",    "lp");
+        leg.Draw();
+
+        c.SaveAs(Form("%s/b_vs_absEtaDet_fixedAbsAlpha_intE.png", collapseEtaDet.c_str()));
+      }
+    }
+  };
+
+  // Starting “physics bins” (5 bins each)
+  const std::vector<std::pair<double,double>> aPhiBins = {
+    {0.00,0.11},{0.11,0.13},{0.13,0.145},{0.145,0.160},{0.160,0.20}
+  };
+  const std::vector<std::pair<double,double>> aEtaBins = {
+    {0.00,0.10},{0.10,0.14},{0.14,0.18},{0.18,0.22},{0.22,0.25}
+  };
+
+  runOne("alphaPhi", hAphi, aPhiBins);
+  runOne("alphaEta", hAeta, aEtaBins);
+
+  std::cout << "[IncidenceProof] Outputs under: " << base << "\n";
+}
+
+static void RunBlockwiseBExtraction(TFile* fin,
+                                   const std::string& outBaseDir,
+                                   const std::vector<std::pair<double,double>>& eEdges)
+{
   if (!fin) return;
 
   // Toggle audit volume here (safe defaults)
@@ -7685,8 +8161,23 @@ void PDCAnalysisPRIMEPRIME()
                            outBaseDir + "/bValues.txt",
                            "originalEta", "originalZRange",
                            /*E0=*/3.0);
+                           /*E0=*/3.0);
 
     std::cout << "[DONE] Outputs written under: " << outBaseDir << "\n";
+
+    // ==================== NEW: Incidence proof (energy-integrated) from THnSparse masters ====================
+    // Reads:
+    //   hns_blockCoord_E_alphaPhi_{range|disc}
+    //   hns_blockCoord_E_alphaEta_{range|disc}
+    // Writes:
+    //   outBaseDir/bvaluePNGsByGeom/IncidenceProof/<modeTag>/alphaPhi/...
+    //   outBaseDir/bvaluePNGsByGeom/IncidenceProof/<modeTag>/alphaEta/...
+    //
+    // Verbosity:
+    //   export PDC_INC_VERBOSE=1  (default)  -> minimal prints
+    //   export PDC_INC_VERBOSE=2            -> slice entries + fit results per slice
+    //   export PDC_INC_VERBOSE=3            -> includes FitAsinh1D per-1D prints
+    RunIncidenceProof_FirstPass(fin.get(), outBaseDir, eEdges);
 
     // ==================== NEW: Blockwise b(E) maps per sector/module/blockPhi ====================
     // Reads: h3_blockCoord_E_full_sXX_mYY_bZ_{range|disc}
