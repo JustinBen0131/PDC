@@ -6068,10 +6068,128 @@ static void RunIncidenceProof_FirstPass(TFile* fin,
       const char* alphaSym = (std::string(tag) == "alphaPhi") ? "|#alpha_{#varphi}|" : "|#alpha_{#eta}|";
       const std::string pretty = Form("%s = %.3f - %.3f rad", alphaSym, aLo, aHi);
 
-      // Optional: reuse your pretty plot pages (these are already implemented)
-      // Pass the incidence label/range so EVERY page is self-documenting.
-      Plot2DBlockEtaPhi(h3, nullptr, /*firstPass*/true, eEdges, binDir.c_str(), pretty.c_str());
-      OverlayUncorrPhiEta(h3, eEdges, binDir.c_str(), pretty.c_str());
+        // IncidenceProof is ENERGY-INDEPENDENT for these per-bin pages:
+        //   - one 2D heatmap integrated over ALL E
+        //   - one overlay of ηloc and φloc projections integrated over ALL E (with fits)
+        {
+          gStyle->SetOptStat(0);
+
+          // Ensure full energy range is included
+          h3->GetZaxis()->SetRange(0,0);
+
+          // 2D: ηloc vs φloc integrated over E
+          TH2D* h2 = static_cast<TH2D*>( h3->Project3D("xy") );
+          if (h2)
+          {
+            h2->SetDirectory(nullptr);
+            h2->SetName(Form("h2_intE_%s_absA_%zu", tag, i));
+            h2->SetTitle("");
+            h2->GetZaxis()->SetTitle("Entries");
+            h2->GetXaxis()->SetTitle("block #eta_{local, 2#times 2}");
+            h2->GetYaxis()->SetTitle("block #varphi_{local, 2#times 2}");
+
+            // 1D projections integrated over E
+            TH1D* hPhi = static_cast<TH1D*>( h3->Project3D("y") ); // φloc
+            TH1D* hEta = static_cast<TH1D*>( h3->Project3D("x") ); // ηloc
+
+            if (hPhi && hEta)
+            {
+              hPhi->SetDirectory(nullptr);
+              hEta->SetDirectory(nullptr);
+              hPhi->SetName(Form("hPhi_intE_%s_absA_%zu", tag, i));
+              hEta->SetName(Form("hEta_intE_%s_absA_%zu", tag, i));
+
+              hPhi->SetMarkerStyle(21);
+              hPhi->SetMarkerColor(kRed+1);
+              hPhi->SetLineColor  (kRed+1);
+
+              hEta->SetMarkerStyle(20);
+              hEta->SetMarkerColor(kBlue+1);
+              hEta->SetLineColor  (kBlue+1);
+
+              const BRes bPhi = FitAsinh1D(hPhi);
+              const BRes bEta = FitAsinh1D(hEta);
+
+              // 1x2 canvas: [0]=2D map, [1]=overlay+fits
+              TCanvas cQA(Form("cQA_%s_absA_%zu", tag, i), "", 2000, 800);
+              cQA.Divide(2,1);
+
+              // Left pad: 2D heatmap
+              cQA.cd(1);
+              gPad->SetRightMargin(0.14);
+              gPad->SetLeftMargin (0.12);
+              gPad->SetBottomMargin(0.12);
+              gPad->SetTopMargin   (0.14);
+
+              h2->Draw("COLZ");
+
+              TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
+              tl.SetTextAlign(13);
+              tl.SetTextSize(0.055);
+              tl.DrawLatex(0.12, 0.96, Form("UNCORR (intE)  %s", pretty.c_str()));
+
+              // Right pad: overlay + fits
+              cQA.cd(2);
+              gPad->SetRightMargin(0.04);
+              gPad->SetLeftMargin (0.12);
+              gPad->SetBottomMargin(0.12);
+              gPad->SetTopMargin   (0.14);
+
+              const double ymax = std::max(hPhi->GetMaximum(), hEta->GetMaximum());
+              hEta->GetYaxis()->SetRangeUser(0.0, 1.30 * std::max(1.0, ymax));
+              hEta->SetTitle(Form("UNCORR (intE)  %s", pretty.c_str()));
+              hEta->GetXaxis()->SetTitle("block #eta_{local} / block #varphi_{local}");
+
+              hEta->Draw("E");
+              hPhi->Draw("E SAME");
+
+              static std::vector<std::unique_ptr<TF1>> s_keepFits_intE;
+              // η fit (blue)
+              if (std::isfinite(bEta.val) && std::isfinite(bEta.norm) && bEta.val > 1e-9)
+              {
+                auto fEta = std::make_unique<TF1>(Form("fEta_intE_%s_%zu", tag, i), asinhModel, -0.5, 1.5, 2);
+                fEta->SetParameters(bEta.norm, bEta.val);
+                fEta->SetLineColor(kBlue+1);
+                fEta->SetLineWidth(2);
+                fEta->SetNpx(800);
+                fEta->Draw("L SAME");
+                s_keepFits_intE.emplace_back(std::move(fEta));
+              }
+              // φ fit (red)
+              if (std::isfinite(bPhi.val) && std::isfinite(bPhi.norm) && bPhi.val > 1e-9)
+              {
+                auto fPhi = std::make_unique<TF1>(Form("fPhi_intE_%s_%zu", tag, i), asinhModel, -0.5, 1.5, 2);
+                fPhi->SetParameters(bPhi.norm, bPhi.val);
+                fPhi->SetLineColor(kRed+1);
+                fPhi->SetLineWidth(2);
+                fPhi->SetNpx(800);
+                fPhi->Draw("L SAME");
+                s_keepFits_intE.emplace_back(std::move(fPhi));
+              }
+
+              TLegend leg(0.14,0.80,0.55,0.92);
+              leg.SetBorderSize(0);
+              leg.SetFillStyle(0);
+              leg.SetTextSize(0.045);
+              leg.AddEntry(hPhi, "local #varphi (intE)", "lp");
+              leg.AddEntry(hEta, "local #eta (intE)",    "lp");
+              leg.Draw();
+
+              TLatex t2; t2.SetNDC(); t2.SetTextAlign(33); t2.SetTextSize(0.045);
+              t2.SetTextColor(kRed+1);
+              t2.DrawLatex(0.95, 0.92, Form("b_{#varphi}=%.3g#pm%.2g", bPhi.val, bPhi.err));
+              t2.SetTextColor(kBlue+1);
+              t2.DrawLatex(0.95, 0.86, Form("b_{#eta}=%.3g#pm%.2g", bEta.val, bEta.err));
+              t2.SetTextColor(kBlack);
+
+              cQA.SaveAs(Form("%s/IncidenceIntE_QA.png", binDir.c_str()));
+            }
+
+            if (hPhi) delete hPhi;
+            if (hEta) delete hEta;
+            delete h2;
+          }
+        }
 
       double bphi=0, ebphi=0, beta=0, ebeta=0;
       if (fitIntE(h3, bphi, ebphi, beta, ebeta))
