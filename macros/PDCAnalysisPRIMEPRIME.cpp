@@ -6036,14 +6036,101 @@ static void RunIncidenceProof_FirstPass(TFile* fin,
   {
     if (!hns) return;
 
-    const std::string dir = base + "/" + tag;
-    const std::string globalDir = dir + "/global";
-    const std::string collapseZ = dir + "/collapse_vs_z";
-    const std::string collapseEtaDet = dir + "/collapse_vs_etaDet";
-    EnsureDir(dir);
-    EnsureDir(globalDir);
-    EnsureDir(collapseZ);
-    EnsureDir(collapseEtaDet);
+      const std::string dir = base + "/" + tag;
+      const std::string globalDir = dir + "/global";
+      const std::string collapseZ = dir + "/collapse_vs_z";
+      const std::string collapseEtaDet = dir + "/collapse_vs_etaDet";
+      const std::string incidenceQADir = dir + "/incidenceQA";
+      EnsureDir(dir);
+      EnsureDir(globalDir);
+      EnsureDir(collapseZ);
+      EnsureDir(collapseEtaDet);
+      EnsureDir(incidenceQADir);
+
+      // ---------------------------------------------------------------------
+      // Incidence QA (from THnSparse axes) — helps interpret the b-vs-incidence plots.
+      //
+      // For alphaEta:
+      //   - <|alpha_eta|> vs |eta_det|
+      //   - <|alpha_eta|> vs |eta_SD|
+      //   - occupancy: |eta_SD| vs |eta_det|
+      //
+      // (All are fully integrated over etaLoc, phiLoc, E, and the remaining axes.)
+      // ---------------------------------------------------------------------
+      if (std::string(tag) == "alphaEta")
+      {
+        // Reset all axis ranges so the QA is global
+        for (int ax=0; ax<=6; ++ax) hns->GetAxis(ax)->SetRange(0,0);
+
+        // (1) <|alpha_eta|> vs |eta_det|
+        TH2D* h2_aeta_vs_etadet = static_cast<TH2D*>( hns->Projection(4,3) ); // x=|eta_det|, y=|alpha_eta|
+        if (h2_aeta_vs_etadet)
+        {
+          h2_aeta_vs_etadet->SetDirectory(nullptr);
+          h2_aeta_vs_etadet->SetName(Form("h2_aeta_vs_etadet_%s", modeTag.c_str()));
+
+          TProfile* p = h2_aeta_vs_etadet->ProfileX(Form("p_aeta_vs_etadet_%s", modeTag.c_str()));
+          if (p)
+          {
+            p->SetDirectory(nullptr);
+            p->SetMarkerStyle(20);
+            p->SetMarkerSize(1.0);
+
+            TCanvas c("c_aeta_vs_etadet","",900,700);
+            c.cd();
+            p->SetTitle("#LT|#alpha_{#eta}|#GT vs |#eta_{det}|  (integrated over all other axes);|#eta_{det}|;#LT|#alpha_{#eta}|#GT  [rad]");
+            p->Draw("E");
+            c.SaveAs(Form("%s/meanAbsAlphaEta_vs_absEtaDet.png", incidenceQADir.c_str()));
+            delete p;
+          }
+          delete h2_aeta_vs_etadet;
+        }
+
+        // (2) <|alpha_eta|> vs |eta_SD|
+        TH2D* h2_aeta_vs_etasd = static_cast<TH2D*>( hns->Projection(5,3) ); // x=|eta_SD|, y=|alpha_eta|
+        if (h2_aeta_vs_etasd)
+        {
+          h2_aeta_vs_etasd->SetDirectory(nullptr);
+          h2_aeta_vs_etasd->SetName(Form("h2_aeta_vs_etasd_%s", modeTag.c_str()));
+
+          TProfile* p = h2_aeta_vs_etasd->ProfileX(Form("p_aeta_vs_etasd_%s", modeTag.c_str()));
+          if (p)
+          {
+            p->SetDirectory(nullptr);
+            p->SetMarkerStyle(20);
+            p->SetMarkerSize(1.0);
+
+            TCanvas c("c_aeta_vs_etasd","",900,700);
+            c.cd();
+            p->SetTitle("#LT|#alpha_{#eta}|#GT vs |#eta_{SD}|  (integrated over all other axes);|#eta_{SD}|;#LT|#alpha_{#eta}|#GT  [rad]");
+            p->Draw("E");
+            c.SaveAs(Form("%s/meanAbsAlphaEta_vs_absEtaSD.png", incidenceQADir.c_str()));
+            delete p;
+          }
+          delete h2_aeta_vs_etasd;
+        }
+
+        // (3) Occupancy: |eta_SD| vs |eta_det| (integrated over etaLoc, phiLoc, E, |alpha_eta|, z)
+        TH2D* h2_occ_etasd_vs_etadet = static_cast<TH2D*>( hns->Projection(4,5) ); // x=|eta_det|, y=|eta_SD|
+        if (h2_occ_etasd_vs_etadet)
+        {
+          h2_occ_etasd_vs_etadet->SetDirectory(nullptr);
+          h2_occ_etasd_vs_etadet->SetName(Form("h2_occ_etasd_vs_etadet_%s", modeTag.c_str()));
+          h2_occ_etasd_vs_etadet->GetXaxis()->SetTitle("|#eta_{det}|");
+          h2_occ_etasd_vs_etadet->GetYaxis()->SetTitle("|#eta_{SD}|");
+          h2_occ_etasd_vs_etadet->SetTitle("Occupancy: |#eta_{SD}| vs |#eta_{det}| (integrated over other axes)");
+
+          TCanvas c("c_occ_etasd_vs_etadet","",900,750);
+          c.cd();
+          gPad->SetRightMargin(0.14);
+          gPad->SetLeftMargin (0.12);
+          gPad->SetBottomMargin(0.12);
+          gPad->SetTopMargin   (0.10);
+          h2_occ_etasd_vs_etadet->Draw("COLZ");
+          c.SaveAs(Form("%s/occupancy_absEtaSD_vs_absEtaDet.png", incidenceQADir.c_str()));
+          delete h2_occ_etasd_vs_etadet;
+        }
+      }
 
     std::vector<double> aC, bP, eP, bE, eE;
     aC.reserve(aBins.size());
@@ -6071,6 +6158,36 @@ static void RunIncidenceProof_FirstPass(TFile* fin,
         // IncidenceProof is ENERGY-INDEPENDENT for these per-bin pages:
         //   - one 2D heatmap integrated over ALL E
         //   - one overlay of ηloc and φloc projections integrated over ALL E (with fits)
+        //
+        // Additionally: build ONE stacked canvas per tag:
+        //   5x2 (rows = alpha bins, col1=2D heatmap, col2=overlay+fits)
+        static TCanvas* s_cGrid = nullptr;
+        static std::string s_cGridTag;
+
+        // Keep objects alive for the stacked grid until we save it (ROOT pads store pointers)
+        static std::vector<TH2D*> s_keepGridH2;
+        static std::vector<TH1D*> s_keepGridHPhi;
+        static std::vector<TH1D*> s_keepGridHEta;
+
+        if (!s_cGrid || s_cGridTag != std::string(tag))
+        {
+          if (s_cGrid) { delete s_cGrid; s_cGrid = nullptr; }
+          s_cGridTag = std::string(tag);
+
+          // Clean up any previous-tag kept objects
+          for (auto* h : s_keepGridH2)   delete h;
+          for (auto* h : s_keepGridHPhi) delete h;
+          for (auto* h : s_keepGridHEta) delete h;
+          s_keepGridH2.clear();
+          s_keepGridHPhi.clear();
+          s_keepGridHEta.clear();
+
+            s_cGrid = new TCanvas(Form("cGrid_%s_intE", tag),
+                                  Form("%s: Incidence-intE QA grid", tag),
+                                  2600, 5*520);
+            s_cGrid->Divide(2, 5, 0.002, 0.002);
+        }
+
         {
           gStyle->SetOptStat(0);
 
@@ -6110,86 +6227,177 @@ static void RunIncidenceProof_FirstPass(TFile* fin,
               const BRes bPhi = FitAsinh1D(hPhi);
               const BRes bEta = FitAsinh1D(hEta);
 
-              // 1x2 canvas: [0]=2D map, [1]=overlay+fits
-              TCanvas cQA(Form("cQA_%s_absA_%zu", tag, i), "", 2000, 800);
-              cQA.Divide(2,1);
-
-              // Left pad: 2D heatmap
-              cQA.cd(1);
-              gPad->SetRightMargin(0.14);
-              gPad->SetLeftMargin (0.12);
-              gPad->SetBottomMargin(0.12);
-              gPad->SetTopMargin   (0.14);
-
-              h2->Draw("COLZ");
-
-              TLatex tl; tl.SetNDC(); tl.SetTextFont(42);
-              tl.SetTextAlign(13);
-              tl.SetTextSize(0.055);
-              tl.DrawLatex(0.12, 0.96, Form("UNCORR (intE)  %s", pretty.c_str()));
-
-              // Right pad: overlay + fits
-              cQA.cd(2);
-              gPad->SetRightMargin(0.04);
-              gPad->SetLeftMargin (0.12);
-              gPad->SetBottomMargin(0.12);
-              gPad->SetTopMargin   (0.14);
-
-              const double ymax = std::max(hPhi->GetMaximum(), hEta->GetMaximum());
-              hEta->GetYaxis()->SetRangeUser(0.0, 1.30 * std::max(1.0, ymax));
-              hEta->SetTitle(Form("UNCORR (intE)  %s", pretty.c_str()));
-              hEta->GetXaxis()->SetTitle("block #eta_{local} / block #varphi_{local}");
-
-              hEta->Draw("E");
-              hPhi->Draw("E SAME");
-
-              static std::vector<std::unique_ptr<TF1>> s_keepFits_intE;
-              // η fit (blue)
-              if (std::isfinite(bEta.val) && std::isfinite(bEta.norm) && bEta.val > 1e-9)
+              auto drawOneRow = [&](TPad* p2D, TPad* pOv)
               {
-                auto fEta = std::make_unique<TF1>(Form("fEta_intE_%s_%zu", tag, i), asinhModel, -0.5, 1.5, 2);
-                fEta->SetParameters(bEta.norm, bEta.val);
-                fEta->SetLineColor(kBlue+1);
-                fEta->SetLineWidth(2);
-                fEta->SetNpx(800);
-                fEta->Draw("L SAME");
-                s_keepFits_intE.emplace_back(std::move(fEta));
+                // Left pad: 2D heatmap
+                p2D->cd();
+                gPad->SetRightMargin(0.14);
+                gPad->SetLeftMargin (0.12);
+                gPad->SetBottomMargin(0.12);
+                gPad->SetTopMargin   (0.14);
+
+                h2->Draw("COLZ");
+
+                  // NOTE: Do NOT print the "UNCORR (intE) ..." title inside pads.
+                  // The title is printed ONCE using the top-center title band.
+
+                    // Right pad: overlay + fits
+                    pOv->cd();
+                    gPad->SetRightMargin(0.04);
+                    gPad->SetLeftMargin (0.12);
+                    gPad->SetBottomMargin(0.12);
+                    gPad->SetTopMargin   (0.10);
+
+                    const double ymax = std::max(hPhi->GetMaximum(), hEta->GetMaximum());
+                    hEta->GetYaxis()->SetRangeUser(0.0, 1.12 * std::max(1.0, ymax));
+                    hEta->SetTitle("");
+                    hEta->GetXaxis()->SetTitle("block #eta_{local} / block #varphi_{local}");
+
+                    hEta->Draw("E");
+                    hPhi->Draw("E SAME");
+
+                static std::vector<std::unique_ptr<TF1>> s_keepFits_intE;
+                // η fit (blue)
+                if (std::isfinite(bEta.val) && std::isfinite(bEta.norm) && bEta.val > 1e-9)
+                {
+                  auto fEta = std::make_unique<TF1>(Form("fEta_intE_%s_%zu", tag, i), asinhModel, -0.5, 1.5, 2);
+                  fEta->SetParameters(bEta.norm, bEta.val);
+                  fEta->SetLineColor(kBlue+1);
+                  fEta->SetLineWidth(2);
+                  fEta->SetNpx(800);
+                  fEta->Draw("L SAME");
+                  s_keepFits_intE.emplace_back(std::move(fEta));
+                }
+                // φ fit (red)
+                if (std::isfinite(bPhi.val) && std::isfinite(bPhi.norm) && bPhi.val > 1e-9)
+                {
+                  auto fPhi = std::make_unique<TF1>(Form("fPhi_intE_%s_%zu", tag, i), asinhModel, -0.5, 1.5, 2);
+                  fPhi->SetParameters(bPhi.norm, bPhi.val);
+                  fPhi->SetLineColor(kRed+1);
+                  fPhi->SetLineWidth(2);
+                  fPhi->SetNpx(800);
+                  fPhi->Draw("L SAME");
+                  s_keepFits_intE.emplace_back(std::move(fPhi));
+                }
+
+                  TLegend leg(0.14,0.78,0.62,0.92);
+                  leg.SetBorderSize(0);
+                  leg.SetFillStyle(0);
+                  leg.SetTextSize(0.060);
+                  leg.AddEntry(hPhi, "local #varphi (intE)", "lp");
+                  leg.AddEntry(hEta, "local #eta (intE)",    "lp");
+                  leg.Draw();
+
+                  TLatex t2; t2.SetNDC(); t2.SetTextAlign(33); t2.SetTextSize(0.060);
+                  t2.SetTextColor(kRed+1);
+                  t2.DrawLatex(0.95, 0.82, Form("b_{#varphi}=%.3g#pm%.2g", bPhi.val, bPhi.err));
+                  t2.SetTextColor(kBlue+1);
+                  t2.DrawLatex(0.95, 0.74, Form("b_{#eta}=%.3g#pm%.2g", bEta.val, bEta.err));
+                  t2.SetTextColor(kBlack);
+              };
+
+                // Per-bin 1x2 canvas (keep) — add a single centered title + LHS/RHS labels
+                {
+                  TCanvas cQA(Form("cQA_%s_absA_%zu", tag, i), "", 2200, 850);
+                  cQA.Divide(2,1, 0.002, 0.002);
+
+                  // Draw content first
+                  TPad* pL = (TPad*)cQA.cd(1);
+                  TPad* pR = (TPad*)cQA.cd(2);
+                  drawOneRow(pL, pR);
+
+                  // Overlay a thin title band across BOTH pads (transparent)
+                  cQA.cd();
+                  TPad* pTitle = new TPad(Form("pTitle_%s_%zu", tag, i), "", 0.0, 0.93, 1.0, 1.0);
+                  pTitle->SetFillStyle(0);
+                  pTitle->SetFrameFillStyle(0);
+                  pTitle->SetBorderMode(0);
+                  pTitle->SetMargin(0,0,0,0);
+                  pTitle->Draw();
+                  pTitle->cd();
+
+                    TLatex ttl;
+                    ttl.SetNDC();
+                    ttl.SetTextFont(42);
+                    ttl.SetTextAlign(22);
+                    ttl.SetTextSize(0.80);
+                    ttl.DrawLatex(0.50, 0.45, Form("UNCORR (intE)  %s", pretty.c_str()));
+
+                    // LHS / RHS labels (centered above each pad)
+                    pL->cd();
+                    TLatex labL;
+                    labL.SetNDC();
+                    labL.SetTextFont(42);
+                    labL.SetTextAlign(22);
+                    labL.SetTextSize(0.045);
+                    labL.DrawLatex(0.50, 0.94, "2D: block ( #eta_{loc}, #varphi_{loc} )");
+
+                    pR->cd();
+                    TLatex labR;
+                    labR.SetNDC();
+                    labR.SetTextFont(42);
+                    labR.SetTextAlign(22);
+                    labR.SetTextSize(0.045);
+                    labR.DrawLatex(0.50, 0.94, "1D: projections + asinh fits");
+
+                  cQA.Modified();
+                  cQA.Update();
+                  cQA.SaveAs(Form("%s/IncidenceIntE_QA.png", binDir.c_str()));
+
+                  delete pTitle;
+                }
+
+                // Fill the global 5x2 grid row for this bin index (i = 0..4)
+                // IMPORTANT: draw CLONES into the grid and keep them alive until SaveAs,
+                // otherwise pads will go blank when we delete the originals.
+                if (s_cGrid && i < 5)
+                {
+                  TH2D* h2g   = static_cast<TH2D*>(h2->Clone(Form("h2_grid_%s_%zu", tag, i)));
+                  TH1D* hPhig = static_cast<TH1D*>(hPhi->Clone(Form("hPhi_grid_%s_%zu", tag, i)));
+                  TH1D* hEtag = static_cast<TH1D*>(hEta->Clone(Form("hEta_grid_%s_%zu", tag, i)));
+
+                  h2g->SetDirectory(nullptr);
+                  hPhig->SetDirectory(nullptr);
+                  hEtag->SetDirectory(nullptr);
+
+                  s_keepGridH2.push_back(h2g);
+                  s_keepGridHPhi.push_back(hPhig);
+                  s_keepGridHEta.push_back(hEtag);
+
+                  // Temporarily swap pointers used by drawOneRow to draw the grid clones
+                  TH2D* h2_save = h2;  TH1D* hPhi_save = hPhi;  TH1D* hEta_save = hEta;
+                  h2  = h2g;   hPhi = hPhig;   hEta = hEtag;
+
+                  const int padL = (int)(2*i + 1);
+                  const int padR = (int)(2*i + 2);
+                  drawOneRow((TPad*)s_cGrid->cd(padL), (TPad*)s_cGrid->cd(padR));
+
+                  h2  = h2_save;  hPhi = hPhi_save;  hEta = hEta_save;
+
+                  s_cGrid->Modified();
+                  s_cGrid->Update();
+                }
               }
-              // φ fit (red)
-              if (std::isfinite(bPhi.val) && std::isfinite(bPhi.norm) && bPhi.val > 1e-9)
-              {
-                auto fPhi = std::make_unique<TF1>(Form("fPhi_intE_%s_%zu", tag, i), asinhModel, -0.5, 1.5, 2);
-                fPhi->SetParameters(bPhi.norm, bPhi.val);
-                fPhi->SetLineColor(kRed+1);
-                fPhi->SetLineWidth(2);
-                fPhi->SetNpx(800);
-                fPhi->Draw("L SAME");
-                s_keepFits_intE.emplace_back(std::move(fPhi));
-              }
 
-              TLegend leg(0.14,0.80,0.55,0.92);
-              leg.SetBorderSize(0);
-              leg.SetFillStyle(0);
-              leg.SetTextSize(0.045);
-              leg.AddEntry(hPhi, "local #varphi (intE)", "lp");
-              leg.AddEntry(hEta, "local #eta (intE)",    "lp");
-              leg.Draw();
-
-              TLatex t2; t2.SetNDC(); t2.SetTextAlign(33); t2.SetTextSize(0.045);
-              t2.SetTextColor(kRed+1);
-              t2.DrawLatex(0.95, 0.92, Form("b_{#varphi}=%.3g#pm%.2g", bPhi.val, bPhi.err));
-              t2.SetTextColor(kBlue+1);
-              t2.DrawLatex(0.95, 0.86, Form("b_{#eta}=%.3g#pm%.2g", bEta.val, bEta.err));
-              t2.SetTextColor(kBlack);
-
-              cQA.SaveAs(Form("%s/IncidenceIntE_QA.png", binDir.c_str()));
+              if (hPhi) delete hPhi;
+              if (hEta) delete hEta;
+              delete h2;
             }
-
-            if (hPhi) delete hPhi;
-            if (hEta) delete hEta;
-            delete h2;
           }
-        }
+
+          // After the last bin (i==4), write the stacked 5x2 canvas once.
+          if (s_cGrid && i == 4)
+          {
+            s_cGrid->SaveAs(Form("%s/IncidenceIntE_QA_5x2.png", globalDir.c_str()));
+
+            // Now it is safe to clean up grid-owned objects
+            for (auto* h : s_keepGridH2)   delete h;
+            for (auto* h : s_keepGridHPhi) delete h;
+            for (auto* h : s_keepGridHEta) delete h;
+            s_keepGridH2.clear();
+            s_keepGridHPhi.clear();
+            s_keepGridHEta.clear();
+          }
 
       double bphi=0, ebphi=0, beta=0, ebeta=0;
       if (fitIntE(h3, bphi, ebphi, beta, ebeta))
