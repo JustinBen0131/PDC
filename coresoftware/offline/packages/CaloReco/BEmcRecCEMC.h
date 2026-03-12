@@ -53,10 +53,10 @@ class BEmcRecCEMC : public BEmcRec
   void LoadProfile(const std::string &fname) override;
   //  float GetProb(std::vector<EmcModule> HitList, float e, float xg, float yg, float zg, float &chi2, int &ndf) override;
     
-    void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
+  void GetImpactThetaPhi(float xg, float yg, float zg, float &theta, float &phi) override;
       
-    // ───────── variant–specific φ-tilt handling ─────────
-    enum class ETiltVariant  {
+  // ───────── variant–specific φ-tilt handling ─────────
+  enum class ETiltVariant  {
       CLUS_RAW,
       CLUS_CP,
 
@@ -72,33 +72,13 @@ class BEmcRecCEMC : public BEmcRec
       PDC_RAW,
       PDC_CORR,
       DEFAULT
-    };
+  };
 
-    /// call once before any Tower2Global / CorrectShowerDepth
-    void SetPhiTiltVariant(ETiltVariant v);
+  /// call once before any Tower2Global / CorrectShowerDepth
+  void SetPhiTiltVariant(ETiltVariant v);
 
-    // ---- Incidence / mechanical tilt debugging ----
-
-    // Incidence debug toggles (local to incidence only)
-    inline void SetIncidenceDebugLevel(int lvl)    { m_incDbgLevel = lvl; }     // 0 = silent
-    inline void SetIncidenceHardStopLevel(int lvl) { m_incHardStop = lvl; }     // >=0 enables stop
-
-    // Set event vertex z used by incidence calculations
-    void SetVertexZ(float vz) { fVz = vz; }
-
-    // Mechanical incidence: returns cosines and signed φ/η angles.
-    // Uses the RawTowerGeomv5 mechanical rotations (rotX/rotY/rotZ) only
-    // to define the incidence frame.
-    bool CalculateMechIncidence(float E, float x, float y,
-                                float& cos_a_phi, float& cos_a_eta,
-                                float& a_phi_sgn, float& a_eta_sgn);
-
-    // Mechanical-incidence QA summary:
-    //  - ResetMechIncidenceQA() clears the internal per-process counters.
-    //  - PrintMechIncidenceQASummary(...) prints a compact PASS/CHECK block.
-    void ResetMechIncidenceQA();
-    void PrintMechIncidenceQASummary(double tolAlphaPhi = 0.1,
-                                     double tolAlphaEta = 0.1) const;
+  // Set event vertex z used by incidence calculations
+  void SetVertexZ(float vz) { fVz = vz; }
 
    private:
     // Per-|η| band coefficients for 〈αφ^fold〉(E) = a − b ln E  [radians]
@@ -106,10 +86,6 @@ class BEmcRecCEMC : public BEmcRec
     // 0.20 < |η| ≤ 0.70 → mid
     // 0.70 < |η| ≤ 1.10 → edge
     ETiltVariant   m_tiltVariant { ETiltVariant::DEFAULT };
-
-    // Local-only incidence tracer switches (do not leak verbosity class-wide)
-    int m_incDbgLevel { 0 };      // 0 = silent; >0 prints trace
-    int m_incHardStop { 20 };     // if >=0 and incDbgLevel >= m_incHardStop → stop after dump
 
     // keep angle caches
     float m_lastAlphaPhi { std::numeric_limits<float>::quiet_NaN() };

@@ -2,7 +2,6 @@
 
 #include "BEmcCluster.h"
 #include "BEmcProfile.h"
-#include "TVector3.h"
 
 #include <cmath>
 #include <iostream>
@@ -10,7 +9,7 @@
 #include <unordered_map>
 #include <limits>   // for quiet_NaN()
 #include <fstream>  // for reading bFit_master.txt
-#include <Math/Vector3D.h>   // for TVector3 used in calculateIncidence
+#include <Math/Vector3D.h>   // for XYZVector used in calculateIncidence
 #include <map>
 #include <tuple>
 #include <algorithm>
@@ -1200,462 +1199,6 @@ bool BEmcRecCEMC::calculateIncidence(float x, float y,
   return ok;
 }
 
-
-// ----------------------------------------------------------------------
-// Internal QA accumulators for mechanical-incidence debugging.
-// These are per-process statics: reset once at the start of the macro,
-// accumulate over all CalculateMechIncidence calls in that scan, then
-// summarised by PrintMechIncidenceQASummary().
-// ----------------------------------------------------------------------
-static int    s_mech_nCalls         = 0;
-static double s_mech_maxAbsAlphaPh  = 0.0;
-static double s_mech_maxAbsAlphaEt  = 0.0;
-static double s_mech_maxAbsDphi     = 0.0;
-
-// ----------------------------------------------------------------------
-// Mechanical incidence: use RawTowerGeomv5 rotations (rotX/rotY/rotZ)
-// to define the incidence frame, and the detailed geometry to locate
-// the front-surface point F hit by the ray from the chosen vertex.
-// Returns signed φ/η angles and foreshortening cosines in the MECH frame.
-// ----------------------------------------------------------------------
-bool BEmcRecCEMC::CalculateMechIncidence(float E, float x, float y,
-                                         float& cos_a_phi, float& cos_a_eta,
-                                         float& a_phi_sgn, float& a_eta_sgn)
-{
-  (void)E;  // Incidence does not depend on energy
-
-  const bool dbg = (m_incDbgLevel > 0);
-
-    auto dump_and_maybe_stop =
-      [&](const char* tag,
-          const TVector3& C, const TVector3& F,
-          const TVector3& V, const TVector3& un,
-          const TVector3& uphi, const TVector3& ueta,
-          const TVector3& pF,
-          double pn, double pph, double pet,
-          double aphi, double aeta,
-          double cphi, double ceta)
-    {
-      if (!dbg) return;
-
-      const char* ANSI_BOLD   = "\033[1m";
-      const char* ANSI_CYAN   = "\033[36m";
-      const char* ANSI_YELLOW = "\033[33m";
-      const char* ANSI_RED    = "\033[31m";
-      const char* ANSI_RESET  = "\033[0m";
-
-      // Orthonormality checks for the mechanical basis {un, uphi, ueta}
-      const double norm_n   = un.Mag();
-      const double norm_phi = uphi.Mag();
-      const double norm_eta = ueta.Mag();
-
-      const double dot_n_phi   = un.Dot(uphi);
-      const double dot_n_eta   = un.Dot(ueta);
-      const double dot_phi_eta = uphi.Dot(ueta);
-
-      const double alphaMag = std::sqrt(aphi * aphi + aeta * aeta);
-
-      // "Small" tolerance for off-diagonal dot products in the basis
-      const double basisTol = 5.0e-3; // ~0.3° equivalent
-      const bool basisOK =
-          std::fabs(norm_n   - 1.0) < 1e-3 &&
-          std::fabs(norm_phi - 1.0) < 1e-3 &&
-          std::fabs(norm_eta - 1.0) < 1e-3 &&
-          std::fabs(dot_n_phi)      < basisTol &&
-          std::fabs(dot_n_eta)      < basisTol &&
-          std::fabs(dot_phi_eta)    < basisTol;
-
-      const bool incidenceOK = (std::isfinite(alphaMag) &&
-                                std::isfinite(cphi) &&
-                                std::isfinite(ceta));
-
-      const char* statusColor =
-          (basisOK && incidenceOK) ? ANSI_CYAN :
-          (!basisOK              ) ? ANSI_YELLOW :
-                                     ANSI_YELLOW;
-      const char* statusText =
-          (basisOK && incidenceOK) ? "OK" :
-          (!basisOK              ) ? "BASIS_CHECK" :
-                                     "INC_CHECK";
-
-      std::cout << "\n"
-                << ANSI_BOLD << ANSI_CYAN
-                << "=== [MECH_TRACE] " << tag << " ==="
-                << ANSI_RESET << "\n";
-
-      std::cout << "  status : "
-                << statusColor << statusText << ANSI_RESET
-                << "  incDbgLevel=" << m_incDbgLevel << "\n";
-
-      // Geometry of points
-      std::cout << "  points : "
-                << "C=(" << C.X() << "," << C.Y() << "," << C.Z() << ")  "
-                << "F=(" << F.X() << "," << F.Y() << "," << F.Z() << ")  "
-                << "V=(" << V.X() << "," << V.Y() << "," << V.Z() << ")\n";
-
-      // Mechanical basis
-      std::cout << "  basis  : "
-                << "un=("   << un.X()   << "," << un.Y()   << "," << un.Z()   << ")  "
-                << "uphi=(" << uphi.X() << "," << uphi.Y() << "," << uphi.Z() << ")  "
-                << "ueta=(" << ueta.X() << "," << ueta.Y() << "," << ueta.Z() << ")\n";
-
-      std::cout << "           "
-                << "||un||="   << norm_n
-                << "  ||uphi||=" << norm_phi
-                << "  ||ueta||=" << norm_eta << "\n";
-
-      std::cout << "           "
-                << "un·uphi="   << dot_n_phi
-                << "  un·ueta=" << dot_n_eta
-                << "  uphi·ueta=" << dot_phi_eta << "\n";
-
-      // Ray and projections
-      std::cout << "  ray pF : "
-                << "pF=(" << pF.X() << "," << pF.Y() << "," << pF.Z() << ")"
-                << "  |pF|=" << pF.Mag() << "\n";
-
-      std::cout << "  proj   : "
-                << "pn=" << pn
-                << "  p_phi=" << pph
-                << "  p_eta=" << pet << "\n";
-
-      // Incidence in MECH frame
-      std::cout << "  inc(mech): "
-                << "alpha_phi=" << aphi
-                << "  alpha_eta=" << aeta
-                << "  |alpha|=" << alphaMag
-                << "  cos_phi=" << cphi
-                << "  cos_eta=" << ceta << "\n";
-
-      std::cout << "======================================\n";
-
-      if (m_incHardStop >= 0 && m_incDbgLevel >= m_incHardStop)
-      {
-        std::cerr << ANSI_RED
-                  << "[MECH_TRACE] hard-stop triggered (m_incHardStop="
-                  << m_incHardStop << ")"
-                  << ANSI_RESET << "\n";
-        throw std::runtime_error("Mech incidence debug hard-stop");
-      }
-    };
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Step 1) Owner tower in "tower units"
-  // ────────────────────────────────────────────────────────────────────────────
-  const int ix = EmcCluster::lowint(x + 0.5f);
-  const int iy = EmcCluster::lowint(y + 0.5f);
-
-  TowerGeom g{};
-  if (!GetTowerGeometry(ix, iy, g)) return false; // need detailed geometry
-
-  // Sub-cell offsets δ ∈ (−0.5, +0.5]
-  const float dx = x - ix;
-  const float dy = y - iy;
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Step 2) Front-surface point F in cm:
-  //         F = C + δx * eφ_geom + δy * eη_geom
-  //         (dX[], dY[], dZ[] are one-pitch tangents from detailed geometry)
-  // ────────────────────────────────────────────────────────────────────────────
-  const TVector3 C(g.Xcenter, g.Ycenter, g.Zcenter);
-  const TVector3 ephi_geom(g.dX[0], g.dY[0], g.dZ[0]);
-  const TVector3 eeta_geom(g.dX[1], g.dY[1], g.dZ[1]);
-  if (ephi_geom.Mag() < 1e-9 || eeta_geom.Mag() < 1e-9) return false;
-
-  const TVector3 F = C + dx * ephi_geom + dy * eeta_geom;
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Step 3) Unit ray from vertex to the front surface
-  // ────────────────────────────────────────────────────────────────────────────
-  const TVector3 V(0., 0., fVz);
-  TVector3 pF = F - V;
-  const double pFmag = pF.Mag();
-  if (!(pFmag > 0.0)) return false;
-  pF *= (1.0 / pFmag);
-
-  // Helper: from a basis {un,uphi,ueta} and ray pF, compute projections,
-  // signed incidence angles, and foreshortening cosines.
-  auto basis_to_incidence =
-    [&](const TVector3& un_b, const TVector3& uphi_b, const TVector3& ueta_b,
-        double& pn_b, double& pph_b, double& pet_b,
-        double& aphi_b, double& aeta_b,
-        double& cosphi_b, double& coseta_b) -> bool
-  {
-    pn_b  = pF.Dot(un_b);
-    pph_b = pF.Dot(uphi_b);
-    pet_b = pF.Dot(ueta_b);
-
-    const double apn_b      = std::max(1e-12, std::fabs(pn_b));
-    const double aphi_mag_b = std::atan2(std::fabs(pph_b), apn_b);
-    const double aeta_mag_b = std::atan2(std::fabs(pet_b), apn_b);
-
-    const double sgn_phi_b = (pph_b >= 0.0) ? +1.0 : -1.0;
-    const double sgn_eta_b = (pet_b >= 0.0) ? +1.0 : -1.0;
-
-    aphi_b = sgn_phi_b * aphi_mag_b;
-    aeta_b = sgn_eta_b * aeta_mag_b;
-
-    cosphi_b = std::clamp(apn_b / std::sqrt(apn_b*apn_b + pph_b*pph_b),
-                          1.0e-6, 1.0);
-    coseta_b = std::clamp(apn_b / std::sqrt(apn_b*apn_b + pet_b*pet_b),
-                          1.0e-6, 1.0);
-
-    return (std::isfinite(aphi_b)  && std::isfinite(aeta_b) &&
-            std::isfinite(cosphi_b) && std::isfinite(coseta_b));
-  };
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Step 4) MECHANICAL frame from RawTowerGeomv5 rotations
-  // ────────────────────────────────────────────────────────────────────────────
-  TVector3 un_mech, uphi_mech, ueta_mech;
-  {
-    const double rx = g.rotX;
-    const double ry = g.rotY;
-    const double rz = g.rotZ;
-
-    const double cx = std::cos(rx), sx = std::sin(rx);
-    const double cy = std::cos(ry), sy = std::sin(ry);
-    const double cz = std::cos(rz), sz = std::sin(rz);
-
-    auto applyRot = [&](const TVector3& v) -> TVector3
-    {
-      // Apply Rz * Ry * Rx to local vector v (column-vector convention).
-      double vx = v.X(), vy = v.Y(), vz = v.Z();
-
-      // Rx
-      const double vx1 = vx;
-      const double vy1 =  cx*vy - sx*vz;
-      const double vz1 =  sx*vy + cx*vz;
-
-      // Ry
-      const double vx2 =  cy*vx1 + sy*vz1;
-      const double vy2 =  vy1;
-      const double vz2 = -sy*vx1 + cy*vz1;
-
-      // Rz
-      const double vx3 =  cz*vx2 - sz*vy2;
-      const double vy3 =  sz*vx2 + cz*vy2;
-      const double vz3 =  vz2;
-
-      return TVector3(vx3, vy3, vz3);
-    };
-
-    // Local axes: ẑ = bar axis, x̂/ŷ = transverse directions
-    TVector3 u_axis = applyRot(TVector3(0.,0.,1.)); // tower "z" axis
-    TVector3 u_x    = applyRot(TVector3(1.,0.,0.)); // tower "x" axis
-    TVector3 u_y    = applyRot(TVector3(0.,1.,0.)); // tower "y" axis
-
-    // Normalize axis and enforce outward direction
-    const double amag = u_axis.Mag();
-    if (!(amag > 0.0)) return false;
-
-    u_axis *= (1.0 / amag);
-    if (u_axis.Dot(C) < 0.0) u_axis = -u_axis;
-
-    un_mech = u_axis;
-
-    // φ̂: project rotated local x̂ into plane ⟂ axis; normalize
-    uphi_mech = u_x - un_mech * u_x.Dot(un_mech);
-    const double uphim = uphi_mech.Mag();
-    if (!(uphim > 0.0)) return false;
-    uphi_mech *= (1.0 / uphim);
-
-    // η̂: start from rotated local ŷ, orthogonalize to {un,uphi}; normalize
-    ueta_mech = u_y
-              - un_mech   * u_y.Dot(un_mech)
-              - uphi_mech * u_y.Dot(uphi_mech);
-    const double uetam = ueta_mech.Mag();
-    if (!(uetam > 0.0)) return false;
-    ueta_mech *= (1.0 / uetam);
-
-    // Ensure right-handed triad
-    if (un_mech.Cross(uphi_mech).Dot(ueta_mech) < 0.0)
-      ueta_mech = -ueta_mech;
-
-    // Align mechanical φ-axis sign with geometric φ tangent if available
-    TVector3 uphi_ref = ephi_geom;
-    const double refMag = uphi_ref.Mag();
-    if (refMag > 0.0)
-    {
-      uphi_ref *= (1.0 / refMag);
-      if (uphi_mech.Dot(uphi_ref) < 0.0)
-      {
-        uphi_mech = -uphi_mech;
-        ueta_mech = -ueta_mech;
-      }
-    }
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Step 5) Compute incidence in the mechanical frame
-  // ────────────────────────────────────────────────────────────────────────────
-  double pn  = 0.0, pph  = 0.0, pet  = 0.0;
-  double aphi = 0.0, aeta = 0.0;
-  double cphi = 1.0, ceta = 1.0;
-
-  if (!basis_to_incidence(un_mech, uphi_mech, ueta_mech,
-                          pn, pph, pet,
-                          aphi, aeta, cphi, ceta))
-  {
-    return false;
-  }
-
-  a_phi_sgn = static_cast<float>(aphi);
-  a_eta_sgn = static_cast<float>(aeta);
-  cos_a_phi = static_cast<float>(cphi);
-  cos_a_eta = static_cast<float>(ceta);
-
-  // Cache for later access
-  m_lastAlphaPhiSigned = a_phi_sgn;
-  m_lastAlphaEtaSigned = a_eta_sgn;
-
-  const bool ok = (std::isfinite(cos_a_phi) && std::isfinite(cos_a_eta) &&
-                   std::isfinite(a_phi_sgn) && std::isfinite(a_eta_sgn));
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Step 6) Debug + QA: MECH bookkeeping and tabulated CSV output
-    // ────────────────────────────────────────────────────────────────────────────
-    {
-      // Geometry helpers for digestible output
-      const double Rc = std::hypot(C.X(), C.Y());
-
-      // eta_det : tower-center η as seen from IP (z=0)
-      const double eta_det = (Rc > 0.0) ? std::asinh(C.Z() / Rc)         : 0.0;
-      // eta_SD  : tower-center η as seen from the chosen vertex z = fVz
-      const double eta_SD  = (Rc > 0.0) ? std::asinh((C.Z() - fVz) / Rc) : 0.0;
-
-      const double phi_det = std::atan2(C.Y(), C.X());    // tower center φ (detector)
-      const double phi_ray = std::atan2(pF.Y(), pF.X());  // ray direction φ from vertex
-
-      const double dphi = phi_ray - phi_det;
-      const double deta = eta_SD  - eta_det;
-
-      // Magnitude of the MECH incidence vector in the (φ,η) plane
-      const double amag_mech = std::sqrt(aphi * aphi + aeta * aeta);
-
-      // Classification vs a nominal tolerance (shared with macro & QA summary)
-      const double tolAlpha = 5.0e-3;  // ~0.29°
-      const char*  tiltTag  =
-          (amag_mech < tolAlpha)
-            ? "within_tol"
-            : (amag_mech < 3.0 * tolAlpha ? "moderate_tilt" : "large_tilt");
-
-      // --- MECH QA bookkeeping ---
-      ++s_mech_nCalls;
-      s_mech_maxAbsDphi    = std::max(s_mech_maxAbsDphi,    std::fabs(dphi));
-      s_mech_maxAbsAlphaPh = std::max(s_mech_maxAbsAlphaPh, std::fabs(aphi));
-      s_mech_maxAbsAlphaEt = std::max(s_mech_maxAbsAlphaEt, std::fabs(aeta));
-
-      // Only print the CSV-style [MECH_INC] lines when debug is enabled
-      if (dbg)
-      {
-        // Print header once (CSV-style; easy to grep / load in Python/ROOT)
-        static bool s_headerPrinted = false;
-        if (!s_headerPrinted)
-        {
-          std::cout << "# Columns ([MECH_INC] lines)\n"
-                    << "#  vtxZ_cm, ix, iy, "
-                    << "eta_det_IP, phi_det, eta_SD_vtx, phi_ray, "
-                    << "dphi, deta, "
-                    << "rotX_mrad, rotY_mrad, rotZ_mrad, "
-                    << "a_phi_mech, a_eta_mech, |a_mech|, cos_phi_mech, cos_eta_mech, tiltTag\n";
-          s_headerPrinted = true;
-        }
-
-        std::cout << "[MECH_INC] "
-                  << fVz             << ", "
-                  << ix              << ", "
-                  << iy              << ", "
-                  << eta_det         << ", "
-                  << phi_det         << ", "
-                  << eta_SD          << ", "
-                  << phi_ray         << ", "
-                  << dphi            << ", "
-                  << deta            << ", "
-                  << g.rotX * 1.0e3  << ", "
-                  << g.rotY * 1.0e3  << ", "
-                  << g.rotZ * 1.0e3  << ", "
-                  << aphi            << ", "
-                  << aeta            << ", "
-                  << amag_mech       << ", "
-                  << cphi            << ", "
-                  << ceta            << ", "
-                  << tiltTag         << "\n";
-      }
-    }
-
-  // Keep the very detailed vector dump only for high debug levels
-  if (dbg && m_incDbgLevel >= 10)
-  {
-    dump_and_maybe_stop("post-compute", C, F, V, un_mech, uphi_mech, ueta_mech,
-                        pF, pn, pph, pet, a_phi_sgn, a_eta_sgn, cos_a_phi, cos_a_eta);
-  }
-
-  return ok;
-}
-
-// ----------------------------------------------------------------------
-// Mechanical-incidence QA helpers
-// ----------------------------------------------------------------------
-void BEmcRecCEMC::ResetMechIncidenceQA()
-{
-  s_mech_nCalls         = 0;
-  s_mech_maxAbsAlphaPh  = 0.0;
-  s_mech_maxAbsAlphaEt  = 0.0;
-  s_mech_maxAbsDphi     = 0.0;
-}
-
-void BEmcRecCEMC::PrintMechIncidenceQASummary(double tolAlphaPhi,
-                                              double tolAlphaEta) const
-{
-  const char* ANSI_GREEN_BOLD  = "\033[1;32m";
-  const char* ANSI_YELLOW_BOLD = "\033[1;33m";
-  const char* ANSI_RESET       = "\033[0m";
-
-  const double pi      = std::acos(-1.0);
-  const double rad2deg = 180.0 / pi;
-
-  std::cout << "\n[MECH_QA] Mechanical incidence summary\n"
-            << "  nCalls          : " << s_mech_nCalls        << "\n"
-            << "  max|dphi|       : " << s_mech_maxAbsDphi    << " rad\n"
-            << "  max|αφ_mech|    : " << s_mech_maxAbsAlphaPh << " rad  ("
-            << s_mech_maxAbsAlphaPh * rad2deg << " deg)\n"
-            << "  max|αη_mech|    : " << s_mech_maxAbsAlphaEt << " rad  ("
-            << s_mech_maxAbsAlphaEt * rad2deg << " deg)\n"
-            << "  tol|αφ_mech|    : " << tolAlphaPhi          << " rad  ("
-            << tolAlphaPhi * rad2deg << " deg)\n"
-            << "  tol|αη_mech|    : " << tolAlphaEta          << " rad  ("
-            << tolAlphaEta * rad2deg << " deg)\n";
-
-  const bool pass =
-      (s_mech_nCalls > 0 &&
-       s_mech_maxAbsAlphaPh < tolAlphaPhi &&
-       s_mech_maxAbsAlphaEt < tolAlphaEta);
-
-  std::cout << "  STATUS          : "
-            << (pass ? ANSI_GREEN_BOLD : ANSI_YELLOW_BOLD)
-            << (pass ? "PASS" : "CHECK")
-            << ANSI_RESET;
-
-  if (pass)
-  {
-    std::cout << "  (all |αφ_mech| and |αη_mech| remain within tolerances)\n\n";
-  }
-  else
-  {
-    std::cout << "  (at least one tower exceeds the requested incidence tolerances)\n\n";
-  }
-}
-
-
-
-
-
-
-
-
-
-
 void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(
     float Energy, float x, float y, float& xc, float& yc)
 {
@@ -1675,41 +1218,41 @@ void BEmcRecCEMC::CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(
   VLOG() << "[EA+α] ENTER  E=" << Energy << "  (x,y)=(" << x << "," << y << ")"
          << "  bphi_E=" << bphi_E << "  beta_E=" << beta_E << "\n";
 
-  // defaults (no incidence): keep baseline b(E), zero cached angles
-  float bx = bphi_E, by = beta_E;
-  m_lastAlphaPhi = 0.f; m_lastAlphaEta = 0.f;
-  m_lastAlphaPhiSigned = 0.f; m_lastAlphaEtaSigned = 0.f;
+    // defaults (no incidence): keep baseline b(E), zero cached angles
+    float bx = bphi_E, by = beta_E;
+    m_lastAlphaPhi = 0.f; m_lastAlphaEta = 0.f;
+    m_lastAlphaPhiSigned = 0.f; m_lastAlphaEtaSigned = 0.f;
 
-    // ---- mechanical incidence (rotX/rotY/rotZ frame) ------------------
-    {
-      float cos_a_phi = 1.f, cos_a_eta = 1.f, a_phi_sgn = 0.f, a_eta_sgn = 0.f;
-
-      if (CalculateMechIncidence(Energy, x, y, cos_a_phi, cos_a_eta, a_phi_sgn, a_eta_sgn))
+      // ---- production incidence from calculateIncidence ------------------
       {
-        // cache angles (unsigned and signed)
-        const float cphi = std::clamp(cos_a_phi, 1e-6f, 1.0f);
-        const float ceta = std::clamp(cos_a_eta, 1e-6f, 1.0f);
-        m_lastAlphaPhi       = std::acos(cphi);
-        m_lastAlphaEta       = std::acos(ceta);
-        m_lastAlphaPhiSigned = a_phi_sgn;
-        m_lastAlphaEtaSigned = a_eta_sgn;
+        float a_phi_sgn = 0.f, a_eta_sgn = 0.f;
 
-        // foreshortening: b_eff = b(E) / cos α
-        bx = clamp_b(bphi_E / cphi);
-        by = clamp_b(beta_E / ceta);
+        if (calculateIncidence(x, y, a_phi_sgn, a_eta_sgn))
+        {
+          // cache angles (unsigned and signed)
+          const float cphi = std::clamp(std::cos(std::fabs(a_phi_sgn)), 1e-6f, 1.0f);
+          const float ceta = std::clamp(std::cos(std::fabs(a_eta_sgn)), 1e-6f, 1.0f);
+          m_lastAlphaPhi       = std::fabs(a_phi_sgn);
+          m_lastAlphaEta       = std::fabs(a_eta_sgn);
+          m_lastAlphaPhiSigned = a_phi_sgn;
+          m_lastAlphaEtaSigned = a_eta_sgn;
 
-        VLOG() << "        [EA+α] cos(a_phi)=" << cphi << "  cos(a_eta)=" << ceta
-               << "  → a_phi=" << m_lastAlphaPhi << "  a_eta=" << m_lastAlphaEta
-               << "  → bx=" << bx << "  by=" << by << "\n";
+          // foreshortening: b_eff = b(E) / cos α
+          bx = clamp_b(bphi_E / cphi);
+          by = clamp_b(beta_E / ceta);
+
+          VLOG() << "        [EA+α] cos(a_phi)=" << cphi << "  cos(a_eta)=" << ceta
+                 << "  → a_phi=" << m_lastAlphaPhi << "  a_eta=" << m_lastAlphaEta
+                 << "  → bx=" << bx << "  by=" << by << "\n";
+        }
+        else
+        {
+          VLOG() << "[EA+α] production incidence unavailable → using baseline b(E)\n";
+        }
       }
-      else
-      {
-        VLOG() << "[EA+α] mechanical incidence unavailable → using baseline b(E)\n";
-      }
-    }
 
-  VLOG() << "[EA+α] EXIT  bphi_E=" << bphi_E << "  beta_E=" << beta_E
-         << "  → bx=" << bx << "  by=" << by << "\n";
+    VLOG() << "[EA+α] EXIT  bphi_E=" << bphi_E << "  beta_E=" << beta_E
+           << "  → bx=" << bx << "  by=" << by << "\n";
 
     // ============================== φ ===================================
     // Apply signed δ_φ(E,αϕ) BEFORE the inverse mapping (guarded by a tiny DeltaDB)
