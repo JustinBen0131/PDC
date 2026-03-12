@@ -2920,37 +2920,20 @@ void PositionDependentCorrection::fillDPhiAllVariants(
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
     {
-      // Mechanical + production-style incidence evaluated at the
+      // Production-style incidence evaluated at the
       // CorrectPosition CoG (xCP,yCP), to match the RawClusterv1 property.
-      float aPhi_mech   = std::numeric_limits<float>::quiet_NaN();
-      float aEtaDummy   = std::numeric_limits<float>::quiet_NaN();
-      float cosPhi      = std::numeric_limits<float>::quiet_NaN();
-      float cosEta      = std::numeric_limits<float>::quiet_NaN();
-
       float aPhi_ci     = std::numeric_limits<float>::quiet_NaN();
       float aEta_ci     = std::numeric_limits<float>::quiet_NaN();
-      bool  mech_ok     = false;
       bool  ci_ok       = false;
 
       auto* cemc = dynamic_cast<BEmcRecCEMC*>(m_bemcRec);
       if (cemc && std::isfinite(xCP) && std::isfinite(yCP))
       {
-        // 1) Mechanical incidence at CorrectPosition CoG
-        mech_ok = cemc->CalculateMechIncidence(
-            eReco, xCP, yCP,
-            cosPhi, cosEta,
-            aPhi_mech, aEtaDummy);
-
-        // 2) Production-style incidence at the same (xCP,yCP)
         ci_ok = cemc->calculateIncidence(
             xCP, yCP,
             aPhi_ci, aEta_ci);
       }
 
-        if (!mech_ok)
-        {
-          aPhi_mech = std::numeric_limits<float>::quiet_NaN();
-        }
         if (!ci_ok)
         {
           aPhi_ci = std::numeric_limits<float>::quiet_NaN();
@@ -2990,31 +2973,25 @@ void PositionDependentCorrection::fillDPhiAllVariants(
 
             if (std::isfinite(aPhi_prop))
             {
-              const float diff_prop_mech = aPhi_prop - aPhi_mech;
               const float diff_prop_ci   = aPhi_prop - aPhi_ci;
 
               std::cout << "[INC-QA φ] prop vs recomputed @CP: "
                         << "alpha_phi(prop)=" << aPhi_prop
-                        << "  alpha_phi(mech@CP)=" << aPhi_mech
-                        << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
-                        << "                     "
-                        << "alpha_phi(calcInc@CP)=" << aPhi_ci
+                        << "  alpha_phi(calcInc@CP)=" << aPhi_ci
                         << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
 
-                // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
-                // Keep only an optional warning at very high verbosity.
                 if (vb > 9)
                 {
                   constexpr float kTolAlphaPhi = 1.0e-5f;
-                  if (std::fabs(diff_prop_mech) > kTolAlphaPhi)
+                  if (std::fabs(diff_prop_ci) > kTolAlphaPhi)
                   {
                     std::cerr << ANSI_YELLOW
-                              << "[INC-WARN φ] RawCluster prop vs mech@CP mismatch (ignored)\n"
+                              << "[INC-WARN φ] RawCluster prop vs calcInc@CP mismatch\n"
                               << "  clusID=" << clus->get_id()
                               << "  E=" << eReco << " GeV\n"
                               << "  alpha_phi(prop)=" << aPhi_prop << "\n"
-                              << "  alpha_phi(mech@CP)=" << aPhi_mech << "\n"
-                              << "  Δ=" << diff_prop_mech
+                              << "  alpha_phi(calcInc@CP)=" << aPhi_ci << "\n"
+                              << "  Δ=" << diff_prop_ci
                               << "  tol=" << kTolAlphaPhi << "\n"
                               << ANSI_RESET << std::endl;
                   }
@@ -3726,37 +3703,20 @@ void PositionDependentCorrection::fillDEtaAllVariants(
     m_bemcRec->CorrectPositionEnergyAwareEnergyDepAndIncidentAngle(eReco, xCG, yCG,
                                                                    xEA_inc, yEA_inc);
     {
-      // Mechanical + production-style incidence evaluated at the
+      // Production-style incidence evaluated at the
       // CorrectPosition CoG (xCP,yCP), to match the RawClusterv1 η property.
-      float aPhiDummy  = std::numeric_limits<float>::quiet_NaN();
-      float aEta_mech  = std::numeric_limits<float>::quiet_NaN();
-      float cosPhi     = std::numeric_limits<float>::quiet_NaN();
-      float cosEta     = std::numeric_limits<float>::quiet_NaN();
-
       float aPhi_ci    = std::numeric_limits<float>::quiet_NaN();
       float aEta_ci    = std::numeric_limits<float>::quiet_NaN();
-      bool  mech_ok    = false;
       bool  ci_ok      = false;
 
       auto* cemc = dynamic_cast<BEmcRecCEMC*>(m_bemcRec);
       if (cemc && std::isfinite(xCP) && std::isfinite(yCP))
       {
-        // 1) Mechanical incidence at CorrectPosition CoG
-        mech_ok = cemc->CalculateMechIncidence(
-            eReco, xCP, yCP,
-            cosPhi, cosEta,
-            aPhiDummy, aEta_mech);
-
-        // 2) Production-style incidence at the same (xCP,yCP)
         ci_ok = cemc->calculateIncidence(
             xCP, yCP,
             aPhi_ci, aEta_ci);
       }
 
-        if (!mech_ok)
-        {
-          aEta_mech = std::numeric_limits<float>::quiet_NaN();
-        }
         if (!ci_ok)
         {
           aEta_ci = std::numeric_limits<float>::quiet_NaN();
@@ -3795,31 +3755,25 @@ void PositionDependentCorrection::fillDEtaAllVariants(
 
             if (std::isfinite(aEta_prop))
             {
-              const float diff_prop_mech = aEta_prop - aEta_mech;
               const float diff_prop_ci   = aEta_prop - aEta_ci;
 
               std::cout << "[INC-QA η] prop vs recomputed @CP: "
                         << "alpha_eta(prop)=" << aEta_prop
-                        << "  alpha_eta(mech@CP)=" << aEta_mech
-                        << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
-                        << "                     "
-                        << "alpha_eta(calcInc@CP)=" << aEta_ci
+                        << "  alpha_eta(calcInc@CP)=" << aEta_ci
                         << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
 
-                // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
-                // Keep only an optional warning at very high verbosity.
                 if (vb > 9)
                 {
                   constexpr float kTolAlphaEta = 1.0e-5f;
-                  if (std::fabs(diff_prop_mech) > kTolAlphaEta)
+                  if (std::fabs(diff_prop_ci) > kTolAlphaEta)
                   {
                     std::cerr << ANSI_YELLOW
-                              << "[INC-WARN η] RawCluster prop vs mech@CP mismatch (ignored)\n"
+                              << "[INC-WARN η] RawCluster prop vs calcInc@CP mismatch\n"
                               << "  clusID=" << clus->get_id()
                               << "  E=" << eReco << " GeV\n"
                               << "  alpha_eta(prop)=" << aEta_prop << "\n"
-                              << "  alpha_eta(mech@CP)=" << aEta_mech << "\n"
-                              << "  Δ=" << diff_prop_mech
+                              << "  alpha_eta(calcInc@CP)=" << aEta_ci << "\n"
+                              << "  Δ=" << diff_prop_ci
                               << "  tol=" << kTolAlphaEta << "\n"
                               << ANSI_RESET << std::endl;
                   }
