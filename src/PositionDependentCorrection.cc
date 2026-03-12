@@ -2947,96 +2947,97 @@ void PositionDependentCorrection::fillDPhiAllVariants(
             aPhi_ci, aEta_ci);
       }
 
-      if (!mech_ok)
-      {
-        aPhi_mech = std::numeric_limits<float>::quiet_NaN();
-      }
-
-      const float aPhiSigned = aPhi_mech;
-      const float aPhiAbs    = std::fabs(aPhiSigned);
-
-      // η at shower depth (cluster direction from this vertex)
-      const float etaSD_forQA =
-          cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
-
-      // Detector η at the front face (tower-row orientation, independent of vtx)
-      double etaDet = std::numeric_limits<double>::quiet_NaN();
-      if (rFront > 0.0) {
-        etaDet = std::asinh(zFront / rFront);
-      }
-
-      // Fill only if angles and both η’s are well-defined
-      if (std::isfinite(aPhiSigned) &&
-          std::isfinite(etaSD_forQA) &&
-          std::isfinite(etaDet))
-      {
-        // (1) Cluster front-face η *with* vtx_z dependence → "SD" TH3
-        if (h3_alphaPhi_vsVz_vsEta)
-          h3_alphaPhi_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aPhiSigned);
-
-        // (2) Pure detector η (tower row, no vtx) → "Det" TH3
-        if (h3_alphaPhi_vsVz_vsEtaDet)
-          h3_alphaPhi_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aPhiSigned);
-
-        // --- QA vs RawClusterv1 property (filled via calculateIncidence at xcorr,ycorr) ---
-        if (vb > 0 && ci_ok && std::isfinite(aPhi_ci))
+        if (!mech_ok)
         {
-          const float aPhi_prop =
-              clus->get_property_float(RawCluster::prop_incidence_alpha_phi);
-
-          if (std::isfinite(aPhi_prop))
-          {
-            const float diff_prop_mech = aPhi_prop - aPhi_mech;
-            const float diff_prop_ci   = aPhi_prop - aPhi_ci;
-
-            std::cout << "[INC-QA φ] prop vs recomputed @CP: "
-                      << "alpha_phi(prop)=" << aPhi_prop
-                      << "  alpha_phi(mech@CP)=" << aPhi_mech
-                      << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
-                      << "                     "
-                      << "alpha_phi(calcInc@CP)=" << aPhi_ci
-                      << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
-
-              // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
-              // Keep only an optional warning at very high verbosity.
-              if (vb > 9)
-              {
-                constexpr float kTolAlphaPhi = 1.0e-5f;
-                if (std::fabs(diff_prop_mech) > kTolAlphaPhi)
-                {
-                  std::cerr << ANSI_YELLOW
-                            << "[INC-WARN φ] RawCluster prop vs mech@CP mismatch (ignored)\n"
-                            << "  clusID=" << clus->get_id()
-                            << "  E=" << eReco << " GeV\n"
-                            << "  alpha_phi(prop)=" << aPhi_prop << "\n"
-                            << "  alpha_phi(mech@CP)=" << aPhi_mech << "\n"
-                            << "  Δ=" << diff_prop_mech
-                            << "  tol=" << kTolAlphaPhi << "\n"
-                            << ANSI_RESET << std::endl;
-                }
-              }
-            }
-          else if (vb > 0)
-          {
-            std::cout << "[INC-QA φ]  alpha_phi(prop) is NaN/not set; "
-                         "skipping property cross-check.\n";
-          }
+          aPhi_mech = std::numeric_limits<float>::quiet_NaN();
+        }
+        if (!ci_ok)
+        {
+          aPhi_ci = std::numeric_limits<float>::quiet_NaN();
         }
 
-        // Per-E incidence maps: signed α on X, Xmeas on Y
-        if (iE >= 0 && iE < N_Ebins)
-        {
-          float u_raw  = blkCoord.second;
-          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f)
-                       ? std::fmod(u_raw + 2.f, 2.f)
-                       : u_raw;
-          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
+        const float aPhiSigned = aPhi_ci;
+        const float aPhiAbs    = std::fabs(aPhiSigned);
 
-          // sec is even in α; prefer mech cos if available, otherwise fall back
-          const float cosA = std::isfinite(cosPhi)
-                           ? cosPhi
-                           : std::cos(aPhiAbs);
-          const float secA = 1.f / std::max(1e-6f, cosA);
+        // η at shower depth (cluster direction from this vertex)
+        const float etaSD_forQA =
+            cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
+
+        // Detector η at the front face (tower-row orientation, independent of vtx)
+        double etaDet = std::numeric_limits<double>::quiet_NaN();
+        if (rFront > 0.0) {
+          etaDet = std::asinh(zFront / rFront);
+        }
+
+        // Fill only if angles and both η’s are well-defined
+        if (std::isfinite(aPhiSigned) &&
+            std::isfinite(etaSD_forQA) &&
+            std::isfinite(etaDet))
+        {
+          // (1) Cluster front-face η *with* vtx_z dependence → "SD" TH3
+          if (h3_alphaPhi_vsVz_vsEta)
+            h3_alphaPhi_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aPhiSigned);
+
+          // (2) Pure detector η (tower row, no vtx) → "Det" TH3
+          if (h3_alphaPhi_vsVz_vsEtaDet)
+            h3_alphaPhi_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aPhiSigned);
+
+          // --- QA vs RawClusterv1 property (filled via calculateIncidence at xcorr,ycorr) ---
+          if (vb > 0 && ci_ok && std::isfinite(aPhi_ci))
+          {
+            const float aPhi_prop =
+                clus->get_property_float(RawCluster::prop_incidence_alpha_phi);
+
+            if (std::isfinite(aPhi_prop))
+            {
+              const float diff_prop_mech = aPhi_prop - aPhi_mech;
+              const float diff_prop_ci   = aPhi_prop - aPhi_ci;
+
+              std::cout << "[INC-QA φ] prop vs recomputed @CP: "
+                        << "alpha_phi(prop)=" << aPhi_prop
+                        << "  alpha_phi(mech@CP)=" << aPhi_mech
+                        << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
+                        << "                     "
+                        << "alpha_phi(calcInc@CP)=" << aPhi_ci
+                        << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
+
+                // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
+                // Keep only an optional warning at very high verbosity.
+                if (vb > 9)
+                {
+                  constexpr float kTolAlphaPhi = 1.0e-5f;
+                  if (std::fabs(diff_prop_mech) > kTolAlphaPhi)
+                  {
+                    std::cerr << ANSI_YELLOW
+                              << "[INC-WARN φ] RawCluster prop vs mech@CP mismatch (ignored)\n"
+                              << "  clusID=" << clus->get_id()
+                              << "  E=" << eReco << " GeV\n"
+                              << "  alpha_phi(prop)=" << aPhi_prop << "\n"
+                              << "  alpha_phi(mech@CP)=" << aPhi_mech << "\n"
+                              << "  Δ=" << diff_prop_mech
+                              << "  tol=" << kTolAlphaPhi << "\n"
+                              << ANSI_RESET << std::endl;
+                  }
+                }
+              }
+            else if (vb > 0)
+            {
+              std::cout << "[INC-QA φ]  alpha_phi(prop) is NaN/not set; "
+                           "skipping property cross-check.\n";
+            }
+          }
+
+          // Per-E incidence maps: signed α on X, Xmeas on Y
+          if (iE >= 0 && iE < N_Ebins)
+          {
+            float u_raw  = blkCoord.second;
+            float u_fold = (u_raw <= -0.5f || u_raw > 1.5f)
+                         ? std::fmod(u_raw + 2.f, 2.f)
+                         : u_raw;
+            const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
+
+            // sec is even in α; use production-style α for sec α
+            const float secA = 1.f / std::max(1e-6f, std::cos(aPhiAbs));
 
           if (h2_XmeasPhi_vsAlpha_E[iE]) {
             auto* ax = h2_XmeasPhi_vsAlpha_E[iE]->GetXaxis();
@@ -3752,93 +3753,94 @@ void PositionDependentCorrection::fillDEtaAllVariants(
             aPhi_ci, aEta_ci);
       }
 
-      if (!mech_ok)
-      {
-        aEta_mech = std::numeric_limits<float>::quiet_NaN();
-      }
-
-      const float aEtaSigned = aEta_mech;
-      const float aEtaAbs    = std::fabs(aEtaSigned);
-
-      // η at shower depth (cluster direction, vtx-dependent)
-      const float etaSD_forQA =
-          cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
-
-      // Detector η at front face (tower row, independent of vtx)
-      double etaDet = std::numeric_limits<double>::quiet_NaN();
-      if (rFront > 0.0) {
-        etaDet = std::asinh(zFront / rFront);
-      }
-
-      if (std::isfinite(aEtaSigned) &&
-          std::isfinite(etaSD_forQA) &&
-          std::isfinite(etaDet))
-      {
-        // (1) Cluster front-face / depth η (vtx-dependent) → "SD" TH3
-        if (h3_alphaEta_vsVz_vsEta)
-          h3_alphaEta_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aEtaSigned);
-
-        // (2) Pure detector η (tower-row orientation) → "Det" TH3
-        if (h3_alphaEta_vsVz_vsEtaDet)
-          h3_alphaEta_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aEtaSigned);
-
-        // --- QA vs RawClusterv1 η property ---
-        if (vb > 0 && ci_ok && std::isfinite(aEta_ci))
+        if (!mech_ok)
         {
-          const float aEta_prop =
-              clus->get_property_float(RawCluster::prop_incidence_alpha_eta);
-
-          if (std::isfinite(aEta_prop))
-          {
-            const float diff_prop_mech = aEta_prop - aEta_mech;
-            const float diff_prop_ci   = aEta_prop - aEta_ci;
-
-            std::cout << "[INC-QA η] prop vs recomputed @CP: "
-                      << "alpha_eta(prop)=" << aEta_prop
-                      << "  alpha_eta(mech@CP)=" << aEta_mech
-                      << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
-                      << "                     "
-                      << "alpha_eta(calcInc@CP)=" << aEta_ci
-                      << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
-
-              // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
-              // Keep only an optional warning at very high verbosity.
-              if (vb > 9)
-              {
-                constexpr float kTolAlphaEta = 1.0e-5f;
-                if (std::fabs(diff_prop_mech) > kTolAlphaEta)
-                {
-                  std::cerr << ANSI_YELLOW
-                            << "[INC-WARN η] RawCluster prop vs mech@CP mismatch (ignored)\n"
-                            << "  clusID=" << clus->get_id()
-                            << "  E=" << eReco << " GeV\n"
-                            << "  alpha_eta(prop)=" << aEta_prop << "\n"
-                            << "  alpha_eta(mech@CP)=" << aEta_mech << "\n"
-                            << "  Δ=" << diff_prop_mech
-                            << "  tol=" << kTolAlphaEta << "\n"
-                            << ANSI_RESET << std::endl;
-                }
-              }
-            }
-          else if (vb > 0)
-          {
-            std::cout << "[INC-QA η]  alpha_eta(prop) is NaN/not set; "
-                         "skipping property cross-check.\n";
-          }
+          aEta_mech = std::numeric_limits<float>::quiet_NaN();
+        }
+        if (!ci_ok)
+        {
+          aEta_ci = std::numeric_limits<float>::quiet_NaN();
         }
 
-        if (iE >= 0 && iE < N_Ebins)
-        {
-          float u_raw  = blkCoord.first;
-          float u_fold = (u_raw <= -0.5f || u_raw > 1.5f)
-                       ? std::fmod(u_raw + 2.f, 2.0f)
-                       : u_raw;
-          const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
+        const float aEtaSigned = aEta_ci;
+        const float aEtaAbs    = std::fabs(aEtaSigned);
 
-          const float cosA  = std::isfinite(cosEta)
-                            ? cosEta
-                            : std::cos(aEtaAbs);
-          const float secA  = 1.f / std::max(1e-6f, cosA);
+        // η at shower depth (cluster direction, vtx-dependent)
+        const float etaSD_forQA =
+            cg2ShowerEta(m_bemcRec, eReco, xCP, yCP, vtxZ);
+
+        // Detector η at front face (tower row, independent of vtx)
+        double etaDet = std::numeric_limits<double>::quiet_NaN();
+        if (rFront > 0.0) {
+          etaDet = std::asinh(zFront / rFront);
+        }
+
+        if (std::isfinite(aEtaSigned) &&
+            std::isfinite(etaSD_forQA) &&
+            std::isfinite(etaDet))
+        {
+          // (1) Cluster front-face / depth η (vtx-dependent) → "SD" TH3
+          if (h3_alphaEta_vsVz_vsEta)
+            h3_alphaEta_vsVz_vsEta->Fill(vtxZ, etaSD_forQA, aEtaSigned);
+
+          // (2) Pure detector η (tower-row orientation) → "Det" TH3
+          if (h3_alphaEta_vsVz_vsEtaDet)
+            h3_alphaEta_vsVz_vsEtaDet->Fill(vtxZ, etaDet, aEtaSigned);
+
+          // --- QA vs RawClusterv1 η property ---
+          if (vb > 0 && ci_ok && std::isfinite(aEta_ci))
+          {
+            const float aEta_prop =
+                clus->get_property_float(RawCluster::prop_incidence_alpha_eta);
+
+            if (std::isfinite(aEta_prop))
+            {
+              const float diff_prop_mech = aEta_prop - aEta_mech;
+              const float diff_prop_ci   = aEta_prop - aEta_ci;
+
+              std::cout << "[INC-QA η] prop vs recomputed @CP: "
+                        << "alpha_eta(prop)=" << aEta_prop
+                        << "  alpha_eta(mech@CP)=" << aEta_mech
+                        << "  Δ(prop−mech@CP)=" << diff_prop_mech << "\n"
+                        << "                     "
+                        << "alpha_eta(calcInc@CP)=" << aEta_ci
+                        << "  Δ(prop−calcInc@CP)=" << diff_prop_ci << "\n";
+
+                // NOTE: Property-vs-mech incidence cross-check DISABLED (no hard fail).
+                // Keep only an optional warning at very high verbosity.
+                if (vb > 9)
+                {
+                  constexpr float kTolAlphaEta = 1.0e-5f;
+                  if (std::fabs(diff_prop_mech) > kTolAlphaEta)
+                  {
+                    std::cerr << ANSI_YELLOW
+                              << "[INC-WARN η] RawCluster prop vs mech@CP mismatch (ignored)\n"
+                              << "  clusID=" << clus->get_id()
+                              << "  E=" << eReco << " GeV\n"
+                              << "  alpha_eta(prop)=" << aEta_prop << "\n"
+                              << "  alpha_eta(mech@CP)=" << aEta_mech << "\n"
+                              << "  Δ=" << diff_prop_mech
+                              << "  tol=" << kTolAlphaEta << "\n"
+                              << ANSI_RESET << std::endl;
+                  }
+                }
+              }
+            else if (vb > 0)
+            {
+              std::cout << "[INC-QA η]  alpha_eta(prop) is NaN/not set; "
+                           "skipping property cross-check.\n";
+            }
+          }
+
+          if (iE >= 0 && iE < N_Ebins)
+          {
+            float u_raw  = blkCoord.first;
+            float u_fold = (u_raw <= -0.5f || u_raw > 1.5f)
+                         ? std::fmod(u_raw + 2.f, 2.0f)
+                         : u_raw;
+            const float Xmeas = (u_fold < 0.5f) ? u_fold : (u_fold - 1.f);
+
+            const float secA  = 1.f / std::max(1e-6f, std::cos(aEtaAbs));
 
           if (h2_XmeasEta_vsAlpha_E[iE]) {
             auto* ax = h2_XmeasEta_vsAlpha_E[iE]->GetXaxis();
