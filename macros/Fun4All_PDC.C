@@ -60,6 +60,8 @@
 #include <ffaobjects/EventHeader.h>
 #include <Event/Event.h>
 #include <mbd/MbdReco.h>
+#include <calostatusskimmer/CaloStatusSkimmer.h>
+#include <phool/RunnumberRange.h>
 #include <GlobalVariables.C>
 #include "/sphenix/u/patsfan753/scratch/PDCrun24pp/src/PositionDependentCorrection.h"
 
@@ -110,43 +112,44 @@ class CEMCGeomAlias : public SubsysReco
       return 0;  // EVENT_OK
     }
 
-    // 2) If TOWERGEOM_CEMC already exists, do nothing
-    auto* geoSimple =
-      findNode::getClass<RawTowerGeomContainer>(topNode, "TOWERGEOM_CEMC");
-    if (geoSimple)
-    {
-      std::cout << "[CEMCGeomAlias] TOWERGEOM_CEMC already present, skipping alias."
+      // 2) Find RUN/CEMC node to hang the alias under
+      PHNodeIterator topIter(topNode);
+      auto* runNode =
+        dynamic_cast<PHCompositeNode*>(topIter.findFirst("PHCompositeNode","RUN"));
+      if (!runNode)
+      {
+        std::cout << "[CEMCGeomAlias] RUN node not found, cannot add alias." << std::endl;
+        return 0;
+      }
+
+      PHNodeIterator runIter(runNode);
+      auto* cemcRun =
+        dynamic_cast<PHCompositeNode*>(runIter.findFirst("PHCompositeNode","CEMC"));
+      if (!cemcRun)
+      {
+        std::cout << "[CEMCGeomAlias] RUN/CEMC node not found, cannot add alias." << std::endl;
+        return 0;
+      }
+
+      // 3) If TOWERGEOM_CEMC already exists, do not try to replace it here.
+      //    PHCompositeNode does not provide a public removeNode API.
+      auto* geoSimple =
+        findNode::getClass<RawTowerGeomContainer>(topNode, "TOWERGEOM_CEMC");
+      if (geoSimple)
+      {
+        std::cout << "[CEMCGeomAlias] TOWERGEOM_CEMC already present; not replacing existing node."
+                  << std::endl;
+        return 0;
+      }
+
+      // 4) Create an IO node that points to the SAME geometry container
+      //     but under the name "TOWERGEOM_CEMC".
+      auto* aliasNode =
+        new PHIODataNode<PHObject>(geoDet, "TOWERGEOM_CEMC", "PHObject");
+      cemcRun->addNode(aliasNode);
+
+      std::cout << "[CEMCGeomAlias] Added alias node TOWERGEOM_CEMC → TOWERGEOM_CEMC_DETAILED."
                 << std::endl;
-      return 0;
-    }
-
-    // 3) Find RUN/CEMC node to hang the alias under
-    PHNodeIterator topIter(topNode);
-    auto* runNode =
-      dynamic_cast<PHCompositeNode*>(topIter.findFirst("PHCompositeNode","RUN"));
-    if (!runNode)
-    {
-      std::cout << "[CEMCGeomAlias] RUN node not found, cannot add alias." << std::endl;
-      return 0;
-    }
-
-    PHNodeIterator runIter(runNode);
-    auto* cemcRun =
-      dynamic_cast<PHCompositeNode*>(runIter.findFirst("PHCompositeNode","CEMC"));
-    if (!cemcRun)
-    {
-      std::cout << "[CEMCGeomAlias] RUN/CEMC node not found, cannot add alias." << std::endl;
-      return 0;
-    }
-
-    // 4) Create an IO node that points to the SAME geometry container
-    //     but under the name "TOWERGEOM_CEMC".
-    auto* aliasNode =
-      new PHIODataNode<PHObject>(geoDet, "TOWERGEOM_CEMC", "PHObject");
-    cemcRun->addNode(aliasNode);
-
-    std::cout << "[CEMCGeomAlias] Added alias node TOWERGEOM_CEMC → TOWERGEOM_CEMC_DETAILED."
-              << std::endl;
 
     return 0;  // EVENT_OK
   }
@@ -163,7 +166,7 @@ void Fun4All_PDC(int nevents = 0,
                  const string &outFileName       = "")
 {
 
-  const bool useCustomClusterizer = true;  // <== Flip this to false to disable
+  const bool useCustomClusterizer = true;  // keep the custom detailed-geometry cluster builder
     
   // 0) Setup Fun4AllServer
   Fun4AllServer *se = Fun4AllServer::instance();
@@ -271,54 +274,91 @@ void Fun4All_PDC(int nevents = 0,
     gvertex->Verbosity(0);
     se->registerSubsystem(gvertex);
 
-    // Ensure RawClusterBuilderTemplate can find geometry under both names:
-    //   TOWERGEOM_CEMC_DETAILED (detailed) and TOWERGEOM_CEMC (simple alias).
-    CEMCGeomAlias* cemcAlias = new CEMCGeomAlias("CEMCGeomAlias");
-    se->registerSubsystem(cemcAlias);
+    ///////////////////////////////////////////////
+    // Remove incomplete events from event combiner
+    if (!isSimulation)
+    {
+      CaloStatusSkimmer *css = new CaloStatusSkimmer("CaloStatusSkimmer");
+      se->registerSubsystem(css);
+    }
 
-    // ==========================
-    // Tower status (DATA & SIM)
-    // ==========================
-    std::cout << "Setting tower status for EMCal" << std::endl;
-    auto* statusEMC = new CaloTowerStatus("CEMCSTATUS");
+    //////////////////////
+    // Input geometry node
+    std::cout << "Adding Geometry file" << std::endl;
+    Fun4AllInputManager *ingeo = new Fun4AllRunNodeInputManager("DST_GEO");
+    std::string geoLocation = CDBInterface::instance()->getUrl("calo_geo");
+    ingeo->AddFile(geoLocation);
+    se->registerInputManager(ingeo);
+
+    CaloTowerDefs::BuilderType buildertype = CaloTowerDefs::kPRDFTowerv4;
+
+    // build ZDC towers
+    CaloTowerBuilder *caZDC = new CaloTowerBuilder("ZDCBUILDER");
+    caZDC->set_detector_type(CaloTowerDefs::ZDC);
+    caZDC->set_builder_type(buildertype);
+    if ((runNo > RunnumberRange::RUN2PP_FIRST && runNo < RunnumberRange::RUN2PP_LAST) || (runNo > RunnumberRange::RUN3PP_FIRST && runNo < RunnumberRange::RUN3PP_LAST))
+    {
+      caZDC->set_processing_type(CaloWaveformProcessing::FAST);
+    }
+    else
+    {
+      caZDC->set_processing_type(CaloWaveformProcessing::FUNCFIT);
+      caZDC->set_funcfit_type(2);
+    }
+    caZDC->set_nsamples(16);
+    caZDC->set_offlineflag();
+    se->registerSubsystem(caZDC);
+
+    //////////////////////////////
+    // set statuses on raw towers
+    std::cout << "status setters" << std::endl;
+    CaloTowerStatus *statusEMC = new CaloTowerStatus("CEMCSTATUS");
     statusEMC->set_detector_type(CaloTowerDefs::CEMC);
-    statusEMC->set_time_cut(1);   // match Process_Calo_Calib
+    // MC Towers Status
+    if (isSimulation)
+    {
+      // Uses threshold of 50% for towers be considered frequently bad.
+      std::string calibName_hotMap = "CEMC_hotTowers_status";
+      /* Systematic options (to be used as needed). */
+      /* Uses threshold of 40% for towers be considered frequently bad. */
+      // std::string calibName_hotMap = "CEMC_hotTowers_status_40";
+
+      /* Uses threshold of 60% for towers be considered frequently bad. */
+      // std::string calibName_hotMap = "CEMC_hotTowers_status_60";
+
+      std::string calibdir = CDBInterface::instance()->getUrl(calibName_hotMap);
+      statusEMC->set_directURL_hotMap(calibdir);
+    }
     se->registerSubsystem(statusEMC);
 
-    std::cout << "Setting tower status for HCALIN/HCALOUT" << std::endl;
-    auto* statusHCALIN = new CaloTowerStatus("HCALINSTATUS");
-    statusHCALIN->set_detector_type(CaloTowerDefs::HCALIN);
-    statusHCALIN->set_time_cut(2);
-    se->registerSubsystem(statusHCALIN);
+    CaloTowerStatus *statusHCalIn = new CaloTowerStatus("HCALINSTATUS");
+    statusHCalIn->set_detector_type(CaloTowerDefs::HCALIN);
+    se->registerSubsystem(statusHCalIn);
 
-    auto* statusHCALOUT = new CaloTowerStatus("HCALOUTSTATUS");
+    CaloTowerStatus *statusHCALOUT = new CaloTowerStatus("HCALOUTSTATUS");
     statusHCALOUT->set_detector_type(CaloTowerDefs::HCALOUT);
-    statusHCALOUT->set_time_cut(2);
     se->registerSubsystem(statusHCALOUT);
 
-    // ==========================
-    // Calibrate towers (DATA & SIM)
-    // ==========================
+    ////////////////////
+    // Calibrate towers
     std::cout << "Calibrating EMCal" << std::endl;
-    auto* calibEMC = new CaloTowerCalib("CEMCCALIB");
+    CaloTowerCalib *calibEMC = new CaloTowerCalib("CEMCCALIB");
     calibEMC->set_detector_type(CaloTowerDefs::CEMC);
     se->registerSubsystem(calibEMC);
 
     std::cout << "Calibrating OHcal" << std::endl;
-    auto* calibOHCal = new CaloTowerCalib("HCALOUT");
+    CaloTowerCalib *calibOHCal = new CaloTowerCalib("HCALOUT");
     calibOHCal->set_detector_type(CaloTowerDefs::HCALOUT);
     se->registerSubsystem(calibOHCal);
 
     std::cout << "Calibrating IHcal" << std::endl;
-    auto* calibIHCal = new CaloTowerCalib("HCALIN");
+    CaloTowerCalib *calibIHCal = new CaloTowerCalib("HCALIN");
     calibIHCal->set_detector_type(CaloTowerDefs::HCALIN);
     se->registerSubsystem(calibIHCal);
 
-    // ==========================
-    // (SIM only) MC re-calibration pass for older sims
-    // Run-28 and beyond moved this into waveformSim for embedding
-    // ==========================
-    if (isSimulation && rc->get_uint64Flag("TIMESTAMP") < 28)
+    ////////////////
+    // MC Calibration
+    if (isSimulation && rc->get_uint64Flag("TIMESTAMP") < 28)  // in run28 and beyond we moved the MC calibration into the waveformsim module for data embedding
     {
       std::string MC_Calib = CDBInterface::instance()->getUrl("CEMC_MC_RECALIB");
       if (MC_Calib.empty())
@@ -326,15 +366,14 @@ void Fun4All_PDC(int nevents = 0,
         std::cout << "No MC calibration found :( )" << std::endl;
         gSystem->Exit(0);
       }
-      auto* calibEMC_MC = new CaloTowerCalib("CEMCCALIB_MC");
+      CaloTowerCalib *calibEMC_MC = new CaloTowerCalib("CEMCCALIB_MC");
       calibEMC_MC->set_detector_type(CaloTowerDefs::CEMC);
-      // read/write calibrated TowerInfo in place
-      calibEMC_MC->set_inputNodePrefix ("TOWERINFO_CALIB_");
+      calibEMC_MC->set_inputNodePrefix("TOWERINFO_CALIB_");
       calibEMC_MC->set_outputNodePrefix("TOWERINFO_CALIB_");
       calibEMC_MC->set_directURL(MC_Calib);
       calibEMC_MC->set_doCalibOnly(true);
       se->registerSubsystem(calibEMC_MC);
-  }
+    }
     
     
     
@@ -348,6 +387,12 @@ void Fun4All_PDC(int nevents = 0,
     geomMap->set_UseDetailedGeometry(true);   // we want the 8-vertex blocks
     geomMap->Verbosity(0);
     se->registerSubsystem(geomMap);           // register *before* anything that uses it
+
+    // Ensure RawClusterBuilderTemplate can find geometry under both names:
+    //   TOWERGEOM_CEMC_DETAILED (detailed) and TOWERGEOM_CEMC (simple alias).
+    // Register this AFTER CaloGeomMapping so the detailed node exists at InitRun.
+    CEMCGeomAlias* cemcAlias = new CEMCGeomAlias("CEMCGeomAlias");
+    se->registerSubsystem(cemcAlias);
 
     /* 4b) AFTER CaloGeomMapping is in place, copy the geometry into BEmcRec.
            Mirror RawClusterBuilderTemplate::InitRun:
@@ -416,7 +461,7 @@ void Fun4All_PDC(int nevents = 0,
     // 6) Our PositionDependentCorrection code
     ////////////////////////////////////////////////////////////
     // isSimulation was decided above; reuse it here.
-    string finalOut = outFileName.empty()
+  string finalOut = outFileName.empty()
                       ? (isSimulation ? "output_PositionDep_sim.root"
                                       : "output_PositionDep_data.root")
                       : outFileName;
@@ -426,30 +471,22 @@ void Fun4All_PDC(int nevents = 0,
       {
         std::cout << "Building clusters (using custom RawClusterBuilderTemplate)" << std::endl;
 
-        RawClusterBuilderTemplate* ClusterBuilder =
-          new RawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
-        ClusterBuilder->Detector("CEMC");
+          RawClusterBuilderTemplate* ClusterBuilder =
+            new RawClusterBuilderTemplate("EmcRawClusterBuilderTemplate");
+          ClusterBuilder->Detector("CEMC");
 
-        // Make builder geometry match PDC bemc: cylinder + detailed
-        ClusterBuilder->SetCylindricalGeometry();
-        ClusterBuilder->set_UseDetailedGeometry(true);
+          // Match Process_Calo_Calib(), but force detailed geometry for CEMC.
+          ClusterBuilder->SetCylindricalGeometry();
+          ClusterBuilder->set_UseDetailedGeometry(true);
+          ClusterBuilder->set_threshold_energy(0.070);
 
-        // Use MBD z-vertex for vertex-based corrections (as in Process_Calo_Calib)
-        ClusterBuilder->set_UseAltZVertex(3);
+          std::string emc_prof = getenv("CALIBRATIONROOT");
+          emc_prof += "/EmcProfile/CEMCprof_Thresh30MeV.root";
+          ClusterBuilder->LoadProfile(emc_prof);
+          ClusterBuilder->set_UseTowerInfo(1);
+          ClusterBuilder->set_UseAltZVertex(1);
 
-        // Use the same tower threshold you want PDC to see (optional)
-        ClusterBuilder->set_threshold_energy(0.030f);
-
-        std::string emc_prof = getenv("CALIBRATIONROOT");
-        emc_prof += "/EmcProfile/CEMCprof_Thresh30MeV.root";
-        ClusterBuilder->LoadProfile(emc_prof);
-
-        // TowerInfo mode → read from calibrated node TOWERINFO_CALIB_CEMC
-        ClusterBuilder->set_UseTowerInfo(1);
-        ClusterBuilder->setInputTowerNodeName("TOWERINFO_CALIB_CEMC");
-
-        ClusterBuilder->Verbosity(20);
-        se->registerSubsystem(ClusterBuilder);
+          se->registerSubsystem(ClusterBuilder);
       }
       else
       {
